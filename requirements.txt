@@ -1,0 +1,11 @@
+timm
+wandb
+numpy==1.26.1
+pandas
+pillow
+einops
+tqdm
+omegaconf
+wholeslidedata
+torch==2.1.0
+torchvision==0.16.0

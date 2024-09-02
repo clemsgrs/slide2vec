@@ -6,8 +6,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 import slide2vec.distributed as distributed
-from slide2vec.logging import setup_logging
-from slide2vec.utils import utils
+from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
 
 
@@ -37,7 +36,7 @@ def default_setup(args, cfg):
     # set up wandb
     if cfg.wandb.enable:
         key = os.environ.get("WANDB_API_KEY")
-        wandb_run = utils.initialize_wandb(cfg, key=key)
+        wandb_run = initialize_wandb(cfg, key=key)
         wandb_run.define_metric("epoch", summary="max")
         run_id = wandb_run.id
 
@@ -52,10 +51,10 @@ def default_setup(args, cfg):
 
     global logger
     setup_logging(output=cfg.output_dir, level=logging.INFO)
-    logger = logging.getLogger("dinov2")
+    logger = logging.getLogger("slide2vec")
 
-    utils.fix_random_seeds(seed + rank)
-    logger.info("git:\n  {}\n".format(utils.get_sha()))
+    fix_random_seeds(seed + rank)
+    logger.info("git:\n  {}\n".format(get_sha()))
     logger.info("\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items())))
     return cfg
 

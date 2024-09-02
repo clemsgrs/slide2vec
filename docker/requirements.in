@@ -1,0 +1,11 @@
+timm
+wandb
+numpy==%NUMPY_VERSION%
+pandas
+pillow
+einops
+tqdm
+omegaconf
+wholeslidedata
+torch==%PYTORCH_VERSION%
+torchvision==%TORCHVISION_VERSION%

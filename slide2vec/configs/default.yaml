@@ -11,8 +11,8 @@ tiling:
 
 model:
   level: "tile" # level at which to extract the features
-  name: "virchow2" # model name
-  pretrain_weights: "/data/temporary/clement/leopard/models/virchow2.pt" # path to pre-trained weights
+  name: "" # model name
+  pretrain_weights: "" # path to pre-trained weights
   config_path: # path to model config
   batch_size: 4
 
@@ -24,7 +24,7 @@ wandb:
   enable: false
   project: "" # wandb project name
   username: "" # wandb username
-  exp_name: "${experiment_name}" # wandb experiment name
-  tags: ["features", "${level}", "${tile_size}"] # wandb tags
+  exp_name: "" # wandb experiment name
+  tags: ["features", "${model.level}", "${tiling.tile_size}"] # wandb tags
   dir: "/home/user/"
   group:

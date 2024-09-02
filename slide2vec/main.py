@@ -10,10 +10,10 @@ from pathlib import Path
 import slide2vec.distributed as distributed
 
 from slide2vec.utils import load_csv
+from slide2vec.utils.config import setup, write_config
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset
 from slide2vec.wsi import extract_coordinates, save_coordinates, visualize_coordinates
-from slide2vec.utils.config import setup, write_config
 
 logger = logging.getLogger("slide2vec")
 
@@ -85,8 +85,8 @@ def main(args):
     # extract tile coordinates input #
 
     if distributed.is_main_process():
-        save_dir = Path(f"/tmp/{cfg.tile_size}/npy")
-        save_dir.mkdir(exist_ok=True, parents=True)
+        tile_dir = Path(f"/tmp/{cfg.tile_size}/npy")
+        tile_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
             visualize_dir = Path(f"/tmp/{cfg.tile_size}/jpg")
             visualize_dir.mkdir(exist_ok=True, parents=True)
@@ -99,8 +99,8 @@ def main(args):
         ) as t:
             for wsi_fp, mask_fp in t:
                 tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
-                coordinates, _, level, resize_factor = extract_coordinates(wsi_fp, mask_fp, cfg.tiling.spacing, cfg.tiling.tile_size, num_workers=num_workers_preprocessing)
-                save_path = Path(save_dir, f"{wsi_fp.stem}.npy")
+                coordinates, _, level, resize_factor = extract_coordinates(wsi_fp, mask_fp, cfg.tiling.spacing, cfg.tiling.tile_size, cfg.tiling.backend, num_workers=num_workers_preprocessing)
+                save_path = Path(tile_dir, f"{wsi_fp.stem}.npy")
                 save_coordinates(coordinates, cfg.tiling.spacing, level, cfg.tiling.tile_size, resize_factor, save_path)
                 if cfg.visualize:
                     visualize_coordinates(wsi_fp, coordinates, level, resize_factor, cfg.tiling.tile_size, cfg.tiling.spacing, visualize_dir)
@@ -140,7 +140,7 @@ def main(args):
         position=1,
     ) as t:
         for fp in t:
-            dataset = TileDataset(fp)
+            dataset = TileDataset(fp, tile_dir, backend=cfg.tiling.backend)
             if distributed.is_enabled_and_multiple_gpus():
                 sampler = torch.utils.data.DistributedSampler(dataset)
             else:

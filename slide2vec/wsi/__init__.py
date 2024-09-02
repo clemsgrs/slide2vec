@@ -16,8 +16,8 @@ def sort_coords_with_tissue(coords, tissue_percentages):
     return sorted_coords, sorted_tissue_percentages
 
 
-def extract_coordinates(wsi_fp, mask_fp, spacing, region_size, num_workers: int = 1):
-    wsi = WholeSlideImage(wsi_fp, mask_fp)
+def extract_coordinates(wsi_fp, mask_fp, spacing, region_size, backend, num_workers: int = 1):
+    wsi = WholeSlideImage(wsi_fp, mask_fp, backend=backend)
     coordinates, tissue_percentages, patch_level, resize_factor = wsi.get_patch_coordinates(spacing, region_size, num_workers=num_workers)
     sorted_coordinates, sorted_tissue_percentages = sort_coords_with_tissue(coordinates, tissue_percentages)
     return sorted_coordinates, sorted_tissue_percentages, patch_level, resize_factor
