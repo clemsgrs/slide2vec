@@ -1,0 +1,30 @@
+csv: # path to csv containing slide paths
+backend: "asap" # backend to use for slide reading
+
+output_dir: "output" # output directory
+
+visualize: false # visualize slide tiling
+
+tiling:
+  spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+  tile_size: 256 # size of the tiles to extract, in pixels
+
+model:
+  level: "tile" # level at which to extract the features
+  name: "virchow2" # model name
+  pretrain_weights: "/data/temporary/clement/leopard/models/virchow2.pt" # path to pre-trained weights
+  config_path: # path to model config
+  batch_size: 4
+
+speed:
+  num_workers_preprocessing: 8 # number of workers for preprocessing
+  num_workers_data_loading: 8 # number of workers for data loading
+
+wandb:
+  enable: false
+  project: "" # wandb project name
+  username: "" # wandb username
+  exp_name: "${experiment_name}" # wandb experiment name
+  tags: ["features", "${level}", "${tile_size}"] # wandb tags
+  dir: "/home/user/"
+  group:
