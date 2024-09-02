@@ -46,9 +46,7 @@ class TileFeatureExtractor(nn.Module):
         assert Path(pretrained_weights).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
         self.pretrained_weights = pretrained_weights
         self.encoder = self.build_encoder()
-        self.config_path = config_path
-        if not config:
-            self.load_config()
+        self.load_config(config, config_path)
         self.load_weights()
         self.set_device()
 
@@ -64,12 +62,12 @@ class TileFeatureExtractor(nn.Module):
     def build_encoder(self):
         raise NotImplementedError
 
-    def load_config(self):
-        if self.config_path:
-            with open(self.config_path, 'r') as f:
+    def load_config(self, config, config_path):
+        if config_path:
+            with open(config_path, 'r') as f:
                 self.config = json.load(f)
         else:
-            self.config = None
+            self.config = config
 
     def get_transforms(self):
         if self.config:
@@ -134,7 +132,7 @@ class UNI(TileFeatureExtractor):
             }
         }
         self.features_dim = 1024
-        super(UNI, self).__init__("virchow2", pretrained_weights, config=config)
+        super(UNI, self).__init__(pretrained_weights, config=config)
 
     def build_encoder(self):
         encoder = timm.create_model("hf-hub:MahmoodLab/uni", pretrained=False, dynamic_img_size=True)
@@ -193,7 +191,7 @@ class Virchow2(TileFeatureExtractor):
         self.features_dim = 1280
         if mode == "full":
             self.features_dim = 2560
-        super(Virchow2, self).__init__("virchow2", pretrained_weights, config=config)
+        super(Virchow2, self).__init__(pretrained_weights, config=config)
 
     def build_encoder(self):
         encoder = timm.create_model("hf-hub:paige-ai/Virchow2", pretrained=False, mlp_layer=timm.layers.SwiGLUPacked, act_layer=torch.nn.SiLU)
@@ -208,3 +206,37 @@ class Virchow2(TileFeatureExtractor):
         elif self.mode == "full":
             embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)  # size: 1 x 2560
             return embedding
+
+
+class RegionFeatureExtractor(nn.Module):
+    def __init__(
+        self,
+        pretrained_weights: str,
+        config: Optional[dict] = None,
+        config_path: Optional[str] = None,
+    ):
+        super(RegionFeatureExtractor, self).__init__()
+        assert Path(pretrained_weights).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
+        self.pretrained_weights = pretrained_weights
+        self.tile_encoder = self.TileFeatureExtractor(pretrained_weights, config, config_path)
+        self.device = self.tile_encoder.device
+
+    def get_transforms(self):
+        if self.config:
+            data_config = resolve_data_config(self.config)
+            transform = create_transform(**data_config)
+        else:
+            transform = None
+        return transform
+
+    def load_weights(self):
+        if distributed.is_main_process():
+            logger.info(f"Loading pretrained weights from:  {self.pretrained_weights}")
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
+        self.encoder.load_state_dict(state_dict, strict=True)
+        if distributed.is_main_process():
+            logger.info(msg)
+
+    def forward(self, x):
+        raise NotImplementedError

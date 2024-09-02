@@ -69,13 +69,13 @@ RUN python3 -m pip install --upgrade pip pip-tools wheel setuptools && \
 # install ASAP
 RUN apt-get update && \
     apt-get -y install curl git && \
-    curl --remote-name --location "https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.1-(Nightly)/ASAP-2.1-Ubuntu2004.deb" && \
-    dpkg --install ASAP-2.1-Ubuntu2004.deb || true && \
+    curl --remote-name --location "https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.1-(Nightly)/ASAP-2.1-Ubuntu2204.deb" && \
+    dpkg --install ASAP-2.1-Ubuntu2204.deb || true && \
     apt-get -f install --fix-missing --fix-broken --assume-yes && \
     ldconfig -v && \
     apt-get clean && \
     echo "/opt/ASAP/bin" > /usr/local/lib/python3.9/site-packages/asap.pth && \
-    rm ASAP-2.1-Ubuntu2004.deb
+    rm ASAP-2.1-Ubuntu2204.deb
 
 # Ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED 1

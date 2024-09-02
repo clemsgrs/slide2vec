@@ -85,10 +85,10 @@ def main(args):
     # extract tile coordinates input #
 
     if distributed.is_main_process():
-        tile_dir = Path(f"/tmp/{cfg.tile_size}/npy")
+        tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
         tile_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
-            visualize_dir = Path(f"/tmp/{cfg.tile_size}/jpg")
+            visualize_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/jpg")
             visualize_dir.mkdir(exist_ok=True, parents=True)
         with tqdm.tqdm(
             zip(wsi_paths, mask_paths),
@@ -113,13 +113,11 @@ def main(args):
 
     # instantiate feature extractor #
 
-    model = ModelFactory(cfg.model)
+    model = ModelFactory(cfg.model).get_model()
     if distributed.is_main_process():
         logger.info("=+=" * 10)
 
-    transforms = model.get_transforms()
-
-    tile_dir = Path(f"/tmp/{cfg.tile_size}/npy")
+    tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
     wsi_paths = [p for p in wsi_paths if Path(tile_dir, f"{Path(p).stem}.npy").is_file()]
     if distributed.is_main_process():
         logger.info(f"{len(wsi_paths)} slides with extracted tiles found\n")
@@ -140,13 +138,17 @@ def main(args):
         position=1,
     ) as t:
         for fp in t:
-            dataset = TileDataset(fp, tile_dir, backend=cfg.tiling.backend)
+            dataset = TileDataset(fp, tile_dir, backend=cfg.tiling.backend, transforms=model.get_transforms())
             if distributed.is_enabled_and_multiple_gpus():
                 sampler = torch.utils.data.DistributedSampler(dataset)
             else:
                 sampler = None
             dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.model.batch_size, sampler=sampler, num_workers=num_workers_data_loading, pin_memory=True)
-            features = torch.empty((0, model.features_dim), device=model.device)
+            if cfg.model.level == "tile":
+                features = torch.empty((0, model.features_dim), device=model.device)
+            elif cfg.model.level == "region":
+                npatch = cfg.tiling.tile_size // cfg.model.patch_size
+                features = torch.empty((0, npatch, model.features_dim), device=model.device)
             indices = torch.empty((0,), dtype=torch.long, device=model.device)
             with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
                 with tqdm.tqdm(
@@ -159,9 +161,9 @@ def main(args):
                 ) as t:
                     for batch in t:
                         idx, image = batch
-                        image = transforms(image).to(model.device, non_blocking=True)
-                        feature = model(image)
-                        features = torch.cat((features, feature), dim=0)
+                        image = image.to(model.device, non_blocking=True)
+                        feature = model(image) # (batch_size, features_dim) or (batch_size, npatch, features_dim)
+                        features = torch.cat((features, feature), dim=0) # (ntiles, features_dim) or (ntiles, npatch, features_dim)
                         indices = torch.cat((indices, idx.to(model.device, non_blocking=True)), dim=0)
 
             if distributed.is_enabled():

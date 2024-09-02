@@ -1,5 +1,4 @@
 csv: # path to csv containing slide paths
-backend: "asap" # backend to use for slide reading
 
 output_dir: "output" # output directory
 
@@ -8,13 +7,15 @@ visualize: false # visualize slide tiling
 tiling:
   spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
   tile_size: 256 # size of the tiles to extract, in pixels
+  backend: "asap" # backend to use for slide reading
 
 model:
   level: "tile" # level at which to extract the features
   name: "" # model name
-  pretrain_weights: "" # path to pre-trained weights
+  pretrained_weights: "" # path to pre-trained weights
   config_path: # path to model config
   batch_size: 4
+  patch_size: # unroll the tiles into patches of this size
 
 speed:
   num_workers_preprocessing: 8 # number of workers for preprocessing

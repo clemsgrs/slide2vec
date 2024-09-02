@@ -24,8 +24,8 @@ def extract_coordinates(wsi_fp, mask_fp, spacing, region_size, backend, num_work
 
 
 def save_coordinates(coordinates, target_spacing, level, tile_size, resize_factor, save_path):
-    x = list(coordinates[:, 0])  # defined w.r.t level 0
-    y = list(coordinates[:, 1])  # defined w.r.t level 0
+    x = [x for x, _ in coordinates]  # defined w.r.t level 0
+    y = [y for _, y in coordinates]  # defined w.r.t level 0
     npatch = len(x)
     tile_size_resized = tile_size * resize_factor
     data = []
