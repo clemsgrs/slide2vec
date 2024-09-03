@@ -88,7 +88,7 @@ def main(args):
         tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
         tile_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
-            visualize_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/jpg")
+            visualize_dir = Path(cfg.output_dir, f"visualization")
             visualize_dir.mkdir(exist_ok=True, parents=True)
         with tqdm.tqdm(
             zip(wsi_paths, mask_paths),
@@ -99,11 +99,11 @@ def main(args):
         ) as t:
             for wsi_fp, mask_fp in t:
                 tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
-                coordinates, _, level, resize_factor = extract_coordinates(wsi_fp, mask_fp, cfg.tiling.spacing, cfg.tiling.tile_size, cfg.tiling.backend, num_workers=num_workers_preprocessing)
+                coordinates, _, patch_level, resize_factor = extract_coordinates(wsi_fp, mask_fp, cfg.tiling.spacing, cfg.tiling.tile_size, cfg.tiling.backend, tissue_val=cfg.tiling.tissue_pixel_value, num_workers=num_workers_preprocessing)
                 save_path = Path(tile_dir, f"{wsi_fp.stem}.npy")
-                save_coordinates(coordinates, cfg.tiling.spacing, level, cfg.tiling.tile_size, resize_factor, save_path)
+                save_coordinates(coordinates, cfg.tiling.spacing, patch_level, cfg.tiling.tile_size, resize_factor, save_path)
                 if cfg.visualize:
-                    visualize_coordinates(wsi_fp, coordinates, level, resize_factor, cfg.tiling.tile_size, cfg.tiling.spacing, visualize_dir)
+                    visualize_coordinates(wsi_fp, coordinates, patch_level, cfg.tiling.tile_size, resize_factor, visualize_dir, downsample=32, backend="asap")
         logger.info("=+=" * 10)
 
     # wait for all processes to finish preprocessing #

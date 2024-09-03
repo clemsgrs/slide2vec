@@ -26,7 +26,8 @@ class WholeSlideImage(object):
         mask_path: Optional[Path] = None,
         spacing: Optional[float] = None,
         downsample: int = 64,
-        backend: str = "asap"
+        backend: str = "asap",
+        tissue_val: int = 1,
     ):
         """
         Args:
@@ -48,7 +49,7 @@ class WholeSlideImage(object):
         if mask_path is not None:
             tqdm.tqdm.write(f"Loading mask: {mask_path}")
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
-            self.seg_level = self.load_segmentation(downsample)
+            self.seg_level = self.load_segmentation(downsample, tissue_val=tissue_val)
         else:
             tqdm.tqdm.write("Segmenting tissue")
             self.seg_level = self.segment_tissue(downsample)

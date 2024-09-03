@@ -8,6 +8,7 @@ tiling:
   spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
   tile_size: 256 # size of the tiles to extract, in pixels
   backend: "asap" # backend to use for slide reading
+  tissue_pixel_value: 1 # value of tissue pixel in pre-computed segmentation masks
 
 model:
   level: "tile" # level at which to extract the features
