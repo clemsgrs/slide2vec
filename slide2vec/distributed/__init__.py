@@ -24,7 +24,9 @@ def is_enabled_and_multiple_gpus() -> bool:
     Returns:
         True if distributed training is enabled and there are multiple GPUs available.
     """
-    return dist.is_available() and dist.is_initialized() and torch.cuda.device_count() > 1
+    return (
+        dist.is_available() and dist.is_initialized() and torch.cuda.device_count() > 1
+    )
 
 
 def get_global_size() -> int:
@@ -121,7 +123,11 @@ _TORCH_DISTRIBUTED_ENV_VARS = (
 
 
 def _collect_env_vars() -> Dict[str, str]:
-    return {env_var: os.environ[env_var] for env_var in _TORCH_DISTRIBUTED_ENV_VARS if env_var in os.environ}
+    return {
+        env_var: os.environ[env_var]
+        for env_var in _TORCH_DISTRIBUTED_ENV_VARS
+        if env_var in os.environ
+    }
 
 
 def _is_slurm_job_process() -> bool:
@@ -148,7 +154,9 @@ def _parse_slurm_node_list(s: str) -> List[str]:
 def _check_env_variable(key: str, new_value: str):
     # Only check for difference with preset environment variables
     if key in os.environ and os.environ[key] != new_value:
-        raise RuntimeError(f"Cannot export environment variables as {key} is already set")
+        raise RuntimeError(
+            f"Cannot export environment variables as {key} is already set"
+        )
 
 
 class _TorchDistributedEnvironment:
@@ -239,7 +247,12 @@ class _TorchDistributedEnvironment:
         return self
 
 
-def enable(*, set_cuda_current_device: bool = True, overwrite: bool = False, allow_nccl_timeout: bool = False):
+def enable(
+    *,
+    set_cuda_current_device: bool = True,
+    overwrite: bool = False,
+    allow_nccl_timeout: bool = False,
+):
     """Enable distributed mode
 
     Args:

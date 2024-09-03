@@ -19,9 +19,12 @@ logger = logging.getLogger("slide2vec")
 
 RESOURCE_PATH = Path("/opt/app/resources")
 
+
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("slide2vec", add_help=add_help)
-    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument(
+        "--config-file", default="", metavar="FILE", help="path to config file"
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -42,9 +45,16 @@ def get_args_parser(add_help: bool = True):
 
     return parser
 
+
 def gather_features(features, indices, device, features_dim):
-    gathered_feature = [torch.zeros_like(features, device=device) for _ in range(distributed.get_global_size())]
-    gathered_indices = [torch.zeros_like(indices, device=device) for _ in range(distributed.get_global_size())]
+    gathered_feature = [
+        torch.zeros_like(features, device=device)
+        for _ in range(distributed.get_global_size())
+    ]
+    gathered_indices = [
+        torch.zeros_like(indices, device=device)
+        for _ in range(distributed.get_global_size())
+    ]
     torch.distributed.all_gather(gathered_feature, features)
     torch.distributed.all_gather(gathered_indices, indices)
     if distributed.is_main_process():
@@ -54,7 +64,9 @@ def gather_features(features, indices, device, features_dim):
         # remove duplicates
         unique_indices = torch.unique(tile_indices)
         # create a final tensor to store the features in the correct order
-        wsi_feature_ordered = torch.zeros((len(unique_indices), features_dim), device=device)
+        wsi_feature_ordered = torch.zeros(
+            (len(unique_indices), features_dim), device=device
+        )
         # insert each feature into its correct position based on tile_indices
         wsi_feature_ordered[unique_indices] = wsi_feature[unique_indices]
     else:
@@ -63,7 +75,6 @@ def gather_features(features, indices, device, features_dim):
 
 
 def main(args):
-
     cfg = setup(args)
     wsi_paths, mask_paths = load_csv(cfg)
 
@@ -88,7 +99,7 @@ def main(args):
         tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
         tile_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
-            visualize_dir = Path(cfg.output_dir, f"visualization")
+            visualize_dir = Path(cfg.output_dir, "visualization")
             visualize_dir.mkdir(exist_ok=True, parents=True)
         with tqdm.tqdm(
             zip(wsi_paths, mask_paths),
@@ -99,11 +110,35 @@ def main(args):
         ) as t:
             for wsi_fp, mask_fp in t:
                 tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
-                coordinates, _, patch_level, resize_factor = extract_coordinates(wsi_fp, mask_fp, cfg.tiling.spacing, cfg.tiling.tile_size, cfg.tiling.backend, tissue_val=cfg.tiling.tissue_pixel_value, num_workers=num_workers_preprocessing)
+                coordinates, _, patch_level, resize_factor = extract_coordinates(
+                    wsi_fp,
+                    mask_fp,
+                    cfg.tiling.spacing,
+                    cfg.tiling.tile_size,
+                    cfg.tiling.backend,
+                    tissue_val=cfg.tiling.tissue_pixel_value,
+                    num_workers=num_workers_preprocessing,
+                )
                 save_path = Path(tile_dir, f"{wsi_fp.stem}.npy")
-                save_coordinates(coordinates, cfg.tiling.spacing, patch_level, cfg.tiling.tile_size, resize_factor, save_path)
+                save_coordinates(
+                    coordinates,
+                    cfg.tiling.spacing,
+                    patch_level,
+                    cfg.tiling.tile_size,
+                    resize_factor,
+                    save_path,
+                )
                 if cfg.visualize:
-                    visualize_coordinates(wsi_fp, coordinates, patch_level, cfg.tiling.tile_size, resize_factor, visualize_dir, downsample=32, backend="asap")
+                    visualize_coordinates(
+                        wsi_fp,
+                        coordinates,
+                        patch_level,
+                        cfg.tiling.tile_size,
+                        resize_factor,
+                        visualize_dir,
+                        downsample=32,
+                        backend="asap",
+                    )
         logger.info("=+=" * 10)
 
     # wait for all processes to finish preprocessing #
@@ -118,7 +153,9 @@ def main(args):
         logger.info("=+=" * 10)
 
     tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
-    wsi_paths = [p for p in wsi_paths if Path(tile_dir, f"{Path(p).stem}.npy").is_file()]
+    wsi_paths = [
+        p for p in wsi_paths if Path(tile_dir, f"{Path(p).stem}.npy").is_file()
+    ]
     if distributed.is_main_process():
         logger.info(f"{len(wsi_paths)} slides with extracted tiles found\n")
 
@@ -138,50 +175,73 @@ def main(args):
         position=1,
     ) as t:
         for fp in t:
-            dataset = TileDataset(fp, tile_dir, backend=cfg.tiling.backend, transforms=model.get_transforms())
+            dataset = TileDataset(
+                fp,
+                tile_dir,
+                backend=cfg.tiling.backend,
+                transforms=model.get_transforms(),
+            )
             if distributed.is_enabled_and_multiple_gpus():
                 sampler = torch.utils.data.DistributedSampler(dataset)
             else:
                 sampler = None
-            dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.model.batch_size, sampler=sampler, num_workers=num_workers_data_loading, pin_memory=True)
+            dataloader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=cfg.model.batch_size,
+                sampler=sampler,
+                num_workers=num_workers_data_loading,
+                pin_memory=True,
+            )
             if cfg.model.level == "tile":
                 features = torch.empty((0, model.features_dim), device=model.device)
             elif cfg.model.level == "region":
                 npatch = cfg.tiling.tile_size // cfg.model.patch_size
-                features = torch.empty((0, npatch, model.features_dim), device=model.device)
+                features = torch.empty(
+                    (0, npatch, model.features_dim), device=model.device
+                )
             indices = torch.empty((0,), dtype=torch.long, device=model.device)
-            with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
+            with torch.inference_mode(), torch.autocast(
+                device_type="cuda", dtype=torch.float16
+            ):
                 with tqdm.tqdm(
                     dataloader,
                     desc=f"GPU {distributed.get_local_rank()}: {fp.stem}",
                     unit=" tile",
                     unit_scale=cfg.model.batch_size,
                     leave=False,
-                    position=2+distributed.get_local_rank(),
+                    position=2 + distributed.get_local_rank(),
                 ) as t:
                     for batch in t:
                         idx, image = batch
                         image = image.to(model.device, non_blocking=True)
-                        feature = model(image) # (batch_size, features_dim) or (batch_size, npatch, features_dim)
-                        features = torch.cat((features, feature), dim=0) # (ntiles, features_dim) or (ntiles, npatch, features_dim)
-                        indices = torch.cat((indices, idx.to(model.device, non_blocking=True)), dim=0)
+                        feature = model(
+                            image
+                        )  # (batch_size, features_dim) or (batch_size, npatch, features_dim)
+                        features = torch.cat(
+                            (features, feature), dim=0
+                        )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
+                        indices = torch.cat(
+                            (indices, idx.to(model.device, non_blocking=True)), dim=0
+                        )
 
             if distributed.is_enabled():
                 torch.distributed.barrier()
                 # gather features and indices from all GPUs
-                wsi_feature = gather_features(features, indices, model.device, model.features_dim)
+                wsi_feature = gather_features(
+                    features, indices, model.device, model.features_dim
+                )
             else:
                 # remove duplicates and reorder features
                 unique_indices = torch.unique(indices)
-                wsi_feature = torch.zeros((len(dataset), model.features_dim), device=model.device)
+                wsi_feature = torch.zeros(
+                    (len(dataset), model.features_dim), device=model.device
+                )
                 wsi_feature[unique_indices] = features[unique_indices]
 
             if distributed.is_main_process():
                 torch.save(wsi_feature, Path(features_dir, f"{fp.stem}.pt"))
 
 
-
 if __name__ == "__main__":
-
     args = get_args_parser(add_help=True).parse_args()
     main(args)

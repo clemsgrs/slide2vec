@@ -6,6 +6,7 @@ from typing import Optional
 
 import slide2vec.distributed as distributed
 
+
 # So that calling _configure_logger multiple times won't add many handlers
 @functools.lru_cache()
 def _configure_logger(
@@ -38,7 +39,9 @@ def _configure_logger(
     #   [IWEF]yyyymmdd hh:mm:ss.uuuuuu threadid file:line] msg
     # but use a shorter timestamp and include the logger name:
     #   [IWEF]yyyymmdd hh:mm:ss logger threadid file:line] msg
-    fmt_prefix = "%(levelname).1s%(asctime)s %(process)s %(name)s %(filename)s:%(lineno)s] "
+    fmt_prefix = (
+        "%(levelname).1s%(asctime)s %(process)s %(name)s %(filename)s:%(lineno)s] "
+    )
     fmt_message = "%(message)s"
     fmt = fmt_prefix + fmt_message
     datefmt = "%Y%m%d %H:%M:%S"

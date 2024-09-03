@@ -21,21 +21,34 @@ def sort_coords_with_tissue(coords, tissue_percentages):
     return sorted_coords, sorted_tissue_percentages
 
 
-def extract_coordinates(wsi_fp, mask_fp, spacing, region_size, backend, tissue_val, num_workers: int = 1):
+def extract_coordinates(
+    wsi_fp, mask_fp, spacing, region_size, backend, tissue_val, num_workers: int = 1
+):
     wsi = WholeSlideImage(wsi_fp, mask_fp, backend=backend, tissue_val=tissue_val)
-    coordinates, tissue_percentages, patch_level, resize_factor = wsi.get_patch_coordinates(spacing, region_size, num_workers=num_workers)
-    sorted_coordinates, sorted_tissue_percentages = sort_coords_with_tissue(coordinates, tissue_percentages)
+    (
+        coordinates,
+        tissue_percentages,
+        patch_level,
+        resize_factor,
+    ) = wsi.get_patch_coordinates(spacing, region_size, num_workers=num_workers)
+    sorted_coordinates, sorted_tissue_percentages = sort_coords_with_tissue(
+        coordinates, tissue_percentages
+    )
     return sorted_coordinates, sorted_tissue_percentages, patch_level, resize_factor
 
 
-def save_coordinates(coordinates, target_spacing, level, tile_size, resize_factor, save_path):
+def save_coordinates(
+    coordinates, target_spacing, level, tile_size, resize_factor, save_path
+):
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     npatch = len(x)
     tile_size_resized = tile_size * resize_factor
     data = []
     for i in range(npatch):
-        data.append([x[i], y[i], tile_size_resized, level, resize_factor, target_spacing])
+        data.append(
+            [x[i], y[i], tile_size_resized, level, resize_factor, target_spacing]
+        )
     data_arr = np.array(data, dtype=int)
     np.save(save_path, data_arr)
     return save_path
@@ -61,7 +74,6 @@ def draw_grid_from_coordinates(
     thickness: int = 2,
     indices: Optional[List[int]] = None,
 ):
-
     downsamples = wsi_object.level_downsamples[vis_level]
     if indices is None:
         indices = np.arange(len(coords))
@@ -69,10 +81,9 @@ def draw_grid_from_coordinates(
 
     patch_size = tuple(
         np.ceil((np.array(patch_size_at_0) / np.array(downsamples))).astype(np.int32)
-    ) # defined w.r.t vis_level
+    )  # defined w.r.t vis_level
 
     for idx in range(total):
-
         patch_id = indices[idx]
         coord = coords[patch_id]
         x, y = coord
@@ -107,30 +118,39 @@ def draw_grid_from_coordinates(
     return Image.fromarray(canvas)
 
 
-def visualize_coordinates(wsi_fp, coordinates, patch_level, tile_size, resize_factor, save_dir, downsample: int = 64, backend: str = "asap", grid_thickness: int = 1, canvas: Optional[Image.Image] = None):
-
+def visualize_coordinates(
+    wsi_fp,
+    coordinates,
+    patch_level,
+    tile_size,
+    resize_factor,
+    save_dir,
+    downsample: int = 64,
+    backend: str = "asap",
+    grid_thickness: int = 1,
+    canvas: Optional[Image.Image] = None,
+):
     wsi = WholeSlideImage(wsi_fp, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     if len(coordinates) == 0:
         return canvas
 
-    patch_size = tile_size * resize_factor # defined w.r.t patch_level
+    patch_size = tile_size * resize_factor  # defined w.r.t patch_level
     patch_size_at_0 = tuple(
         (
-            np.array((patch_size, patch_size))
-            * wsi.level_downsamples[patch_level]
+            np.array((patch_size, patch_size)) * wsi.level_downsamples[patch_level]
         ).astype(np.int32)
-    ) # defined w.r.t level 0
+    )  # defined w.r.t level 0
 
     w, h = wsi.level_dimensions[vis_level]
     if w * h > Image.MAX_IMAGE_PIXELS:
-        raise Image.DecompressionBombError(f"Visualization downsample ({downsample}) is too large")
+        raise Image.DecompressionBombError(
+            f"Visualization downsample ({downsample}) is too large"
+        )
 
     if canvas is None:
         vis_spacing = wsi.spacings[vis_level]
-        canvas = wsi.wsi.get_patch(
-            0, 0, w, h, spacing=vis_spacing, center=False
-        )
+        canvas = wsi.wsi.get_patch(0, 0, w, h, spacing=vis_spacing, center=False)
         canvas = Image.fromarray(canvas).convert("RGB")
 
     canvas = np.array(canvas)

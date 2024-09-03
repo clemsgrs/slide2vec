@@ -27,12 +27,12 @@ jobs:
           pip install -r lint.txt
       - name: Run flake8
         run: |
-          flake8
+          flake8 --ignore=E501,F401,E203,W503
       - name: Run black
         if: always()
         run: |
-          black --check dinov2
+          black --check slide2vec
       - name: Run pylint
         if: always()
         run: |
-          pylint --exit-zero dinov2
+          pylint --exit-zero slide2vec

@@ -43,7 +43,9 @@ class TileFeatureExtractor(nn.Module):
         config_path: Optional[str] = None,
     ):
         super(TileFeatureExtractor, self).__init__()
-        assert Path(pretrained_weights).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
+        assert Path(
+            pretrained_weights
+        ).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
         self.pretrained_weights = pretrained_weights
         self.encoder = self.build_encoder()
         self.load_config(config, config_path)
@@ -64,7 +66,7 @@ class TileFeatureExtractor(nn.Module):
 
     def load_config(self, config, config_path):
         if config_path:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 self.config = json.load(f)
         else:
             self.config = config
@@ -108,34 +110,24 @@ class UNI(TileFeatureExtractor):
                 "tag": "uni_mass100k",
                 "custom_load": True,
                 "crop_pct": 1,
-                "input_size": [
-                    3,
-                    224,
-                    224
-                ],
+                "input_size": [3, 224, 224],
                 "fixed_input_size": False,
                 "interpolation": "bilinear",
-                "mean": [
-                    0.485,
-                    0.456,
-                    0.406
-                ],
-                "std": [
-                    0.229,
-                    0.224,
-                    0.225
-                ],
+                "mean": [0.485, 0.456, 0.406],
+                "std": [0.229, 0.224, 0.225],
                 "num_classes": 0,
                 "pool_size": None,
                 "first_conv": "patch_embed.proj",
                 "classifier": "head",
-            }
+            },
         }
         self.features_dim = 1024
         super(UNI, self).__init__(pretrained_weights, config=config)
 
     def build_encoder(self):
-        encoder = timm.create_model("hf-hub:MahmoodLab/uni", pretrained=False, dynamic_img_size=True)
+        encoder = timm.create_model(
+            "hf-hub:MahmoodLab/uni", pretrained=False, dynamic_img_size=True
+        )
         return encoder
 
     def forward(self, x):
@@ -143,11 +135,7 @@ class UNI(TileFeatureExtractor):
 
 
 class Virchow2(TileFeatureExtractor):
-    def __init__(
-        self,
-        pretrained_weights: str,
-        mode: str = "cls"
-    ):
+    def __init__(self, pretrained_weights: str, mode: str = "cls"):
         self.mode = mode
         config = {
             "architecture": "vit_huge_patch14_224",
@@ -158,35 +146,23 @@ class Virchow2(TileFeatureExtractor):
                 "reg_tokens": 4,
                 "mlp_ratio": 5.3375,
                 "global_pool": "",
-                "dynamic_img_size": True
+                "dynamic_img_size": True,
             },
             "pretrained_cfg": {
                 "tag": "virchow_v2",
                 "custom_load": False,
-                "input_size": [
-                    3,
-                    224,
-                    224
-                ],
+                "input_size": [3, 224, 224],
                 "fixed_input_size": False,
                 "interpolation": "bicubic",
                 "crop_pct": 1.0,
                 "crop_mode": "center",
-                "mean": [
-                    0.485,
-                    0.456,
-                    0.406
-                ],
-                "std": [
-                    0.229,
-                    0.224,
-                    0.225
-                ],
+                "mean": [0.485, 0.456, 0.406],
+                "std": [0.229, 0.224, 0.225],
                 "num_classes": 0,
                 "pool_size": None,
                 "first_conv": "patch_embed.proj",
                 "classifier": "head",
-            }
+            },
         }
         self.features_dim = 1280
         if mode == "full":
@@ -194,17 +170,26 @@ class Virchow2(TileFeatureExtractor):
         super(Virchow2, self).__init__(pretrained_weights, config=config)
 
     def build_encoder(self):
-        encoder = timm.create_model("hf-hub:paige-ai/Virchow2", pretrained=False, mlp_layer=timm.layers.SwiGLUPacked, act_layer=torch.nn.SiLU)
+        encoder = timm.create_model(
+            "hf-hub:paige-ai/Virchow2",
+            pretrained=False,
+            mlp_layer=timm.layers.SwiGLUPacked,
+            act_layer=torch.nn.SiLU,
+        )
         return encoder
 
     def forward(self, x):
         output = self.encoder(x)
-        class_token = output[:, 0]      # size: 1 x 1280
-        patch_tokens = output[:, 5:]    # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
+        class_token = output[:, 0]  # size: 1 x 1280
+        patch_tokens = output[
+            :, 5:
+        ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
         if self.mode == "cls":
             return class_token
         elif self.mode == "full":
-            embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)  # size: 1 x 2560
+            embedding = torch.cat(
+                [class_token, patch_tokens.mean(1)], dim=-1
+            )  # size: 1 x 2560
             return embedding
 
 
@@ -216,9 +201,13 @@ class RegionFeatureExtractor(nn.Module):
         config_path: Optional[str] = None,
     ):
         super(RegionFeatureExtractor, self).__init__()
-        assert Path(pretrained_weights).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
+        assert Path(
+            pretrained_weights
+        ).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
         self.pretrained_weights = pretrained_weights
-        self.tile_encoder = self.TileFeatureExtractor(pretrained_weights, config, config_path)
+        self.tile_encoder = self.TileFeatureExtractor(
+            pretrained_weights, config, config_path
+        )
         self.device = self.tile_encoder.device
 
     def get_transforms(self):

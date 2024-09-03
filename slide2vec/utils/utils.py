@@ -119,7 +119,7 @@ def initialize_wandb(
 
 
 def load_csv(cfg):
-    df  = pd.read_csv(cfg.csv)
+    df = pd.read_csv(cfg.csv)
     wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
     if "mask_path" in df.columns:
         mask_paths = [Path(x) for x in df.mask_path.values.tolist()]
