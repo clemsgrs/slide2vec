@@ -3,6 +3,7 @@ import tqdm
 import torch
 import logging
 import argparse
+import torchvision
 import multiprocessing as mp
 
 from pathlib import Path
@@ -12,7 +13,7 @@ import slide2vec.distributed as distributed
 from slide2vec.utils import load_csv
 from slide2vec.utils.config import setup, write_config
 from slide2vec.models import ModelFactory
-from slide2vec.data import TileDataset
+from slide2vec.data import TileDataset, RegionUnfolding
 from slide2vec.wsi import extract_coordinates, save_coordinates, visualize_coordinates
 
 logger = logging.getLogger("slide2vec")
@@ -46,7 +47,7 @@ def get_args_parser(add_help: bool = True):
     return parser
 
 
-def gather_features(features, indices, device, features_dim):
+def gather_features(features, indices, device, features_dim, level):
     gathered_feature = [
         torch.zeros_like(features, device=device)
         for _ in range(distributed.get_global_size())
@@ -64,9 +65,15 @@ def gather_features(features, indices, device, features_dim):
         # remove duplicates
         unique_indices = torch.unique(tile_indices)
         # create a final tensor to store the features in the correct order
-        wsi_feature_ordered = torch.zeros(
-            (len(unique_indices), features_dim), device=device
-        )
+        if level == "tile":
+            wsi_feature_ordered = torch.zeros(
+                (len(unique_indices), features_dim), device=device
+            )
+        elif level == "region":
+            num_patches = features.shape[1]
+            wsi_feature_ordered = torch.zeros(
+                (len(unique_indices), num_patches, features_dim), device=device
+            )
         # insert each feature into its correct position based on tile_indices
         wsi_feature_ordered[unique_indices] = wsi_feature[unique_indices]
     else:
@@ -96,8 +103,8 @@ def main(args):
     # extract tile coordinates input #
 
     if distributed.is_main_process():
-        tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
-        tile_dir.mkdir(exist_ok=True, parents=True)
+        coordinates_dir = Path("coordinates")
+        coordinates_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
             visualize_dir = Path(cfg.output_dir, "visualization")
             visualize_dir.mkdir(exist_ok=True, parents=True)
@@ -119,7 +126,7 @@ def main(args):
                     tissue_val=cfg.tiling.tissue_pixel_value,
                     num_workers=num_workers_preprocessing,
                 )
-                save_path = Path(tile_dir, f"{wsi_fp.stem}.npy")
+                save_path = Path(coordinates_dir, f"{wsi_fp.stem}.npy")
                 save_coordinates(
                     coordinates,
                     cfg.tiling.spacing,
@@ -152,9 +159,9 @@ def main(args):
     if distributed.is_main_process():
         logger.info("=+=" * 10)
 
-    tile_dir = Path(f"/tmp/slide2vec/{cfg.tiling.tile_size}/npy")
+    coordinates_dir = Path("coordinates")
     wsi_paths = [
-        p for p in wsi_paths if Path(tile_dir, f"{Path(p).stem}.npy").is_file()
+        p for p in wsi_paths if Path(coordinates_dir, f"{Path(p).stem}.npy").is_file()
     ]
     if distributed.is_main_process():
         logger.info(f"{len(wsi_paths)} slides with extracted tiles found\n")
@@ -175,11 +182,21 @@ def main(args):
         position=1,
     ) as t:
         for fp in t:
+            if cfg.model.level == "tile":
+                transforms = model.get_transforms()
+            elif cfg.model.level == "region":
+                transforms = torchvision.transforms.Compose(
+                    [
+                        torchvision.transforms.ToTensor(),
+                        RegionUnfolding(model.patch_size),
+                        model.get_transforms(),
+                    ]
+                )
             dataset = TileDataset(
                 fp,
-                tile_dir,
+                coordinates_dir,
                 backend=cfg.tiling.backend,
-                transforms=model.get_transforms(),
+                transforms=transforms,
             )
             if distributed.is_enabled_and_multiple_gpus():
                 sampler = torch.utils.data.DistributedSampler(dataset)
@@ -195,9 +212,11 @@ def main(args):
             if cfg.model.level == "tile":
                 features = torch.empty((0, model.features_dim), device=model.device)
             elif cfg.model.level == "region":
-                npatch = cfg.tiling.tile_size // cfg.model.patch_size
+                npatch = cfg.tiling.tile_size // model.patch_size
+                num_patches = npatch**2
                 features = torch.empty(
-                    (0, npatch, model.features_dim), device=model.device
+                    (0, num_patches, model.tile_encoder.features_dim),
+                    device=model.device,
                 )
             indices = torch.empty((0,), dtype=torch.long, device=model.device)
             with torch.inference_mode(), torch.autocast(
@@ -206,7 +225,7 @@ def main(args):
                 with tqdm.tqdm(
                     dataloader,
                     desc=f"GPU {distributed.get_local_rank()}: {fp.stem}",
-                    unit=" tile",
+                    unit=f" {cfg.model.level}",
                     unit_scale=cfg.model.batch_size,
                     leave=False,
                     position=2 + distributed.get_local_rank(),
@@ -216,7 +235,7 @@ def main(args):
                         image = image.to(model.device, non_blocking=True)
                         feature = model(
                             image
-                        )  # (batch_size, features_dim) or (batch_size, npatch, features_dim)
+                        )  # (B, features_dim) or (B, npatch, features_dim)
                         features = torch.cat(
                             (features, feature), dim=0
                         )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
@@ -228,7 +247,7 @@ def main(args):
                 torch.distributed.barrier()
                 # gather features and indices from all GPUs
                 wsi_feature = gather_features(
-                    features, indices, model.device, model.features_dim
+                    features, indices, model.device, model.features_dim, cfg.model.level
                 )
             else:
                 # remove duplicates and reorder features

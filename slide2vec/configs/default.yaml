@@ -15,8 +15,7 @@ model:
   name: "" # model name
   pretrained_weights: "" # path to pre-trained weights
   config_path: # path to model config
-  batch_size: 4
-  patch_size: # unroll the tiles into patches of this size
+  batch_size: 128
 
 speed:
   num_workers_preprocessing: 8 # number of workers for preprocessing

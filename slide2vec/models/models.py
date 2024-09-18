@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from pathlib import Path
 from typing import Optional
+from einops import rearrange
 from omegaconf import DictConfig
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
@@ -27,6 +28,14 @@ class ModelFactory:
                 model = Virchow2(options.pretrained_weights)
             elif options.name == "uni":
                 model = UNI(options.pretrained_weights)
+        elif options.level == "region":
+            if options.name == "virchow2":
+                tile_encoder = Virchow2(options.pretrained_weights)
+            elif options.name == "uni":
+                tile_encoder = UNI(options.pretrained_weights)
+            model = RegionFeatureExtractor(tile_encoder)
+        elif options.level == "slide":
+            raise NotImplementedError
 
         self.model = model.eval()
         self.model = self.model.to(self.model.device)
@@ -35,14 +44,14 @@ class ModelFactory:
         return self.model
 
 
-class TileFeatureExtractor(nn.Module):
+class FeatureExtractor(nn.Module):
     def __init__(
         self,
         pretrained_weights: str,
         config: Optional[dict] = None,
         config_path: Optional[str] = None,
     ):
-        super(TileFeatureExtractor, self).__init__()
+        super(FeatureExtractor, self).__init__()
         assert Path(
             pretrained_weights
         ).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
@@ -92,7 +101,7 @@ class TileFeatureExtractor(nn.Module):
         raise NotImplementedError
 
 
-class UNI(TileFeatureExtractor):
+class UNI(FeatureExtractor):
     def __init__(
         self,
         pretrained_weights: str,
@@ -134,7 +143,7 @@ class UNI(TileFeatureExtractor):
         return self.encoder(x)
 
 
-class Virchow2(TileFeatureExtractor):
+class Virchow2(FeatureExtractor):
     def __init__(self, pretrained_weights: str, mode: str = "cls"):
         self.mode = mode
         config = {
@@ -196,36 +205,24 @@ class Virchow2(TileFeatureExtractor):
 class RegionFeatureExtractor(nn.Module):
     def __init__(
         self,
-        pretrained_weights: str,
-        config: Optional[dict] = None,
-        config_path: Optional[str] = None,
+        tile_encoder: nn.Module,
+        patch_size: int = 256,
     ):
         super(RegionFeatureExtractor, self).__init__()
-        assert Path(
-            pretrained_weights
-        ).is_file(), f"{pretrained_weights} doesnt exist ; please provide path to an existing file."
-        self.pretrained_weights = pretrained_weights
-        self.tile_encoder = self.TileFeatureExtractor(
-            pretrained_weights, config, config_path
-        )
+        self.tile_encoder = tile_encoder
+        self.patch_size = patch_size
         self.device = self.tile_encoder.device
+        self.features_dim = self.tile_encoder.features_dim
 
     def get_transforms(self):
-        if self.config:
-            data_config = resolve_data_config(self.config)
-            transform = create_transform(**data_config)
-        else:
-            transform = None
-        return transform
-
-    def load_weights(self):
-        if distributed.is_main_process():
-            logger.info(f"Loading pretrained weights from:  {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
-        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
-        self.encoder.load_state_dict(state_dict, strict=True)
-        if distributed.is_main_process():
-            logger.info(msg)
+        return self.tile_encoder.get_transforms()
 
     def forward(self, x):
-        raise NotImplementedError
+        # x = [B, num_patches, 3, 224, 224]
+        B = x.size(0)
+        x = rearrange(x, "b p c w h -> (b p) c w h")  # [B*num_patches, 3, 224, 224]
+        output = self.tile_encoder(x)  # [B*num_patches, features_dim]
+        output = rearrange(
+            output, "(b p) f -> b p f", b=B
+        )  # [B, num_patches, features_dim]
+        return output
