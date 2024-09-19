@@ -70,9 +70,9 @@ def gather_features(features, indices, device, features_dim, level):
                 (len(unique_indices), features_dim), device=device
             )
         elif level == "region":
-            num_patches = features.shape[1]
+            num_tiles = features.shape[1]
             wsi_feature_ordered = torch.zeros(
-                (len(unique_indices), num_patches, features_dim), device=device
+                (len(unique_indices), num_tiles, features_dim), device=device
             )
         # insert each feature into its correct position based on tile_indices
         wsi_feature_ordered[unique_indices] = wsi_feature[unique_indices]
@@ -108,9 +108,9 @@ def main(args):
         if cfg.visualize:
             visualize_dir = Path(cfg.output_dir, "visualization")
             mask_visualize_dir = Path(visualize_dir, "mask")
-            patch_visualize_dir = Path(visualize_dir, "patching")
+            tile_visualize_dir = Path(visualize_dir, "tiling")
             mask_visualize_dir.mkdir(exist_ok=True, parents=True)
-            patch_visualize_dir.mkdir(exist_ok=True, parents=True)
+            tile_visualize_dir.mkdir(exist_ok=True, parents=True)
         with tqdm.tqdm(
             zip(wsi_paths, mask_paths),
             desc="Extracting tile coordinates",
@@ -125,13 +125,14 @@ def main(args):
                     tissue_mask_visu_path = Path(
                         mask_visualize_dir, f"{wsi_fp.stem}.jpg"
                     )
-                coordinates, _, patch_level, resize_factor = extract_coordinates(
+                coordinates, _, tile_level, resize_factor = extract_coordinates(
                     wsi_fp,
                     mask_fp,
                     cfg.tiling.spacing,
                     cfg.tiling.tile_size,
                     cfg.tiling.backend,
                     tissue_val=cfg.tiling.tissue_pixel_value,
+                    tiling_params=cfg.tiling.params,
                     mask_visu_path=tissue_mask_visu_path,
                     num_workers=num_workers_preprocessing,
                 )
@@ -139,7 +140,7 @@ def main(args):
                 save_coordinates(
                     coordinates,
                     cfg.tiling.spacing,
-                    patch_level,
+                    tile_level,
                     cfg.tiling.tile_size,
                     resize_factor,
                     coordinates_path,
@@ -148,10 +149,10 @@ def main(args):
                     visualize_coordinates(
                         wsi_fp,
                         coordinates,
-                        patch_level,
+                        tile_level,
                         cfg.tiling.tile_size,
                         resize_factor,
-                        patch_visualize_dir,
+                        tile_visualize_dir,
                         downsample=32,
                         backend="asap",
                     )
@@ -197,7 +198,7 @@ def main(args):
                 transforms = torchvision.transforms.Compose(
                     [
                         torchvision.transforms.ToTensor(),
-                        RegionUnfolding(model.patch_size),
+                        RegionUnfolding(model.tile_size),
                         model.get_transforms(),
                     ]
                 )
@@ -221,10 +222,10 @@ def main(args):
             if cfg.model.level == "tile":
                 features = torch.empty((0, model.features_dim), device=model.device)
             elif cfg.model.level == "region":
-                npatch = cfg.tiling.tile_size // model.patch_size
-                num_patches = npatch**2
+                ntile = cfg.tiling.tile_size // model.tile_size
+                num_tiles = ntile**2
                 features = torch.empty(
-                    (0, num_patches, model.tile_encoder.features_dim),
+                    (0, num_tiles, model.tile_encoder.features_dim),
                     device=model.device,
                 )
             indices = torch.empty((0,), dtype=torch.long, device=model.device)
@@ -244,10 +245,10 @@ def main(args):
                         image = image.to(model.device, non_blocking=True)
                         feature = model(
                             image
-                        )  # (B, features_dim) or (B, npatch, features_dim)
+                        )  # (B, features_dim) or (B, ntile, features_dim)
                         features = torch.cat(
                             (features, feature), dim=0
-                        )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
+                        )  # (ntiles, features_dim) or (ntiles, ntile, features_dim)
                         indices = torch.cat(
                             (indices, idx.to(model.device, non_blocking=True)), dim=0
                         )

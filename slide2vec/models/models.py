@@ -206,11 +206,11 @@ class RegionFeatureExtractor(nn.Module):
     def __init__(
         self,
         tile_encoder: nn.Module,
-        patch_size: int = 256,
+        tile_size: int = 256,
     ):
         super(RegionFeatureExtractor, self).__init__()
         self.tile_encoder = tile_encoder
-        self.patch_size = patch_size
+        self.tile_size = tile_size
         self.device = self.tile_encoder.device
         self.features_dim = self.tile_encoder.features_dim
 
@@ -218,11 +218,11 @@ class RegionFeatureExtractor(nn.Module):
         return self.tile_encoder.get_transforms()
 
     def forward(self, x):
-        # x = [B, num_patches, 3, 224, 224]
+        # x = [B, num_tiles, 3, 224, 224]
         B = x.size(0)
-        x = rearrange(x, "b p c w h -> (b p) c w h")  # [B*num_patches, 3, 224, 224]
-        output = self.tile_encoder(x)  # [B*num_patches, features_dim]
+        x = rearrange(x, "b p c w h -> (b p) c w h")  # [B*num_tiles, 3, 224, 224]
+        output = self.tile_encoder(x)  # [B*num_tiles, features_dim]
         output = rearrange(
             output, "(b p) f -> b p f", b=B
-        )  # [B, num_patches, features_dim]
+        )  # [B, num_tiles, features_dim]
         return output
