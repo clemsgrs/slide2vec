@@ -103,11 +103,14 @@ def main(args):
     # extract tile coordinates input #
 
     if distributed.is_main_process():
-        coordinates_dir = Path("coordinates")
+        coordinates_dir = Path(cfg.output_dir, "coordinates")
         coordinates_dir.mkdir(exist_ok=True, parents=True)
         if cfg.visualize:
             visualize_dir = Path(cfg.output_dir, "visualization")
-            visualize_dir.mkdir(exist_ok=True, parents=True)
+            mask_visualize_dir = Path(visualize_dir, "mask")
+            patch_visualize_dir = Path(visualize_dir, "patching")
+            mask_visualize_dir.mkdir(exist_ok=True, parents=True)
+            patch_visualize_dir.mkdir(exist_ok=True, parents=True)
         with tqdm.tqdm(
             zip(wsi_paths, mask_paths),
             desc="Extracting tile coordinates",
@@ -117,6 +120,11 @@ def main(args):
         ) as t:
             for wsi_fp, mask_fp in t:
                 tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
+                tissue_mask_visu_path = None
+                if cfg.visualize:
+                    tissue_mask_visu_path = Path(
+                        mask_visualize_dir, f"{wsi_fp.stem}.jpg"
+                    )
                 coordinates, _, patch_level, resize_factor = extract_coordinates(
                     wsi_fp,
                     mask_fp,
@@ -124,16 +132,17 @@ def main(args):
                     cfg.tiling.tile_size,
                     cfg.tiling.backend,
                     tissue_val=cfg.tiling.tissue_pixel_value,
+                    mask_visu_path=tissue_mask_visu_path,
                     num_workers=num_workers_preprocessing,
                 )
-                save_path = Path(coordinates_dir, f"{wsi_fp.stem}.npy")
+                coordinates_path = Path(coordinates_dir, f"{wsi_fp.stem}.npy")
                 save_coordinates(
                     coordinates,
                     cfg.tiling.spacing,
                     patch_level,
                     cfg.tiling.tile_size,
                     resize_factor,
-                    save_path,
+                    coordinates_path,
                 )
                 if cfg.visualize:
                     visualize_coordinates(
@@ -142,7 +151,7 @@ def main(args):
                         patch_level,
                         cfg.tiling.tile_size,
                         resize_factor,
-                        visualize_dir,
+                        patch_visualize_dir,
                         downsample=32,
                         backend="asap",
                     )
@@ -159,7 +168,7 @@ def main(args):
     if distributed.is_main_process():
         logger.info("=+=" * 10)
 
-    coordinates_dir = Path("coordinates")
+    coordinates_dir = Path(cfg.output_dir, "coordinates")
     wsi_paths = [
         p for p in wsi_paths if Path(coordinates_dir, f"{Path(p).stem}.npy").is_file()
     ]

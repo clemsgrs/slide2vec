@@ -22,12 +22,27 @@ def sort_coords_with_tissue(coords, tissue_percentages):
 
 
 def extract_coordinates(
-    wsi_fp, mask_fp, spacing, region_size, backend, tissue_val, num_workers: int = 1
+    wsi_fp,
+    mask_fp,
+    spacing,
+    region_size,
+    backend,
+    tissue_val,
+    downsample: int = 64,
+    mask_visu_path: Optional[Path] = None,
+    num_workers: int = 1,
 ):
     wsi = WholeSlideImage(
-        wsi_fp, mask_fp, backend=backend, tissue_val=tissue_val, segment=True
+        wsi_fp,
+        mask_fp,
+        backend=backend,
+        tissue_val=tissue_val,
+        downsample=downsample,
+        segment=True,
     )
     (
+        contours,
+        holes,
         coordinates,
         tissue_percentages,
         patch_level,
@@ -36,6 +51,8 @@ def extract_coordinates(
     sorted_coordinates, sorted_tissue_percentages = sort_coords_with_tissue(
         coordinates, tissue_percentages
     )
+    if mask_visu_path is not None:
+        wsi.visualize_mask(contours, holes).save(mask_visu_path)
     return sorted_coordinates, sorted_tissue_percentages, patch_level, resize_factor
 
 

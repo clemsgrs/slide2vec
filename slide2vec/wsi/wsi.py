@@ -1,6 +1,7 @@
 import os
 import cv2
 import tqdm
+import math
 import warnings
 import numpy as np
 import wholeslidedata as wsd
@@ -8,7 +9,7 @@ import multiprocessing as mp
 
 from PIL import Image
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from slide2vec.wsi.utils import find_common_spacings, HasEnoughTissue
 
@@ -40,10 +41,13 @@ class WholeSlideImage(object):
         self.fmt = path.suffix
         self.wsi = wsd.WholeSlideImage(path, backend=backend)
 
+        self.downsample = downsample
         self.spacing = spacing  # manually set spacing at level 0
         self.spacings = self.get_spacings()
+        print(f"self.spacings: {self.spacings}")
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
+        print(f"self.level_downsamples: {self.level_downsamples}")
         self.backend = backend
 
         self.mask_path = mask_path
@@ -54,9 +58,6 @@ class WholeSlideImage(object):
         elif segment:
             tqdm.tqdm.write("Segmenting tissue")
             self.seg_level = self.segment_tissue(downsample)
-
-        self.contours_tissue = None
-        self.contours_tumor = None
 
     def get_downsamples(self):
         level_downsamples = []
@@ -182,6 +183,85 @@ class WholeSlideImage(object):
         self.binary_mask = img_thresh
         return seg_level
 
+    def visualize_mask(
+        self,
+        contours,
+        holes,
+        color: Tuple[int] = (0, 255, 0),
+        hole_color: Tuple[int] = (0, 0, 255),
+        line_thickness: int = 250,
+        max_size: Optional[int] = None,
+        number_contours: bool = False,
+    ):
+        vis_level = self.get_best_level_for_downsample_custom(self.downsample)
+        level_downsample = self.level_downsamples[vis_level]
+        scale = [1 / level_downsample[0], 1 / level_downsample[1]]
+
+        s = self.spacings[vis_level]
+        img = self.wsi.get_slide(spacing=s)
+        if self.backend == "openslide":
+            img = np.ascontiguousarray(img)
+
+        offset = tuple(-(np.array((0, 0)) * scale).astype(int))
+        line_thickness = int(line_thickness * math.sqrt(scale[0] * scale[1]))
+        if contours is not None:
+            if not number_contours:
+                cv2.drawContours(
+                    img,
+                    self.scaleContourDim(contours, scale),
+                    -1,
+                    color,
+                    line_thickness,
+                    lineType=cv2.LINE_8,
+                    offset=offset,
+                )
+
+            else:
+                # add numbering to each contour
+                for idx, cont in enumerate(contours):
+                    contour = np.array(self.scaleContourDim(cont, scale))
+                    M = cv2.moments(contour)
+                    cX = int(M["m10"] / (M["m00"] + 1e-9))
+                    cY = int(M["m01"] / (M["m00"] + 1e-9))
+                    # draw the contour and put text next to center
+                    cv2.drawContours(
+                        img,
+                        [contour],
+                        -1,
+                        color,
+                        line_thickness,
+                        lineType=cv2.LINE_8,
+                        offset=offset,
+                    )
+                    cv2.putText(
+                        img,
+                        "{}".format(idx),
+                        (cX, cY),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        2,
+                        (255, 0, 0),
+                        10,
+                    )
+
+            for holes in holes:
+                cv2.drawContours(
+                    img,
+                    self.scaleContourDim(holes, scale),
+                    -1,
+                    hole_color,
+                    line_thickness,
+                    lineType=cv2.LINE_8,
+                )
+
+        img = Image.fromarray(img)
+
+        w, h = img.size
+        if max_size is not None and (w > max_size or h > max_size):
+            resizeFactor = max_size / w if w > h else max_size / h
+            img = img.resize((int(w * resizeFactor), int(h * resizeFactor)))
+
+        return img
+
     def get_patch_coordinates(
         self,
         target_spacing,
@@ -219,7 +299,14 @@ class WholeSlideImage(object):
             num_workers=num_workers,
         )
         patch_coordinates = list(zip(running_x_coords, running_y_coords))
-        return patch_coordinates, tissue_percentages, patch_level, resize_factor
+        return (
+            contours,
+            holes,
+            patch_coordinates,
+            tissue_percentages,
+            patch_level,
+            resize_factor,
+        )
 
     def detect_contours(
         self,
@@ -293,6 +380,7 @@ class WholeSlideImage(object):
             self.binary_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE
         )
         hierarchy = np.squeeze(hierarchy, axis=(0,))[:, 2:]
+        print(f"len(contours): {len(contours)}")
         if filter_params:
             # necessary for filtering out artifacts
             foreground_contours, hole_contours = _filter_contours(
@@ -300,6 +388,7 @@ class WholeSlideImage(object):
             )
 
         # scale detected contours to level 0
+        print(f"len(foreground_contours): {len(foreground_contours)}")
         contours = self.scaleContourDim(foreground_contours, target_scale)
         holes = self.scaleHolesDim(hole_contours, target_scale)
         return contours, holes
@@ -345,7 +434,7 @@ class WholeSlideImage(object):
         spacing: float = 0.5,
         patch_size: int = 256,
         overlap: float = 0.0,
-        drop_holes: bool = True,
+        drop_holes: bool = False,
         tissue_thresh: float = 0.1,
         use_padding: bool = True,
         num_workers: int = 1,
@@ -438,8 +527,8 @@ class WholeSlideImage(object):
             int(self.level_downsamples[patch_level][1]),
         )
         ref_patch_size = (
-            patch_size * patch_downsample[0],
-            patch_size * patch_downsample[1],
+            patch_size_resized * patch_downsample[0],
+            patch_size_resized * patch_downsample[1],
         )
 
         img_w, img_h = self.level_dimensions[0]

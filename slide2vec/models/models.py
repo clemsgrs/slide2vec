@@ -90,7 +90,7 @@ class FeatureExtractor(nn.Module):
 
     def load_weights(self):
         if distributed.is_main_process():
-            logger.info(f"Loading pretrained weights from:  {self.pretrained_weights}")
+            logger.info(f"Loading pretrained weights from: {self.pretrained_weights}")
         state_dict = torch.load(self.pretrained_weights, map_location="cpu")
         state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
         self.encoder.load_state_dict(state_dict, strict=True)
