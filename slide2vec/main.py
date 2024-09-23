@@ -62,20 +62,24 @@ def gather_features(features, indices, device, features_dim, level):
         # concatenate the gathered features and indices
         wsi_feature = torch.cat(gathered_feature, dim=0)
         tile_indices = torch.cat(gathered_indices, dim=0)
-        # remove duplicates
-        unique_indices = torch.unique(tile_indices)
+        # handle duplicates
+        unique_indices, inverse_indices = torch.unique(
+            tile_indices, sorted=False, return_inverse=True
+        )
         # create a final tensor to store the features in the correct order
         if level == "tile":
             wsi_feature_ordered = torch.zeros(
-                (len(unique_indices), features_dim), device=device
+                (unique_indices.size(0), features_dim), device=device
             )
         elif level == "region":
             num_tiles = features.shape[1]
             wsi_feature_ordered = torch.zeros(
-                (len(unique_indices), num_tiles, features_dim), device=device
+                (unique_indices.size(0), num_tiles, features_dim), device=device
             )
         # insert each feature into its correct position based on tile_indices
-        wsi_feature_ordered[unique_indices] = wsi_feature[unique_indices]
+        for idx in range(tile_indices.size(0)):
+            index = inverse_indices[idx]
+            wsi_feature_ordered[index] = wsi_feature[idx]
     else:
         wsi_feature_ordered = None
     return wsi_feature_ordered
@@ -209,7 +213,7 @@ def main(args):
                 transforms=transforms,
             )
             if distributed.is_enabled_and_multiple_gpus():
-                sampler = torch.utils.data.DistributedSampler(dataset)
+                sampler = torch.utils.data.DistributedSampler(dataset, shuffle=False)
             else:
                 sampler = None
             dataloader = torch.utils.data.DataLoader(
@@ -245,27 +249,43 @@ def main(args):
                         image = image.to(model.device, non_blocking=True)
                         feature = model(
                             image
-                        )  # (B, features_dim) or (B, ntile, features_dim)
+                        )  # (B, features_dim) or (B, npatch, features_dim)
                         features = torch.cat(
                             (features, feature), dim=0
-                        )  # (ntiles, features_dim) or (ntiles, ntile, features_dim)
+                        )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
                         indices = torch.cat(
                             (indices, idx.to(model.device, non_blocking=True)), dim=0
                         )
 
-            if distributed.is_enabled():
+            if distributed.is_enabled_and_multiple_gpus():
                 torch.distributed.barrier()
                 # gather features and indices from all GPUs
                 wsi_feature = gather_features(
                     features, indices, model.device, model.features_dim, cfg.model.level
                 )
             else:
-                # remove duplicates and reorder features
-                unique_indices = torch.unique(indices)
-                wsi_feature = torch.zeros(
-                    (len(dataset), model.features_dim), device=model.device
+                # handle duplicates
+                unique_indices, inverse_indices = torch.unique(
+                    indices, sorted=False, return_inverse=True
                 )
-                wsi_feature[unique_indices] = features[unique_indices]
+                if cfg.model.level == "tile":
+                    wsi_feature = torch.zeros(
+                        (unique_indices.size(0), model.features_dim),
+                        device=model.device,
+                    )
+                elif cfg.model.level == "region":
+                    wsi_feature = torch.zeros(
+                        (
+                            unique_indices.size(0),
+                            num_tiles,
+                            model.tile_encoder.features_dim,
+                        ),
+                        device=model.device,
+                    )
+                # insert each feature into its correct position based on tile_indices
+                for idx in range(indices.size(0)):
+                    index = inverse_indices[idx]
+                    wsi_feature[index] = features[idx]
 
             if distributed.is_main_process():
                 torch.save(wsi_feature, Path(features_dir, f"{fp.stem}.pt"))
