@@ -38,3 +38,4 @@ wandb:
   tags: ["features", "${model.level}", "${tiling.tile_size}"] # wandb tags
   dir: "/home/user/"
   group:
+  resume_id: # if resuming & wandb enabled, specify the id of the wandb run to resume

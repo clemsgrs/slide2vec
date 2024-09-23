@@ -108,7 +108,7 @@ def initialize_wandb(
             config=config,
             tags=tags,
         )
-    config_file_path = Path(cfg.train.output_dir, run.id, "run_config.yaml")
+    config_file_path = Path(cfg.output_dir, run.id, "run_config.yaml")
     config_file_path.parent.mkdir(exist_ok=True, parents=True)
     d = OmegaConf.to_container(cfg, resolve=True)
     with open(config_file_path, "w+") as f:
@@ -120,9 +120,14 @@ def initialize_wandb(
 
 def load_csv(cfg):
     df = pd.read_csv(cfg.csv)
-    wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
+    if "wsi_path" in df.columns:
+        wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
+    elif "slide_path" in df.columns:
+        wsi_paths = [Path(x) for x in df.slide_path.values.tolist()]
     if "mask_path" in df.columns:
         mask_paths = [Path(x) for x in df.mask_path.values.tolist()]
+    elif "segmentation_mask_path" in df.columns:
+        mask_paths = [Path(x) for x in df.segmentation_mask_path.values.tolist()]
     else:
         mask_paths = [None for _ in wsi_paths]
     return wsi_paths, mask_paths

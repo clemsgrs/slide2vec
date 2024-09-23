@@ -1,5 +1,6 @@
 import logging
 import os
+import torch
 import datetime
 
 from pathlib import Path
@@ -22,8 +23,9 @@ def write_config(cfg, output_dir, name="config.yaml"):
 
 
 def get_cfg_from_args(args):
-    args.output_dir = os.path.abspath(args.output_dir)
-    args.opts += [f"output_dir={args.output_dir}"]
+    if args.output_dir is not None:
+        args.output_dir = os.path.abspath(args.output_dir)
+        args.opts += [f"output_dir={args.output_dir}"]
     default_cfg = OmegaConf.create(default_config)
     cfg = OmegaConf.load(args.config_file)
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
@@ -32,20 +34,30 @@ def get_cfg_from_args(args):
 
 
 def default_setup(args, cfg):
-    run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
-    # set up wandb
-    if cfg.wandb.enable:
-        key = os.environ.get("WANDB_API_KEY")
-        wandb_run = initialize_wandb(cfg, key=key)
-        wandb_run.define_metric("epoch", summary="max")
-        run_id = wandb_run.id
+    distributed.enable(overwrite=True)
+    if distributed.is_main_process():
+        run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
+        # set up wandb
+        if cfg.wandb.enable:
+            key = os.environ.get("WANDB_API_KEY")
+            wandb_run = initialize_wandb(cfg, key=key)
+            wandb_run.define_metric("epoch", summary="max")
+            run_id = wandb_run.id
+    else:
+        run_id = ""
+
+    if distributed.is_enabled():
+        obj = [run_id]
+        torch.distributed.broadcast_object_list(
+            obj, 0, device=torch.device(f"cuda:{distributed.get_local_rank()}")
+        )
+        run_id = obj[0]
 
     output_dir = Path(cfg.output_dir, run_id)
     if distributed.is_main_process():
         output_dir.mkdir(exist_ok=True, parents=True)
     cfg.output_dir = str(output_dir)
 
-    distributed.enable(overwrite=True)
     seed = getattr(args, "seed", 0)
     rank = distributed.get_global_rank()
 
@@ -64,4 +76,6 @@ def default_setup(args, cfg):
 def setup(args):
     cfg = get_cfg_from_args(args)
     cfg = default_setup(args, cfg)
+    # prevent deadlock in distributed inference
+    os.environ["NCCL_BLOCKING_WAIT"] = "1"
     return cfg

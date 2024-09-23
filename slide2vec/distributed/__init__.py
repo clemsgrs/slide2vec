@@ -284,3 +284,39 @@ def enable(
     _LOCAL_RANK = torch_env.local_rank
     _LOCAL_WORLD_SIZE = torch_env.local_world_size
     _restrict_print_to_main_process()
+
+
+def gather_features(features, indices, device, features_dim, level):
+    gathered_feature = [
+        torch.zeros_like(features, device=device) for _ in range(get_global_size())
+    ]
+    gathered_indices = [
+        torch.zeros_like(indices, device=device) for _ in range(get_global_size())
+    ]
+    torch.distributed.all_gather(gathered_feature, features)
+    torch.distributed.all_gather(gathered_indices, indices)
+    if is_main_process():
+        # concatenate the gathered features and indices
+        wsi_feature = torch.cat(gathered_feature, dim=0)
+        tile_indices = torch.cat(gathered_indices, dim=0)
+        # handle duplicates
+        unique_indices, inverse_indices = torch.unique(
+            tile_indices, sorted=False, return_inverse=True
+        )
+        # create a final tensor to store the features in the correct order
+        if level == "tile":
+            wsi_feature_ordered = torch.zeros(
+                (unique_indices.size(0), features_dim), device=device
+            )
+        elif level == "region":
+            num_tiles = features.shape[1]
+            wsi_feature_ordered = torch.zeros(
+                (unique_indices.size(0), num_tiles, features_dim), device=device
+            )
+        # insert each feature into its correct position based on tile_indices
+        for idx in range(tile_indices.size(0)):
+            index = inverse_indices[idx]
+            wsi_feature_ordered[index] = wsi_feature[idx]
+    else:
+        wsi_feature_ordered = None
+    return wsi_feature_ordered

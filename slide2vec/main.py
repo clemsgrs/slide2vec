@@ -39,50 +39,11 @@ def get_args_parser(add_help: bool = True):
     )
     parser.add_argument(
         "--output-dir",
-        default="output",
         type=str,
         help="Output directory to save logs and checkpoints",
     )
 
     return parser
-
-
-def gather_features(features, indices, device, features_dim, level):
-    gathered_feature = [
-        torch.zeros_like(features, device=device)
-        for _ in range(distributed.get_global_size())
-    ]
-    gathered_indices = [
-        torch.zeros_like(indices, device=device)
-        for _ in range(distributed.get_global_size())
-    ]
-    torch.distributed.all_gather(gathered_feature, features)
-    torch.distributed.all_gather(gathered_indices, indices)
-    if distributed.is_main_process():
-        # concatenate the gathered features and indices
-        wsi_feature = torch.cat(gathered_feature, dim=0)
-        tile_indices = torch.cat(gathered_indices, dim=0)
-        # handle duplicates
-        unique_indices, inverse_indices = torch.unique(
-            tile_indices, sorted=False, return_inverse=True
-        )
-        # create a final tensor to store the features in the correct order
-        if level == "tile":
-            wsi_feature_ordered = torch.zeros(
-                (unique_indices.size(0), features_dim), device=device
-            )
-        elif level == "region":
-            num_tiles = features.shape[1]
-            wsi_feature_ordered = torch.zeros(
-                (unique_indices.size(0), num_tiles, features_dim), device=device
-            )
-        # insert each feature into its correct position based on tile_indices
-        for idx in range(tile_indices.size(0)):
-            index = inverse_indices[idx]
-            wsi_feature_ordered[index] = wsi_feature[idx]
-    else:
-        wsi_feature_ordered = None
-    return wsi_feature_ordered
 
 
 def main(args):
@@ -260,7 +221,7 @@ def main(args):
             if distributed.is_enabled_and_multiple_gpus():
                 torch.distributed.barrier()
                 # gather features and indices from all GPUs
-                wsi_feature = gather_features(
+                wsi_feature = distributed.gather_features(
                     features, indices, model.device, model.features_dim, cfg.model.level
                 )
             else:
