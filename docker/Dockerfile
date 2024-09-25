@@ -50,6 +50,19 @@ RUN apt-get update --fix-missing && \
         libgtk2.0-dev libgsf-1-dev libtiff5-dev libopenslide-dev \
         libgl1-mesa-glx libgirepository1.0-dev libexif-dev librsvg2-dev fftw3-dev orc-0.4-dev
 
+# install specific pixman version
+RUN cd /tmp && \
+    wget https://www.cairographics.org/releases/pixman-0.40.0.tar.gz && \
+    tar -xf pixman-0.40.0.tar.gz && \
+    cd pixman-0.40.0 && \
+    ./configure && \
+    make && \
+    make install && \
+    export LD_PRELOAD=/usr/local/lib/libpixman-1.so.0.40.0 && \
+    cd /tmp && \
+    rm -r pixman-0.40.0 && \
+    rm pixman-0.40.0.tar.gz
+
 # install python with up-to-date pip
 RUN cd /tmp && \
     wget "https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" && \
