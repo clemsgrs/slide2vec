@@ -1,9 +1,11 @@
 import os
 import tqdm
+import time
 import wandb
 import torch
 import logging
 import argparse
+import traceback
 import torchvision
 import numpy as np
 import pandas as pd
@@ -75,10 +77,12 @@ def main(args):
                 "tiling_status": ["tbp"] * len(wsi_paths),
                 "feature_status": ["tbp"] * len(wsi_paths),
                 "error": [str(np.nan)] * len(wsi_paths),
+                "traceback": [str(np.nan)] * len(wsi_paths),
             }
         )
 
     skip_tiling = process_df["tiling_status"].str.contains("done").all()
+    skip_feature_extraction = process_df["feature_status"].str.contains("done").all()
 
     if not skip_tiling:
         mask = process_df["tiling_status"] != "done"
@@ -154,8 +158,9 @@ def main(args):
 
                     except Exception as e:
                         tiling_status_updates[str(wsi_fp)] = {
-                            "status": "error",
+                            "status": "failed",
                             "error": str(e),
+                            "traceback": str(traceback.format_exc()),
                         }
 
             logger.info("=+=" * 10)
@@ -164,9 +169,13 @@ def main(args):
                     process_df.loc[
                         process_df["path"] == wsi_path, "tiling_status"
                     ] = status_info["status"]
-                    process_df.loc[
-                        process_df["path"] == wsi_path, "error"
-                    ] = status_info["error"]
+                    if "error" in status_info:
+                        process_df.loc[
+                            process_df["path"] == wsi_path, "error"
+                        ] = status_info["error"]
+                        process_df.loc[
+                            process_df["path"] == wsi_path, "traceback"
+                        ] = status_info["traceback"]
             process_df.to_csv(process_list, index=False)
 
     # wait for all processes to finish preprocessing #
@@ -174,187 +183,216 @@ def main(args):
     if distributed.is_enabled():
         torch.distributed.barrier()
 
-    # instantiate feature extractor #
+    if not skip_feature_extraction:
+        # instantiate feature extractor #
 
-    model = ModelFactory(cfg.model).get_model()
-    if distributed.is_main_process():
-        logger.info("=+=" * 10)
+        model = ModelFactory(cfg.model).get_model()
+        if distributed.is_main_process():
+            logger.info("=+=" * 10)
 
-    coordinates_dir = Path(cfg.output_dir, "coordinates")
-    wsi_paths = [
-        p for p in wsi_paths if Path(coordinates_dir, f"{Path(p).stem}.npy").is_file()
-    ]
-    if distributed.is_main_process():
-        logger.info(f"{len(wsi_paths)} slides with extracted tiles found\n")
+        coordinates_dir = Path(cfg.output_dir, "coordinates")
+        wsi_with_tiles_paths = [
+            p
+            for p in wsi_paths
+            if Path(coordinates_dir, f"{Path(p).stem}.npy").is_file()
+        ]
 
-    # extract features #
+        # extract features #
 
-    process_df = process_df[process_df.path.isin([str(x) for x in wsi_paths])]
-    mask = process_df["feature_status"] != "done"
-    process_stack = process_df[mask]
-    total = len(process_stack)
+        sub_process_df = process_df[
+            process_df.path.isin([str(x) for x in wsi_with_tiles_paths])
+        ]
+        mask = sub_process_df["feature_status"] != "done"
+        process_stack = sub_process_df[mask]
+        total = len(process_stack)
+        already_processed = len(sub_process_df) - total
 
-    wsi_paths_to_process = [Path(x) for x in process_stack.path.values.tolist()]
-    if distributed.is_main_process():
-        logger.info(f"Processing {len(wsi_paths_to_process)} slides")
+        wsi_paths_to_process = [Path(x) for x in process_stack.path.values.tolist()]
 
-    features_dir = Path(cfg.output_dir, "features")
-    if distributed.is_main_process():
-        features_dir.mkdir(exist_ok=True, parents=True)
+        features_dir = Path(cfg.output_dir, "features")
+        if distributed.is_main_process():
+            features_dir.mkdir(exist_ok=True, parents=True)
 
-    local_processed_count = 0
-    if distributed.is_main_process():
-        agg_processed_count = 0
+        local_processed_count = torch.tensor(0, device=model.device)
+        if distributed.is_main_process():
+            agg_processed_count = already_processed
 
-    feature_status_updates = {}
+        feature_status_updates = {}
 
-    with tqdm.tqdm(
-        wsi_paths_to_process,
-        desc="Inference",
-        unit=" case",
-        total=total,
-        leave=True,
-        disable=not distributed.is_main_process(),
-        position=1,
-    ) as t:
-        for wsi_fp in t:
-            try:
-                if cfg.model.level == "tile":
-                    transforms = model.get_transforms()
-                elif cfg.model.level == "region":
-                    transforms = torchvision.transforms.Compose(
-                        [
-                            torchvision.transforms.ToTensor(),
-                            RegionUnfolding(model.tile_size),
-                            model.get_transforms(),
-                        ]
+        with tqdm.tqdm(
+            wsi_paths_to_process,
+            desc="Inference",
+            unit=" case",
+            total=total,
+            leave=True,
+            disable=not distributed.is_main_process(),
+            position=1,
+        ) as t:
+            for wsi_fp in t:
+                try:
+                    if cfg.model.level == "tile":
+                        transforms = model.get_transforms()
+                    elif cfg.model.level == "region":
+                        transforms = torchvision.transforms.Compose(
+                            [
+                                torchvision.transforms.ToTensor(),
+                                RegionUnfolding(model.tile_size),
+                                model.get_transforms(),
+                            ]
+                        )
+                    dataset = TileDataset(
+                        wsi_fp,
+                        coordinates_dir,
+                        backend=cfg.tiling.backend,
+                        transforms=transforms,
                     )
-                dataset = TileDataset(
-                    wsi_fp,
-                    coordinates_dir,
-                    backend=cfg.tiling.backend,
-                    transforms=transforms,
-                )
-                if distributed.is_enabled_and_multiple_gpus():
-                    sampler = torch.utils.data.DistributedSampler(
-                        dataset, shuffle=False
-                    )
-                else:
-                    sampler = None
-                dataloader = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=cfg.model.batch_size,
-                    sampler=sampler,
-                    num_workers=num_workers_data_loading,
-                    pin_memory=True,
-                )
-                if cfg.model.level == "tile":
-                    features = torch.empty((0, model.features_dim), device=model.device)
-                elif cfg.model.level == "region":
-                    ntile = cfg.tiling.tile_size // model.tile_size
-                    num_tiles = ntile**2
-                    features = torch.empty(
-                        (0, num_tiles, model.tile_encoder.features_dim),
-                        device=model.device,
-                    )
-                indices = torch.empty((0,), dtype=torch.long, device=model.device)
-                with torch.inference_mode(), torch.autocast(
-                    device_type="cuda", dtype=torch.float16
-                ):
-                    with tqdm.tqdm(
-                        dataloader,
-                        desc=f"GPU {distributed.get_local_rank()}: {wsi_fp.stem}",
-                        unit=f" {cfg.model.level}",
-                        unit_scale=cfg.model.batch_size,
-                        leave=False,
-                        position=2 + distributed.get_local_rank(),
-                    ) as t:
-                        for batch in t:
-                            idx, image = batch
-                            image = image.to(model.device, non_blocking=True)
-                            feature = model(
-                                image
-                            )  # (B, features_dim) or (B, npatch, features_dim)
-                            features = torch.cat(
-                                (features, feature), dim=0
-                            )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
-                            indices = torch.cat(
-                                (indices, idx.to(model.device, non_blocking=True)),
-                                dim=0,
-                            )
-
-                if distributed.is_enabled_and_multiple_gpus():
-                    torch.distributed.barrier()
-                    # gather features and indices from all GPUs
-                    wsi_feature = distributed.gather_features(
-                        features,
-                        indices,
-                        model.device,
-                        model.features_dim,
-                        cfg.model.level,
-                    )
-                else:
-                    # handle duplicates
-                    unique_indices, inverse_indices = torch.unique(
-                        indices, sorted=False, return_inverse=True
+                    if distributed.is_enabled_and_multiple_gpus():
+                        sampler = torch.utils.data.DistributedSampler(
+                            dataset, shuffle=False
+                        )
+                    else:
+                        sampler = None
+                    dataloader = torch.utils.data.DataLoader(
+                        dataset,
+                        batch_size=cfg.model.batch_size,
+                        sampler=sampler,
+                        num_workers=num_workers_data_loading,
+                        pin_memory=True,
                     )
                     if cfg.model.level == "tile":
-                        wsi_feature = torch.zeros(
-                            (unique_indices.size(0), model.features_dim),
-                            device=model.device,
+                        features = torch.empty(
+                            (0, model.features_dim), device=model.device
                         )
                     elif cfg.model.level == "region":
-                        wsi_feature = torch.zeros(
-                            (
-                                unique_indices.size(0),
-                                num_tiles,
-                                model.tile_encoder.features_dim,
-                            ),
+                        ntile = cfg.tiling.tile_size // model.tile_size
+                        num_tiles = ntile**2
+                        features = torch.empty(
+                            (0, num_tiles, model.tile_encoder.features_dim),
                             device=model.device,
                         )
-                    # insert each feature into its correct position based on tile_indices
-                    for idx in range(indices.size(0)):
-                        index = inverse_indices[idx]
-                        wsi_feature[index] = features[idx]
+                    indices = torch.empty((0,), dtype=torch.long, device=model.device)
+                    with torch.inference_mode(), torch.autocast(
+                        device_type="cuda", dtype=torch.float16
+                    ):
+                        with tqdm.tqdm(
+                            dataloader,
+                            desc=f"GPU {distributed.get_local_rank()}: {wsi_fp.stem}",
+                            unit=f" {cfg.model.level}",
+                            unit_scale=cfg.model.batch_size,
+                            leave=False,
+                            position=2 + distributed.get_local_rank(),
+                        ) as t:
+                            for batch in t:
+                                idx, image = batch
+                                image = image.to(model.device, non_blocking=True)
+                                feature = model(
+                                    image
+                                )  # (B, features_dim) or (B, npatch, features_dim)
+                                features = torch.cat(
+                                    (features, feature), dim=0
+                                )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
+                                indices = torch.cat(
+                                    (indices, idx.to(model.device, non_blocking=True)),
+                                    dim=0,
+                                )
 
-                if distributed.is_main_process():
-                    torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
+                    if distributed.is_enabled_and_multiple_gpus():
+                        torch.distributed.barrier()
+                        # gather features and indices from all GPUs
+                        wsi_feature = distributed.gather_features(
+                            features,
+                            indices,
+                            model.device,
+                            model.features_dim,
+                            cfg.model.level,
+                        )
+                    else:
+                        # handle duplicates
+                        unique_indices, inverse_indices = torch.unique(
+                            indices, sorted=False, return_inverse=True
+                        )
+                        if cfg.model.level == "tile":
+                            wsi_feature = torch.zeros(
+                                (unique_indices.size(0), model.features_dim),
+                                device=model.device,
+                            )
+                        elif cfg.model.level == "region":
+                            wsi_feature = torch.zeros(
+                                (
+                                    unique_indices.size(0),
+                                    num_tiles,
+                                    model.tile_encoder.features_dim,
+                                ),
+                                device=model.device,
+                            )
+                        # insert each feature into its correct position based on tile_indices
+                        for idx in range(indices.size(0)):
+                            index = inverse_indices[idx]
+                            wsi_feature[index] = features[idx]
 
-                local_processed_count += 1
-                dist.reduce(local_processed_count, dst=0, op=dist.ReduceOp.SUM)
+                    if distributed.is_main_process():
+                        torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
 
-                if cfg.wandb.enable and distributed.is_main_process():
-                    agg_processed_count += local_processed_count
-                    wandb.log({"processed": agg_processed_count})
-                elif distributed.is_main_process():
-                    logger.info(f"processed: {agg_processed_count}/{total}")
+                    local_processed_count += 1
+                    dist.reduce(local_processed_count, dst=0, op=dist.ReduceOp.SUM)
 
-                feature_status_updates[str(wsi_fp)] = {"status": "done"}
-                local_processed_count = 0
+                    if cfg.wandb.enable and distributed.is_main_process():
+                        agg_processed_count += local_processed_count.item()
+                        wandb.log({"processed": agg_processed_count})
+                    elif distributed.is_main_process():
+                        logger.info(f"processed: {agg_processed_count}/{total}")
 
-            except Exception as e:
-                feature_status_updates[str(wsi_fp)] = {
-                    "status": "error",
-                    "error": str(e),
-                }
+                    feature_status_updates[str(wsi_fp)] = {"status": "done"}
+                    local_processed_count = torch.tensor(0, device=model.device)
 
-    if distributed.is_enabled():
-        torch.distributed.barrier()
+                except Exception as e:
+                    feature_status_updates[str(wsi_fp)] = {
+                        "status": "failed",
+                        "error": str(e),
+                        "traceback": str(traceback.format_exc()),
+                    }
 
-    # collect status updates from all processes
-    status_updates_list = [None for _ in range(distributed.get_world_size())]
-    dist.all_gather_object(status_updates_list, feature_status_updates)
+        if distributed.is_enabled():
+            torch.distributed.barrier()
 
-    if distributed.is_main_process():
-        for status_updates in status_updates_list:
-            for wsi_path, status_info in status_updates.items():
-                process_df.loc[
-                    process_df["path"] == wsi_path, "feature_status"
-                ] = status_info["status"]
-                process_df.loc[process_df["path"] == wsi_path, "error"] = status_info[
-                    "error"
-                ]
-        process_df.to_csv(process_list, index=False)
+        # collect status updates from all processes
+        status_updates_list = [None for _ in range(distributed.get_global_size())]
+        dist.all_gather_object(status_updates_list, feature_status_updates)
+
+        if distributed.is_main_process():
+            for status_updates in status_updates_list:
+                for wsi_path, status_info in status_updates.items():
+                    process_df.loc[
+                        process_df["path"] == wsi_path, "feature_status"
+                    ] = status_info["status"]
+                    if "error" in status_info:
+                        process_df.loc[
+                            process_df["path"] == wsi_path, "error"
+                        ] = status_info["error"]
+                        process_df.loc[
+                            process_df["path"] == wsi_path, "traceback"
+                        ] = status_info["traceback"]
+            process_df.to_csv(process_list, index=False)
+
+        # summary logging
+        if distributed.is_main_process():
+            total_slides = len(process_df)
+            failed_tiling = process_df[process_df["tiling_status"] == "failed"]
+            no_tiles = process_df[
+                ~process_df["path"].isin([str(x) for x in wsi_with_tiles_paths])
+            ]
+            failed_feature_extraction = process_df[
+                process_df["feature_status"] == "failed"
+            ]
+            logger.info("=+=" * 10)
+            logger.info("Summary:")
+            logger.info(f"Total number of slides: {total_slides}")
+            logger.info(f"Failed tiling: {len(failed_tiling)}")
+            logger.info(f"No tiles after tiling step: {len(no_tiles)}")
+            logger.info(f"Failed feature extraction: {len(failed_feature_extraction)}")
+            logger.info(
+                f"Completed feature extraction: {total_slides - len(failed_feature_extraction)}"
+            )
 
 
 if __name__ == "__main__":
