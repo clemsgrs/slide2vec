@@ -1,6 +1,7 @@
 csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
+resume: false # resume from a previous run
 
 visualize: false # visualize slide tiling
 
