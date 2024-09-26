@@ -41,7 +41,7 @@ def default_setup(args, cfg):
         if cfg.wandb.enable:
             key = os.environ.get("WANDB_API_KEY")
             wandb_run = initialize_wandb(cfg, key=key)
-            wandb_run.define_metric("epoch", summary="max")
+            wandb_run.define_metric("processed", summary="max")
             run_id = wandb_run.id
     else:
         run_id = ""

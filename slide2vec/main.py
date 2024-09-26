@@ -164,18 +164,17 @@ def main(args):
                         }
 
             logger.info("=+=" * 10)
-            for status_updates in tiling_status_updates:
-                for wsi_path, status_info in status_updates.items():
+            for wsi_path, status_info in tiling_status_updates.items():
+                process_df.loc[
+                    process_df["path"] == wsi_path, "tiling_status"
+                ] = status_info["status"]
+                if "error" in status_info:
                     process_df.loc[
-                        process_df["path"] == wsi_path, "tiling_status"
-                    ] = status_info["status"]
-                    if "error" in status_info:
-                        process_df.loc[
-                            process_df["path"] == wsi_path, "error"
-                        ] = status_info["error"]
-                        process_df.loc[
-                            process_df["path"] == wsi_path, "traceback"
-                        ] = status_info["traceback"]
+                        process_df["path"] == wsi_path, "error"
+                    ] = status_info["error"]
+                    process_df.loc[
+                        process_df["path"] == wsi_path, "traceback"
+                    ] = status_info["traceback"]
             process_df.to_csv(process_list, index=False)
 
     # wait for all processes to finish preprocessing #
