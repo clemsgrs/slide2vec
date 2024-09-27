@@ -72,8 +72,8 @@ def main(args):
     else:
         process_df = pd.DataFrame(
             {
-                "path": wsi_paths,
-                "mask_path": mask_paths,
+                "path": [str(p) for p in wsi_paths],
+                "mask_path": [str(p) for p in mask_paths],
                 "tiling_status": ["tbp"] * len(wsi_paths),
                 "feature_status": ["tbp"] * len(wsi_paths),
                 "error": [str(np.nan)] * len(wsi_paths),
@@ -96,7 +96,7 @@ def main(args):
 
         # extract tile coordinates input #
 
-        tiling_status_updates = {}
+        tiling_updates = {}
 
         if distributed.is_main_process():
             coordinates_dir = Path(cfg.output_dir, "coordinates")
@@ -154,17 +154,17 @@ def main(args):
                                 backend="asap",
                             )
 
-                        tiling_status_updates[str(wsi_fp)] = {"status": "done"}
+                        tiling_updates[str(wsi_fp)] = {"status": "done"}
 
                     except Exception as e:
-                        tiling_status_updates[str(wsi_fp)] = {
+                        tiling_updates[str(wsi_fp)] = {
                             "status": "failed",
                             "error": str(e),
                             "traceback": str(traceback.format_exc()),
                         }
 
             logger.info("=+=" * 10)
-            for wsi_path, status_info in tiling_status_updates.items():
+            for wsi_path, status_info in tiling_updates.items():
                 process_df.loc[
                     process_df["path"] == wsi_path, "tiling_status"
                 ] = status_info["status"]
@@ -191,16 +191,14 @@ def main(args):
 
         coordinates_dir = Path(cfg.output_dir, "coordinates")
         wsi_with_tiles_paths = [
-            p
+            str(p)
             for p in wsi_paths
-            if Path(coordinates_dir, f"{Path(p).stem}.npy").is_file()
+            if Path(coordinates_dir, f"{p.stem}.npy").is_file()
         ]
 
         # extract features #
 
-        sub_process_df = process_df[
-            process_df.path.isin([str(x) for x in wsi_with_tiles_paths])
-        ]
+        sub_process_df = process_df[process_df.path.isin(wsi_with_tiles_paths)]
         mask = sub_process_df["feature_status"] != "done"
         process_stack = sub_process_df[mask]
         total = len(process_stack)
@@ -216,7 +214,7 @@ def main(args):
         if distributed.is_main_process():
             agg_processed_count = already_processed
 
-        feature_status_updates = {}
+        feature_extraction_updates = {}
 
         with tqdm.tqdm(
             wsi_paths_to_process,
@@ -341,11 +339,11 @@ def main(args):
                     elif distributed.is_main_process():
                         logger.info(f"processed: {agg_processed_count}/{total}")
 
-                    feature_status_updates[str(wsi_fp)] = {"status": "done"}
+                    feature_extraction_updates[str(wsi_fp)] = {"status": "done"}
                     local_processed_count = torch.tensor(0, device=model.device)
 
                 except Exception as e:
-                    feature_status_updates[str(wsi_fp)] = {
+                    feature_extraction_updates[str(wsi_fp)] = {
                         "status": "failed",
                         "error": str(e),
                         "traceback": str(traceback.format_exc()),
@@ -356,7 +354,7 @@ def main(args):
 
         # collect status updates from all processes
         status_updates_list = [None for _ in range(distributed.get_global_size())]
-        dist.all_gather_object(status_updates_list, feature_status_updates)
+        dist.all_gather_object(status_updates_list, feature_extraction_updates)
 
         if distributed.is_main_process():
             for status_updates in status_updates_list:
@@ -377,11 +375,9 @@ def main(args):
         if distributed.is_main_process():
             total_slides = len(process_df)
             failed_tiling = process_df[process_df["tiling_status"] == "failed"]
-            no_tiles = process_df[
-                ~process_df["path"].isin([str(x) for x in wsi_with_tiles_paths])
-            ]
+            no_tiles = process_df[~process_df["path"].isin(wsi_with_tiles_paths)]
             failed_feature_extraction = process_df[
-                process_df["feature_status"] == "failed"
+                ~(process_df["feature_status"] == "done")
             ]
             logger.info("=+=" * 10)
             logger.info("Summary:")
