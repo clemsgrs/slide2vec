@@ -58,9 +58,10 @@ class FeatureExtractor(nn.Module):
         raise NotImplementedError
 
     def get_transforms(self):
-        transforms = create_transform(
-            **resolve_data_config(self.encoder.pretrained_cfg, model=self.encoder)
+        data_config = resolve_data_config(
+            self.encoder.pretrained_cfg, model=self.encoder
         )
+        transforms = create_transform(**data_config)
         return transforms
 
     def forward(self, x):
@@ -79,6 +80,11 @@ class UNI(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=True,
         )
+        encoder.pretrained_cfg["input_size"] = [3, 224, 224]  # Set crop size to 224
+        encoder.pretrained_cfg["crop_pct"] = 224 / 256  # Ensure Resize to 256 first
+        encoder.pretrained_cfg[
+            "interpolation"
+        ] = "bicubic"  # Match interpolation if needed
         return encoder
 
     def forward(self, x):
