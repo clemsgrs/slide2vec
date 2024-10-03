@@ -1,6 +1,5 @@
 import os
 import tqdm
-import time
 import wandb
 import torch
 import logging
@@ -115,7 +114,7 @@ def main(args):
                 leave=True,
             ) as t:
                 for wsi_fp, mask_fp in t:
-                    tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
+                    logger.info(f"Preprocessing {wsi_fp.stem}")
                     tissue_mask_visu_path = None
                     try:
                         if cfg.visualize:
@@ -336,8 +335,6 @@ def main(args):
                     if cfg.wandb.enable and distributed.is_main_process():
                         agg_processed_count += local_processed_count.item()
                         wandb.log({"processed": agg_processed_count})
-                    elif distributed.is_main_process():
-                        logger.info(f"processed: {agg_processed_count}/{total}")
 
                     feature_extraction_updates[str(wsi_fp)] = {"status": "done"}
                     local_processed_count = torch.tensor(0, device=model.device)
