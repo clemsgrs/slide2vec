@@ -1,9 +1,9 @@
 import cv2
 import numpy as np
 
-from PIL import Image
+from PIL import Image, ImageOps
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 
 from .wsi import WholeSlideImage
 
@@ -114,20 +114,45 @@ def draw_grid_from_coordinates(
         np.ceil((np.array(tile_size_at_0) / np.array(downsamples))).astype(np.int32)
     )  # defined w.r.t vis_level
 
+    wsi_width_at_0, wsi_height_at_0 = wsi.level_dimensions[
+        0
+    ]  # retrieve slide dimension at level 0
+
     for idx in range(total):
         tile_id = indices[idx]
         coord = coords[tile_id]
         x, y = coord
         vis_spacing = wsi.get_level_spacing(vis_level)
-        resize_factor = 1
 
-        width, height = tile_size * resize_factor
-        tile = wsi.get_tile(x, y, width, height, spacing=vis_spacing)
-        tile = Image.fromarray(tile).convert("RGB")
-        if resize_factor != 1:
-            tile = tile.resize((tile_size, tile_size))
+        width, height = tile_size
+        tile = np.ones((height, width, 3), dtype=np.uint8) * 255  # White background
 
-        tile = np.array(tile)
+        # compute valid tile area
+        if x + tile_size_at_0[0] > wsi_width_at_0:
+            valid_width_at_0 = max(
+                0, wsi_width_at_0 - x
+            )  # how much of the tile width is inside the wsi
+            valid_width = int(valid_width_at_0 / downsamples[0])
+        else:
+            valid_width = width
+
+        if y + tile_size_at_0[1] > wsi_height_at_0:
+            valid_height_at_0 = max(
+                0, wsi_height_at_0 - y
+            )  # how much of the tile height is inside the wsi
+            valid_height = int(valid_height_at_0 / downsamples[1])
+        else:
+            valid_height = height
+
+        # extract only the valid portion of the tile
+        if valid_width > 0 and valid_height > 0:
+            valid_tile = wsi.get_tile(
+                x, y, valid_width, valid_height, spacing=vis_spacing
+            )
+            valid_tile = Image.fromarray(valid_tile).convert("RGB")
+            valid_tile = np.array(valid_tile)
+            # paste the valid part into the white tile
+            tile[:valid_height, :valid_width, :] = valid_tile
 
         coord = np.ceil(
             tuple(coord[i] / downsamples[i] for i in range(len(coord)))
@@ -147,6 +172,18 @@ def draw_grid_from_coordinates(
     return Image.fromarray(canvas)
 
 
+def pad_to_patch_size(canvas: Image.Image, patch_size: Tuple[int, int]) -> Image.Image:
+    width, height = canvas.size
+    # compute amount of padding required for width and height
+    pad_width = (patch_size[0] - (width % patch_size[0])) % patch_size[0]
+    pad_height = (patch_size[1] - (height % patch_size[1])) % patch_size[1]
+    # apply the padding to canvas
+    padded_canvas = ImageOps.expand(
+        canvas, (0, 0, pad_width, pad_height), fill=(255, 255, 255)
+    )  # white padding
+    return padded_canvas
+
+
 def visualize_coordinates(
     wsi_fp,
     coordinates,
@@ -157,10 +194,13 @@ def visualize_coordinates(
     downsample: int = 64,
     backend: str = "asap",
     grid_thickness: int = 1,
-    canvas: Optional[Image.Image] = None,
 ):
     wsi = WholeSlideImage(wsi_fp, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
+    vis_spacing = wsi.spacings[vis_level]
+
+    canvas = wsi.get_slide(spacing=vis_spacing)
+    canvas = Image.fromarray(canvas).convert("RGB")
     if len(coordinates) == 0:
         return canvas
 
@@ -177,11 +217,12 @@ def visualize_coordinates(
             f"Visualization downsample ({downsample}) is too large"
         )
 
-    if canvas is None:
-        vis_spacing = wsi.spacings[vis_level]
-        canvas = wsi.get_slide(spacing=vis_spacing)
-        canvas = Image.fromarray(canvas).convert("RGB")
-
+    tile_size_at_vis_level = tuple(
+        (np.array(tile_size_at_0) / np.array(wsi.level_downsamples[vis_level])).astype(
+            np.int32
+        )
+    )  # defined w.r.t vis_level
+    canvas = pad_to_patch_size(canvas, tile_size_at_vis_level)
     canvas = np.array(canvas)
     canvas = draw_grid_from_coordinates(
         canvas,
