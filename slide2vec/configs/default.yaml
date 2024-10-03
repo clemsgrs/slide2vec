@@ -23,8 +23,6 @@ tiling:
 model:
   level: "tile" # level at which to extract the features
   name: "" # model name
-  pretrained_weights: "" # path to pre-trained weights
-  config_path: # path to model config
   batch_size: 128
 
 speed:

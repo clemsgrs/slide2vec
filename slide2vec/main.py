@@ -1,6 +1,5 @@
 import os
 import tqdm
-import time
 import wandb
 import torch
 import logging
@@ -13,6 +12,7 @@ import multiprocessing as mp
 import torch.distributed as dist
 
 from pathlib import Path
+from huggingface_hub import login
 
 import slide2vec.distributed as distributed
 
@@ -48,6 +48,10 @@ def get_args_parser(add_help: bool = True):
 
 
 def main(args):
+    # login to huggingface hub
+    login()
+
+    # setup configuration
     cfg = setup(args)
     wsi_paths, mask_paths = load_csv(cfg)
 
@@ -115,7 +119,7 @@ def main(args):
                 leave=True,
             ) as t:
                 for wsi_fp, mask_fp in t:
-                    tqdm.tqdm.write(f"Preprocessing {wsi_fp.stem}")
+                    logger.info(f"Preprocessing {wsi_fp.stem}")
                     tissue_mask_visu_path = None
                     try:
                         if cfg.visualize:
@@ -224,8 +228,8 @@ def main(args):
             leave=True,
             disable=not distributed.is_main_process(),
             position=1,
-        ) as t:
-            for wsi_fp in t:
+        ) as t1:
+            for wsi_fp in t1:
                 try:
                     if cfg.model.level == "tile":
                         transforms = model.get_transforms()
@@ -278,8 +282,8 @@ def main(args):
                             unit_scale=cfg.model.batch_size,
                             leave=False,
                             position=2 + distributed.get_local_rank(),
-                        ) as t:
-                            for batch in t:
+                        ) as t2:
+                            for batch in t2:
                                 idx, image = batch
                                 image = image.to(model.device, non_blocking=True)
                                 feature = model(
@@ -336,8 +340,6 @@ def main(args):
                     if cfg.wandb.enable and distributed.is_main_process():
                         agg_processed_count += local_processed_count.item()
                         wandb.log({"processed": agg_processed_count})
-                    elif distributed.is_main_process():
-                        logger.info(f"processed: {agg_processed_count}/{total}")
 
                     feature_extraction_updates[str(wsi_fp)] = {"status": "done"}
                     local_processed_count = torch.tensor(0, device=model.device)
@@ -391,5 +393,10 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import warnings
+
+    warnings.filterwarnings("ignore", message="Could not set the permissions")
+    warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
+    warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
     args = get_args_parser(add_help=True).parse_args()
     main(args)
