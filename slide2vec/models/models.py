@@ -20,14 +20,14 @@ class ModelFactory:
     ):
         if options.level == "tile":
             if options.name == "virchow2":
-                model = Virchow2()
+                model = Virchow2(img_size=options.tile_size)
             elif options.name == "uni":
-                model = UNI()
+                model = UNI(img_size=options.tile_size)
         elif options.level == "region":
             if options.name == "virchow2":
-                tile_encoder = Virchow2()
+                tile_encoder = Virchow2(img_size=options.patch_size)
             elif options.name == "uni":
-                tile_encoder = UNI()
+                tile_encoder = UNI(img_size=options.patch_size)
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
             raise NotImplementedError
@@ -69,7 +69,8 @@ class FeatureExtractor(nn.Module):
 
 
 class UNI(FeatureExtractor):
-    def __init__(self):
+    def __init__(self, img_size: int = 224):
+        self.img_size = img_size
         self.features_dim = 1024
         super(UNI, self).__init__()
 
@@ -80,8 +81,9 @@ class UNI(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=True,
         )
-        encoder.pretrained_cfg["input_size"] = [3, 224, 224]  # Set crop size to 224
-        encoder.pretrained_cfg["crop_pct"] = 224 / 256  # Ensure Resize to 256 first
+        if self.img_size == 256:
+            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
+            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         encoder.pretrained_cfg[
             "interpolation"
         ] = "bicubic"  # Match interpolation if needed
@@ -92,7 +94,8 @@ class UNI(FeatureExtractor):
 
 
 class Virchow2(FeatureExtractor):
-    def __init__(self, mode: str = "cls"):
+    def __init__(self, img_size: int = 224, mode: str = "cls"):
+        self.img_size = img_size
         self.mode = mode
         self.features_dim = 1280
         if mode == "full":
@@ -106,6 +109,9 @@ class Virchow2(FeatureExtractor):
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
+        if self.img_size == 256:
+            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
+            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
 
     def forward(self, x):

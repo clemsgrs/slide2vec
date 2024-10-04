@@ -24,6 +24,8 @@ model:
   level: "tile" # level at which to extract the features
   name: "" # model name
   batch_size: 128
+  tile_size: ${tiling.tile_size}
+  patch_size: 256 # if level is "region", size used to unroll the region into patches
 
 speed:
   num_workers_preprocessing: 8 # number of workers for preprocessing

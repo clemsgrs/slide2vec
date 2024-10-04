@@ -395,7 +395,7 @@ def main(args):
 if __name__ == "__main__":
     import warnings
 
-    warnings.filterwarnings("ignore", message="Could not set the permissions")
+    warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
     args = get_args_parser(add_help=True).parse_args()
