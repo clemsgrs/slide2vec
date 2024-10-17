@@ -29,6 +29,13 @@ def extract_coordinates(
     backend,
     tissue_val,
     downsample: int = 64,
+    segment_params: Dict = {
+        "sthresh": 8,
+        "sthresh_up": 255,
+        "mthresh": 7,
+        "close": 4,
+        "use_otsu": False,
+    },
     tiling_params: Dict[str, int] = {
         "overlap": 0.0,
         "drop_holes": False,
@@ -49,6 +56,7 @@ def extract_coordinates(
         tissue_val=tissue_val,
         downsample=downsample,
         segment=True,
+        segment_params=segment_params,
     )
     (
         contours,

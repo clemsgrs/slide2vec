@@ -30,6 +30,13 @@ class WholeSlideImage(object):
         backend: str = "asap",
         tissue_val: int = 1,
         segment: bool = False,
+        segment_params: Dict = {
+            "sthresh": 8,
+            "sthresh_up": 255,
+            "mthresh": 7,
+            "close": 4,
+            "use_otsu": False,
+        },
     ):
         """
         Args:
@@ -55,7 +62,7 @@ class WholeSlideImage(object):
             self.seg_level = self.load_segmentation(downsample, tissue_val=tissue_val)
         elif segment:
             tqdm.tqdm.write("Segmenting tissue")
-            self.seg_level = self.segment_tissue(downsample)
+            self.seg_level = self.segment_tissue(downsample, **segment_params)
 
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)

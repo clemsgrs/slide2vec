@@ -12,12 +12,11 @@ import multiprocessing as mp
 import torch.distributed as dist
 
 from pathlib import Path
-from huggingface_hub import login
 
 import slide2vec.distributed as distributed
 
 from slide2vec.utils import load_csv
-from slide2vec.utils.config import setup, write_config
+from slide2vec.utils.config import setup, write_config, hf_login
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
 from slide2vec.wsi import extract_coordinates, save_coordinates, visualize_coordinates
@@ -48,11 +47,9 @@ def get_args_parser(add_help: bool = True):
 
 
 def main(args):
-    # login to huggingface hub
-    login()
-
     # setup configuration
     cfg = setup(args)
+    hf_login()
     wsi_paths, mask_paths = load_csv(cfg)
 
     if distributed.is_main_process():
@@ -77,7 +74,7 @@ def main(args):
         process_df = pd.DataFrame(
             {
                 "path": [str(p) for p in wsi_paths],
-                "mask_path": [str(p) for p in mask_paths],
+                "mask_path": [str(p) if p is not None else p for p in mask_paths],
                 "tiling_status": ["tbp"] * len(wsi_paths),
                 "feature_status": ["tbp"] * len(wsi_paths),
                 "error": [str(np.nan)] * len(wsi_paths),
@@ -95,7 +92,8 @@ def main(args):
 
         wsi_paths_to_process = [Path(x) for x in process_stack.path.values.tolist()]
         mask_paths_to_process = [
-            Path(x) for x in process_stack.mask_path.values.tolist()
+            Path(x) if x is not None else x
+            for x in process_stack.mask_path.values.tolist()
         ]
 
         # extract tile coordinates input #
@@ -133,6 +131,8 @@ def main(args):
                             cfg.tiling.tile_size,
                             cfg.tiling.backend,
                             tissue_val=cfg.tiling.tissue_pixel_value,
+                            downsample=cfg.tiling.downsample,
+                            segment_params=cfg.tiling.seg_params,
                             tiling_params=cfg.tiling.params,
                             mask_visu_path=tissue_mask_visu_path,
                             num_workers=num_workers_preprocessing,

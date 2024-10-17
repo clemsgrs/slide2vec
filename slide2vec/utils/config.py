@@ -2,6 +2,9 @@ import logging
 import os
 import torch
 import datetime
+import getpass
+from huggingface_hub import login
+import torch.distributed as dist
 
 from pathlib import Path
 from omegaconf import OmegaConf
@@ -76,6 +79,18 @@ def default_setup(args, cfg):
 def setup(args):
     cfg = get_cfg_from_args(args)
     cfg = default_setup(args, cfg)
-    # prevent deadlock in distributed inference
-    os.environ["NCCL_BLOCKING_WAIT"] = "1"
     return cfg
+
+
+def hf_login():
+    if "HF_TOKEN" not in os.environ and distributed.is_main_process():
+        # Use getpass to hide the input when typing the token
+        hf_token = getpass.getpass(
+            "Enter your Hugging Face API token (input will not be visible): "
+        )
+        os.environ["HF_TOKEN"] = hf_token
+    # ensure all processes wait until the main process logs in
+    if distributed.is_enabled_and_multiple_gpus():
+        dist.barrier()
+    if distributed.is_main_process():
+        login(os.environ["HF_TOKEN"])
