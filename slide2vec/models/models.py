@@ -1,14 +1,17 @@
-import timm
+import json
 import torch
 import logging
 import torch.nn as nn
 
 from einops import rearrange
+from typing import Optional
 from omegaconf import DictConfig
-from timm.data import resolve_data_config
-from timm.data.transforms_factory import create_transform
+from torchvision import transforms
 
 import slide2vec.distributed as distributed
+import slide2vec.models.vision_transformer as vits
+
+from slide2vec.models.utils import update_state_dict
 
 logger = logging.getLogger("slide2vec")
 
@@ -19,15 +22,11 @@ class ModelFactory:
         options: DictConfig,
     ):
         if options.level == "tile":
-            if options.name == "virchow2":
-                model = Virchow2(img_size=options.tile_size)
-            elif options.name == "uni":
-                model = UNI(img_size=options.tile_size)
+            if options.name is None and options.arch:
+                model = CustomViT(options.arch, options.pretrained_weights)
         elif options.level == "region":
-            if options.name == "virchow2":
-                tile_encoder = Virchow2(img_size=options.patch_size)
-            elif options.name == "uni":
-                tile_encoder = UNI(img_size=options.patch_size)
+            if options.name is None and options.arch:
+                tile_encoder = CustomViT(options.arch, options.pretrained_weights)
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
             raise NotImplementedError
@@ -43,7 +42,25 @@ class FeatureExtractor(nn.Module):
     def __init__(self):
         super(FeatureExtractor, self).__init__()
         self.encoder = self.build_encoder()
+        self.load_weights()
         self.set_device()
+
+    def load_weights(self):
+        if distributed.is_main_process():
+            logger.info(f"Loading pretrained weights from: {self.pretrained_weights}")
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+        if self.ckpt_key:
+            state_dict = state_dict[self.ckpt_key]
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="module."
+        )
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="backbone."
+        )
+        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
+        self.encoder.load_state_dict(state_dict, strict=True)
+        if distributed.is_main_process():
+            logger.info(msg)
 
     def set_device(self):
         if distributed.is_enabled():
@@ -58,75 +75,59 @@ class FeatureExtractor(nn.Module):
         raise NotImplementedError
 
     def get_transforms(self):
-        data_config = resolve_data_config(
-            self.encoder.pretrained_cfg, model=self.encoder
-        )
-        transforms = create_transform(**data_config)
-        return transforms
+        if self.input_size > 224:
+            transform = transforms.CenterCrop(224)
+        else:
+            transform = None
+        return transform
 
     def forward(self, x):
         raise NotImplementedError
 
 
-class UNI(FeatureExtractor):
-    def __init__(self, img_size: int = 224):
-        self.img_size = img_size
+class CustomViT(FeatureExtractor):
+    def __init__(
+        self,
+        arch: str,
+        pretrained_weights: str,
+        input_size: int = 256,
+        ckpt_key: str = "teacher",
+    ):
+        """_summary_
+
+        Args:
+            arch (str): architecture of the Vision Transformer model
+            pretrained_weights (str): path to the pretrained weights
+            input_size (int, optional): size of the expected input image. Defaults to 256.
+            ckpt_key (str, optional): checkpoint key to load the weights. Defaults to "teacher".
+        """
+        self.arch = arch
+        self.input_size = input_size
+        self.pretrained_weights = pretrained_weights
+        self.vit_kwargs = dict(
+            img_size=224,
+            patch_size=14,
+            init_values=1.0e-05,
+            ffn_layer="swiglufused",
+            block_chunks=4,
+            qkv_bias=True,
+            proj_bias=True,
+            ffn_bias=True,
+            num_register_tokens=4,
+            interpolate_offset=0.1,
+            interpolate_antialias=False,
+        )
+        self.ckpt_key = ckpt_key
         self.features_dim = 1024
-        super(UNI, self).__init__()
+
+        super(CustomViT, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
-            "hf-hub:MahmoodLab/uni",
-            pretrained=True,
-            init_values=1e-5,
-            dynamic_img_size=True,
-        )
-        if self.img_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
-        encoder.pretrained_cfg[
-            "interpolation"
-        ] = "bicubic"  # Match interpolation if needed
+        encoder = vits.__dict__[self.arch](**self.vit_kwargs)
         return encoder
 
     def forward(self, x):
         return self.encoder(x)
-
-
-class Virchow2(FeatureExtractor):
-    def __init__(self, img_size: int = 224, mode: str = "cls"):
-        self.img_size = img_size
-        self.mode = mode
-        self.features_dim = 1280
-        if mode == "full":
-            self.features_dim = 2560
-        super(Virchow2, self).__init__()
-
-    def build_encoder(self):
-        encoder = timm.create_model(
-            "hf-hub:paige-ai/Virchow2",
-            pretrained=True,
-            mlp_layer=timm.layers.SwiGLUPacked,
-            act_layer=torch.nn.SiLU,
-        )
-        if self.img_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
-        return encoder
-
-    def forward(self, x):
-        output = self.encoder(x)
-        class_token = output[:, 0]  # size: 1 x 1280
-        patch_tokens = output[
-            :, 5:
-        ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
-        if self.mode == "cls":
-            return class_token
-        elif self.mode == "full":
-            embedding = torch.cat(
-                [class_token, patch_tokens.mean(1)], dim=-1
-            )  # size: 1 x 2560
-            return embedding
 
 
 class RegionFeatureExtractor(nn.Module):

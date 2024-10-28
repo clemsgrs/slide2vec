@@ -37,7 +37,8 @@ def get_cfg_from_args(args):
 
 
 def default_setup(args, cfg):
-    distributed.enable(overwrite=True)
+    if torch.cuda.device_count() > 0:
+        distributed.enable(overwrite=True)
     if distributed.is_main_process():
         run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
         # set up wandb
@@ -49,7 +50,7 @@ def default_setup(args, cfg):
     else:
         run_id = ""
 
-    if distributed.is_enabled():
+    if distributed.is_enabled_and_multiple_gpus():
         obj = [run_id]
         torch.distributed.broadcast_object_list(
             obj, 0, device=torch.device(f"cuda:{distributed.get_local_rank()}")

@@ -230,12 +230,18 @@ def main(args):
         ) as t1:
             for wsi_fp in t1:
                 try:
-                    if cfg.model.level == "tile":
-                        transforms = model.get_transforms()
+                    transforms = torchvision.transforms.ToTensor()
+                    if cfg.model.level == "tile" and model.get_transforms() is not None:
+                        transforms = torchvision.transforms.Compose(
+                            [
+                                transforms,
+                                model.get_transforms(),
+                            ]
+                        )
                     elif cfg.model.level == "region":
                         transforms = torchvision.transforms.Compose(
                             [
-                                torchvision.transforms.ToTensor(),
+                                transforms,
                                 RegionUnfolding(model.tile_size),
                                 model.get_transforms(),
                             ]
