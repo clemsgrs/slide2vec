@@ -19,9 +19,23 @@ export PYTHONPATH="${PYTHONPATH}:/path/to/slide2vec"
 |     ViT-G/14     |       GigaPath       |      1.8B      |
 |     ViT-G/14     |       H-optimus      |      1.8B      |
 
-## Extract UNI features
+## Extract tile-level features
 
-```shell
-torchrun --nproc_per_node=gpu slide2vec/main.py \
-    --config-file slide2vec/configs/uni.yaml \
-```
+1. Create a `.csv` file with slide and tissue mask paths
+
+    ```csv
+    wsi_path,mask_path
+    /path/to/slide1.tif,/path/to/mask1.tif
+    /path/to/slide2.tif,/path/to/mask2.tif
+    ...
+    ```
+
+2. Create a configuration file under `slide2vec/configs`
+
+    A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.
+
+3. Kick off distributed feature extraction
+
+    ```shell
+    torchrun --nproc_per_node=gpu slide2vec/main.py --config-file slide2vec/configs/uni.yaml
+    ```

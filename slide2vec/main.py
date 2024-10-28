@@ -155,7 +155,7 @@ def main(args):
                                 resize_factor,
                                 tile_visualize_dir,
                                 downsample=32,
-                                backend="asap",
+                                backend=cfg.tiling.backend,
                             )
 
                         tiling_updates[str(wsi_fp)] = {"status": "done"}
@@ -214,7 +214,6 @@ def main(args):
         if distributed.is_main_process():
             features_dir.mkdir(exist_ok=True, parents=True)
 
-        local_processed_count = torch.tensor(0, device=model.device)
         if distributed.is_main_process():
             agg_processed_count = already_processed
 
@@ -334,15 +333,11 @@ def main(args):
                     if distributed.is_main_process():
                         torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
 
-                    local_processed_count += 1
-                    dist.reduce(local_processed_count, dst=0, op=dist.ReduceOp.SUM)
-
                     if cfg.wandb.enable and distributed.is_main_process():
-                        agg_processed_count += local_processed_count.item()
+                        agg_processed_count += 1
                         wandb.log({"processed": agg_processed_count})
 
                     feature_extraction_updates[str(wsi_fp)] = {"status": "done"}
-                    local_processed_count = torch.tensor(0, device=model.device)
 
                 except Exception as e:
                     feature_extraction_updates[str(wsi_fp)] = {
