@@ -26,7 +26,11 @@ class ModelFactory:
                 model = CustomViT(options.arch, options.pretrained_weights)
         elif options.level == "region":
             if options.name is None and options.arch:
-                tile_encoder = CustomViT(options.arch, options.pretrained_weights)
+                tile_encoder = CustomViT(
+                    options.arch,
+                    options.pretrained_weights,
+                    input_size=options.TOMODIFY,
+                )
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
             raise NotImplementedError
