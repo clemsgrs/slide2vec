@@ -12,6 +12,7 @@ import multiprocessing as mp
 import torch.distributed as dist
 
 from pathlib import Path
+from contextlib import nullcontext
 
 import slide2vec.distributed as distributed
 
@@ -217,6 +218,10 @@ def main(args):
         if distributed.is_main_process():
             agg_processed_count = already_processed
 
+        autocast_context = nullcontext()
+        if cfg.speed.fp16:
+            autocast_context = torch.autocast(device_type="cuda", dtype=torch.float16)
+
         feature_extraction_updates = {}
 
         with tqdm.tqdm(
@@ -271,30 +276,32 @@ def main(args):
                             device=model.device,
                         )
                     indices = torch.empty((0,), dtype=torch.long, device=model.device)
-                    with torch.inference_mode(), torch.autocast(
-                        device_type="cuda", dtype=torch.float16
-                    ):
-                        with tqdm.tqdm(
-                            dataloader,
-                            desc=f"GPU {distributed.get_local_rank()}: {wsi_fp.stem}",
-                            unit=f" {cfg.model.level}",
-                            unit_scale=cfg.model.batch_size,
-                            leave=False,
-                            position=2 + distributed.get_local_rank(),
-                        ) as t2:
-                            for batch in t2:
-                                idx, image = batch
-                                image = image.to(model.device, non_blocking=True)
-                                feature = model(
-                                    image
-                                )  # (B, features_dim) or (B, npatch, features_dim)
-                                features = torch.cat(
-                                    (features, feature), dim=0
-                                )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
-                                indices = torch.cat(
-                                    (indices, idx.to(model.device, non_blocking=True)),
-                                    dim=0,
-                                )
+                    with torch.inference_mode():
+                        with autocast_context:
+                            with tqdm.tqdm(
+                                dataloader,
+                                desc=f"GPU {distributed.get_local_rank()}: {wsi_fp.stem}",
+                                unit=f" {cfg.model.level}",
+                                unit_scale=cfg.model.batch_size,
+                                leave=False,
+                                position=2 + distributed.get_local_rank(),
+                            ) as t2:
+                                for batch in t2:
+                                    idx, image = batch
+                                    image = image.to(model.device, non_blocking=True)
+                                    feature = model(
+                                        image
+                                    )  # (B, features_dim) or (B, npatch, features_dim)
+                                    features = torch.cat(
+                                        (features, feature), dim=0
+                                    )  # (ntiles, features_dim) or (ntiles, npatch, features_dim)
+                                    indices = torch.cat(
+                                        (
+                                            indices,
+                                            idx.to(model.device, non_blocking=True),
+                                        ),
+                                        dim=0,
+                                    )
 
                     if distributed.is_enabled_and_multiple_gpus():
                         torch.distributed.barrier()

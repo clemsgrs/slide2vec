@@ -34,6 +34,7 @@ model:
   patch_size: 256 # if level is "region", size used to unroll the region into patches
 
 speed:
+  fp16: false # use mixed precision during model inference
   num_workers_preprocessing: 8 # number of workers for preprocessing
   num_workers_data_loading: 8 # number of workers for data loading
 
