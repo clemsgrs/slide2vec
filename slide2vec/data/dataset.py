@@ -8,36 +8,40 @@ from pathlib import Path
 
 class TileDataset(torch.utils.data.Dataset):
     def __init__(self, wsi_path, tile_dir, backend, transforms=None):
-        self.tile_dir = tile_dir
         self.path = wsi_path
         self.backend = backend
         self.name = wsi_path.stem.replace(" ", "_")
-        self.load_coordinates()
+        self.load_coordinates(tile_dir)
         self.transforms = transforms
 
-    def load_coordinates(self):
-        self.coordinates = np.load(Path(self.tile_dir, f"{self.name}.npy"))
+    def load_coordinates(self, tile_dir):
+        coordinates = np.load(Path(tile_dir, f"{self.name}.npy"), allow_pickle=True)
+        self.x = coordinates["x"]
+        self.y = coordinates["y"]
+        self.tile_size_resized = coordinates["tile_size_resized"]
+        self.tile_level = coordinates["tile_level"]
+        self.resize_factor = coordinates["resize_factor"]
 
     def __len__(self):
-        return len(self.coordinates)
+        return len(self.x)
 
     def __getitem__(self, idx):
         wsi = wsd.WholeSlideImage(
             self.path, backend=self.backend
         )  # cannot be defined in __init__ because of multiprocessing
-        x, y, tile_size_resized, tile_level, resize_factor, _ = self.coordinates[idx]
+        tile_level = self.tile_level[idx]
         tile_spacing = wsi.spacings[tile_level]
         tile_arr = wsi.get_patch(
-            x,
-            y,
-            tile_size_resized,
-            tile_size_resized,
+            self.x[idx],
+            self.y[idx],
+            self.tile_size_resized[idx],
+            self.tile_size_resized[idx],
             spacing=tile_spacing,
             center=False,
         )
         tile = Image.fromarray(tile_arr).convert("RGB")
-        if resize_factor != 1:
-            tile_size = int(tile_size_resized / resize_factor)
+        if self.resize_factor[idx] != 1:
+            tile_size = int(self.tile_size_resized[idx] / self.resize_factor[idx])
             tile = tile.resize((tile_size, tile_size))
         if self.transforms:
             tile = self.transforms(tile)

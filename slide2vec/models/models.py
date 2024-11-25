@@ -76,7 +76,7 @@ class UNI(FeatureExtractor):
 
     def build_encoder(self):
         encoder = timm.create_model(
-            "hf-hub:MahmoodLab/uni",
+            "hf-hub:MahmoodLab/UNI",
             pretrained=True,
             init_values=1e-5,
             dynamic_img_size=True,

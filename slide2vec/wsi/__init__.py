@@ -77,18 +77,31 @@ def extract_coordinates(
 
 
 def save_coordinates(
-    coordinates, target_spacing, level, tile_size, resize_factor, save_path
+    coordinates, target_spacing, tile_level, tile_size, resize_factor, save_path
 ):
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     ntile = len(x)
-    tile_size_resized = tile_size * resize_factor
-    data = []
+    tile_size_resized = tile_size * resize_factor  # defined w.r.t level "tile_level"
+    dtype = [
+        ("x", int),
+        ("y", int),
+        ("tile_size_resized", int),
+        ("tile_level", int),
+        ("resize_factor", int),
+        ("target_spacing", float),
+    ]
+    data = np.zeros(ntile, dtype=dtype)
     for i in range(ntile):
-        data.append(
-            [x[i], y[i], tile_size_resized, level, resize_factor, target_spacing]
+        data[i] = (
+            x[i],
+            y[i],
+            tile_size_resized,
+            tile_level,
+            resize_factor,
+            target_spacing,
         )
-    data_arr = np.array(data, dtype=int)
+    data_arr = np.array(data)
     np.save(save_path, data_arr)
     return save_path
 

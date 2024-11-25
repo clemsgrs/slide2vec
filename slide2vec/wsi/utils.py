@@ -12,12 +12,7 @@ def find_common_spacings(spacings_1, spacings_2, tolerance: float = 0.05):
     return common_spacings
 
 
-class Contour_Checking_fn(object):
-    def __call__(self, pt):
-        raise NotImplementedError
-
-
-class HasEnoughTissue(Contour_Checking_fn):
+class HasEnoughTissue(object):
     def __init__(self, contour, contour_holes, tissue_mask, tile_size, scale, pct=0.01):
         self.cont = contour
         self.holes = contour_holes

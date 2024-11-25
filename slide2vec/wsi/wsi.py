@@ -496,14 +496,19 @@ class WholeSlideImage(object):
         drop_holes: bool,
         tissue_thresh: float,
         use_padding: bool,
+        spacing_tol: float = 0.15,
         num_workers: int = 1,
     ):
-        tile_level, resize_factor = self.get_best_level_for_spacing(
-            spacing, ignore_warning=True
-        )
+        tile_level, _ = self.get_best_level_for_spacing(spacing, ignore_warning=True)
 
         tile_spacing = self.get_level_spacing(tile_level)
         resize_factor = int(round(spacing / tile_spacing, 0))
+
+        if abs(resize_factor * tile_spacing / spacing - 1) > spacing_tol:
+            raise ValueError(
+                f"ERROR: The natural spacing ({resize_factor*tile_spacing:.4f}) closest to the target spacing ({spacing:.4f}) was more than {spacing_tol*100}% apart."
+            )
+
         tile_size_resized = tile_size * resize_factor
         step_size = int(tile_size_resized * (1.0 - overlap))
 

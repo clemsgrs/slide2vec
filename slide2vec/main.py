@@ -245,6 +245,7 @@ def main(args):
                                 model.get_transforms(),
                             ]
                         )
+                    print(f"transforms: {transforms}")
                     dataset = TileDataset(
                         wsi_fp,
                         coordinates_dir,

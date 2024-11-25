@@ -39,7 +39,10 @@ def get_cfg_from_args(args):
 def default_setup(args, cfg):
     distributed.enable(overwrite=True)
     if distributed.is_main_process():
-        run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
+        if cfg.resume:
+            run_id = cfg.resume_dirname
+        else:
+            run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
         # set up wandb
         if cfg.wandb.enable:
             key = os.environ.get("WANDB_API_KEY")

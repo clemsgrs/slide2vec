@@ -9,3 +9,4 @@ omegaconf
 wholeslidedata
 torch==%PYTORCH_VERSION%
 torchvision==%TORCHVISION_VERSION%
+opencv-python==4.4.0.46

@@ -2,6 +2,7 @@ csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
 resume: false # resume from a previous run
+resume_dirname: # directory name to resume from
 
 visualize: false # visualize slide tiling
 
@@ -46,4 +47,4 @@ wandb:
   tags: ["features", "${model.level}", "${tiling.tile_size}"] # wandb tags
   dir: "/home/user/"
   group:
-  resume_id: # if resuming & wandb enabled, specify the id of the wandb run to resume
+  resume_id: "${resume_dirname}"
