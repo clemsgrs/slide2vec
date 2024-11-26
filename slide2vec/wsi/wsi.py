@@ -383,7 +383,7 @@ class WholeSlideImage(object):
 
         # filtering out artifacts
         foreground_contours, hole_contours = _filter_contours(
-            contours, hierarchy, tiling_params
+            contours, hierarchy, _tiling_params
         )
 
         # scale detected contours to level 0
