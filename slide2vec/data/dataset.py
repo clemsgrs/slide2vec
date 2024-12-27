@@ -7,8 +7,9 @@ from pathlib import Path
 
 
 class TileDataset(torch.utils.data.Dataset):
-    def __init__(self, wsi_path, tile_dir, backend, transforms=None):
+    def __init__(self, wsi_path, tile_dir, target_spacing, backend, transforms=None):
         self.path = wsi_path
+        self.target_spacing = target_spacing
         self.backend = backend
         self.name = wsi_path.stem.replace(" ", "_")
         self.load_coordinates(tile_dir)
@@ -18,9 +19,20 @@ class TileDataset(torch.utils.data.Dataset):
         coordinates = np.load(Path(tile_dir, f"{self.name}.npy"), allow_pickle=True)
         self.x = coordinates["x"]
         self.y = coordinates["y"]
+        self.scaled_coordinates = self.scale_coordinates(coordinates)
         self.tile_size_resized = coordinates["tile_size_resized"]
         self.tile_level = coordinates["tile_level"]
         self.resize_factor = coordinates["resize_factor"]
+
+    def scale_coordinates(self, coordinates):
+        # coordinates are defined w.r.t. level 0
+        # i need to scale them to target_spacing
+        wsi = wsd.WholeSlideImage(self.path, backend=self.backend)
+        min_spacing = wsi.spacings[0]
+        scale = min_spacing / self.target_spacing
+        # create a [N, 2] array with x and y coordinates
+        scaled_coordinates = np.array([coordinates["x"], coordinates["y"]]).T * scale
+        return scaled_coordinates
 
     def __len__(self):
         return len(self.x)

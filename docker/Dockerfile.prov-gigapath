@@ -3,11 +3,11 @@
 # =============================================================
 
 ARG UBUNTU_VERSION=22.04
-ARG CUDA_MAJOR_VERSION=12.1.0
+ARG CUDA_MAJOR_VERSION=11.8.0
 ARG CUDNN_MAJOR_VERSION=8
 ARG PYTHON_VERSION=3.9.15
-ARG PYTORCH_VERSION=2.1.0
-ARG TORCHVISION_VERSION=0.16.0
+ARG PYTORCH_VERSION=2.0.0
+ARG TORCHVISION_VERSION=0.15.0
 ARG NUMPY_VERSION=1.26.1
 ARG BUILD_JOBS=16
 
@@ -15,7 +15,7 @@ ARG BUILD_JOBS=16
 # Create docker
 # =============================================================
 
-FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS base
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 
 # propagate build args
 ARG CUDA_MAJOR_VERSION
@@ -90,7 +90,7 @@ RUN apt-get update && \
     echo "/opt/ASAP/bin" > /usr/local/lib/python3.9/site-packages/asap.pth && \
     rm ASAP-2.1-Ubuntu2204.deb
 
-# Ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
+# ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED 1
 
 RUN groupadd -r user && useradd -m --no-log-init -r -g user user
@@ -101,10 +101,22 @@ RUN chown user:user /input
 RUN mkdir /output
 RUN chown user:user /output
 
+WORKDIR /home/user/
+
+# create cache folder for storing huggingface model weights
+RUN mkdir cache
+ENV HF_HOME=/home/user/cache
+
+# clone prov-gigapath repo
+RUN git clone https://github.com/prov-gigapath/prov-gigapath
+
+# add gigapath folder to conda env python path
+ENV PYTHONPATH="/home/user/prov-gigapath:$PYTHONPATH"
+
 # install python libraries
 WORKDIR /opt/app
 
-COPY --chown=user:user requirements.in /opt/app/
+COPY --chown=user:user gigapath-requirements.in /opt/app/requirements.in
 
 RUN cd /opt/app/ && \
     CUDA_IDENTIFIER_PYTORCH=`echo "cu${CUDA_MAJOR_VERSION}" | sed "s|\.||g" | cut -c1-5` && \
@@ -116,5 +128,8 @@ RUN cd /opt/app/ && \
     /usr/local/bin/python3 -m piptools compile requirements.in --verbose --find-links https://download.pytorch.org/whl/torch_stable.html && \
     /usr/local/bin/python3 -m piptools sync && \
     rm -rf ~/.cache/pip*
+
+# install flash-attn
+RUN /usr/local/bin/python3 -m pip install flash-attn==2.5.8
 
 USER user

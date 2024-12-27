@@ -287,7 +287,9 @@ def enable(
     _restrict_print_to_main_process()
 
 
-def gather_features(features, indices, device, features_dim, level):
+def gather_features(
+    features, indices, device, features_dim, level, scaled_coordinates=None
+):
     gathered_feature = [
         torch.zeros_like(features, device=device) for _ in range(get_global_size())
     ]
@@ -296,6 +298,7 @@ def gather_features(features, indices, device, features_dim, level):
     ]
     torch.distributed.all_gather(gathered_feature, features)
     torch.distributed.all_gather(gathered_indices, indices)
+    coordinates = None
     if is_main_process():
         # concatenate the gathered features and indices
         wsi_feature = torch.cat(gathered_feature, dim=0)
@@ -305,10 +308,12 @@ def gather_features(features, indices, device, features_dim, level):
             tile_indices, sorted=False, return_inverse=True
         )
         # create a final tensor to store the features in the correct order
-        if level == "tile":
+        if level == "tile" or level == "slide":
             wsi_feature_ordered = torch.zeros(
                 (unique_indices.size(0), features_dim), device=device
             )
+            if level == "slide":
+                coordinates = torch.zeros((unique_indices.size(0), 2), device=device)
         elif level == "region":
             num_tiles = features.shape[1]
             wsi_feature_ordered = torch.zeros(
@@ -318,6 +323,11 @@ def gather_features(features, indices, device, features_dim, level):
         for idx in range(tile_indices.size(0)):
             index = inverse_indices[idx]
             wsi_feature_ordered[index] = wsi_feature[idx]
+            if level == "slide":
+                assert scaled_coordinates is not None
+                coordinates[index] = torch.tensor(
+                    scaled_coordinates[idx], device=device
+                )
     else:
         wsi_feature_ordered = None
-    return wsi_feature_ordered
+    return wsi_feature_ordered, coordinates

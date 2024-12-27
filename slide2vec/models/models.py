@@ -23,14 +23,33 @@ class ModelFactory:
                 model = Virchow2(img_size=options.tile_size)
             elif options.name == "uni":
                 model = UNI(img_size=options.tile_size)
+            elif options.name == "prov-gigapath":
+                model = ProvGigaPath(img_size=options.tile_size)
+            elif options.name == "h-optimus-0":
+                model = Hoptimus0(img_size=options.tile_size)
         elif options.level == "region":
             if options.name == "virchow2":
                 tile_encoder = Virchow2(img_size=options.patch_size)
             elif options.name == "uni":
                 tile_encoder = UNI(img_size=options.patch_size)
+            elif options.name == "prov-gigapath":
+                tile_encoder = ProvGigaPath(img_size=options.patch_size)
+            elif options.name == "h-optimus-0":
+                tile_encoder = Hoptimus0(img_size=options.patch_size)
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
-            raise NotImplementedError
+            if options.name == "prov-gigapath":
+                import gigapath.slide_encoder as sd
+
+                tile_encoder = ProvGigaPath(img_size=options.patch_size)
+                slide_encoder = sd.create_model(
+                    "hf_hub:prov-gigapath/prov-gigapath",
+                    "gigapath_slide_enc12l768d",
+                    tile_encoder.features_dim,
+                )
+            else:
+                raise ValueError(f"{options.name} doesn't support slide-level encoding")
+            model = SlideFeatureExtractor(tile_encoder, slide_encoder)
 
         self.model = model.eval()
         self.model = self.model.to(self.model.device)
@@ -129,6 +148,48 @@ class Virchow2(FeatureExtractor):
             return embedding
 
 
+class ProvGigaPath(FeatureExtractor):
+    def __init__(self, img_size: int = 224):
+        self.img_size = img_size
+        self.features_dim = 1536
+        super(ProvGigaPath, self).__init__()
+
+    def build_encoder(self):
+        encoder = timm.create_model(
+            "hf_hub:prov-gigapath/prov-gigapath",
+            pretrained=True,
+        )
+        if self.img_size == 256:
+            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
+            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
+        return encoder
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
+class Hoptimus0(FeatureExtractor):
+    def __init__(self, img_size: int = 224):
+        self.img_size = img_size
+        self.features_dim = 1536
+        super(Hoptimus0, self).__init__()
+
+    def build_encoder(self):
+        encoder = timm.create_model(
+            "hf-hub:bioptimus/H-optimus-0",
+            pretrained=True,
+            init_values=1e-5,
+            dynamic_img_size=False,
+        )
+        if self.img_size == 256:
+            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
+            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
+        return encoder
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
 class RegionFeatureExtractor(nn.Module):
     def __init__(
         self,
@@ -152,4 +213,29 @@ class RegionFeatureExtractor(nn.Module):
         output = rearrange(
             output, "(b p) f -> b p f", b=B
         )  # [B, num_tiles, features_dim]
+        return output
+
+
+class SlideFeatureExtractor(nn.Module):
+    def __init__(
+        self,
+        tile_encoder: nn.Module,
+        slide_encoder: nn.Module,
+    ):
+        super(SlideFeatureExtractor, self).__init__()
+        self.tile_encoder = tile_encoder
+        self.slide_encoder = slide_encoder
+        self.device = self.tile_encoder.device
+        self.features_dim = self.tile_encoder.features_dim
+
+    def get_transforms(self):
+        return self.tile_encoder.get_transforms()
+
+    def forward(self, x):
+        return self.tile_encoder(x)
+
+    def forward_slide(self, tile_features, tile_coordinates):
+        tile_features = tile_features.unsqueeze(0)
+        output = self.slide_encoder(tile_features, tile_coordinates)
+        output = output[0].squeeze()
         return output
