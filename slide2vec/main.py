@@ -16,7 +16,7 @@ from contextlib import nullcontext
 
 import slide2vec.distributed as distributed
 
-from slide2vec.utils import load_csv
+from slide2vec.utils import load_csv, fix_random_seeds
 from slide2vec.utils.config import setup, write_config, hf_login
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
@@ -52,6 +52,10 @@ def main(args):
     cfg = setup(args)
     hf_login()
     wsi_paths, mask_paths = load_csv(cfg)
+
+    fix_random_seeds(cfg.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     if distributed.is_main_process():
         write_config(cfg, cfg.output_dir)
@@ -197,6 +201,8 @@ def main(args):
         model = ModelFactory(cfg.model).get_model()
         if distributed.is_main_process():
             logger.info("=+=" * 10)
+
+        torch.distributed.barrier()
 
         coordinates_dir = Path(cfg.output_dir, "coordinates")
         wsi_with_tiles_paths = [
@@ -344,22 +350,26 @@ def main(args):
                                 device=model.device,
                             )
                         # insert each feature into its correct position based on tile_indices
-                        for idx in range(indices.size(0)):
-                            index = inverse_indices[idx]
-                            wsi_feature[index] = features[idx]
+                        for idx in inverse_indices:
+                            unique_idx = unique_indices[idx]
+                            wsi_feature[unique_idx] = features[idx]
                             if cfg.model.level == "slide":
-                                coordinates[index] = torch.tensor(
+                                coordinates[unique_idx] = torch.tensor(
                                     dataset.scaled_coordinates[idx], device=model.device
                                 )
 
+                    torch.distributed.barrier()
+                    if cfg.model.level == "slide":
+                        with torch.inference_mode():
+                            with autocast_context:
+                                wsi_feature = model.forward_slide(
+                                    wsi_feature, coordinates
+                                )
+
                     if distributed.is_main_process():
-                        if cfg.model.level == "slide":
-                            with torch.inference_mode():
-                                with autocast_context:
-                                    wsi_feature = model.forward_slide(
-                                        wsi_feature, coordinates
-                                    )
                         torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
+
+                    torch.distributed.barrier()
 
                     if cfg.wandb.enable and distributed.is_main_process():
                         agg_processed_count += 1

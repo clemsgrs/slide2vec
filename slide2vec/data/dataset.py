@@ -31,7 +31,9 @@ class TileDataset(torch.utils.data.Dataset):
         min_spacing = wsi.spacings[0]
         scale = min_spacing / self.target_spacing
         # create a [N, 2] array with x and y coordinates
-        scaled_coordinates = np.array([coordinates["x"], coordinates["y"]]).T * scale
+        scaled_coordinates = (
+            np.array([coordinates["x"], coordinates["y"]]).T * scale
+        ).astype(int)
         return scaled_coordinates
 
     def __len__(self):

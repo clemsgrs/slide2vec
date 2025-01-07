@@ -5,10 +5,15 @@ import torch.nn as nn
 
 from einops import rearrange
 from omegaconf import DictConfig
+from torchvision import transforms
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
 
 import slide2vec.distributed as distributed
+import slide2vec.models.vision_transformer as vits
+
+from slide2vec.utils import update_state_dict
+from slide2vec.data.augmentations import make_normalize_transform
 
 logger = logging.getLogger("slide2vec")
 
@@ -20,28 +25,40 @@ class ModelFactory:
     ):
         if options.level == "tile":
             if options.name == "virchow2":
-                model = Virchow2(img_size=options.tile_size)
+                model = Virchow2(input_size=options.tile_size)
             elif options.name == "uni":
-                model = UNI(img_size=options.tile_size)
+                model = UNI(input_size=options.tile_size)
             elif options.name == "prov-gigapath":
-                model = ProvGigaPath(img_size=options.tile_size)
+                model = ProvGigaPath(input_size=options.tile_size)
             elif options.name == "h-optimus-0":
-                model = Hoptimus0(img_size=options.tile_size)
+                model = Hoptimus0(input_size=options.tile_size)
+            elif options.name is None and options.arch:
+                model = DINOViT(
+                    arch=options.arch,
+                    pretrained_weights=options.pretrained_weights,
+                    input_size=options.tile_size,
+                )
         elif options.level == "region":
             if options.name == "virchow2":
-                tile_encoder = Virchow2(img_size=options.patch_size)
+                tile_encoder = Virchow2(input_size=options.patch_size)
             elif options.name == "uni":
-                tile_encoder = UNI(img_size=options.patch_size)
+                tile_encoder = UNI(input_size=options.patch_size)
             elif options.name == "prov-gigapath":
-                tile_encoder = ProvGigaPath(img_size=options.patch_size)
+                tile_encoder = ProvGigaPath(input_size=options.patch_size)
             elif options.name == "h-optimus-0":
-                tile_encoder = Hoptimus0(img_size=options.patch_size)
+                tile_encoder = Hoptimus0(input_size=options.patch_size)
+            elif options.name is None and options.arch:
+                tile_encoder = DINOViT(
+                    arch=options.arch,
+                    pretrained_weights=options.pretrained_weights,
+                    input_size=options.patch_size,
+                )
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
             if options.name == "prov-gigapath":
                 import gigapath.slide_encoder as sd
 
-                tile_encoder = ProvGigaPath(img_size=options.patch_size)
+                tile_encoder = ProvGigaPath(input_size=options.patch_size)
                 slide_encoder = sd.create_model(
                     "hf_hub:prov-gigapath/prov-gigapath",
                     "gigapath_slide_enc12l768d",
@@ -80,16 +97,80 @@ class FeatureExtractor(nn.Module):
         data_config = resolve_data_config(
             self.encoder.pretrained_cfg, model=self.encoder
         )
-        transforms = create_transform(**data_config)
-        return transforms
+        transform = create_transform(**data_config)
+        return transform
 
     def forward(self, x):
         raise NotImplementedError
 
 
+class DINOViT(FeatureExtractor):
+    def __init__(
+        self,
+        arch: str,
+        pretrained_weights: str,
+        input_size: int = 256,
+        patch_size: int = 14,
+        ckpt_key: str = "teacher",
+    ):
+        self.arch = arch
+        self.pretrained_weights = pretrained_weights
+        self.input_size = input_size
+        self.patch_size = patch_size
+        self.ckpt_key = ckpt_key
+        arch2dim = {"vit_large": 1024, "vit_base": 768, "vit_small": 384}
+        self.features_dim = arch2dim[arch]
+        super(DINOViT, self).__init__()
+        self.load_weights()
+
+    def load_weights(self):
+        if distributed.is_main_process():
+            print(f"Loading pretrained weights from: {self.pretrained_weights}")
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+        if self.ckpt_key:
+            state_dict = state_dict[self.ckpt_key]
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="module."
+        )
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="backbone."
+        )
+        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
+        if distributed.is_main_process():
+            print(msg)
+        self.encoder.load_state_dict(state_dict, strict=False)
+
+    def build_encoder(self):
+        encoder = vits.__dict__[self.arch](
+            img_size=self.input_size, patch_size=self.patch_size
+        )
+        return encoder
+
+    def get_transforms(self):
+        if self.input_size > 224:
+            transform = transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    transforms.CenterCrop(224),
+                    make_normalize_transform(),
+                ]
+            )
+        else:
+            transforms.Compose(
+                [
+                    transforms.ToTensor(),
+                    make_normalize_transform(),
+                ]
+            )
+        return transform
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
 class UNI(FeatureExtractor):
-    def __init__(self, img_size: int = 224):
-        self.img_size = img_size
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
         self.features_dim = 1024
         super(UNI, self).__init__()
 
@@ -100,7 +181,7 @@ class UNI(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=True,
         )
-        if self.img_size == 256:
+        if self.input_size == 256:
             encoder.pretrained_cfg["input_size"] = [3, 224, 224]
             encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         encoder.pretrained_cfg[
@@ -113,8 +194,8 @@ class UNI(FeatureExtractor):
 
 
 class Virchow2(FeatureExtractor):
-    def __init__(self, img_size: int = 224, mode: str = "cls"):
-        self.img_size = img_size
+    def __init__(self, input_size: int = 224, mode: str = "cls"):
+        self.input_size = input_size
         self.mode = mode
         self.features_dim = 1280
         if mode == "full":
@@ -128,7 +209,7 @@ class Virchow2(FeatureExtractor):
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
-        if self.img_size == 256:
+        if self.input_size == 256:
             encoder.pretrained_cfg["input_size"] = [3, 224, 224]
             encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
@@ -149,8 +230,8 @@ class Virchow2(FeatureExtractor):
 
 
 class ProvGigaPath(FeatureExtractor):
-    def __init__(self, img_size: int = 224):
-        self.img_size = img_size
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
         self.features_dim = 1536
         super(ProvGigaPath, self).__init__()
 
@@ -159,7 +240,7 @@ class ProvGigaPath(FeatureExtractor):
             "hf_hub:prov-gigapath/prov-gigapath",
             pretrained=True,
         )
-        if self.img_size == 256:
+        if self.input_size == 256:
             encoder.pretrained_cfg["input_size"] = [3, 224, 224]
             encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
@@ -169,8 +250,8 @@ class ProvGigaPath(FeatureExtractor):
 
 
 class Hoptimus0(FeatureExtractor):
-    def __init__(self, img_size: int = 224):
-        self.img_size = img_size
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
         self.features_dim = 1536
         super(Hoptimus0, self).__init__()
 
@@ -181,7 +262,7 @@ class Hoptimus0(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=False,
         )
-        if self.img_size == 256:
+        if self.input_size == 256:
             encoder.pretrained_cfg["input_size"] = [3, 224, 224]
             encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
@@ -223,10 +304,19 @@ class SlideFeatureExtractor(nn.Module):
         slide_encoder: nn.Module,
     ):
         super(SlideFeatureExtractor, self).__init__()
+        self.set_device()
         self.tile_encoder = tile_encoder
         self.slide_encoder = slide_encoder
-        self.device = self.tile_encoder.device
         self.features_dim = self.tile_encoder.features_dim
+
+    def set_device(self):
+        if distributed.is_enabled():
+            self.device = torch.device(f"cuda:{distributed.get_local_rank()}")
+        else:
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+            else:
+                self.device = torch.device("cpu")
 
     def get_transforms(self):
         return self.tile_encoder.get_transforms()

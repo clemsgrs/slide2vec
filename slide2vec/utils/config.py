@@ -59,6 +59,8 @@ def default_setup(args, cfg):
         )
         run_id = obj[0]
 
+    torch.distributed.barrier()
+
     output_dir = Path(cfg.output_dir, run_id)
     if distributed.is_main_process():
         output_dir.mkdir(exist_ok=True, parents=True)

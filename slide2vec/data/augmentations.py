@@ -1,4 +1,17 @@
+from typing import Sequence
 from einops import rearrange
+from torchvision import transforms
+
+# Use timm's names
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+
+def make_normalize_transform(
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
+) -> transforms.Normalize:
+    return transforms.Normalize(mean=mean, std=std)
 
 
 class RegionUnfolding:

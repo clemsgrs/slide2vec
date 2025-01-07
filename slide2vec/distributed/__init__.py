@@ -298,36 +298,33 @@ def gather_features(
     ]
     torch.distributed.all_gather(gathered_feature, features)
     torch.distributed.all_gather(gathered_indices, indices)
+    # concatenate the gathered features and indices
+    wsi_feature = torch.cat(gathered_feature, dim=0)
+    tile_indices = torch.cat(gathered_indices, dim=0)
+    # handle duplicates
+    unique_indices, inverse_indices = torch.unique(
+        tile_indices, sorted=False, return_inverse=True
+    )
+    # create a final tensor to store the features in the correct order
     coordinates = None
-    if is_main_process():
-        # concatenate the gathered features and indices
-        wsi_feature = torch.cat(gathered_feature, dim=0)
-        tile_indices = torch.cat(gathered_indices, dim=0)
-        # handle duplicates
-        unique_indices, inverse_indices = torch.unique(
-            tile_indices, sorted=False, return_inverse=True
+    if level == "tile" or level == "slide":
+        wsi_feature_ordered = torch.zeros(
+            (unique_indices.size(0), features_dim), device=device
         )
-        # create a final tensor to store the features in the correct order
-        if level == "tile" or level == "slide":
-            wsi_feature_ordered = torch.zeros(
-                (unique_indices.size(0), features_dim), device=device
+        if level == "slide":
+            coordinates = torch.zeros((unique_indices.size(0), 2), device=device)
+    elif level == "region":
+        num_tiles = features.shape[1]
+        wsi_feature_ordered = torch.zeros(
+            (unique_indices.size(0), num_tiles, features_dim), device=device
+        )
+    # insert each feature into its correct position based on tile_indices
+    for idx in inverse_indices:
+        unique_idx = unique_indices[idx]
+        wsi_feature_ordered[unique_idx] = wsi_feature[idx]
+        if level == "slide":
+            assert scaled_coordinates is not None
+            coordinates[unique_idx] = torch.tensor(
+                scaled_coordinates[idx], device=device
             )
-            if level == "slide":
-                coordinates = torch.zeros((unique_indices.size(0), 2), device=device)
-        elif level == "region":
-            num_tiles = features.shape[1]
-            wsi_feature_ordered = torch.zeros(
-                (unique_indices.size(0), num_tiles, features_dim), device=device
-            )
-        # insert each feature into its correct position based on tile_indices
-        for idx in range(tile_indices.size(0)):
-            index = inverse_indices[idx]
-            wsi_feature_ordered[index] = wsi_feature[idx]
-            if level == "slide":
-                assert scaled_coordinates is not None
-                coordinates[index] = torch.tensor(
-                    scaled_coordinates[idx], device=device
-                )
-    else:
-        wsi_feature_ordered = None
     return wsi_feature_ordered, coordinates

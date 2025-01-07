@@ -6,6 +6,8 @@ resume_dirname: # directory name to resume from
 
 visualize: false # visualize slide tiling
 
+seed: 0 # seed for reproducibility
+
 tiling:
   spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
   tile_size: 256 # size of the tiles to extract, in pixels
