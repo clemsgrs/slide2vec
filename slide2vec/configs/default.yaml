@@ -31,7 +31,9 @@ tiling:
 
 model:
   level: "tile" # level at which to extract the features
-  name: "" # model name
+  name: # foundation model name ["uni", "virchow2", "prov-gigapath", "h-optimus-0"] (leave empty when using a custom model)
+  arch: # architecture of custom model
+  pretrained_weights: # path to the pretrained weights when using a custom model
   batch_size: 128
   tile_size: ${tiling.tile_size}
   patch_size: 256 # if level is "region", size used to unroll the region into patches

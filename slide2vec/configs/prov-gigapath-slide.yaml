@@ -1,0 +1,28 @@
+csv:
+
+visualize: true
+
+tiling:
+  spacing: 0.5
+  tile_size: 256
+  backend: "asap"
+  tissue_pixel_value: 1
+  params:
+    tissue_thresh: 0.1
+    ref_tile_size: 256
+    a_t: 4
+    a_h: 2
+    max_n_holes: 8
+
+model:
+  name: "prov-gigapath"
+  level: "slide"
+  batch_size: 1
+
+speed:
+  fp16: true
+  num_workers_preprocessing: 8
+  num_workers_data_loading: 8
+
+wandb:
+  enable: false
