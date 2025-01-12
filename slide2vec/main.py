@@ -334,8 +334,12 @@ def main(args):
                             indices_all = torch.cat(indices_list, dim=0)
                         else:
                             # non-main ranks won't have the combined features
-                            wsi_feature = None
-                            indices_all = None
+                            wsi_feature = torch.empty(
+                                (0, model.features_dim), device=model.device
+                            )
+                            indices_all = torch.empty(
+                                (0,), dtype=torch.long, device=model.device
+                            )
                     else:
                         # single GPU
                         wsi_feature = features
@@ -360,15 +364,20 @@ def main(args):
                             [dedup_dict[k] for k in unique_idxs], dim=0
                         )
 
-                        if cfg.model.level == "slide":
-                            # align coordinates with order of wsi_feature tensor
+                    torch.distributed.barrier()
+
+                    if cfg.model.level == "slide":
+                        # align coordinates with order of wsi_feature tensor
+                        if distributed.is_main_process():
                             coordinates = torch.tensor(
                                 dataset.scaled_coordinates[unique_idxs],
                                 dtype=torch.int64,
                                 device=model.device,
                             )
-
-                    if cfg.model.level == "slide" and distributed.is_main_process():
+                        else:
+                            coordinates = torch.empty(
+                                (0, 2), dtype=torch.int64, device=model.device
+                            )
                         with torch.inference_mode():
                             with autocast_context:
                                 wsi_feature = model.forward_slide(
@@ -376,9 +385,10 @@ def main(args):
                                     coordinates,
                                     tile_size_lv0=dataset.tile_size_lv0,
                                 )
-
-                    if distributed.is_main_process():
-                        torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
+                        if distributed.is_main_process():
+                            torch.save(
+                                wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt")
+                            )
 
                     if cfg.wandb.enable and distributed.is_main_process():
                         agg_processed_count += 1
@@ -393,7 +403,7 @@ def main(args):
                         "traceback": str(traceback.format_exc()),
                     }
 
-        if distributed.is_enabled():
+        if distributed.is_enabled_and_multiple_gpus():
             torch.distributed.barrier()
 
         # collect status updates from all processes
