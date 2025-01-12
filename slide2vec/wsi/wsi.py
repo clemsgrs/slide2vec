@@ -280,6 +280,8 @@ class WholeSlideImage(object):
         tiling_params: Dict,
         num_workers: int = 1,
     ):
+        scale = int(round(target_spacing / self.get_level_spacing(0), 0))
+        tile_size_lv0 = target_tile_size * scale
         contours, holes = self.detect_contours(target_spacing, tiling_params)
         (
             running_x_coords,
@@ -306,6 +308,7 @@ class WholeSlideImage(object):
             tissue_percentages,
             tile_level,
             resize_factor,
+            tile_size_lv0,
         )
 
     def detect_contours(

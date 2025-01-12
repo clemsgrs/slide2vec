@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from einops import rearrange
 from omegaconf import DictConfig
+from transformers import AutoModel
 from torchvision import transforms
 from timm.data import resolve_data_config
 from timm.data.transforms_factory import create_transform
@@ -13,7 +14,7 @@ import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer as vits
 
 from slide2vec.utils import update_state_dict
-from slide2vec.data.augmentations import make_normalize_transform
+from slide2vec.data.augmentations import make_normalize_transform, MaybeToTensor
 
 logger = logging.getLogger("slide2vec")
 
@@ -56,17 +57,11 @@ class ModelFactory:
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
             if options.name == "prov-gigapath":
-                import gigapath.slide_encoder as sd
-
-                tile_encoder = ProvGigaPath(input_size=options.patch_size)
-                slide_encoder = sd.create_model(
-                    "hf_hub:prov-gigapath/prov-gigapath",
-                    "gigapath_slide_enc12l768d",
-                    tile_encoder.features_dim,
-                )
+                model = ProvGigaPathSlide(input_size=options.tile_size)
+            elif options.name == "titan":
+                model = TITAN(input_size=options.tile_size)
             else:
                 raise ValueError(f"{options.name} doesn't support slide-level encoding")
-            model = SlideFeatureExtractor(tile_encoder, slide_encoder)
 
         self.model = model.eval()
         self.model = self.model.to(self.model.device)
@@ -150,7 +145,7 @@ class DINOViT(FeatureExtractor):
         if self.input_size > 224:
             transform = transforms.Compose(
                 [
-                    transforms.ToTensor(),
+                    MaybeToTensor(),
                     transforms.CenterCrop(224),
                     make_normalize_transform(),
                 ]
@@ -158,7 +153,7 @@ class DINOViT(FeatureExtractor):
         else:
             transforms.Compose(
                 [
-                    transforms.ToTensor(),
+                    MaybeToTensor(),
                     make_normalize_transform(),
                 ]
             )
@@ -298,16 +293,15 @@ class RegionFeatureExtractor(nn.Module):
 
 
 class SlideFeatureExtractor(nn.Module):
-    def __init__(
-        self,
-        tile_encoder: nn.Module,
-        slide_encoder: nn.Module,
-    ):
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
         super(SlideFeatureExtractor, self).__init__()
+        self.build_encoders()
         self.set_device()
-        self.tile_encoder = tile_encoder
-        self.slide_encoder = slide_encoder
-        self.features_dim = self.tile_encoder.features_dim
+        self.features_dim = None
+
+    def build_encoders(self):
+        raise NotImplementedError
 
     def set_device(self):
         if distributed.is_enabled():
@@ -324,8 +318,53 @@ class SlideFeatureExtractor(nn.Module):
     def forward(self, x):
         return self.tile_encoder(x)
 
-    def forward_slide(self, tile_features, tile_coordinates):
+    def forward_slide(self, **kwargs):
+        return self.slide_encoder(**kwargs)
+
+
+class ProvGigaPathSlide(SlideFeatureExtractor):
+    def __init__(
+        self,
+        input_size: int = 224,
+    ):
+        super(ProvGigaPathSlide, self).__init__(input_size)
+        self.features_dim = self.tile_encoder.features_dim
+
+    def build_encoders(self):
+        import gigapath.slide_encoder as sd
+
+        self.tile_encoder = ProvGigaPath(input_size=self.input_size)
+        self.slide_encoder = sd.create_model(
+            "hf_hub:prov-gigapath/prov-gigapath",
+            "gigapath_slide_enc12l768d",
+            self.tile_encoder.features_dim,
+        )
+
+    def forward_slide(self, tile_features, tile_coordinates, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         output = self.slide_encoder(tile_features, tile_coordinates)
         output = output[0].squeeze()
+        return output
+
+
+class TITAN(SlideFeatureExtractor):
+    def __init__(self, input_size: int = 512):
+        super(TITAN, self).__init__(input_size)
+        self.features_dim = 768
+
+    def build_encoders(self):
+        self.slide_encoder = AutoModel.from_pretrained(
+            "MahmoodLab/TITAN", trust_remote_code=True
+        )
+        self.tile_encoder, self.eval_transform = self.slide_encoder.return_conch()
+
+    def get_transforms(self):
+        return self.eval_transform
+
+    def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0):
+        tile_features = tile_features.unsqueeze(0)
+        tile_coordinates = tile_coordinates.unsqueeze(0)
+        output = self.slide_encoder.encode_slide_from_patch_features(
+            tile_features, tile_coordinates, tile_size_lv0
+        )
         return output

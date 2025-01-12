@@ -131,7 +131,13 @@ def main(args):
                             tissue_mask_visu_path = Path(
                                 mask_visualize_dir, f"{wsi_fp.stem}.jpg"
                             )
-                        coordinates, _, tile_level, resize_factor = extract_coordinates(
+                        (
+                            coordinates,
+                            _,
+                            tile_level,
+                            resize_factor,
+                            tile_size_lv0,
+                        ) = extract_coordinates(
                             wsi_fp,
                             mask_fp,
                             cfg.tiling.spacing,
@@ -151,6 +157,7 @@ def main(args):
                             tile_level,
                             cfg.tiling.tile_size,
                             resize_factor,
+                            tile_size_lv0,
                             coordinates_path,
                         )
                         if cfg.visualize:
@@ -265,7 +272,9 @@ def main(args):
                     )
                     if distributed.is_enabled_and_multiple_gpus():
                         sampler = torch.utils.data.DistributedSampler(
-                            dataset, shuffle=False
+                            dataset,
+                            shuffle=False,
+                            drop_last=False,  # ensures no tiles are left over when dataset size is not divisible by the number of GPUs
                         )
                     else:
                         sampler = None
@@ -316,60 +325,60 @@ def main(args):
                                     )
 
                     if distributed.is_enabled_and_multiple_gpus():
-                        torch.distributed.barrier()
-                        # gather features and indices from all GPUs
-                        wsi_feature, coordinates = distributed.gather_features(
-                            features,
-                            indices,
-                            model.device,
-                            model.features_dim,
-                            cfg.model.level,
-                            scaled_coordinates=dataset.scaled_coordinates,
-                        )
+                        # gather on main process
+                        features_list = distributed.gather_tensor(features)
+                        indices_list = distributed.gather_tensor(indices)
+                        if distributed.is_main_process():
+                            # cat them
+                            wsi_feature = torch.cat(features_list, dim=0)
+                            indices_all = torch.cat(indices_list, dim=0)
+                        else:
+                            # non-main ranks won't have the combined features
+                            wsi_feature = None
+                            indices_all = None
                     else:
-                        # handle duplicates
-                        unique_indices, inverse_indices = torch.unique(
-                            indices, sorted=False, return_inverse=True
-                        )
-                        if cfg.model.level == "tile" or cfg.model.level == "slide":
-                            wsi_feature = torch.zeros(
-                                (unique_indices.size(0), model.features_dim),
-                                device=model.device,
-                            )
-                            if cfg.model.level == "slide":
-                                coordinates = torch.zeros(
-                                    (unique_indices.size(0), 2), device=model.device
-                                )
-                        elif cfg.model.level == "region":
-                            wsi_feature = torch.zeros(
-                                (
-                                    unique_indices.size(0),
-                                    num_tiles,
-                                    model.tile_encoder.features_dim,
-                                ),
-                                device=model.device,
-                            )
-                        # insert each feature into its correct position based on tile_indices
-                        for idx in inverse_indices:
-                            unique_idx = unique_indices[idx]
-                            wsi_feature[unique_idx] = features[idx]
-                            if cfg.model.level == "slide":
-                                coordinates[unique_idx] = torch.tensor(
-                                    dataset.scaled_coordinates[idx], device=model.device
-                                )
+                        # single GPU
+                        wsi_feature = features
+                        indices_all = indices
 
-                    torch.distributed.barrier()
-                    if cfg.model.level == "slide":
+                    if distributed.is_main_process():
+                        # check for duplicates
+                        sorted_order = indices_all.argsort()
+                        indices_sorted = indices_all[sorted_order]
+                        features_sorted = wsi_feature[sorted_order]
+
+                        # deduplicate feature tensor
+                        dedup_dict = {}
+                        for i, idx in enumerate(indices_sorted):
+                            # only set the first time we see `idx`
+                            if idx.item() not in dedup_dict:
+                                dedup_dict[idx.item()] = features_sorted[i]
+
+                        # Rebuild final ordered Tensors
+                        unique_idxs = sorted(dedup_dict.keys())  # ascending list
+                        wsi_feature = torch.stack(
+                            [dedup_dict[k] for k in unique_idxs], dim=0
+                        )
+
+                        if cfg.model.level == "slide":
+                            # align coordinates with order of wsi_feature tensor
+                            coordinates = torch.tensor(
+                                dataset.scaled_coordinates[unique_idxs],
+                                dtype=torch.int64,
+                                device=model.device,
+                            )
+
+                    if cfg.model.level == "slide" and distributed.is_main_process():
                         with torch.inference_mode():
                             with autocast_context:
                                 wsi_feature = model.forward_slide(
-                                    wsi_feature, coordinates
+                                    wsi_feature,
+                                    coordinates,
+                                    tile_size_lv0=dataset.tile_size_lv0,
                                 )
 
                     if distributed.is_main_process():
                         torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
-
-                    torch.distributed.barrier()
 
                     if cfg.wandb.enable and distributed.is_main_process():
                         agg_processed_count += 1

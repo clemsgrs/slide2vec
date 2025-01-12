@@ -287,6 +287,18 @@ def enable(
     _restrict_print_to_main_process()
 
 
+def gather_tensor(t: torch.Tensor, dst_rank: int = 0):
+    """
+    Gather a tensor t from all ranks to dst_rank.
+    Returns a list of size world_size on dst_rank, otherwise an empty list on other ranks.
+    """
+    gather_list = []
+    if dist.get_rank() == dst_rank:
+        gather_list = [torch.empty_like(t) for _ in range(get_global_size())]
+    dist.gather(t, gather_list, dst=dst_rank)
+    return gather_list
+
+
 def gather_features(
     features, indices, device, features_dim, level, scaled_coordinates=None
 ):
@@ -312,7 +324,9 @@ def gather_features(
             (unique_indices.size(0), features_dim), device=device
         )
         if level == "slide":
-            coordinates = torch.zeros((unique_indices.size(0), 2), device=device)
+            coordinates = torch.zeros(
+                (unique_indices.size(0), 2), dtype=torch.int64, device=device
+            )
     elif level == "region":
         num_tiles = features.shape[1]
         wsi_feature_ordered = torch.zeros(

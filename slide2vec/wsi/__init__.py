@@ -65,6 +65,7 @@ def extract_coordinates(
         tissue_percentages,
         tile_level,
         resize_factor,
+        tile_size_lv0,
     ) = wsi.get_tile_coordinates(
         spacing, tile_size, tiling_params, num_workers=num_workers
     )
@@ -73,11 +74,23 @@ def extract_coordinates(
     )
     if mask_visu_path is not None:
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
-    return sorted_coordinates, sorted_tissue_percentages, tile_level, resize_factor
+    return (
+        sorted_coordinates,
+        sorted_tissue_percentages,
+        tile_level,
+        resize_factor,
+        tile_size_lv0,
+    )
 
 
 def save_coordinates(
-    coordinates, target_spacing, tile_level, tile_size, resize_factor, save_path
+    coordinates,
+    target_spacing,
+    tile_level,
+    tile_size,
+    resize_factor,
+    tile_size_lv0,
+    save_path,
 ):
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
@@ -89,6 +102,7 @@ def save_coordinates(
         ("tile_size_resized", int),
         ("tile_level", int),
         ("resize_factor", int),
+        ("tile_size_lv0", int),
         ("target_spacing", float),
     ]
     data = np.zeros(ntile, dtype=dtype)
@@ -99,6 +113,7 @@ def save_coordinates(
             tile_size_resized,
             tile_level,
             resize_factor,
+            tile_size_lv0,
             target_spacing,
         )
     data_arr = np.array(data)

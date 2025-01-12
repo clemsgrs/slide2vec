@@ -7,6 +7,7 @@ einops
 tqdm
 omegaconf
 wholeslidedata
+huggingface-hub
 torch==%PYTORCH_VERSION%
 torchvision==%TORCHVISION_VERSION%
 opencv-python==4.4.0.46

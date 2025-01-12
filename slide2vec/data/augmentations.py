@@ -1,3 +1,6 @@
+import torch
+import torchvision.transforms.functional as F
+
 from typing import Sequence
 from einops import rearrange
 from torchvision import transforms
@@ -12,6 +15,30 @@ def make_normalize_transform(
     std: Sequence[float] = IMAGENET_DEFAULT_STD,
 ) -> transforms.Normalize:
     return transforms.Normalize(mean=mean, std=std)
+
+
+class MaybeToTensor(transforms.ToTensor):
+    """
+    Convert a PIL Image or ndarray to tensor if it's not already one.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, pic):
+        """
+        Args:
+            pic (PIL Image or numpy.ndarray): Image to be converted to tensor.
+
+        Returns:
+            Tensor: Converted image.
+        """
+        if isinstance(pic, torch.Tensor):
+            return pic
+        return F.to_tensor(pic)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}()"
 
 
 class RegionUnfolding:
