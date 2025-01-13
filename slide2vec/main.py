@@ -334,12 +334,10 @@ def main(args):
                             indices_all = torch.cat(indices_list, dim=0)
                         else:
                             # non-main ranks won't have the combined features
-                            wsi_feature = torch.empty(
-                                (0, model.features_dim), device=model.device
+                            wsi_feature = torch.rand(
+                                (len(dataset), model.features_dim), device=model.device
                             )
-                            indices_all = torch.empty(
-                                (0,), dtype=torch.long, device=model.device
-                            )
+                            indices_all = None
                     else:
                         # single GPU
                         wsi_feature = features
@@ -375,8 +373,11 @@ def main(args):
                                 device=model.device,
                             )
                         else:
-                            coordinates = torch.empty(
-                                (0, 2), dtype=torch.int64, device=model.device
+                            coordinates = torch.randint(
+                                10000,
+                                (len(dataset), 2),
+                                dtype=torch.int64,
+                                device=model.device,
                             )
                         with torch.inference_mode():
                             with autocast_context:
