@@ -108,7 +108,7 @@ RUN mkdir cache
 ENV HF_HOME=/home/user/cache
 
 # clone prov-gigapath repo
-RUN git clone https://github.com/prov-gigapath/prov-gigapath
+RUN git clone https://github.com/prov-gigapath/prov-gigapath.git
 
 # add gigapath folder to conda env python path
 ENV PYTHONPATH="/home/user/prov-gigapath:$PYTHONPATH"

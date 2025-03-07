@@ -6,6 +6,7 @@ pillow
 einops
 tqdm
 omegaconf
+transformers
 wholeslidedata
 huggingface-hub
 torch==%PYTORCH_VERSION%

@@ -367,11 +367,18 @@ def main(args):
                     if cfg.model.level == "slide":
                         # align coordinates with order of wsi_feature tensor
                         if distributed.is_main_process():
-                            coordinates = torch.tensor(
-                                dataset.scaled_coordinates[unique_idxs],
-                                dtype=torch.int64,
-                                device=model.device,
-                            )
+                            if cfg.model.name == "prov-gigapath":
+                                coordinates = torch.tensor(
+                                    dataset.scaled_coordinates[unique_idxs],
+                                    dtype=torch.int64,
+                                    device=model.device,
+                                )
+                            else:
+                                coordinates = torch.tensor(
+                                    dataset.coordinates[unique_idxs],
+                                    dtype=torch.int64,
+                                    device=model.device,
+                                )
                         else:
                             coordinates = torch.randint(
                                 10000,
@@ -386,14 +393,12 @@ def main(args):
                                     coordinates,
                                     tile_size_lv0=dataset.tile_size_lv0,
                                 )
-                        if distributed.is_main_process():
-                            torch.save(
-                                wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt")
-                            )
 
-                    if cfg.wandb.enable and distributed.is_main_process():
-                        agg_processed_count += 1
-                        wandb.log({"processed": agg_processed_count})
+                    if distributed.is_main_process():
+                        torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
+                        if cfg.wandb.enable:
+                            agg_processed_count += 1
+                            wandb.log({"processed": agg_processed_count})
 
                     feature_extraction_updates[str(wsi_fp)] = {"status": "done"}
 

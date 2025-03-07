@@ -19,22 +19,21 @@ class TileDataset(torch.utils.data.Dataset):
         coordinates = np.load(Path(tile_dir, f"{self.name}.npy"), allow_pickle=True)
         self.x = coordinates["x"]
         self.y = coordinates["y"]
-        self.scaled_coordinates = self.scale_coordinates(coordinates)
+        self.coordinates = (np.array([self.x, self.y]).T).astype(int)
+        self.scaled_coordinates = self.scale_coordinates()
         self.tile_size_resized = coordinates["tile_size_resized"]
         self.tile_level = coordinates["tile_level"]
         self.resize_factor = coordinates["resize_factor"]
         self.tile_size_lv0 = coordinates["tile_size_lv0"][0]
 
-    def scale_coordinates(self, coordinates):
+    def scale_coordinates(self):
         # coordinates are defined w.r.t. level 0
         # i need to scale them to target_spacing
         wsi = wsd.WholeSlideImage(self.path, backend=self.backend)
         min_spacing = wsi.spacings[0]
         scale = min_spacing / self.target_spacing
         # create a [N, 2] array with x and y coordinates
-        scaled_coordinates = (
-            np.array([coordinates["x"], coordinates["y"]]).T * scale
-        ).astype(int)
+        scaled_coordinates = (self.coordinates * scale).astype(int)
         return scaled_coordinates
 
     def __len__(self):
