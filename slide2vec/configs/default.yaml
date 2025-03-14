@@ -40,8 +40,8 @@ model:
 
 speed:
   fp16: false # use mixed precision during model inference
-  num_workers_preprocessing: 8 # number of workers for preprocessing
-  num_workers_data_loading: 8 # number of workers for data loading
+  num_workers_tiling: 8 # number of workers for tiling slides
+  num_workers_embedding: 8 # number of workers for data loading when embedding slides
 
 wandb:
   enable: false

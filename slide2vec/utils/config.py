@@ -13,7 +13,6 @@ import slide2vec.distributed as distributed
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
 
-
 logger = logging.getLogger("slide2vec")
 
 
@@ -25,76 +24,69 @@ def write_config(cfg, output_dir, name="config.yaml"):
     return saved_cfg_path
 
 
-def get_cfg_from_args(args):
-    if args.output_dir is not None:
-        args.output_dir = os.path.abspath(args.output_dir)
-        args.opts += [f"output_dir={args.output_dir}"]
+def get_cfg_from_file(config_file):
     default_cfg = OmegaConf.create(default_config)
-    cfg = OmegaConf.load(args.config_file)
-    cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
+    cfg = OmegaConf.load(config_file)
+    cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.resolve(cfg)
     return cfg
 
 
-def default_setup(args, cfg):
-    distributed.enable(overwrite=True)
-    if distributed.is_main_process():
-        if cfg.resume:
-            run_id = cfg.resume_dirname
-        else:
-            run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
-        # set up wandb
-        if cfg.wandb.enable:
-            key = os.environ.get("WANDB_API_KEY")
-            wandb_run = initialize_wandb(cfg, key=key)
-            wandb_run.define_metric("processed", summary="max")
-            run_id = wandb_run.id
+def setup(config_file):
+    """
+    Basic configuration setup without any distributed or GPU-specific initialization.
+    This function:
+      - Loads the config from file and command-line options.
+      - Sets up logging.
+      - Fixes random seeds.
+      - Creates the output directory.
+    """
+    cfg = get_cfg_from_file(config_file)
+
+    if cfg.resume:
+        run_id = cfg.resume_dirname
     else:
-        run_id = ""
+        run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
 
-    if distributed.is_enabled():
-        obj = [run_id]
-        torch.distributed.broadcast_object_list(
-            obj, 0, device=torch.device(f"cuda:{distributed.get_local_rank()}")
-        )
-        run_id = obj[0]
-
-    torch.distributed.barrier()
+    if cfg.wandb.enable:
+        key = os.environ.get("WANDB_API_KEY")
+        wandb_run = initialize_wandb(cfg, key=key)
+        wandb_run.define_metric("processed", summary="max")
+        run_id = wandb_run.id
 
     output_dir = Path(cfg.output_dir, run_id)
     if distributed.is_main_process():
         output_dir.mkdir(exist_ok=True, parents=True)
     cfg.output_dir = str(output_dir)
 
-    seed = getattr(args, "seed", 0)
-    rank = distributed.get_global_rank()
-
-    global logger
+    fix_random_seeds(0)
     setup_logging(output=cfg.output_dir, level=logging.INFO)
-    logger = logging.getLogger("slide2vec")
-
-    fix_random_seeds(seed + rank)
     logger.info("git:\n  {}\n".format(get_sha()))
-    logger.info(
-        "\n".join("%s: %s" % (k, str(v)) for k, v in sorted(dict(vars(args)).items()))
-    )
+    write_config(cfg, cfg.output_dir)
     return cfg
 
 
-def setup(args):
-    cfg = get_cfg_from_args(args)
-    cfg = default_setup(args, cfg)
-    return cfg
+def setup_distributed():
+    """
+    Distributed/GPU setup. This function handles:
+      - Enabling distributed mode.
+      - Distributed logging, seeding adjustments based on rank
+    """
+    distributed.enable(overwrite=True)
+
+    torch.distributed.barrier()
+
+    # update random seed using rank
+    rank = distributed.get_global_rank()
+    fix_random_seeds(rank)
 
 
 def hf_login():
     if "HF_TOKEN" not in os.environ and distributed.is_main_process():
-        # Use getpass to hide the input when typing the token
         hf_token = getpass.getpass(
             "Enter your Hugging Face API token (input will not be visible): "
         )
         os.environ["HF_TOKEN"] = hf_token
-    # ensure all processes wait until the main process logs in
     if distributed.is_enabled_and_multiple_gpus():
         dist.barrier()
     if distributed.is_main_process():
