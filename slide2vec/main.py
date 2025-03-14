@@ -390,7 +390,7 @@ def main(args):
                             with autocast_context:
                                 wsi_feature = model.forward_slide(
                                     wsi_feature,
-                                    coordinates,
+                                    tile_coordinates=coordinates,
                                     tile_size_lv0=dataset.tile_size_lv0,
                                 )
 

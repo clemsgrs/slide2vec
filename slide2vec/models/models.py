@@ -60,6 +60,8 @@ class ModelFactory:
                 model = ProvGigaPathSlide(input_size=options.tile_size)
             elif options.name == "titan":
                 model = TITAN(input_size=options.tile_size)
+            elif options.name == "prism":
+                model = PRISM(input_size=options.tile_size)
             else:
                 raise ValueError(f"{options.name} doesn't support slide-level encoding")
 
@@ -186,6 +188,42 @@ class UNI(FeatureExtractor):
 
     def forward(self, x):
         return self.encoder(x)
+
+
+class Virchow(FeatureExtractor):
+    def __init__(self, input_size: int = 224, mode: str = "cls"):
+        self.input_size = input_size
+        self.mode = mode
+        self.features_dim = 1280
+        if mode == "full":
+            self.features_dim = 2560
+        super(Virchow, self).__init__()
+
+    def build_encoder(self):
+        encoder = timm.create_model(
+            "hf-hub:paige-ai/Virchow",
+            pretrained=True,
+            mlp_layer=timm.layers.SwiGLUPacked,
+            act_layer=torch.nn.SiLU,
+        )
+        if self.input_size == 256:
+            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
+            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
+        return encoder
+
+    def forward(self, x):
+        output = self.encoder(x)
+        class_token = output[:, 0]  # size: 1 x 1280
+        patch_tokens = output[
+            :, 1:
+        ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
+        if self.mode == "cls":
+            return class_token
+        elif self.mode == "full":
+            embedding = torch.cat(
+                [class_token, patch_tokens.mean(1)], dim=-1
+            )  # size: 1 x 2560
+            return embedding
 
 
 class Virchow2(FeatureExtractor):
@@ -361,10 +399,28 @@ class TITAN(SlideFeatureExtractor):
     def get_transforms(self):
         return self.eval_transform
 
-    def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0):
+    def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         tile_coordinates = tile_coordinates.unsqueeze(0)
         output = self.slide_encoder.encode_slide_from_patch_features(
             tile_features, tile_coordinates, tile_size_lv0
         )
+        return output
+
+
+class PRISM(SlideFeatureExtractor):
+    def __init__(self, input_size: int = 224):
+        super(PRISM, self).__init__(input_size)
+        self.features_dim = self.tile_encoder.features_dim
+
+    def build_encoders(self):
+        self.slide_encoder = AutoModel.from_pretrained(
+            "paige-ai/PRISM", trust_remote_code=True
+        )
+        self.tile_encoder = Virchow(input_size=self.input_size, mode="full")
+
+    def forward_slide(self, tile_features, **kwargs):
+        tile_features = tile_features.unsqueeze(0)
+        reprs = self.slide_encoder.slide_representations(tile_features)
+        output = reprs["image_embedding"]  # [1, 1280]
         return output
