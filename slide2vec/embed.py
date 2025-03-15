@@ -1,8 +1,6 @@
 import os
 import tqdm
-import wandb
 import torch
-import logging
 import argparse
 import traceback
 import torchvision
@@ -137,7 +135,7 @@ def main(args):
     process_df = pd.read_csv(process_list)
     skip_feature_extraction = process_df["feature_status"].str.contains("success").all()
 
-    if skip_feature_extraction:
+    if skip_feature_extraction and distributed.is_main_process():
         print("Feature extraction already completed.")
         return
 
@@ -151,15 +149,11 @@ def main(args):
     mask = sub_process_df["feature_status"] != "success"
     process_stack = sub_process_df[mask]
     total = len(process_stack)
-    already_processed = len(sub_process_df) - total
     wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
 
     features_dir = Path(cfg.output_dir, "features")
     if distributed.is_main_process():
         features_dir.mkdir(exist_ok=True, parents=True)
-
-    if distributed.is_main_process():
-        agg_processed_count = already_processed
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -264,9 +258,6 @@ def main(args):
 
             if distributed.is_main_process():
                 torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
-                agg_processed_count += 1
-                if cfg.wandb.enable:
-                    wandb.log({"processed": agg_processed_count})
 
             feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
 

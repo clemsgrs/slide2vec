@@ -1,4 +1,3 @@
-typer
 timm
 wandb
 numpy==%NUMPY_VERSION%

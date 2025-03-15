@@ -1,66 +1,55 @@
-import subprocess
+import os
 import sys
-import typer
-import logging
+import time
+import wandb
+import signal
+import argparse
+import threading
+import subprocess
+
 from pathlib import Path
 
 from slide2vec.utils.config import setup, hf_login
 
-app = typer.Typer(invoke_without_command=True)
-logger = logging.getLogger("slide2vec")
 
-# global variable to hold the run_id, which is computed from the config's output_dir.
-CONFIG_FILE = None
-RUN_ID = None
-
-
-@app.callback()
-def main(
-    ctx: typer.Context,
-    config_file: str = typer.Option(
-        ..., "--config-file", help="path to yaml config file"
-    ),
-):
-    """
-    Global callback: This grabs the config file path, runs setup,
-    performs HF login, writes out the config, and computes the run ID.
-    """
-    global CONFIG_FILE, RUN_ID
-    CONFIG_FILE = config_file
-
-    cfg = setup(CONFIG_FILE)
-    hf_login()
-    RUN_ID = Path(cfg.output_dir).stem
-
-    # if no subcommand is provided, default to running run_all().
-    if ctx.invoked_subcommand is None:
-        run_all()
+def get_args_parser(add_help: bool = True):
+    parser = argparse.ArgumentParser("slide2vec", add_help=add_help)
+    parser.add_argument(
+        "--config-file", default="", metavar="FILE", help="path to config file"
+    )
+    return parser
 
 
-@app.command()
-def tiling():
-    """Run slide tiling."""
-    typer.echo("Running tiling.py...")
-    global CONFIG_FILE, RUN_ID
+def log_progress(features_dir: Path, total_slides: int, log_interval: int = 10):
+    while True:
+        if not features_dir.exists():
+            time.sleep(log_interval)
+            continue
+        num_files = len(list(features_dir.glob("*.pt")))
+        wandb.log({"processed": num_files})
+        if num_files >= total_slides:
+            break
+        time.sleep(log_interval)
+
+
+def run_tiling(config_file, run_id):
+    print("Running tiling.py...")
     cmd = [
         sys.executable,
         "slide2vec/tiling.py",
         "--run-id",
-        RUN_ID,
+        run_id,
         "--config-file",
-        CONFIG_FILE,
+        config_file,
     ]
     result = subprocess.run(cmd)
     if result.returncode != 0:
-        typer.echo("Slide tiling failed. Exiting.")
+        print("Slide tiling failed. Exiting.")
         sys.exit(result.returncode)
 
 
-@app.command()
-def feature_extraction():
-    """Run slide embedding."""
-    typer.echo("Running embed.py...")
-    global CONFIG_FILE, RUN_ID
+def run_feature_extraction(config_file, run_id):
+    print("Running embed.py...")
     cmd = [
         sys.executable,
         "-m",
@@ -68,23 +57,54 @@ def feature_extraction():
         "--nproc_per_node=gpu",
         "slide2vec/embed.py",
         "--run-id",
-        RUN_ID,
+        run_id,
         "--config-file",
-        CONFIG_FILE,
+        config_file,
     ]
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        typer.echo("Slide embedding failed. Exiting.")
-        sys.exit(result.returncode)
+    # launch in its own process group.
+    proc = subprocess.Popen(
+        cmd,
+        preexec_fn=os.setsid,
+        text=True,
+    )
+    try:
+        stdout, stderr = proc.communicate()
+        print(stdout)
+        print(stderr)
+    except KeyboardInterrupt:
+        print("Received CTRL+C, terminating embed.py process group...")
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        proc.wait()
+        sys.exit(1)
+    if proc.returncode != 0:
+        print("Slide embedding failed. Exiting.")
+        sys.exit(proc.returncode)
 
 
-@app.command()
-def run_all():
-    """Chain tiling and feature extraction."""
-    typer.echo("")
-    tiling()
-    typer.echo("")
-    feature_extraction()
+def main(args):
+    config_file = args.config_file
+
+    cfg = setup(config_file)
+    hf_login()
+
+    output_dir = Path(cfg.output_dir)
+    run_id = output_dir.stem
+
+    run_tiling(config_file, run_id)
+
+    coordinates_dir = output_dir / "coordinates"
+    total_slides = len(list(coordinates_dir.glob("*.npy")))
+
+    features_dir = output_dir / "features"
+    log_thread = threading.Thread(
+        target=log_progress, args=(features_dir, total_slides), daemon=True
+    )
+    log_thread.start()
+
+    run_feature_extraction(config_file, run_id)
+
+    log_thread.join()
+    print("Feature extraction and logging complete.")
 
 
 if __name__ == "__main__":
@@ -94,4 +114,5 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
 
-    app()
+    args = get_args_parser(add_help=True).parse_args()
+    main(args)

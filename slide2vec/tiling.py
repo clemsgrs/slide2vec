@@ -1,6 +1,5 @@
 import os
 import tqdm
-import logging
 import argparse
 import traceback
 import numpy as np
@@ -180,6 +179,11 @@ def main(args):
         print(f"Total number of slides: {total_slides}")
         print(f"Failed tiling: {len(failed_tiling)}")
         print(f"No tiles after tiling step: {len(no_tiles)}")
+        print("=+=" * 10)
+
+    else:
+        print("=+=" * 10)
+        print("All slides have been tiled. Skipping tiling step.")
         print("=+=" * 10)
 
 
