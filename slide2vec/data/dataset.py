@@ -21,9 +21,9 @@ class TileDataset(torch.utils.data.Dataset):
         self.y = coordinates["y"]
         self.coordinates = (np.array([self.x, self.y]).T).astype(int)
         self.scaled_coordinates = self.scale_coordinates()
-        self.tile_size_resized = coordinates["tile_size_resized"]
         self.tile_level = coordinates["tile_level"]
-        self.resize_factor = coordinates["resize_factor"]
+        self.tile_size = coordinates["tile_size"]
+        self.tile_size_resized = coordinates["tile_size_resized"]
         self.tile_size_lv0 = coordinates["tile_size_lv0"][0]
 
     def scale_coordinates(self):
@@ -54,9 +54,8 @@ class TileDataset(torch.utils.data.Dataset):
             center=False,
         )
         tile = Image.fromarray(tile_arr).convert("RGB")
-        if self.resize_factor[idx] != 1:
-            tile_size = int(self.tile_size_resized[idx] / self.resize_factor[idx])
-            tile = tile.resize((tile_size, tile_size))
+        if self.tile_size[idx] != self.tile_size_resized[idx]:
+            tile = tile.resize((self.tile_size[idx], self.tile_size[idx]))
         if self.transforms:
             tile = self.transforms(tile)
         return idx, tile

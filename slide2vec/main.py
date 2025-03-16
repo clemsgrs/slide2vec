@@ -96,14 +96,16 @@ def main(args):
     total_slides = len(list(coordinates_dir.glob("*.npy")))
 
     features_dir = output_dir / "features"
-    log_thread = threading.Thread(
-        target=log_progress, args=(features_dir, total_slides), daemon=True
-    )
-    log_thread.start()
+    if cfg.wandb.enable:
+        log_thread = threading.Thread(
+            target=log_progress, args=(features_dir, total_slides), daemon=True
+        )
+        log_thread.start()
 
     run_feature_extraction(config_file, run_id)
 
-    log_thread.join()
+    if cfg.wandb.enable:
+        log_thread.join()
     print("Feature extraction and logging complete.")
 
 

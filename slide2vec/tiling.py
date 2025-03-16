@@ -35,7 +35,7 @@ def process_slide(wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir):
         tissue_mask_visu_path = None
         if cfg.visualize and mask_visualize_dir is not None:
             tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_fp.stem}.jpg")
-        coordinates, _, tile_level, resize_factor, tile_size_lv0 = extract_coordinates(
+        coordinates, tile_level, tile_size_resized, tile_size_lv0 = extract_coordinates(
             wsi_fp,
             mask_fp,
             cfg.tiling.spacing,
@@ -55,7 +55,7 @@ def process_slide(wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir):
             cfg.tiling.spacing,
             tile_level,
             cfg.tiling.tile_size,
-            resize_factor,
+            tile_size_resized,
             tile_size_lv0,
             coordinates_path,
         )
@@ -64,8 +64,7 @@ def process_slide(wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir):
                 wsi_fp,
                 coordinates,
                 tile_level,
-                cfg.tiling.tile_size,
-                resize_factor,
+                tile_size_resized,
                 tile_visualize_dir,
                 downsample=32,
                 backend=cfg.tiling.backend,
