@@ -64,7 +64,7 @@ def extract_coordinates(
         coordinates,
         tissue_percentages,
         tile_level,
-        resize_factor,
+        tile_size_resized,
         tile_size_lv0,
     ) = wsi.get_tile_coordinates(
         spacing, tile_size, tiling_params, num_workers=num_workers
@@ -76,9 +76,8 @@ def extract_coordinates(
         wsi.visualize_mask(contours, holes).save(mask_visu_path)
     return (
         sorted_coordinates,
-        sorted_tissue_percentages,
         tile_level,
-        resize_factor,
+        tile_size_resized,
         tile_size_lv0,
     )
 
@@ -88,20 +87,19 @@ def save_coordinates(
     target_spacing,
     tile_level,
     tile_size,
-    resize_factor,
+    tile_size_resized,
     tile_size_lv0,
     save_path,
 ):
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     ntile = len(x)
-    tile_size_resized = tile_size * resize_factor  # defined w.r.t level "tile_level"
     dtype = [
         ("x", int),
         ("y", int),
         ("tile_size_resized", int),
         ("tile_level", int),
-        ("resize_factor", int),
+        ("tile_size", int),
         ("tile_size_lv0", int),
         ("target_spacing", float),
     ]
@@ -112,7 +110,7 @@ def save_coordinates(
             y[i],
             tile_size_resized,
             tile_level,
-            resize_factor,
+            tile_size,
             tile_size_lv0,
             target_spacing,
         )
@@ -225,7 +223,6 @@ def visualize_coordinates(
     coordinates,
     tile_level,
     tile_size,
-    resize_factor,
     save_dir,
     downsample: int = 64,
     backend: str = "asap",
@@ -240,7 +237,6 @@ def visualize_coordinates(
     if len(coordinates) == 0:
         return canvas
 
-    tile_size = tile_size * resize_factor  # defined w.r.t tile_level
     tile_size_at_0 = tuple(
         (np.array((tile_size, tile_size)) * wsi.level_downsamples[tile_level]).astype(
             np.int32

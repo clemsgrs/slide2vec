@@ -90,32 +90,15 @@ class WholeSlideImage(object):
     def get_level_spacing(self, level: int = 0):
         return self.spacings[level]
 
-    def get_best_level_for_spacing(
-        self, target_spacing: float, ignore_warning: bool = False
-    ):
+    def get_best_level_for_spacing(self, target_spacing: float):
         spacing = self.get_level_spacing(0)
         target_downsample = target_spacing / spacing
-        level, tol, above_tol = self.get_best_level_for_downsample_custom(
-            target_downsample, return_tol_status=True
-        )
-        level_spacing = self.get_level_spacing(level)
-        resize_factor = int(round(target_spacing / level_spacing, 0))
-        if above_tol and not ignore_warning:
-            print(
-                f"WARNING! The natural spacing ({resize_factor*self.spacings[level]:.4f}) closest to the target spacing ({target_spacing:.4f}) was more than {tol*100:.1f}% appart ({self.name})."
-            )
-        return level, resize_factor
+        level = self.get_best_level_for_downsample_custom(target_downsample)
+        return level
 
-    def get_best_level_for_downsample_custom(
-        self, downsample, tol: float = 0.1, return_tol_status: bool = False
-    ):
+    def get_best_level_for_downsample_custom(self, downsample):
         level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
-        delta = abs(self.level_downsamples[level][0] / downsample - 1)
-        above_tol = delta > tol
-        if return_tol_status:
-            return level, tol, above_tol
-        else:
-            return level
+        return level
 
     def load_segmentation(
         self,
@@ -141,9 +124,7 @@ class WholeSlideImage(object):
             closest = np.argmin([abs(seg_spacing - s) for s, _ in common_spacings])
             closest_common_spacing = common_spacings[closest][0]
             seg_spacing = closest_common_spacing
-            seg_level, _ = self.get_best_level_for_spacing(
-                seg_spacing, ignore_warning=True
-            )
+            seg_level = self.get_best_level_for_spacing(seg_spacing)
 
         m = self.mask.get_slide(spacing=seg_spacing)
         m = m[..., 0]
@@ -280,15 +261,15 @@ class WholeSlideImage(object):
         tiling_params: Dict,
         num_workers: int = 1,
     ):
-        scale = int(round(target_spacing / self.get_level_spacing(0), 0))
-        tile_size_lv0 = target_tile_size * scale
+        scale = target_spacing / self.get_level_spacing(0)
+        tile_size_lv0 = int(round(target_tile_size * scale, 0))
         contours, holes = self.detect_contours(target_spacing, tiling_params)
         (
             running_x_coords,
             running_y_coords,
             tissue_percentages,
             tile_level,
-            resize_factor,
+            tile_size_resized,
         ) = self.process_contours(
             contours,
             holes,
@@ -307,7 +288,7 @@ class WholeSlideImage(object):
             tile_coordinates,
             tissue_percentages,
             tile_level,
-            resize_factor,
+            tile_size_resized,
             tile_size_lv0,
         )
 
@@ -365,9 +346,7 @@ class WholeSlideImage(object):
 
             return foreground_contours, hole_contours
 
-        spacing_level, resize_factor = self.get_best_level_for_spacing(
-            target_spacing, ignore_warning=True
-        )
+        spacing_level = self.get_best_level_for_spacing(target_spacing)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
@@ -443,7 +422,7 @@ class WholeSlideImage(object):
         running_x_coords, running_y_coords = [], []
         running_tissue_pct = []
         tile_level = None
-        resize_factor = None
+        tile_size_resized = None
 
         with tqdm.tqdm(
             contours,
@@ -458,7 +437,7 @@ class WholeSlideImage(object):
                     y_coords,
                     tissue_pct,
                     cont_tile_level,
-                    cont_resize_factor,
+                    cont_tile_size_resized,
                 ) = self.process_contour(
                     cont,
                     holes[i],
@@ -476,7 +455,7 @@ class WholeSlideImage(object):
                             tile_level == cont_tile_level
                         ), "tile level should be the same for all contours"
                     tile_level = cont_tile_level
-                    resize_factor = cont_resize_factor
+                    tile_size_resized = cont_tile_size_resized
                     running_x_coords.extend(x_coords)
                     running_y_coords.extend(y_coords)
                     running_tissue_pct.extend(tissue_pct)
@@ -486,7 +465,7 @@ class WholeSlideImage(object):
             running_y_coords,
             running_tissue_pct,
             tile_level,
-            resize_factor,
+            tile_size_resized,
         )
 
     def process_contour(
@@ -499,20 +478,14 @@ class WholeSlideImage(object):
         drop_holes: bool,
         tissue_thresh: float,
         use_padding: bool,
-        spacing_tol: float = 0.15,
         num_workers: int = 1,
     ):
-        tile_level, _ = self.get_best_level_for_spacing(spacing, ignore_warning=True)
+        tile_level = self.get_best_level_for_spacing(spacing)
 
         tile_spacing = self.get_level_spacing(tile_level)
-        resize_factor = int(round(spacing / tile_spacing, 0))
+        resize_factor = spacing / tile_spacing
 
-        if abs(resize_factor * tile_spacing / spacing - 1) > spacing_tol:
-            raise ValueError(
-                f"ERROR: The natural spacing ({resize_factor*tile_spacing:.4f}) closest to the target spacing ({spacing:.4f}) was more than {spacing_tol*100}% apart."
-            )
-
-        tile_size_resized = tile_size * resize_factor
+        tile_size_resized = int(round(tile_size * resize_factor, 0))
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
@@ -618,7 +591,7 @@ class WholeSlideImage(object):
                 y_coords,
                 filtered_tissue_percentages,
                 tile_level,
-                resize_factor,
+                tile_size_resized,
             )
 
         else:
