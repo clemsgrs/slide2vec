@@ -1,27 +1,15 @@
 # slide2vec
 
-:warning: Make sure the `slide2vec` package is included in your Python module search path:
+:warning: Make sure to run the following:
 
 ```shell
 export PYTHONPATH="${PYTHONPATH}:/path/to/slide2vec"
+export HF_TOKEN=<your-huggingface-api-token>
 ```
 
-## Summary of pathology foundation models
+## Extract features
 
-| **Architecture** | **Foundation Model** | **Parameters** |
-|:----------------:|:--------------------:|:--------------:|
-|      ViT-B/8     |         Kaiko        |       86M      |
-|     ViT-B/16     |        Phikon        |       86M      |
-|     ViT-L/16     |          UNI         |      307M      |
-|     ViT-L/14     |         Kaiko        |      307M      |
-|     ViT-H/14     |        Virchow       |      632M      |
-|     ViT-H/14     |       Virchow2       |      632M      |
-|     ViT-G/14     |       GigaPath       |      1.8B      |
-|     ViT-G/14     |       H-optimus      |      1.8B      |
-
-## Extract tile-level features
-
-1. Create a `.csv` file with slide and tissue mask paths
+1. Create a `.csv` file with slide paths. Optionally, you can provide paths to pre-computed tissue masks.
 
     ```csv
     wsi_path,mask_path
@@ -32,10 +20,14 @@ export PYTHONPATH="${PYTHONPATH}:/path/to/slide2vec"
 
 2. Create a configuration file under `slide2vec/configs`
 
-    A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.
+   A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.<br>
+   The foundations models currently supported are the following:
+   - tile-level: `uni`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`
+   - slide-level: `prov-gigapath`, `titan`, `prism`
+
 
 3. Kick off distributed feature extraction
 
     ```shell
-    torchrun --nproc_per_node=gpu slide2vec/main.py --config-file slide2vec/configs/uni.yaml
+    python3 slide2vec/main.py --config-file </path/to/config.yaml>
     ```

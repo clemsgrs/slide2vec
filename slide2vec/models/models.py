@@ -25,7 +25,9 @@ class ModelFactory:
         options: DictConfig,
     ):
         if options.level == "tile":
-            if options.name == "virchow2":
+            if options.name == "virchow":
+                model = Virchow(input_size=options.tile_size)
+            elif options.name == "virchow2":
                 model = Virchow2(input_size=options.tile_size)
             elif options.name == "uni":
                 model = UNI(input_size=options.tile_size)
@@ -40,7 +42,9 @@ class ModelFactory:
                     input_size=options.tile_size,
                 )
         elif options.level == "region":
-            if options.name == "virchow2":
+            if options.name == "virchow":
+                tile_encoder = Virchow(input_size=options.patch_size)
+            elif options.name == "virchow2":
                 tile_encoder = Virchow2(input_size=options.patch_size)
             elif options.name == "uni":
                 tile_encoder = UNI(input_size=options.patch_size)

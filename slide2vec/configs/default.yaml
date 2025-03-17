@@ -4,7 +4,7 @@ output_dir: "output" # output directory
 resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
-visualize: false # visualize slide tiling
+visualize: false # save a visualization of slide tiling in a .jpg
 
 seed: 0 # seed for reproducibility
 
@@ -30,11 +30,11 @@ tiling:
     max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
 
 model:
-  level: "tile" # level at which to extract the features
-  name: # foundation model name ["uni", "virchow2", "prov-gigapath", "h-optimus-0"] (leave empty when using a custom model)
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  name: # foundation model name ["uni", "virchow", "virchow2", "prov-gigapath", "h-optimus-0", "titan", "prism"] (leave empty when using a custom model)
   arch: # architecture of custom model
   pretrained_weights: # path to the pretrained weights when using a custom model
-  batch_size: 128
+  batch_size: 1
   tile_size: ${tiling.tile_size}
   patch_size: 256 # if level is "region", size used to unroll the region into patches
 
