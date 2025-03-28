@@ -113,57 +113,73 @@ def main(args):
     skip_tiling = process_df["tiling_status"].str.contains("success").all()
 
     if not skip_tiling:
-        mask = process_df["tiling_status"] != "success"
-        process_stack = process_df[mask]
-        total = len(process_stack)
+        if cfg.tiling.read_coordinates_from is not None:
+            coordinates_dir = Path(cfg.tiling.read_coordinates_from)
+            coordinates_files = list(coordinates_dir.glob("*.npy"))
+            for coordinates_file in coordinates_files:
+                wsi_id = coordinates_file.stem
+                if wsi_id in process_df["wsi_path"].values:
+                    process_df.loc[
+                        process_df["wsi_path"] == wsi_id, "tiling_status"
+                    ] = "success"
+            process_df.to_csv(process_list, index=False)
 
-        wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
-        mask_paths_to_process = [
-            Path(x) if x is not None else x
-            for x in process_stack.mask_path.values.tolist()
-        ]
+        else:
+            mask = process_df["tiling_status"] != "success"
+            process_stack = process_df[mask]
+            total = len(process_stack)
 
-        # setup directories for coordinates and visualization
-        coordinates_dir = Path(cfg.output_dir, "coordinates")
-        coordinates_dir.mkdir(exist_ok=True, parents=True)
-        mask_visualize_dir = None
-        tile_visualize_dir = None
-        if cfg.visualize:
-            visualize_dir = Path(cfg.output_dir, "visualization")
-            mask_visualize_dir = Path(visualize_dir, "mask")
-            tile_visualize_dir = Path(visualize_dir, "tiling")
-            mask_visualize_dir.mkdir(exist_ok=True, parents=True)
-            tile_visualize_dir.mkdir(exist_ok=True, parents=True)
-
-        tiling_updates = {}
-        with mp.Pool(processes=parallel_workers) as pool:
-            args_list = [
-                (wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir)
-                for wsi_fp, mask_fp in zip(wsi_paths_to_process, mask_paths_to_process)
+            wsi_paths_to_process = [
+                Path(x) for x in process_stack.wsi_path.values.tolist()
             ]
-            results = list(
-                tqdm.tqdm(
-                    pool.starmap(process_slide, args_list),
-                    total=total,
-                    desc="Slide tiling",
-                    unit="slide",
-                )
-            )
-        for wsi_path, status_info in results:
-            tiling_updates[wsi_path] = status_info
+            mask_paths_to_process = [
+                Path(x) if x is not None else x
+                for x in process_stack.mask_path.values.tolist()
+            ]
 
-        for wsi_path, status_info in tiling_updates.items():
-            process_df.loc[
-                process_df["wsi_path"] == wsi_path, "tiling_status"
-            ] = status_info["status"]
-            if "error" in status_info:
+            # setup directories for coordinates and visualization
+            coordinates_dir = Path(cfg.output_dir, "coordinates")
+            coordinates_dir.mkdir(exist_ok=True, parents=True)
+            mask_visualize_dir = None
+            tile_visualize_dir = None
+            if cfg.visualize:
+                visualize_dir = Path(cfg.output_dir, "visualization")
+                mask_visualize_dir = Path(visualize_dir, "mask")
+                tile_visualize_dir = Path(visualize_dir, "tiling")
+                mask_visualize_dir.mkdir(exist_ok=True, parents=True)
+                tile_visualize_dir.mkdir(exist_ok=True, parents=True)
+
+            tiling_updates = {}
+            with mp.Pool(processes=parallel_workers) as pool:
+                args_list = [
+                    (wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir)
+                    for wsi_fp, mask_fp in zip(
+                        wsi_paths_to_process, mask_paths_to_process
+                    )
+                ]
+                results = list(
+                    tqdm.tqdm(
+                        pool.starmap(process_slide, args_list),
+                        total=total,
+                        desc="Slide tiling",
+                        unit="slide",
+                    )
+                )
+            for wsi_path, status_info in results:
+                tiling_updates[wsi_path] = status_info
+
+            for wsi_path, status_info in tiling_updates.items():
                 process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "error"
-                ] = status_info["error"]
-                process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "traceback"
-                ] = status_info["traceback"]
-        process_df.to_csv(process_list, index=False)
+                    process_df["wsi_path"] == wsi_path, "tiling_status"
+                ] = status_info["status"]
+                if "error" in status_info:
+                    process_df.loc[
+                        process_df["wsi_path"] == wsi_path, "error"
+                    ] = status_info["error"]
+                    process_df.loc[
+                        process_df["wsi_path"] == wsi_path, "traceback"
+                    ] = status_info["traceback"]
+            process_df.to_csv(process_list, index=False)
 
         # summary logging
         total_slides = len(process_df)

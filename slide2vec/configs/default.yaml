@@ -9,6 +9,7 @@ visualize: false # save a visualization of slide tiling in a .jpg
 seed: 0 # seed for reproducibility
 
 tiling:
+  read_coordinates_from: # path to a directory containing {wsi.stem}.npy files with tiles coordinates & associated metadata (leave empty to compute the coordinates)
   spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
   tile_size: 256 # size of the tiles to extract, in pixels
   backend: "asap" # backend to use for slide reading
