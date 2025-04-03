@@ -31,7 +31,6 @@ def process_slide(wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir):
     Note: We force num_workers to 1 for extract_coordinates to disable its internal parallelism.
     """
     try:
-        print(f"Preprocessing {wsi_fp.stem}")
         tissue_mask_visu_path = None
         if cfg.visualize and mask_visualize_dir is not None:
             tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_fp.stem}.jpg")
@@ -163,6 +162,7 @@ def main(args):
                         total=total,
                         desc="Slide tiling",
                         unit="slide",
+                        leave=True,
                     )
                 )
             for wsi_path, status_info in results:

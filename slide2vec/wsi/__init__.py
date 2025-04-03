@@ -3,9 +3,9 @@ import numpy as np
 
 from PIL import Image, ImageOps
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 
-from .wsi import WholeSlideImage
+from .wsi import WholeSlideImage, SegmentationParameters, TilingParameters
 
 
 def sort_coords_with_tissue(coords, tissue_percentages):
@@ -29,23 +29,8 @@ def extract_coordinates(
     backend,
     tissue_val,
     downsample: int = 64,
-    segment_params: Dict = {
-        "sthresh": 8,
-        "sthresh_up": 255,
-        "mthresh": 7,
-        "close": 4,
-        "use_otsu": False,
-    },
-    tiling_params: Dict[str, int] = {
-        "overlap": 0.0,
-        "drop_holes": False,
-        "tissue_thresh": 0.01,
-        "use_padding": True,
-        "ref_tile_size": 16,
-        "a_t": 4,
-        "a_h": 2,
-        "max_n_holes": 8,
-    },
+    segment_params: SegmentationParameters = SegmentationParameters(),
+    tiling_params: TilingParameters = TilingParameters(),
     mask_visu_path: Optional[Path] = None,
     num_workers: int = 1,
 ):
@@ -58,6 +43,9 @@ def extract_coordinates(
         segment=True,
         segment_params=segment_params,
     )
+    assert (
+        spacing >= wsi.spacings[0]
+    ), f"Desired spacing ({spacing}) is smaller than the whole-slide image starting spacing ({wsi.spacings[0]})"
     (
         contours,
         holes,

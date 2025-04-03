@@ -9,7 +9,7 @@ import multiprocessing as mp
 
 from PIL import Image
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional, Tuple, NamedTuple
 
 from slide2vec.wsi.utils import find_common_spacings, HasEnoughTissue
 
@@ -18,6 +18,33 @@ from slide2vec.wsi.utils import find_common_spacings, HasEnoughTissue
 warnings.filterwarnings("ignore", module="wholeslidedata")
 
 Image.MAX_IMAGE_PIXELS = 933120000
+
+
+class SegmentationParameters(NamedTuple):
+    """
+    Parameters for filtering contours.
+    """
+
+    sthresh: int = 8  # reference tile size for filtering
+    sthresh_up: int = 255  # contour area threshold for filtering
+    mthresh: int = 7  # hole area threshold for filtering
+    close: int = 4  # maximum number of holes allowed
+    use_otsu: bool = False  # whether to use Otsu's method for thresholding
+
+
+class TilingParameters(NamedTuple):
+    """
+    Parameters for tiling.
+    """
+
+    overlap: float = 0  # overlap between tiles
+    drop_holes: bool = False  # whether to drop tiles that fall within holes
+    tissue_thresh: float = 0.01  # minimum tissue percentage required for a tile
+    use_padding: bool = True  # whether to use padding for tiles at the edges
+    ref_tile_size: int = 16  # reference tile size for filtering
+    a_t: int = 4  # contour area threshold for filtering
+    a_h: int = 2  # hole area threshold for filtering
+    max_n_holes: int = 8  # maximum number of holes allowed
 
 
 class WholeSlideImage(object):
@@ -30,13 +57,7 @@ class WholeSlideImage(object):
         backend: str = "asap",
         tissue_val: int = 1,
         segment: bool = False,
-        segment_params: Dict = {
-            "sthresh": 8,
-            "sthresh_up": 255,
-            "mthresh": 7,
-            "close": 4,
-            "use_otsu": False,
-        },
+        segment_params: SegmentationParameters = SegmentationParameters(),
     ):
         """
         Args:
@@ -57,12 +78,10 @@ class WholeSlideImage(object):
 
         self.mask_path = mask_path
         if mask_path is not None:
-            tqdm.tqdm.write(f"Loading mask: {mask_path}")
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
             self.seg_level = self.load_segmentation(downsample, tissue_val=tissue_val)
         elif segment:
-            tqdm.tqdm.write("Segmenting tissue")
-            self.seg_level = self.segment_tissue(downsample, **segment_params)
+            self.seg_level = self.segment_tissue(downsample, segment_params)
 
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)
@@ -90,10 +109,18 @@ class WholeSlideImage(object):
     def get_level_spacing(self, level: int = 0):
         return self.spacings[level]
 
-    def get_best_level_for_spacing(self, target_spacing: float):
+    def get_best_level_for_spacing(
+        self, target_spacing: float, smaller_or_equal: bool = False
+    ):
         spacing = self.get_level_spacing(0)
         target_downsample = target_spacing / spacing
         level = self.get_best_level_for_downsample_custom(target_downsample)
+        if smaller_or_equal:
+            while level > 0 and self.get_level_spacing(level) > target_spacing:
+                level -= 1
+            assert (
+                self.get_level_spacing(level) <= target_spacing
+            ), f"Could not find a level with spacing smaller than or equal to {target_spacing}"
         return level
 
     def get_best_level_for_downsample_custom(self, downsample):
@@ -138,38 +165,41 @@ class WholeSlideImage(object):
 
     def segment_tissue(
         self,
-        downsample: int,
-        sthresh: int = 20,
-        sthresh_up: int = 255,
-        mthresh: int = 7,
-        close: int = 0,
-        use_otsu: bool = False,
+        segment_params: SegmentationParameters,
     ):
         """
         Segment the tissue via HSV -> Median thresholding -> Binary threshold
         """
 
-        seg_level = self.get_best_level_for_downsample_custom(downsample)
+        seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
         seg_spacing = self.get_level_spacing(seg_level)
 
         img = self.wsi.get_slide(spacing=seg_spacing)
         img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
-        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # apply median blurring
+        img_med = cv2.medianBlur(
+            img_hsv[:, :, 1], segment_params.mthresh
+        )  # apply median blurring
 
         # thresholding
-        if use_otsu:
+        if segment_params.use_otsu:
             _, img_thresh = cv2.threshold(
-                img_med, 0, sthresh_up, cv2.THRESH_OTSU + cv2.THRESH_BINARY
+                img_med,
+                0,
+                segment_params.sthresh_up,
+                cv2.THRESH_OTSU + cv2.THRESH_BINARY,
             )
         else:
             _, img_thresh = cv2.threshold(
-                img_med, sthresh, sthresh_up, cv2.THRESH_BINARY
+                img_med,
+                segment_params.sthresh,
+                segment_params.sthresh_up,
+                cv2.THRESH_BINARY,
             )
 
         # morphological closing
-        if close > 0:
-            kernel = np.ones((close, close), np.uint8)
+        if segment_params.close > 0:
+            kernel = np.ones((segment_params.close, segment_params.close), np.uint8)
             img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
 
         self.binary_mask = img_thresh
@@ -258,7 +288,7 @@ class WholeSlideImage(object):
         self,
         target_spacing: float,
         target_tile_size: int,
-        tiling_params: Dict,
+        tiling_params: TilingParameters,
         num_workers: int = 1,
     ):
         scale = target_spacing / self.get_level_spacing(0)
@@ -275,10 +305,10 @@ class WholeSlideImage(object):
             holes,
             target_spacing,
             target_tile_size,
-            tiling_params["overlap"],
-            tiling_params["drop_holes"],
-            tiling_params["tissue_thresh"],
-            tiling_params["use_padding"],
+            tiling_params.overlap,
+            tiling_params.drop_holes,
+            tiling_params.tissue_thresh,
+            tiling_params.use_padding,
             num_workers=num_workers,
         )
         tile_coordinates = list(zip(running_x_coords, running_y_coords))
@@ -295,7 +325,7 @@ class WholeSlideImage(object):
     def detect_contours(
         self,
         target_spacing: float,
-        tiling_params: Dict[str, int],
+        tiling_params: TilingParameters,
     ):
         def _filter_contours(contours, hierarchy, tiling_params):
             """
@@ -321,7 +351,7 @@ class WholeSlideImage(object):
                 a = a - np.array(hole_areas).sum()
                 if a == 0:
                     continue
-                if a > tiling_params["a_t"]:
+                if a > tiling_params.a_t:
                     filtered.append(cont_idx)
                     all_holes.append(holes)
 
@@ -334,28 +364,31 @@ class WholeSlideImage(object):
                     unfiltered_holes, key=cv2.contourArea, reverse=True
                 )
                 # take max_n_holes largest holes by area
-                unfilered_holes = unfilered_holes[: tiling_params["max_n_holes"]]
+                unfilered_holes = unfilered_holes[: tiling_params.max_n_holes]
                 filtered_holes = []
 
                 # filter these holes
                 for hole in unfilered_holes:
-                    if cv2.contourArea(hole) > tiling_params["a_h"]:
+                    if cv2.contourArea(hole) > tiling_params.a_h:
                         filtered_holes.append(hole)
 
                 hole_contours.append(filtered_holes)
 
             return foreground_contours, hole_contours
 
-        spacing_level = self.get_best_level_for_spacing(target_spacing)
+        spacing_level = self.get_best_level_for_spacing(
+            target_spacing, smaller_or_equal=True
+        )
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
-        ref_tile_size = tiling_params["ref_tile_size"]
+        ref_tile_size = tiling_params.ref_tile_size
         scaled_ref_tile_area = int(ref_tile_size**2 / (scale[0] * scale[1]))
 
-        _tiling_params = tiling_params.copy()
-        _tiling_params["a_t"] = tiling_params["a_t"] * scaled_ref_tile_area
-        _tiling_params["a_h"] = tiling_params["a_h"] * scaled_ref_tile_area
+        adjusted_tiling_params = TilingParameters(
+            a_t=tiling_params.a_t * scaled_ref_tile_area,
+            a_h=tiling_params.a_h * scaled_ref_tile_area,
+        )
 
         # find and filter contours
         contours, hierarchy = cv2.findContours(
@@ -365,7 +398,7 @@ class WholeSlideImage(object):
 
         # filtering out artifacts
         foreground_contours, hole_contours = _filter_contours(
-            contours, hierarchy, _tiling_params
+            contours, hierarchy, adjusted_tiling_params
         )
 
         # scale detected contours to level 0
@@ -480,10 +513,11 @@ class WholeSlideImage(object):
         use_padding: bool,
         num_workers: int = 1,
     ):
-        tile_level = self.get_best_level_for_spacing(spacing)
+        tile_level = self.get_best_level_for_spacing(spacing, smaller_or_equal=True)
 
         tile_spacing = self.get_level_spacing(tile_level)
         resize_factor = spacing / tile_spacing
+        assert resize_factor >= 1
 
         tile_size_resized = int(round(tile_size * resize_factor, 0))
         step_size = int(tile_size_resized * (1.0 - overlap))
