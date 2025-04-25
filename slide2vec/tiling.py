@@ -25,53 +25,62 @@ def get_args_parser(add_help: bool = True):
     return parser
 
 
-def process_slide(wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir):
+def process_slide_wrapper(kwargs):
+    return process_slide(**kwargs)
+
+
+def process_slide(
+    *,
+    wsi_path: Path,
+    mask_path: Path,
+    cfg,
+    mask_visualize_dir,
+    tile_visualize_dir,
+    num_workers: int = 4,
+):
     """
     Process a single slide: extract tile coordinates and visualize if needed.
-    Note: We force num_workers to 1 for extract_coordinates to disable its internal parallelism.
     """
+    wsi_name = wsi_path.stem.replace(" ", "_")
     try:
         tissue_mask_visu_path = None
         if cfg.visualize and mask_visualize_dir is not None:
-            tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_fp.stem}.jpg")
-        coordinates, tile_level, tile_size_resized, tile_size_lv0 = extract_coordinates(
-            wsi_fp,
-            mask_fp,
-            cfg.tiling.spacing,
-            cfg.tiling.tile_size,
-            cfg.tiling.backend,
-            tissue_val=cfg.tiling.tissue_pixel_value,
-            downsample=cfg.tiling.downsample,
-            segment_params=cfg.tiling.seg_params,
+            tissue_mask_visu_path = Path(mask_visualize_dir, f"{wsi_name}.jpg")
+        coordinates, tile_level, resize_factor, tile_size_lv0 = extract_coordinates(
+            wsi_path=wsi_path,
+            mask_path=mask_path,
+            backend=cfg.tiling.backend,
             tiling_params=cfg.tiling.params,
+            segment_params=cfg.tiling.seg_params,
+            filter_params=cfg.tiling.filter_params,
             mask_visu_path=tissue_mask_visu_path,
-            num_workers=1,  # disable internal multiprocessing
+            num_workers=num_workers,
         )
         coordinates_dir = Path(cfg.output_dir, "coordinates")
-        coordinates_path = Path(coordinates_dir, f"{wsi_fp.stem}.npy")
+        coordinates_path = Path(coordinates_dir, f"{wsi_name}.npy")
         save_coordinates(
-            coordinates,
-            cfg.tiling.spacing,
-            tile_level,
-            cfg.tiling.tile_size,
-            tile_size_resized,
-            tile_size_lv0,
-            coordinates_path,
+            coordinates=coordinates,
+            target_spacing=cfg.tiling.params.spacing,
+            tile_level=tile_level,
+            tile_size=cfg.tiling.params.tile_size,
+            resize_factor=resize_factor,
+            tile_size_lv0=tile_size_lv0,
+            save_path=coordinates_path,
         )
         if cfg.visualize and tile_visualize_dir is not None:
             visualize_coordinates(
-                wsi_fp,
-                coordinates,
-                tile_level,
-                tile_size_resized,
-                tile_visualize_dir,
+                wsi_path=wsi_path,
+                coordinates=coordinates,
+                tile_level=tile_level,
+                tile_size=cfg.tiling.params.tile_size,
+                save_dir=tile_visualize_dir,
                 downsample=32,
                 backend=cfg.tiling.backend,
             )
-        return str(wsi_fp), {"status": "success"}
+        return str(wsi_path), {"status": "success"}
 
     except Exception as e:
-        return str(wsi_fp), {
+        return str(wsi_path), {
             "status": "failed",
             "error": str(e),
             "traceback": str(traceback.format_exc()),
@@ -151,14 +160,21 @@ def main(args):
             tiling_updates = {}
             with mp.Pool(processes=parallel_workers) as pool:
                 args_list = [
-                    (wsi_fp, mask_fp, cfg, mask_visualize_dir, tile_visualize_dir)
+                    {
+                        "wsi_path": wsi_fp,
+                        "mask_path": mask_fp,
+                        "cfg": cfg,
+                        "mask_visualize_dir": mask_visualize_dir,
+                        "tile_visualize_dir": tile_visualize_dir,
+                        "num_workers": parallel_workers,
+                    }
                     for wsi_fp, mask_fp in zip(
                         wsi_paths_to_process, mask_paths_to_process
                     )
                 ]
                 results = list(
                     tqdm.tqdm(
-                        pool.starmap(process_slide, args_list),
+                        pool.map(process_slide_wrapper, args_list),
                         total=total,
                         desc="Slide tiling",
                         unit="slide",

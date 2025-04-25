@@ -51,7 +51,7 @@ def create_dataset(wsi_fp, coordinates_dir, cfg, transforms):
     return TileDataset(
         wsi_fp,
         coordinates_dir,
-        cfg.tiling.spacing,
+        cfg.tiling.params.spacing,
         backend=cfg.tiling.backend,
         transforms=transforms,
     )
@@ -99,16 +99,6 @@ def run_inference(dataloader, model, device, autocast_context, unit, batch_size)
     features = torch.cat(features_list, dim=0)
     indices = torch.cat(indices_list, dim=0)
     return features, indices
-
-
-def gather_status_updates(feature_extraction_updates):
-    status_updates_list = [None for _ in range(distributed.get_global_size())]
-    dist.all_gather_object(status_updates_list, feature_extraction_updates)
-    combined_updates = {}
-    if distributed.is_main_process():
-        for status_updates in status_updates_list:
-            combined_updates.update(status_updates)
-    return combined_updates
 
 
 def main(args):
@@ -164,6 +154,7 @@ def main(args):
     feature_extraction_updates = {}
 
     transforms = create_transforms(cfg, model)
+    print(f"transform: {transforms}")
 
     for wsi_fp in tqdm.tqdm(
         wsi_paths_to_process,
@@ -268,25 +259,25 @@ def main(args):
                 "traceback": str(traceback.format_exc()),
             }
 
-    if distributed.is_enabled_and_multiple_gpus():
-        torch.distributed.barrier()
-
-    combined_updates = gather_status_updates(feature_extraction_updates)
-
-    if distributed.is_main_process():
-        for wsi_path, status_info in combined_updates.items():
+        # update process_df
+        if distributed.is_main_process():
+            status_info = feature_extraction_updates[str(wsi_fp)]
             process_df.loc[
-                process_df["wsi_path"] == wsi_path, "feature_status"
+                process_df["wsi_path"] == str(wsi_fp), "feature_status"
             ] = status_info["status"]
             if "error" in status_info:
                 process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "error"
+                    process_df["wsi_path"] == str(wsi_fp), "error"
                 ] = status_info["error"]
                 process_df.loc[
-                    process_df["wsi_path"] == wsi_path, "traceback"
+                    process_df["wsi_path"] == str(wsi_fp), "traceback"
                 ] = status_info["traceback"]
-        process_df.to_csv(process_list, index=False)
+            process_df.to_csv(process_list, index=False)
 
+    if distributed.is_enabled_and_multiple_gpus():
+        torch.distributed.barrier()
+
+    if distributed.is_main_process():
         # summary logging
         slides_with_tiles = len(sub_process_df)
         total_slides = len(process_df)

@@ -68,9 +68,7 @@ def run_feature_extraction(config_file, run_id):
         text=True,
     )
     try:
-        stdout, stderr = proc.communicate()
-        print(stdout)
-        print(stderr)
+        proc.communicate()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating embed.py process group...")
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -111,10 +109,13 @@ def main(args):
 
 if __name__ == "__main__":
     import warnings
+    import torchvision
 
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
+
+    torchvision.disable_beta_transforms_warning()
 
     args = get_args_parser(add_help=True).parse_args()
     main(args)

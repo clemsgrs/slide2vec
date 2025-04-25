@@ -1,63 +1,62 @@
+from pathlib import Path
+from typing import List, Optional, Tuple
+
 import cv2
 import numpy as np
-
 from PIL import Image, ImageOps
-from pathlib import Path
-from typing import Optional, List, Tuple
 
-from .wsi import WholeSlideImage, SegmentationParameters, TilingParameters
+from .wsi import (
+    FilterParameters,
+    SegmentationParameters,
+    TilingParameters,
+    WholeSlideImage,
+)
 
 
-def sort_coords_with_tissue(coords, tissue_percentages):
+def sort_coordinates_with_tissue(coordinates, tissue_percentages):
     # mock region filenames
-    mocked_filenames = [f"{x}_{y}.jpg" for x, y in coords]
+    mocked_filenames = [f"{x}_{y}.jpg" for x, y in coordinates]
     # combine mocked filenames with coordinates and tissue percentages
-    combined = list(zip(mocked_filenames, coords, tissue_percentages))
+    combined = list(zip(mocked_filenames, coordinates, tissue_percentages))
     # sort combined list by mocked filenames
     sorted_combined = sorted(combined, key=lambda x: x[0])
     # extract sorted coordinates and tissue percentages
-    sorted_coords = [coord for _, coord, _ in sorted_combined]
+    sorted_coordinates = [coord for _, coord, _ in sorted_combined]
     sorted_tissue_percentages = [tissue for _, _, tissue in sorted_combined]
-    return sorted_coords, sorted_tissue_percentages
+    return sorted_coordinates, sorted_tissue_percentages
 
 
 def extract_coordinates(
-    wsi_fp,
-    mask_fp,
-    spacing,
-    tile_size,
-    backend,
-    tissue_val,
-    downsample: int = 64,
-    segment_params: SegmentationParameters = SegmentationParameters(),
-    tiling_params: TilingParameters = TilingParameters(),
+    *,
+    wsi_path: Path,
+    mask_path: Path,
+    backend: str,
+    segment_params: SegmentationParameters,
+    tiling_params: TilingParameters,
+    filter_params: FilterParameters,
     mask_visu_path: Optional[Path] = None,
     num_workers: int = 1,
 ):
     wsi = WholeSlideImage(
-        wsi_fp,
-        mask_fp,
+        path=wsi_path,
+        mask_path=mask_path,
         backend=backend,
-        tissue_val=tissue_val,
-        downsample=downsample,
         segment=True,
         segment_params=segment_params,
     )
     assert (
-        spacing >= wsi.spacings[0]
-    ), f"Desired spacing ({spacing}) is smaller than the whole-slide image starting spacing ({wsi.spacings[0]})"
+        tiling_params.spacing >= wsi.spacings[0]
+    ), f"Desired spacing ({tiling_params.spacing}) is smaller than the whole-slide image starting spacing ({wsi.spacings[0]})"
     (
         contours,
         holes,
         coordinates,
         tissue_percentages,
         tile_level,
-        tile_size_resized,
+        resize_factor,
         tile_size_lv0,
-    ) = wsi.get_tile_coordinates(
-        spacing, tile_size, tiling_params, num_workers=num_workers
-    )
-    sorted_coordinates, sorted_tissue_percentages = sort_coords_with_tissue(
+    ) = wsi.get_tile_coordinates(tiling_params, filter_params, num_workers=num_workers)
+    sorted_coordinates, _ = sort_coordinates_with_tissue(
         coordinates, tissue_percentages
     )
     if mask_visu_path is not None:
@@ -65,29 +64,31 @@ def extract_coordinates(
     return (
         sorted_coordinates,
         tile_level,
-        tile_size_resized,
+        resize_factor,
         tile_size_lv0,
     )
 
 
 def save_coordinates(
-    coordinates,
-    target_spacing,
-    tile_level,
-    tile_size,
-    tile_size_resized,
-    tile_size_lv0,
-    save_path,
+    *,
+    coordinates: List[Tuple[int, int]],
+    target_spacing: float,
+    tile_level: int,
+    tile_size: int,
+    resize_factor: float,
+    tile_size_lv0: int,
+    save_path: Path,
 ):
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     ntile = len(x)
+    tile_size_resized = int(tile_size * resize_factor)
     dtype = [
         ("x", int),
         ("y", int),
         ("tile_size_resized", int),
         ("tile_level", int),
-        ("tile_size", int),
+        ("resize_factor", float),
         ("tile_size_lv0", int),
         ("target_spacing", float),
     ]
@@ -98,7 +99,7 @@ def save_coordinates(
             y[i],
             tile_size_resized,
             tile_level,
-            tile_size,
+            resize_factor,
             tile_size_lv0,
             target_spacing,
         )
@@ -207,16 +208,17 @@ def pad_to_patch_size(canvas: Image.Image, patch_size: Tuple[int, int]) -> Image
 
 
 def visualize_coordinates(
-    wsi_fp,
-    coordinates,
-    tile_level,
-    tile_size,
-    save_dir,
+    *,
+    wsi_path: Path,
+    coordinates: List[Tuple[int, int]],
+    tile_level: int,
+    tile_size: int,
+    save_dir: Path,
     downsample: int = 64,
     backend: str = "asap",
     grid_thickness: int = 1,
 ):
-    wsi = WholeSlideImage(wsi_fp, backend=backend)
+    wsi = WholeSlideImage(wsi_path, backend=backend)
     vis_level = wsi.get_best_level_for_downsample_custom(downsample)
     vis_spacing = wsi.spacings[vis_level]
 
@@ -253,5 +255,6 @@ def visualize_coordinates(
         indices=None,
         thickness=grid_thickness,
     )
-    visu_path = Path(save_dir, f"{wsi_fp.stem}.jpg")
+    wsi_name = wsi_path.stem.replace(" ", "_")
+    visu_path = Path(save_dir, f"{wsi_name}.jpg")
     canvas.save(visu_path)

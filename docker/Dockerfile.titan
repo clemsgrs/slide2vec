@@ -15,7 +15,7 @@ ARG BUILD_JOBS=16
 # Create docker
 # =============================================================
 
-FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS base
 
 # propagate build args
 ARG CUDA_MAJOR_VERSION
