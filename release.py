@@ -8,10 +8,12 @@ def run(cmd: str, check: bool = True) -> str:
 
 
 def get_current_version() -> str:
-    out = run("bumpver show --json")
-    import json
-
-    return json.loads(out)["current_version"]
+    out = run("bumpver show")
+    for line in out.splitlines():
+        if line.startswith("Current Version"):
+            _, version = line.split(":")
+            return version.strip().strip('"').strip("'")
+    raise RuntimeError("Could not find current_version")
 
 
 def bump_version(level: str = "patch") -> str:
