@@ -31,10 +31,14 @@ class ModelFactory:
                 model = Virchow2(input_size=options.tile_size)
             elif options.name == "uni":
                 model = UNI(input_size=options.tile_size)
+            elif options.name == "uni2":
+                model = UNI2(input_size=options.tile_size)
             elif options.name == "prov-gigapath":
                 model = ProvGigaPath(input_size=options.tile_size)
             elif options.name == "h-optimus-0":
                 model = Hoptimus0(input_size=options.tile_size)
+            elif options.name == "h-optimus-1":
+                model = Hoptimus1(input_size=options.tile_size)
             elif options.name is None and options.arch:
                 model = DINOViT(
                     arch=options.arch,
@@ -48,10 +52,14 @@ class ModelFactory:
                 tile_encoder = Virchow2(input_size=options.patch_size)
             elif options.name == "uni":
                 tile_encoder = UNI(input_size=options.patch_size)
+            elif options.name == "uni2":
+                tile_encoder = UNI2(input_size=options.patch_size)
             elif options.name == "prov-gigapath":
                 tile_encoder = ProvGigaPath(input_size=options.patch_size)
             elif options.name == "h-optimus-0":
                 tile_encoder = Hoptimus0(input_size=options.patch_size)
+            elif options.name == "h-optimus-1":
+                tile_encoder = Hoptimus1(input_size=options.patch_size)
             elif options.name is None and options.arch:
                 tile_encoder = DINOViT(
                     arch=options.arch,
@@ -182,12 +190,37 @@ class UNI(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=True,
         )
-        if self.input_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
-        encoder.pretrained_cfg[
-            "interpolation"
-        ] = "bicubic"  # Match interpolation if needed
+        return encoder
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
+class UNI2(FeatureExtractor):
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
+        self.features_dim = 1536
+        super(UNI2, self).__init__()
+
+    def build_encoder(self):
+        timm_kwargs = {
+            "img_size": 224,
+            "patch_size": 14,
+            "depth": 24,
+            "num_heads": 24,
+            "init_values": 1e-5,
+            "embed_dim": 1536,
+            "mlp_ratio": 2.66667 * 2,
+            "num_classes": 0,
+            "no_embed_class": True,
+            "mlp_layer": timm.layers.SwiGLUPacked,
+            "act_layer": torch.nn.SiLU,
+            "reg_tokens": 8,
+            "dynamic_img_size": True,
+        }
+        encoder = timm.create_model(
+            "hf-hub:MahmoodLab/UNI2-h", pretrained=True, **timm_kwargs
+        )
         return encoder
 
     def forward(self, x):
@@ -210,9 +243,6 @@ class Virchow(FeatureExtractor):
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
-        if self.input_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
 
     def forward(self, x):
@@ -246,9 +276,6 @@ class Virchow2(FeatureExtractor):
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
-        if self.input_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
 
     def forward(self, x):
@@ -277,9 +304,6 @@ class ProvGigaPath(FeatureExtractor):
             "hf_hub:prov-gigapath/prov-gigapath",
             pretrained=True,
         )
-        if self.input_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
         return encoder
 
     def forward(self, x):
@@ -299,9 +323,25 @@ class Hoptimus0(FeatureExtractor):
             init_values=1e-5,
             dynamic_img_size=False,
         )
-        if self.input_size == 256:
-            encoder.pretrained_cfg["input_size"] = [3, 224, 224]
-            encoder.pretrained_cfg["crop_pct"] = 224 / 256  # ensure Resize is 256
+        return encoder
+
+    def forward(self, x):
+        return self.encoder(x)
+
+
+class Hoptimus1(FeatureExtractor):
+    def __init__(self, input_size: int = 224):
+        self.input_size = input_size
+        self.features_dim = 1536
+        super(Hoptimus1, self).__init__()
+
+    def build_encoder(self):
+        encoder = timm.create_model(
+            "hf-hub:bioptimus/H-optimus-1",
+            pretrained=True,
+            init_values=1e-5,
+            dynamic_img_size=False,
+        )
         return encoder
 
     def forward(self, x):
