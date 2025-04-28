@@ -114,6 +114,7 @@ if __name__ == "__main__":
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
+    warnings.filterwarnings("ignore", category=FutureWarning)
 
     torchvision.disable_beta_transforms_warning()
 
