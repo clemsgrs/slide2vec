@@ -2,18 +2,6 @@ import cv2
 import numpy as np
 
 
-def find_common_spacings(
-    spacings_1: list[float], spacings_2: list[float], tolerance: float = 0.05
-):
-    common_spacings = []
-    for s1 in spacings_1:
-        for s2 in spacings_2:
-            # check how far appart these two spacings are
-            if abs(s1 - s2) / s1 <= tolerance:
-                common_spacings.append((s1, s2))
-    return common_spacings
-
-
 class HasEnoughTissue(object):
     def __init__(self, contour, contour_holes, tissue_mask, tile_size, scale, pct=0.01):
         self.cont = contour

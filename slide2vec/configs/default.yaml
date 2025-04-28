@@ -13,10 +13,9 @@ tiling:
   backend: "asap" # backend to use for slide reading
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.1 # tolerance within which a natural spacing is considered acceptable (as a percentage of the desired spacing)
     tile_size: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    tissue_thresh: 0.01 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    min_tissue_percentage: 0.01 # threshold used to filter out tiles that have less tissue than this value (percentage)
     drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
