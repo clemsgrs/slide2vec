@@ -20,8 +20,9 @@ export HF_TOKEN=<your-huggingface-api-token>
 
 2. Create a configuration file
 
-   A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented. Foundation models currently supported:
-   - tile-level: `uni`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`
+   A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.<br>
+   We've also added default configuration files for each of the foundation models currently supported:
+   - tile-level: `uni`, `uni2`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`, `h-optimus-1`
    - slide-level: `prov-gigapath`, `titan`, `prism`
 
 

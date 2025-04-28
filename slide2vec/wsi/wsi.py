@@ -1,18 +1,17 @@
-import os
-import cv2
-import tqdm
+import sys
 import math
 import warnings
-import numpy as np
-import wholeslidedata as wsd
-import multiprocessing as mp
-
-from PIL import Image
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import NamedTuple
+from concurrent.futures import ThreadPoolExecutor
 
-from slide2vec.wsi.utils import find_common_spacings, HasEnoughTissue
+import cv2
+import numpy as np
+import tqdm
+import wholeslidedata as wsd
+from PIL import Image
 
+from slide2vec.wsi.utils import HasEnoughTissue
 
 # ignore all warnings from wholeslidedata
 warnings.filterwarnings("ignore", module="wholeslidedata")
@@ -20,27 +19,83 @@ warnings.filterwarnings("ignore", module="wholeslidedata")
 Image.MAX_IMAGE_PIXELS = 933120000
 
 
+class SegmentationParameters(NamedTuple):
+    """
+    Parameters for filtering contours.
+    """
+
+    downsample: int  # dowsample factor for loading segmentation mask
+    sthresh: int  # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
+    sthresh_up: int  # upper threshold value for scaling the binary mask
+    mthresh: int  # median filter size (positive, odd integer)
+    close: int  # additional morphological closing to apply following initial thresholding (positive integer)
+    use_otsu: bool  # whether to use Otsu's method for thresholding
+    tissue_pixel_value: int  # when loading mask from disk, what pixel value corresponds to tissue
+
+
+class FilterParameters(NamedTuple):
+    """
+    Parameters for filtering contours.
+    """
+
+    ref_tile_size: int  # reference tile size for filtering
+    a_t: int  # contour area threshold for filtering
+    a_h: int  # hole area threshold for filtering
+    max_n_holes: int  # maximum number of holes allowed
+
+
+class TilingParameters(NamedTuple):
+    """
+    Parameters for tiling.
+    """
+
+    spacing: float  # spacing at which to tile the slide, in microns per pixel
+    tolerance: float  # for matching the spacing, deciding how much spacing can deviate from those specified in the slide metadata.
+    tile_size: int  # size of the tiles to extract, in pixels
+    overlap: float  # overlap between tiles
+    min_tissue_percentage: float  # minimum tissue percentage required for a tile
+    drop_holes: bool  # whether to drop tiles that fall within holes
+    use_padding: bool  # whether to use padding for tiles at the edges
+
+
 class WholeSlideImage(object):
+    """
+    A class for handling Whole Slide Images (wsi) and tile extraction.
+    Attributes:
+        path (Path): Full path to the wsi.
+        name (str): Name of the wsi (stem of the path).
+        fmt (str): File format of the wsi.
+        wsi (wsd.WholeSlideImage): wsi object.
+        spacing_at_level_0 (float): Manually set spacing at level 0.
+        spacings (list[float]): List of spacings for each level.
+        level_dimensions (list[tuple[int, int]]): Dimensions at each level.
+        level_downsamples (list[tuple[float, float]]): Downsample factors for each level.
+        backend (str): Backend used for opening the wsi (default: "asap").
+        mask_path (Path, optional): Path to the segmentation mask.
+        mask (wsd.WholeSlideImage, optional): Segmentation mask object.
+        seg_level (int): Level for segmentation.
+        binary_mask (np.ndarray): Binary segmentation mask as a numpy array.
+    """
+
     def __init__(
         self,
         path: Path,
-        mask_path: Optional[Path] = None,
-        spacing: Optional[float] = None,
-        downsample: int = 64,
+        mask_path: Path | None = None,
+        spacing_at_level_0: float | None = None,
         backend: str = "asap",
-        tissue_val: int = 1,
         segment: bool = False,
-        segment_params: Dict = {
-            "sthresh": 8,
-            "sthresh_up": 255,
-            "mthresh": 7,
-            "close": 4,
-            "use_otsu": False,
-        },
+        segment_params: SegmentationParameters | None = None,
     ):
         """
+        Initializes a Whole Slide Image object with optional mask and spacing.
+
         Args:
-            path (Path): fullpath to WSI file
+            path (Path): Path to the wsi.
+            mask_path (Path, optional): Path to the tissue mask, if available. Defaults to None.
+            spacing_at_level_0 (float, optional): Manually set spacing at level 0, if speficied. Defaults to None.
+            backend (str): Backend to use for opening the wsi. Defaults to "asap".
+            segment (bool): Whether to segment the slide if tissue mask is not provided. Defaults to False.
+            segment_params (NamedTuple, optional): Segmentation parameters. Used for either loading an existing mask or segmenting the slide.
         """
 
         self.path = path
@@ -48,8 +103,11 @@ class WholeSlideImage(object):
         self.fmt = path.suffix
         self.wsi = wsd.WholeSlideImage(path, backend=backend)
 
-        self.downsample = downsample
-        self.spacing = spacing  # manually set spacing at level 0
+        self._scaled_contours_cache = {}  # add a cache for scaled contours
+        self._scaled_holes_cache = {}  # add a cache for scaled holes
+        self._level_spacing_cache = {}  # add a cache for level spacings
+
+        self.spacing_at_level_0 = spacing_at_level_0  # manually set spacing at level 0
         self.spacings = self.get_spacings()
         self.level_dimensions = self.wsi.shapes
         self.level_downsamples = self.get_downsamples()
@@ -57,20 +115,51 @@ class WholeSlideImage(object):
 
         self.mask_path = mask_path
         if mask_path is not None:
-            tqdm.tqdm.write(f"Loading mask: {mask_path}")
             self.mask = wsd.WholeSlideImage(mask_path, backend=backend)
-            self.seg_level = self.load_segmentation(downsample, tissue_val=tissue_val)
+            self.seg_level = self.load_segmentation(segment_params)
         elif segment:
-            tqdm.tqdm.write("Segmenting tissue")
-            self.seg_level = self.segment_tissue(downsample, **segment_params)
+            self.seg_level = self.segment_tissue(segment_params)
 
     def get_slide(self, spacing: float):
         return self.wsi.get_slide(spacing=spacing)
 
     def get_tile(self, x: int, y: int, width: int, height: int, spacing: float):
-        return self.wsi.get_patch(x, y, width, height, spacing=spacing, center=False)
+        """
+        Extracts a tile from a whole slide image at the specified coordinates, size, and spacing.
+
+        Args:
+            x (int): The x-coordinate of the top-left corner of the tile.
+            y (int): The y-coordinate of the top-left corner of the tile.
+            width (int): Tile width.
+            height (int): Tile height.
+            spacing (float): The spacing (resolution) at which the tile should be extracted.
+
+        Returns:
+            numpy.ndarray: The extracted tile as a numpy array.
+        """
+        return self.wsi.get_patch(
+            x,
+            y,
+            width,
+            height,
+            spacing=spacing,
+            center=False,
+        )
 
     def get_downsamples(self):
+        """
+        Calculate the downsample factors for each level of the image pyramid.
+
+        This method computes the downsample factors for each level in the image
+        pyramid relative to the base level (level 0). The downsample factor for
+        each level is represented as a tuple of two values, corresponding to the
+        downsampling in the width and height dimensions.
+
+        Returns:
+            list of tuple: A list of tuples where each tuple contains two float
+            values representing the downsample factors (width_factor, height_factor)
+            for each level relative to the base level.
+        """
         level_downsamples = []
         dim_0 = self.level_dimensions[0]
         for dim in self.level_dimensions:
@@ -79,97 +168,209 @@ class WholeSlideImage(object):
         return level_downsamples
 
     def get_spacings(self):
-        if self.spacing is None:
+        """
+        Retrieve the spacings for the whole slide image.
+
+        If the `spacing` attribute is not set, the method returns the original spacings
+        from the wsi. Otherwise, it calculates adjusted spacings based on the provided
+        `spacing` value and the original spacings.
+
+        Returns:
+            list: A list of spacings, either the original or adjusted based on the
+            `spacing` attribute.
+        """
+        if self.spacing_at_level_0 is None:
             spacings = self.wsi.spacings
         else:
             spacings = [
-                self.spacing * s / self.wsi.spacings[0] for s in self.wsi.spacings
+                self.spacing_at_level_0 * s / self.wsi.spacings[0]
+                for s in self.wsi.spacings
             ]
         return spacings
 
-    def get_level_spacing(self, level: int = 0):
-        return self.spacings[level]
+    def get_level_spacing(self, level: int):
+        """
+        Retrieve the spacing value for a specified level.
 
-    def get_best_level_for_spacing(self, target_spacing: float):
+        Args:
+            level (int): Level for which to retrieve the spacing.
+
+        Returns:
+            float: Spacing value corresponding to the specified level.
+        """
+        if level not in self._level_spacing_cache:
+            self._level_spacing_cache[level] = self.spacings[level]
+        return self._level_spacing_cache[level]
+
+    def get_best_level_for_spacing(
+        self, target_spacing: float, tolerance: float = 0.05
+    ):
+        """
+        Determines the best level in a multi-resolution image pyramid for a given target spacing.
+
+        Ensures that the spacing of the returned level is either within the specified tolerance of the target
+        spacing or smaller than the target spacing to avoid upsampling.
+
+        Args:
+            target_spacing (float): Desired spacing.
+            tolerance (float, optional): Tolerance for matching the spacing, deciding how much
+                spacing can deviate from those specified in the slide metadata.
+
+        Returns:
+            level (int): Index of the best matching level in the image pyramid.
+        """
         spacing = self.get_level_spacing(0)
         target_downsample = target_spacing / spacing
         level = self.get_best_level_for_downsample_custom(target_downsample)
-        return level
+        level_spacing = self.get_level_spacing(level)
 
-    def get_best_level_for_downsample_custom(self, downsample):
+        # check if the level_spacing is within the tolerance of the target_spacing
+        is_within_tolerance = False
+        if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+            is_within_tolerance = True
+            return level, is_within_tolerance
+
+        # otherwise, look for a spacing smaller than or equal to the target_spacing
+        else:
+            while level > 0 and level_spacing > target_spacing:
+                level -= 1
+                level_spacing = self.get_level_spacing(level)
+                if abs(level_spacing - target_spacing) / target_spacing <= tolerance:
+                    is_within_tolerance = True
+                    break
+
+        assert (
+            level_spacing <= target_spacing
+            or abs(level_spacing - target_spacing) / target_spacing <= tolerance
+        ), f"Unable to find a level with spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
+        return level, is_within_tolerance
+
+    def get_best_level_for_downsample_custom(self, downsample: float | int):
+        """
+        Determines the best level for a given downsample factor based on the available
+        level downsample values.
+
+        Args:
+            downsample (float): Target downsample factor.
+
+        Returns:
+            int: Index of the best matching level for the given downsample factor.
+        """
         level = int(np.argmin([abs(x - downsample) for x, _ in self.level_downsamples]))
         return level
 
     def load_segmentation(
         self,
-        downsample: int,
-        sthresh_up: int = 255,
-        tissue_val: int = 1,
+        segment_params: SegmentationParameters,
     ):
-        # ensure mask and slide have at least one common spacing
-        common_spacings = find_common_spacings(
-            self.spacings, self.mask.spacings, tolerance=0.1
-        )
-        assert (
-            len(common_spacings) >= 1
-        ), f"The provided segmentation mask (spacings={self.mask.spacings}) has no common spacing with the slide (spacings={self.spacings}). A minimum of 1 common spacing is required."
+        """
+        Load and process a segmentation mask for a whole slide image.
 
-        seg_level = self.get_best_level_for_downsample_custom(downsample)
+        This method ensures that the segmentation mask and the slide have at least one
+        common spacing, determines the best level for the given downsample factor, and
+        processes the segmentation mask to create a binary mask.
+
+        Args:
+            downsample (int): Downsample factor for finding best level for tissue segmentation.
+            sthresh_up (int, optional): Upper threshold value for scaling the binary
+                mask. Defaults to 255.
+            tissue_pixel_value (int, optional): Pixel value in the segmentation mask that
+                represents tissue. Defaults to 1.
+
+        Returns:
+            int: Level at which the tissue mask was loaded.
+        """
+        mask_spacing_at_level_0 = self.mask.spacings[0]
+        seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
         seg_spacing = self.get_level_spacing(seg_level)
+        while (
+            seg_spacing < mask_spacing_at_level_0 and seg_level < len(self.spacings) - 1
+        ):
+            seg_level += 1
+            seg_spacing = self.get_level_spacing(seg_level)
 
-        # check if this spacing is present in common spacings
-        is_in_common_spacings = seg_spacing in [s for s, _ in common_spacings]
-        if not is_in_common_spacings:
-            # find spacing that is common to slide and mask and that is the closest to seg_spacing
-            closest = np.argmin([abs(seg_spacing - s) for s, _ in common_spacings])
-            closest_common_spacing = common_spacings[closest][0]
-            seg_spacing = closest_common_spacing
-            seg_level = self.get_best_level_for_spacing(seg_spacing)
+        assert (
+            seg_spacing >= mask_spacing_at_level_0
+        ), f"Segmentation mask natural spacing ({mask_spacing_at_level_0}) is higher than the lowest spacing in the slide ({seg_spacing}), aborting."
 
-        m = self.mask.get_slide(spacing=seg_spacing)
-        m = m[..., 0]
+        mask_downsample = seg_spacing / mask_spacing_at_level_0
+        mask_level = int(
+            np.argmin([abs(x - mask_downsample) for x in self.mask.downsamplings])
+        )
+        mask_spacing = self.mask.spacings[mask_level]
 
-        m = (m == tissue_val).astype("uint8")
+        scale = seg_spacing / mask_spacing
+        while scale < 1 and mask_level > 0:
+            mask_level -= 1
+            mask_spacing = self.mask.spacings[mask_level]
+            scale = seg_spacing / mask_spacing
+
+        assert scale >= 1
+        mask = self.mask.get_slide(spacing=mask_spacing)
+        width, height, _ = mask.shape
+        # resize the mask to the size of the slide at seg_spacing
+        mask = cv2.resize(
+            mask.astype(np.uint8),
+            (int(height // scale), int(width // scale)),
+            interpolation=cv2.INTER_NEAREST,
+        )
+
+        m = (mask == segment_params.tissue_pixel_value).astype("uint8")
         if np.max(m) <= 1:
-            m = m * sthresh_up
+            m = m * segment_params.sthresh_up
 
         self.binary_mask = m
         return seg_level
 
     def segment_tissue(
         self,
-        downsample: int,
-        sthresh: int = 20,
-        sthresh_up: int = 255,
-        mthresh: int = 7,
-        close: int = 0,
-        use_otsu: bool = False,
+        segment_params: SegmentationParameters,
     ):
         """
-        Segment the tissue via HSV -> Median thresholding -> Binary threshold
+        Segment the tissue via HSV -> Median thresholding -> Binary thresholding -> Morphological closing.
+
+        Args:
+            downsample (int): Downsample factor for finding best level for tissue segmentation.
+            sthresh (int, optional): Lower threshold for binary thresholding. Defaults to 20.
+            sthresh_up (int, optional): Upper threshold for binary thresholding. Defaults to 255.
+            mthresh (int, optional): Kernel size for median blurring. Defaults to 7.
+            close (int, optional): Size of the kernel for morphological closing.
+                If 0, no morphological closing is applied. Defaults to 0.
+            use_otsu (bool, optional): Whether to use Otsu's method for thresholding. Defaults to False.
+
+        Returns:
+            int: Level at which the tissue mask was created.
         """
 
-        seg_level = self.get_best_level_for_downsample_custom(downsample)
+        seg_level = self.get_best_level_for_downsample_custom(segment_params.downsample)
         seg_spacing = self.get_level_spacing(seg_level)
 
         img = self.wsi.get_slide(spacing=seg_spacing)
         img = np.array(Image.fromarray(img).convert("RGBA"))
         img_hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)  # convert to HSV space
-        img_med = cv2.medianBlur(img_hsv[:, :, 1], mthresh)  # apply median blurring
+        img_med = cv2.medianBlur(
+            img_hsv[:, :, 1], segment_params.mthresh
+        )  # apply median blurring
 
         # thresholding
-        if use_otsu:
+        if segment_params.use_otsu:
             _, img_thresh = cv2.threshold(
-                img_med, 0, sthresh_up, cv2.THRESH_OTSU + cv2.THRESH_BINARY
+                img_med,
+                0,
+                segment_params.sthresh_up,
+                cv2.THRESH_OTSU + cv2.THRESH_BINARY,
             )
         else:
             _, img_thresh = cv2.threshold(
-                img_med, sthresh, sthresh_up, cv2.THRESH_BINARY
+                img_med,
+                segment_params.sthresh,
+                segment_params.sthresh_up,
+                cv2.THRESH_BINARY,
             )
 
         # morphological closing
-        if close > 0:
-            kernel = np.ones((close, close), np.uint8)
+        if segment_params.close > 0:
+            kernel = np.ones((segment_params.close, segment_params.close), np.uint8)
             img_thresh = cv2.morphologyEx(img_thresh, cv2.MORPH_CLOSE, kernel)
 
         self.binary_mask = img_thresh
@@ -179,13 +380,14 @@ class WholeSlideImage(object):
         self,
         contours,
         holes,
-        color: Tuple[int] = (0, 255, 0),
-        hole_color: Tuple[int] = (0, 0, 255),
+        downsample: int = 32,
+        color: tuple[int] = (0, 255, 0),
+        hole_color: tuple[int] = (0, 0, 255),
         line_thickness: int = 250,
-        max_size: Optional[int] = None,
+        max_size: int | None = None,
         number_contours: bool = False,
     ):
-        vis_level = self.get_best_level_for_downsample_custom(self.downsample)
+        vis_level = self.get_best_level_for_downsample_custom(downsample)
         level_downsample = self.level_downsamples[vis_level]
         scale = [1 / level_downsample[0], 1 / level_downsample[1]]
 
@@ -256,29 +458,60 @@ class WholeSlideImage(object):
 
     def get_tile_coordinates(
         self,
-        target_spacing: float,
-        target_tile_size: int,
-        tiling_params: Dict,
+        tiling_params: TilingParameters,
+        filter_params: FilterParameters,
         num_workers: int = 1,
     ):
-        scale = target_spacing / self.get_level_spacing(0)
-        tile_size_lv0 = int(round(target_tile_size * scale, 0))
-        contours, holes = self.detect_contours(target_spacing, tiling_params)
+        """
+        Extract tile coordinates based on the specified target spacing, tile size, overlap,
+        and additional tiling and filtering parameters.
+
+        Args:
+            tiling_params (NamedTuple): Parameters for tiling, including:
+                - spacing (float): Desired spacing of the tiles.
+                - tolerance (float): Tolerance for matching the spacing, deciding how much
+                    spacing can deviate from those specified in the slide metadata.
+                - tile_size (int): Desired size of the tiles at the target spacing.
+                - overlap (float, optional): Overlap between adjacent tiles. Defaults to 0.0.
+                - "drop_holes" (bool): If True, tiles falling within a hole will be excluded. Defaults to False.
+                - "min_tissue_percentage" (float): Minimum amount pixels covered with tissue required for a tile. Defaults to 0.25 (25 percent).
+                - "use_padding" (bool): Whether to use padding for tiles at the edges. Defaults to True.
+            filter_params (NamedTuple): Parameters for filtering contours, including:
+                - "ref_tile_size" (int): Reference tile size for filtering. Defaults to 256.
+                - "a_t" (int): Contour area threshold for filtering. Defaults to 4.
+                - "a_h" (int): Hole area threshold for filtering. Defaults to 2.
+                - "max_n_holes" (int): Maximum number of holes allowed. Defaults to 8.
+            num_workers (int, optional): Number of workers to use for parallel processing.
+                Defaults to 1.
+
+        Returns:
+            tuple:
+                - tile_coordinates (list[tuple[int, int]]): List of (x, y) coordinates for the extracted tiles.
+                - tissue_percentages (list[float]): List of tissue percentages for each tile.
+                - tile_level (int): Level of the wsi used for tile extraction.
+                - resize_factor (float): The factor by which the tile size was resized.
+                - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
+        """
+        scale = tiling_params.spacing / self.get_level_spacing(0)
+        tile_size_lv0 = int(tiling_params.tile_size * scale)
+
+        contours, holes = self.detect_contours(tiling_params.spacing, filter_params)
         (
             running_x_coords,
             running_y_coords,
             tissue_percentages,
             tile_level,
-            tile_size_resized,
+            resize_factor,
         ) = self.process_contours(
             contours,
             holes,
-            target_spacing,
-            target_tile_size,
-            tiling_params["overlap"],
-            tiling_params["drop_holes"],
-            tiling_params["tissue_thresh"],
-            tiling_params["use_padding"],
+            spacing=tiling_params.spacing,
+            tolerance=tiling_params.tolerance,
+            tile_size=tiling_params.tile_size,
+            overlap=tiling_params.overlap,
+            drop_holes=tiling_params.drop_holes,
+            min_tissue_percentage=tiling_params.min_tissue_percentage,
+            use_padding=tiling_params.use_padding,
             num_workers=num_workers,
         )
         tile_coordinates = list(zip(running_x_coords, running_y_coords))
@@ -288,74 +521,100 @@ class WholeSlideImage(object):
             tile_coordinates,
             tissue_percentages,
             tile_level,
-            tile_size_resized,
+            resize_factor,
             tile_size_lv0,
         )
+
+    @staticmethod
+    def filter_contours(contours, hierarchy, filter_params: FilterParameters):
+        """
+        Filter contours by area using FilterParameters.
+        """
+        filtered = []
+
+        # find indices of foreground contours (parent == -1)
+        hierarchy_1 = np.flatnonzero(hierarchy[:, 1] == -1)
+        all_holes = []
+
+        # loop through foreground contour indices
+        for cont_idx in hierarchy_1:
+            # actual contour
+            cont = contours[cont_idx]
+            # indices of holes contained in this contour (children of parent contour)
+            holes = np.flatnonzero(hierarchy[:, 1] == cont_idx)
+            # take contour area (includes holes)
+            a = cv2.contourArea(cont)
+            # calculate the contour area of each hole
+            hole_areas = [cv2.contourArea(contours[hole_idx]) for hole_idx in holes]
+            # actual area of foreground contour region
+            a = a - np.array(hole_areas).sum()
+            if a == 0:
+                continue
+            if a > filter_params.a_t:  # Use named tuple instead of dictionary
+                filtered.append(cont_idx)
+                all_holes.append(holes)
+
+        foreground_contours = [contours[cont_idx] for cont_idx in filtered]
+
+        hole_contours = []
+        for hole_ids in all_holes:
+            unfiltered_holes = [contours[idx] for idx in hole_ids]
+            unfilered_holes = sorted(
+                unfiltered_holes, key=cv2.contourArea, reverse=True
+            )
+            # take max_n_holes largest holes by area
+            unfilered_holes = unfilered_holes[
+                : filter_params.max_n_holes
+            ]  # Use named tuple
+            filtered_holes = []
+
+            # filter these holes
+            for hole in unfilered_holes:
+                if cv2.contourArea(hole) > filter_params.a_h:  # Use named tuple
+                    filtered_holes.append(hole)
+
+            hole_contours.append(filtered_holes)
+
+        return foreground_contours, hole_contours
 
     def detect_contours(
         self,
         target_spacing: float,
-        tiling_params: Dict[str, int],
+        filter_params: FilterParameters,
     ):
-        def _filter_contours(contours, hierarchy, tiling_params):
-            """
-            Filter contours by: area.
-            """
-            filtered = []
+        """
+        Detect and filter contours from a binary mask based on specified parameters.
 
-            # find indices of foreground contours (parent == -1)
-            hierarchy_1 = np.flatnonzero(hierarchy[:, 1] == -1)
-            all_holes = []
+        This method identifies contours in a binary mask, filters them based on area
+        thresholds, and scales the contours to a specified target resolution.
 
-            # loop through foreground contour indices
-            for cont_idx in hierarchy_1:
-                # actual contour
-                cont = contours[cont_idx]
-                # indices of holes contained in this contour (children of parent contour)
-                holes = np.flatnonzero(hierarchy[:, 1] == cont_idx)
-                # take contour area (includes holes)
-                a = cv2.contourArea(cont)
-                # calculate the contour area of each hole
-                hole_areas = [cv2.contourArea(contours[hole_idx]) for hole_idx in holes]
-                # actual area of foreground contour region
-                a = a - np.array(hole_areas).sum()
-                if a == 0:
-                    continue
-                if a > tiling_params["a_t"]:
-                    filtered.append(cont_idx)
-                    all_holes.append(holes)
+        Args:
+            target_spacing (float): Desired spacing at which tiles should be extracted.
+            filter_params (NamedTuple): A NamedTuple containing filtering parameters:
+                - "a_t" (int): Minimum area threshold for foreground contours.
+                - "a_h" (int): Minimum area threshold for holes within contours.
+                - "max_n_holes" (int): Maximum number of holes to retain per contour.
+                - "ref_tile_size" (int): Reference tile size for computing areas.
 
-            foreground_contours = [contours[cont_idx] for cont_idx in filtered]
+        Returns:
+            tuple[list[np.ndarray], list[list[np.ndarray]]]:
+                - A list of scaled foreground contours.
+                - A list of lists containing scaled hole contours for each foreground contour.
+        """
 
-            hole_contours = []
-            for hole_ids in all_holes:
-                unfiltered_holes = [contours[idx] for idx in hole_ids]
-                unfilered_holes = sorted(
-                    unfiltered_holes, key=cv2.contourArea, reverse=True
-                )
-                # take max_n_holes largest holes by area
-                unfilered_holes = unfilered_holes[: tiling_params["max_n_holes"]]
-                filtered_holes = []
-
-                # filter these holes
-                for hole in unfilered_holes:
-                    if cv2.contourArea(hole) > tiling_params["a_h"]:
-                        filtered_holes.append(hole)
-
-                hole_contours.append(filtered_holes)
-
-            return foreground_contours, hole_contours
-
-        spacing_level = self.get_best_level_for_spacing(target_spacing)
+        spacing_level, _ = self.get_best_level_for_spacing(target_spacing)
         current_scale = self.level_downsamples[spacing_level]
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
-        ref_tile_size = tiling_params["ref_tile_size"]
+        ref_tile_size = filter_params.ref_tile_size
         scaled_ref_tile_area = int(ref_tile_size**2 / (scale[0] * scale[1]))
 
-        _tiling_params = tiling_params.copy()
-        _tiling_params["a_t"] = tiling_params["a_t"] * scaled_ref_tile_area
-        _tiling_params["a_h"] = tiling_params["a_h"] * scaled_ref_tile_area
+        adjusted_filter_params = FilterParameters(
+            ref_tile_size=filter_params.ref_tile_size,
+            a_t=filter_params.a_t * scaled_ref_tile_area,
+            a_h=filter_params.a_h * scaled_ref_tile_area,
+            max_n_holes=filter_params.max_n_holes,
+        )
 
         # find and filter contours
         contours, hierarchy = cv2.findContours(
@@ -363,9 +622,8 @@ class WholeSlideImage(object):
         )
         hierarchy = np.squeeze(hierarchy, axis=(0,))[:, 2:]
 
-        # filtering out artifacts
-        foreground_contours, hole_contours = _filter_contours(
-            contours, hierarchy, _tiling_params
+        foreground_contours, hole_contours = self.filter_contours(
+            contours, hierarchy, adjusted_filter_params
         )
 
         # scale detected contours to level 0
@@ -375,6 +633,19 @@ class WholeSlideImage(object):
 
     @staticmethod
     def isInHoles(holes, pt, tile_size):
+        """
+        Check if a given tile is inside any of the specified polygonal holes.
+
+        Args:
+            holes (list): A list of polygonal contours, where each contour is represented
+                        as a list of points (e.g., from OpenCV's findContours function).
+            pt (tuple): The (x, y) coordinates of the top-left corner of the tile to check.
+            tile_size (int or float): The size of the tile, used to calculate the center
+                                    of the point being tested.
+
+        Returns:
+            int: Returns 1 if the point is inside any of the holes, otherwise returns 0.
+        """
         for hole in holes:
             if (
                 cv2.pointPolygonTest(
@@ -388,6 +659,28 @@ class WholeSlideImage(object):
 
     @staticmethod
     def isInContours(cont_check_fn, pt, holes=None, drop_holes=True, tile_size=256):
+        """
+        Determines whether a given tile is within contours (and optionally outside of holes).
+
+        Args:
+            cont_check_fn (callable): A function that checks if a tile is within contours.
+                It should accept a (x,y) coordinates as input and return a tuple (keep_flag, tissue_pct),
+                where `keep_flag` is a boolean indicating if the tile is within contours,
+                and `tissue_pct` is the percentage of tissue coverage of the tile.
+            pt (tuple): The (x, y) coordinates of the top-left corner of the tile to check.
+            holes (list, optional): A list of holes (e.g., regions to exclude) to check against.
+                Defaults to None.
+            drop_holes (bool, optional): If True, tiles falling within a hole will be excluded.
+                Defaults to True.
+            tile_size (int, optional): The size of the tile to consider.
+                Defaults to 256.
+
+        Returns:
+            tuple: A tuple (keep_flag, tissue_pct), where:
+                - `keep_flag` is 1 if the tile is within contours and not in holes (if applicable),
+                  otherwise 0.
+                - `tissue_pct` is the percentage of tissue coverage of the tile.
+        """
         keep_flag, tissue_pct = cont_check_fn(pt)
         if keep_flag:
             if holes is not None and drop_holes:
@@ -398,10 +691,34 @@ class WholeSlideImage(object):
 
     @staticmethod
     def scaleContourDim(contours, scale):
+        """
+        Scales the dimensions of a list of contours by a given factor.
+
+        Args:
+            contours (list of numpy.ndarray): A list of contours, where each contour is
+                represented as a numpy array of coordinates.
+            scale (float): The scaling factor to apply to the contours.
+
+        Returns:
+            list of numpy.ndarray: A list of scaled contours, where each contour's
+            coordinates are multiplied by the scaling factor and converted to integers.
+        """
         return [np.array(cont * scale, dtype="int32") for cont in contours]
 
     @staticmethod
     def scaleHolesDim(contours, scale):
+        """
+        Scales the dimensions of holes within a set of contours by a given factor.
+
+        Args:
+            contours (list of list of numpy.ndarray): A list of contours, where each contour
+                is represented as a list of holes, and each hole is a numpy array of coordinates.
+            scale (float): The scaling factor to apply to the dimensions of the holes.
+
+        Returns:
+            list of list of numpy.ndarray: A new list of contours with the dimensions of
+            the holes scaled by the specified factor.
+        """
         return [
             [np.array(hole * scale, dtype="int32") for hole in holes]
             for holes in contours
@@ -412,60 +729,93 @@ class WholeSlideImage(object):
         contours,
         holes,
         spacing: float,
+        tolerance: float,
         tile_size: int,
         overlap: float,
         drop_holes: bool,
-        tissue_thresh: float,
+        min_tissue_percentage: float,
         use_padding: bool,
         num_workers: int = 1,
     ):
+        """
+        Processes a list of contours and their corresponding holes to generate tile coordinates,
+        tissue percentages, and other metadata.
+
+        Args:
+            contours (list): List of contours representing tissue blobs in the wsi.
+            holes (list): List of tissue holes in each contour.
+            spacing (float): Desired spacing for tiling.
+            tolerance (float): Tolerance for matching the spacing, deciding how much
+                spacing can deviate from those specified in the slide metadata.
+            tile_size (int): Desired tile size in pixels.
+            overlap (float): Overlap between adjacent tiles.
+            drop_holes (bool): Whether to drop tiles that fall within holes.
+            min_tissue_percentage (float): Minimum amount pixels covered with tissue required for a tile.
+            use_padding (bool): Whether to pad the tiles to ensure full coverage.
+            num_workers (int, optional): Number of workers to use for parallel processing. Defaults to 1.
+
+        Returns:
+            tuple: A tuple containing:
+                - running_x_coords (list): The x-coordinates of the extracted tiles.
+                - running_y_coords (list): The y-coordinates of the extracted tiles.
+                - running_tissue_pct (list): List of tissue percentages for each extracted tile.
+                - tile_level (int): Level of the wsi used for tile extraction.
+                - resize_factor (float): The factor by which the tile size was resized.
+        """
         running_x_coords, running_y_coords = [], []
         running_tissue_pct = []
         tile_level = None
-        tile_size_resized = None
+        resize_factor = None
 
-        with tqdm.tqdm(
-            contours,
-            desc="Processing tissue blobs",
-            unit=" contour",
-            total=len(contours),
-            leave=False,
-        ) as t:
-            for i, cont in enumerate(t):
-                (
-                    x_coords,
-                    y_coords,
-                    tissue_pct,
-                    cont_tile_level,
-                    cont_tile_size_resized,
-                ) = self.process_contour(
-                    cont,
-                    holes[i],
-                    spacing,
-                    tile_size,
-                    overlap,
-                    drop_holes,
-                    tissue_thresh,
-                    use_padding,
-                    num_workers=num_workers,
+        def process_single_contour(i):
+            return self.process_contour(
+                contours[i],
+                holes[i],
+                spacing,
+                tolerance,
+                tile_size,
+                overlap,
+                drop_holes,
+                min_tissue_percentage,
+                use_padding,
+            )
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            results = list(
+                tqdm.tqdm(
+                    executor.map(process_single_contour, range(len(contours))),
+                    desc="Extracting tissue tiles",
+                    unit=" tissue blob",
+                    total=len(contours),
+                    leave=True,
+                    file=sys.stdout,
                 )
-                if len(x_coords) > 0:
-                    if tile_level is not None:
-                        assert (
-                            tile_level == cont_tile_level
-                        ), "tile level should be the same for all contours"
-                    tile_level = cont_tile_level
-                    tile_size_resized = cont_tile_size_resized
-                    running_x_coords.extend(x_coords)
-                    running_y_coords.extend(y_coords)
-                    running_tissue_pct.extend(tissue_pct)
+            )
+
+        for (
+            x_coords,
+            y_coords,
+            tissue_pct,
+            cont_tile_level,
+            cont_resize_factor,
+        ) in results:
+            if len(x_coords) > 0:
+                if tile_level is not None:
+                    assert (
+                        tile_level == cont_tile_level
+                    ), "Tile level should be the same for all contours"
+                tile_level = cont_tile_level
+                resize_factor = cont_resize_factor
+                running_x_coords.extend(x_coords)
+                running_y_coords.extend(y_coords)
+                running_tissue_pct.extend(tissue_pct)
 
         return (
             running_x_coords,
             running_y_coords,
             running_tissue_pct,
             tile_level,
-            tile_size_resized,
+            resize_factor,
         )
 
     def process_contour(
@@ -473,19 +823,49 @@ class WholeSlideImage(object):
         contour,
         contour_holes,
         spacing: float,
+        tolerance: float,
         tile_size: int,
         overlap: float,
         drop_holes: bool,
-        tissue_thresh: float,
+        min_tissue_percentage: float,
         use_padding: bool,
-        num_workers: int = 1,
     ):
-        tile_level = self.get_best_level_for_spacing(spacing)
+        """
+        Processes a contour to generate tile coordinates and associated metadata.
 
+        Args:
+            contour (numpy.ndarray): Contour to process, defined as a set of points.
+            contour_holes (list): List of holes within the contour.
+            spacing (float): Target spacing for the tiles.
+            tolerance (float): Tolerance for matching the spacing, deciding how much
+                spacing can deviate from those specified in the slide metadata.
+            tile_size (int): Size of the tiles in pixels.
+            overlap (float): Overlap between tiles.
+            drop_holes (bool): Whether to drop tiles that fall within holes.
+            min_tissue_percentage (float): Minimum amount pixels covered with tissue required for a tile.
+            use_padding (bool): Whether to pad the image to ensure full coverage.
+
+        Returns:
+            tuple: A tuple containing:
+                - x_coords (list): List of x-coordinates for each tile.
+                - y_coords (list): List of y-coordinates for each tile.
+                - filtered_tissue_percentages (list): List of tissue percentages for each tile.
+                - tile_level (int): Level of the image used for tile extraction.
+                - resize_factor (float): The factor by which the tile size was resized.
+        """
+        tile_level, is_within_tolerance = self.get_best_level_for_spacing(
+            spacing, tolerance=tolerance
+        )
         tile_spacing = self.get_level_spacing(tile_level)
         resize_factor = spacing / tile_spacing
+        if is_within_tolerance:
+            resize_factor = 1.0
 
-        tile_size_resized = int(round(tile_size * resize_factor, 0))
+        assert (
+            resize_factor >= 1
+        ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
+
+        tile_size_resized = int(tile_size * resize_factor)
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
@@ -498,9 +878,6 @@ class WholeSlideImage(object):
                 self.level_dimensions[tile_level][1],
             )
 
-        # 256x256 tiles at 1mpp are equivalent to 512x512 tiles at 0.5mpp
-        # ref_tile_size capture the tile size at level 0
-        # assumes self.level_downsamples[0] is always (1, 1)
         tile_downsample = (
             int(self.level_downsamples[tile_level][0]),
             int(self.level_downsamples[tile_level][1]),
@@ -520,21 +897,19 @@ class WholeSlideImage(object):
 
         scale = self.level_downsamples[self.seg_level]
         cont = self.scaleContourDim([contour], (1.0 / scale[0], 1.0 / scale[1]))[0]
-        cont_check_fn = HasEnoughTissue(
+
+        tissue_checker = HasEnoughTissue(
             contour=cont,
             contour_holes=contour_holes,
             tissue_mask=self.binary_mask,
             tile_size=ref_tile_size[0],
             scale=scale,
-            pct=tissue_thresh,
+            pct=min_tissue_percentage,
         )
 
-        # input step_size is defined w.r.t to input spacing
-        # given contours are defined w.r.t level 0, step_size (potentially) needs to be upsampled
         ref_step_size_x = int(step_size * tile_downsample[0])
         ref_step_size_y = int(step_size * tile_downsample[1])
 
-        # x & y values are defined w.r.t level 0
         x_range = np.arange(start_x, stop_x, step=ref_step_size_x)
         y_range = np.arange(start_y, stop_y, step=ref_step_size_y)
         x_coords, y_coords = np.meshgrid(x_range, y_range, indexing="ij")
@@ -542,44 +917,17 @@ class WholeSlideImage(object):
             [x_coords.flatten(), y_coords.flatten()]
         ).transpose()
 
-        if num_workers > 1:
-            num_workers = min(mp.cpu_count(), num_workers)
-            if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
-                num_workers = min(
-                    num_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
-                )
+        # vectorized processing of coordinates using the tissue_checker
+        keep_flags, tissue_pcts = tissue_checker.check_coordinates(coord_candidates)
 
-            pool = mp.Pool(num_workers)
+        if drop_holes:
+            keep_flags = [
+                flag and not self.isInHoles(contour_holes, coord, ref_tile_size[0])
+                for flag, coord in zip(keep_flags, coord_candidates)
+            ]
 
-            iterable = [
-                (coord, contour_holes, ref_tile_size[0], cont_check_fn, drop_holes)
-                for coord in coord_candidates
-            ]
-            results = pool.starmap(WholeSlideImage.process_coord_candidate, iterable)
-            pool.close()
-            filtered_coordinates = np.array(
-                [result[0] for result in results if result[0] is not None]
-            )
-            filtered_tissue_percentages = [
-                result[1] for result in results if result[0] is not None
-            ]
-        else:
-            coordinates = []
-            tissue_percentages = []
-            for coord in coord_candidates:
-                c, pct = self.process_coord_candidate(
-                    coord, contour_holes, ref_tile_size[0], cont_check_fn, drop_holes
-                )
-                coordinates.append(c)
-                tissue_percentages.append(pct)
-            filtered_coordinates = np.array(
-                [coordinate for coordinate in coordinates if coordinate is not None]
-            )
-            filtered_tissue_percentages = [
-                tissue_percentages[i]
-                for i, coordinate in enumerate(coordinates)
-                if coordinate is not None
-            ]
+        filtered_coordinates = coord_candidates[np.array(keep_flags) == 1]
+        filtered_tissue_percentages = np.array(tissue_pcts)[np.array(keep_flags) == 1]
 
         ntile = len(filtered_coordinates)
 
@@ -591,7 +939,7 @@ class WholeSlideImage(object):
                 y_coords,
                 filtered_tissue_percentages,
                 tile_level,
-                tile_size_resized,
+                resize_factor,
             )
 
         else:
@@ -601,6 +949,24 @@ class WholeSlideImage(object):
     def process_coord_candidate(
         coord, contour_holes, tile_size, cont_check_fn, drop_holes
     ):
+        """
+        Processes a candidate coordinate to determine if it should be kept based on
+        its location relative to contours and the percentage of tissue it contains.
+
+        Args:
+            coord (tuple): (x, y) coordinate to be processed.
+            contour_holes (list): A list of contours and holes to check against.
+            tile_size (int): Size of the tile to consider.
+            cont_check_fn (callable): A function to check if the coordinate is within
+                the contours or holes.
+            drop_holes (bool): A flag indicating whether to drop tiles falling in holes during the check.
+
+        Returns:
+            tuple: A tuple containing:
+                - coord (tuple or None): Input coordinate if it passes the check,
+                otherwise None.
+                - tissue_pct (float): Percentage of tissue in the tile.
+        """
         keep_flag, tissue_pct = WholeSlideImage.isInContours(
             cont_check_fn, coord, contour_holes, drop_holes, tile_size
         )
