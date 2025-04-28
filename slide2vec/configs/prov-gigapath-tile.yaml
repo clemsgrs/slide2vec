@@ -8,7 +8,7 @@ tiling:
     tile_size: 256 # size of the tiles to extract, in pixels
 
 model:
-  level: "slide" # level at which to extract the features ("tile", "region" or "slide")
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "prov-gigapath"
   batch_size: 1
 

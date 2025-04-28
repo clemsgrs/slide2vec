@@ -5,11 +5,11 @@ output_dir: "output" # output directory
 tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tile_size: 256 # size of the tiles to extract, in pixels
+    tile_size: 224 # size of the tiles to extract, in pixels
 
 model:
   level: "slide" # level at which to extract the features ("tile", "region" or "slide")
-  name: "prov-gigapath"
+  name: "prism"
   batch_size: 1
 
 speed:
