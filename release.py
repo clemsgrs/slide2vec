@@ -16,7 +16,7 @@ def get_current_version() -> str:
 
 def bump_version(level: str = "patch") -> str:
     print(f"🔧 Bumping version with level: {level}")
-    run(f"bumpver update --{level} --tag --commit")
+    run(f"bumpver update --{level} --commit")
     return get_current_version()
 
 
