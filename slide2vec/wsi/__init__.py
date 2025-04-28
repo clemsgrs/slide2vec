@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -34,7 +33,7 @@ def extract_coordinates(
     segment_params: SegmentationParameters,
     tiling_params: TilingParameters,
     filter_params: FilterParameters,
-    mask_visu_path: Optional[Path] = None,
+    mask_visu_path: Path | None = None,
     num_workers: int = 1,
 ):
     wsi = WholeSlideImage(
@@ -71,7 +70,7 @@ def extract_coordinates(
 
 def save_coordinates(
     *,
-    coordinates: List[Tuple[int, int]],
+    coordinates: list[tuple[int, int]],
     target_spacing: float,
     tile_level: int,
     tile_size: int,
@@ -126,7 +125,7 @@ def draw_grid_from_coordinates(
     tile_size_at_0,
     vis_level: int,
     thickness: int = 2,
-    indices: Optional[List[int]] = None,
+    indices: list[int] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]
     if indices is None:
@@ -195,7 +194,7 @@ def draw_grid_from_coordinates(
     return Image.fromarray(canvas)
 
 
-def pad_to_patch_size(canvas: Image.Image, patch_size: Tuple[int, int]) -> Image.Image:
+def pad_to_patch_size(canvas: Image.Image, patch_size: tuple[int, int]) -> Image.Image:
     width, height = canvas.size
     # compute amount of padding required for width and height
     pad_width = (patch_size[0] - (width % patch_size[0])) % patch_size[0]
@@ -210,7 +209,7 @@ def pad_to_patch_size(canvas: Image.Image, patch_size: Tuple[int, int]) -> Image
 def visualize_coordinates(
     *,
     wsi_path: Path,
-    coordinates: List[Tuple[int, int]],
+    coordinates: list[tuple[int, int]],
     tile_level: int,
     tile_size: int,
     save_dir: Path,

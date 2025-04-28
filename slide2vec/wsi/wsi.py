@@ -2,7 +2,7 @@ import sys
 import math
 import warnings
 from pathlib import Path
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
@@ -65,15 +65,15 @@ class WholeSlideImage(object):
         name (str): Name of the wsi (stem of the path).
         fmt (str): File format of the wsi.
         wsi (wsd.WholeSlideImage): wsi object.
-        spacing (Optional[float]): Manually set spacing at level 0.
-        spacings (List[float]): List of spacings for each level.
-        level_dimensions (List[Tuple[int, int]]): Dimensions at each level.
-        level_downsamples (List[Tuple[float, float]]): Downsample factors for each level.
+        spacing_at_level_0 (float): Manually set spacing at level 0.
+        spacings (list[float]): List of spacings for each level.
+        level_dimensions (list[tuple[int, int]]): Dimensions at each level.
+        level_downsamples (list[tuple[float, float]]): Downsample factors for each level.
         backend (str): Backend used for opening the wsi (default: "asap").
-        mask_path (Optional[Path]): Path to the segmentation mask.
-        mask (Optional[wsd.WholeSlideImage]): mask object.
+        mask_path (Path, optional): Path to the segmentation mask.
+        mask (wsd.WholeSlideImage, optional): Segmentation mask object.
         seg_level (int): Level for segmentation.
-        binary_mask (Optional[np.ndarray]): Binary segmentation mask as a numpy array.
+        binary_mask (np.ndarray): Binary segmentation mask as a numpy array.
     """
 
     def __init__(
@@ -365,10 +365,10 @@ class WholeSlideImage(object):
         contours,
         holes,
         downsample: int = 32,
-        color: Tuple[int] = (0, 255, 0),
-        hole_color: Tuple[int] = (0, 0, 255),
+        color: tuple[int] = (0, 255, 0),
+        hole_color: tuple[int] = (0, 0, 255),
         line_thickness: int = 250,
-        max_size: Optional[int] = None,
+        max_size: int | None = None,
         number_contours: bool = False,
     ):
         vis_level = self.get_best_level_for_downsample_custom(downsample)
@@ -467,9 +467,9 @@ class WholeSlideImage(object):
                 Defaults to 1.
 
         Returns:
-            Tuple:
-                - tile_coordinates (List[Tuple[int, int]]): List of (x, y) coordinates for the extracted tiles.
-                - tissue_percentages (List[float]): List of tissue percentages for each tile.
+            tuple:
+                - tile_coordinates (list[tuple[int, int]]): List of (x, y) coordinates for the extracted tiles.
+                - tissue_percentages (list[float]): List of tissue percentages for each tile.
                 - tile_level (int): Level of the wsi used for tile extraction.
                 - resize_factor (float): The factor by which the tile size was resized.
                 - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
@@ -578,7 +578,7 @@ class WholeSlideImage(object):
                 - "ref_tile_size" (int): Reference tile size for computing areas.
 
         Returns:
-            Tuple[List[np.ndarray], List[List[np.ndarray]]]:
+            tuple[list[np.ndarray], list[list[np.ndarray]]]:
                 - A list of scaled foreground contours.
                 - A list of lists containing scaled hole contours for each foreground contour.
         """

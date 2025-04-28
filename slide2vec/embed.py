@@ -6,7 +6,6 @@ import traceback
 import torchvision
 import pandas as pd
 import multiprocessing as mp
-import torch.distributed as dist
 
 from pathlib import Path
 from contextlib import nullcontext
