@@ -28,6 +28,6 @@ jobs:
     - name: Build and push Docker image
       run: |
         VERSION=${GITHUB_REF#refs/tags/}
-        IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/unicorn_baseline:$VERSION
+        IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/slide2vec:$VERSION
         docker build -t $IMAGE .
         docker push $IMAGE
