@@ -5,7 +5,7 @@ channels:
   - pytorch
 dependencies:
   - pip
-  - python=3.9  # specify the Python version you want to use
+  - python=3.12  # specify the Python version you want to use
   - cuda
   - packaging
   - pytorch==2.0.0
