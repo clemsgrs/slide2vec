@@ -26,7 +26,8 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument(
         "--run-id",
         type=str,
-        help="Name of output directory",
+        default="",
+        help="Name of output subdirectory",
     )
     return parser
 
