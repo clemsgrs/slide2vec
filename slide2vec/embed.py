@@ -57,22 +57,15 @@ def create_dataset(wsi_fp, coordinates_dir, cfg, transforms):
     )
 
 
-def deduplicate_features(indices_all, wsi_feature):
+def sort_features(features, indices):
     """
-    Deduplicates the features tensor based on the indices.
-    Returns both the deduplicated features and the sorted unique indices.
+    Sort the features tensor based on the indices.
     """
-    sorted_order = indices_all.argsort()
-    indices_sorted = indices_all[sorted_order]
-    features_sorted = wsi_feature[sorted_order]
-
-    dedup_dict = {}
-    for i, idx in enumerate(indices_sorted):
-        if idx.item() not in dedup_dict:
-            dedup_dict[idx.item()] = features_sorted[i]
-    unique_idxs = sorted(dedup_dict.keys())
-    dedup_features = torch.stack([dedup_dict[k] for k in unique_idxs], dim=0)
-    return dedup_features, unique_idxs
+    sorted_order = indices.argsort()
+    indices_sorted = indices[sorted_order]
+    features_sorted = features[sorted_order]
+    assert len(torch.unique(indices_sorted)) == len(indices_sorted), "Indices are not unique."
+    return features_sorted
 
 
 def run_inference(dataloader, model, device, autocast_context, unit, batch_size):
@@ -93,11 +86,13 @@ def run_inference(dataloader, model, device, autocast_context, unit, batch_size)
             ):
                 idx, image = batch
                 image = image.to(device, non_blocking=True)
-                feature = model(image)
+                feature = model(image).cpu()
                 features_list.append(feature)
-                indices_list.append(idx.to(device, non_blocking=True))
-    features = torch.cat(features_list, dim=0)
-    indices = torch.cat(indices_list, dim=0)
+                indices_list.append(idx)
+    # concatenate features and indices
+    # and move to device
+    features = torch.cat(features_list, dim=0).to(device, non_blocking=True)
+    indices = torch.cat(indices_list, dim=0).to(device, non_blocking=True)
     return features, indices
 
 
@@ -154,7 +149,6 @@ def main(args):
     feature_extraction_updates = {}
 
     transforms = create_transforms(cfg, model)
-    print(f"transform: {transforms}")
 
     for wsi_fp in tqdm.tqdm(
         wsi_paths_to_process,
@@ -197,22 +191,18 @@ def main(args):
                 features_list = distributed.gather_tensor(features)
                 indices_list = distributed.gather_tensor(indices)
                 if distributed.is_main_process():
-                    wsi_feature = torch.cat(features_list, dim=0)
-                    indices_all = torch.cat(indices_list, dim=0)
+                    features_gathered = torch.cat(features_list, dim=0)
+                    indices_gathered = torch.cat(indices_list, dim=0)
                 else:
                     # For non-main processes, a placeholder is provided.
-                    wsi_feature = torch.rand(
+                    features_gathered = torch.rand(
                         (len(dataset), model.features_dim), device=model.device
                     )
-                    indices_all = None
-            else:
-                wsi_feature = features
-                indices_all = indices
+                    indices_gathered = None
 
             if distributed.is_main_process():
-                wsi_feature, unique_idxs = deduplicate_features(
-                    indices_all, wsi_feature
-                )
+                wsi_feature = sort_features(features_gathered, indices_gathered)
+                indices = list(indices_gathered.cpu())
 
             torch.distributed.barrier()
 
@@ -222,13 +212,13 @@ def main(args):
                 if distributed.is_main_process():
                     if cfg.model.name == "prov-gigapath":
                         coordinates = torch.tensor(
-                            dataset.scaled_coordinates[unique_idxs],
+                            dataset.scaled_coordinates[indices],
                             dtype=torch.int64,
                             device=model.device,
                         )
                     else:
                         coordinates = torch.tensor(
-                            dataset.coordinates[unique_idxs],
+                            dataset.coordinates[indices],
                             dtype=torch.int64,
                             device=model.device,
                         )
@@ -291,6 +281,9 @@ def main(args):
             f"Completed feature extraction: {total_slides - len(failed_feature_extraction)}"
         )
         print("=+=" * 10)
+
+    if distributed.is_enabled():
+       torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
