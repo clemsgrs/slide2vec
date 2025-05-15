@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import wandb
+import socket
 import signal
 import argparse
 import threading
@@ -50,10 +51,15 @@ def run_tiling(config_file, run_id):
 
 def run_feature_extraction(config_file, run_id):
     print("Running embed.py...")
+    # find a free port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        free_port = s.getsockname()[1]
     cmd = [
         sys.executable,
         "-m",
         "torch.distributed.run",
+        f"--master_port={free_port}",
         "--nproc_per_node=gpu",
         "slide2vec/embed.py",
         "--run-id",

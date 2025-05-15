@@ -10,8 +10,3 @@ repos:
     hooks:
       - id: black
         args: ['slide2vec']
-  # - repo: https://github.com/pycqa/pylint
-  #   rev: ''  # Use the latest commit on the master branch
-  #   hooks:
-  #     - id: pylint
-  #       args: ['--exit-zero', 'slide2vec']

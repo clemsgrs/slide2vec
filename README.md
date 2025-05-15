@@ -1,13 +1,32 @@
 # slide2vec
 
-:warning: Make sure to run the following:
+[![PyPI version](https://img.shields.io/pypi/v/slide2vec?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/slide2vec/)
+[![Docker Version](https://img.shields.io/docker/v/waticlems/slide2vec?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/slide2vec)
+
+
+## 🛠️ Installation
+
+System requirements: Linux-based OS (e.g., Ubuntu 22.04) with Python 3.10+ and Docker installed.
+
+We recommend running the script inside a container using the latest `slide2vec` image from Docker Hub:
 
 ```shell
-export PYTHONPATH="${PYTHONPATH}:/path/to/slide2vec"
-export HF_TOKEN=<your-huggingface-api-token>
+docker pull waticlems/slide2vec:latest
+docker run --rm -it \
+    -v /path/to/your/data:/data \
+    -e HF_TOKEN=<your-huggingface-api-token> \
+    waticlems/slide2vec:latest
 ```
 
-## Extract features
+Replace `/path/to/your/data` with your local data directory.
+
+Alternatively, you can install `slide2vec` via pip:
+
+```shell
+pip install slide2vec
+```
+
+## 🚀 Extract features
 
 1. Create a `.csv` file with slide paths. Optionally, you can provide paths to pre-computed tissue masks.
 
@@ -29,5 +48,5 @@ export HF_TOKEN=<your-huggingface-api-token>
 3. Kick off distributed feature extraction
 
     ```shell
-    python3 slide2vec/main.py --config-file </path/to/config.yaml>
+    python3 -m slide2vec.main --config-file </path/to/config.yaml>
     ```

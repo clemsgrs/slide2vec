@@ -28,6 +28,11 @@ jobs:
     - name: Build and push Docker image
       run: |
         VERSION=${GITHUB_REF#refs/tags/}
-        IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/slide2vec:$VERSION
-        docker build -t $IMAGE .
-        docker push $IMAGE
+        IMAGE_BASE=${{ secrets.DOCKERHUB_USERNAME }}/slide2vec
+
+        # Build the image
+        docker build -t $IMAGE_BASE:$VERSION -t $IMAGE_BASE:latest .
+
+        # Push both tags
+        docker push $IMAGE_BASE:$VERSION
+        docker push $IMAGE_BASE:latest
