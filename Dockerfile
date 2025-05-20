@@ -21,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
     zlib1g-dev \
     curl \
+    openssh-server \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Expose port for ssh and jupyter
+EXPOSE 22 8888
 
 # Install python
 RUN apt-get update && apt-get install -y python3-pip python3-dev python-is-python3 \

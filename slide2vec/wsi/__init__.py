@@ -210,8 +210,7 @@ def visualize_coordinates(
     *,
     wsi_path: Path,
     coordinates: list[tuple[int, int]],
-    tile_level: int,
-    tile_size: int,
+    tile_size_lv0: int,
     save_dir: Path,
     downsample: int = 64,
     backend: str = "asap",
@@ -226,23 +225,19 @@ def visualize_coordinates(
     if len(coordinates) == 0:
         return canvas
 
-    tile_size_at_0 = tuple(
-        (np.array((tile_size, tile_size)) * wsi.level_downsamples[tile_level]).astype(
-            np.int32
-        )
-    )  # defined w.r.t level 0
-
     w, h = wsi.level_dimensions[vis_level]
     if w * h > Image.MAX_IMAGE_PIXELS:
         raise Image.DecompressionBombError(
             f"Visualization downsample ({downsample}) is too large"
         )
 
+    tile_size_at_0 = (tile_size_lv0, tile_size_lv0)
     tile_size_at_vis_level = tuple(
         (np.array(tile_size_at_0) / np.array(wsi.level_downsamples[vis_level])).astype(
             np.int32
         )
     )  # defined w.r.t vis_level
+
     canvas = pad_to_patch_size(canvas, tile_size_at_vis_level)
     canvas = np.array(canvas)
     canvas = draw_grid_from_coordinates(
