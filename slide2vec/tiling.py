@@ -72,10 +72,9 @@ def process_slide(
             visualize_coordinates(
                 wsi_path=wsi_path,
                 coordinates=coordinates,
-                tile_level=tile_level,
-                tile_size=cfg.tiling.params.tile_size,
+                tile_size_lv0=tile_size_lv0,
                 save_dir=tile_visualize_dir,
-                downsample=32,
+                downsample=cfg.tiling.visu_params.downsample,
                 backend=cfg.tiling.backend,
             )
         return str(wsi_path), {"status": "success"}
