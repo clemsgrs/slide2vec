@@ -57,15 +57,26 @@ def create_dataset(wsi_fp, coordinates_dir, cfg, transforms):
     )
 
 
-def sort_features(features, indices):
+def deduplicate_and_sort_features(features, indices):
     """
-    Sort the features tensor based on the indices.
+    Dediplicate and sort the features tensor based on the indices.
     """
     sorted_order = indices.argsort()
     indices_sorted = indices[sorted_order]
     features_sorted = features[sorted_order]
-    assert len(torch.unique(indices_sorted)) == len(indices_sorted), "Indices are not unique."
-    return features_sorted
+
+    dedup_dict = {}
+    for i, idx in enumerate(indices_sorted):
+        if idx.item() not in dedup_dict:
+            dedup_dict[idx.item()] = features_sorted[i]
+
+    del features_sorted
+    del indices_sorted
+
+    indices_sorted_unique = sorted(list(dedup_dict.keys()))
+    assert len(set(indices_sorted_unique)) == len(indices_sorted_unique), "Indices are not unique."
+    features_sorted_unique = torch.stack([dedup_dict[k] for k in indices_sorted_unique], dim=0)
+    return features_sorted_unique, indices_sorted_unique
 
 
 def run_inference(dataloader, model, device, autocast_context, unit, batch_size):
@@ -201,8 +212,7 @@ def main(args):
                     indices_gathered = None
 
             if distributed.is_main_process():
-                wsi_feature = sort_features(features_gathered, indices_gathered)
-                indices = list(indices_gathered.cpu())
+                features, indices = deduplicate_and_sort_features(features_gathered, indices_gathered)
 
             torch.distributed.barrier()
 
@@ -231,14 +241,14 @@ def main(args):
                     )
                 with torch.inference_mode():
                     with autocast_context:
-                        wsi_feature = model.forward_slide(
-                            wsi_feature,
+                        features = model.forward_slide(
+                            features,
                             tile_coordinates=coordinates,
                             tile_size_lv0=dataset.tile_size_lv0,
                         )
 
             if distributed.is_main_process():
-                torch.save(wsi_feature, Path(features_dir, f"{wsi_fp.stem}.pt"))
+                torch.save(features, Path(features_dir, f"{wsi_fp.stem}.pt"))
 
             feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
 

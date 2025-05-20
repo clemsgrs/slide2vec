@@ -23,8 +23,8 @@ class TileDataset(torch.utils.data.Dataset):
         self.scaled_coordinates = self.scale_coordinates()
         self.tile_level = coordinates["tile_level"]
         self.tile_size_resized = coordinates["tile_size_resized"]
-        self.resize_factor = coordinates["resize_factor"]
-        self.tile_size = (self.tile_size_resized / self.resize_factor).astype(int)
+        resize_factor = coordinates["resize_factor"]
+        self.tile_size = (self.tile_size_resized / resize_factor).astype(int)
         self.tile_size_lv0 = coordinates["tile_size_lv0"][0]
 
     def scale_coordinates(self):
