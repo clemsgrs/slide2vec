@@ -80,11 +80,14 @@ class WholeSlideImage(object):
     def __init__(
         self,
         path: Path,
-        mask_path: Path | None = None,
-        spacing_at_level_0: float | None = None,
+        # mask_path: Path | None = None,
+        mask_path: Path = None,
+        # spacing_at_level_0: float | None = None,
+        spacing_at_level_0: float = None,
         backend: str = "asap",
         segment: bool = False,
-        segment_params: SegmentationParameters | None = None,
+        # segment_params: SegmentationParameters | None = None,
+        segment_params: SegmentationParameters = None,
     ):
         """
         Initializes a Whole Slide Image object with optional mask and spacing.
@@ -245,7 +248,8 @@ class WholeSlideImage(object):
         ), f"Unable to find a spacing less than or equal to the target spacing ({target_spacing}) or within {int(tolerance * 100)}% of the target spacing."
         return level, is_within_tolerance
 
-    def get_best_level_for_downsample_custom(self, downsample: float | int):
+    # def get_best_level_for_downsample_custom(self, downsample: float | int):
+    def get_best_level_for_downsample_custom(self, downsample: int):
         """
         Determines the best level for a given downsample factor based on the available
         level downsample values.
@@ -375,7 +379,8 @@ class WholeSlideImage(object):
         color: tuple[int] = (0, 255, 0),
         hole_color: tuple[int] = (0, 0, 255),
         line_thickness: int = 250,
-        max_size: int | None = None,
+        # max_size: int | None = None,
+        max_size: int = None,
         number_contours: bool = False,
     ):
         vis_level = self.get_best_level_for_downsample_custom(downsample)
