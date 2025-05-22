@@ -1,4 +1,6 @@
+import gc
 import os
+import numpy as np
 import tqdm
 import torch
 import argparse
@@ -16,6 +18,8 @@ from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
+
+torchvision.disable_beta_transforms_warning()
 
 
 def get_args_parser(add_help: bool = True):
@@ -79,32 +83,27 @@ def deduplicate_and_sort_features(features, indices):
     return features_sorted_unique, indices_sorted_unique
 
 
-def run_inference(dataloader, model, device, autocast_context, unit, batch_size):
-    """
-    Run inference on the provided dataloader and return concatenated features and indices.
-    """
-    features_list = []
-    indices_list = []
-    with torch.inference_mode():
-        with autocast_context:
-            for batch in tqdm.tqdm(
-                dataloader,
-                desc=f"Inference on GPU {distributed.get_local_rank()}",
-                unit=unit,
-                unit_scale=batch_size,
-                leave=False,
-                position=2 + distributed.get_local_rank(),
-            ):
-                idx, image = batch
-                image = image.to(device, non_blocking=True)
-                feature = model(image).cpu()
-                features_list.append(feature)
-                indices_list.append(idx)
-    # concatenate features and indices
-    # and move to device
-    features = torch.cat(features_list, dim=0).to(device, non_blocking=True)
-    indices = torch.cat(indices_list, dim=0).to(device, non_blocking=True)
-    return features, indices
+def run_inference(dataloader, model, device, autocast_context, unit, batch_size, features):
+    with torch.inference_mode(), autocast_context:
+        for batch in tqdm.tqdm(
+            dataloader,
+            desc=f"Inference on GPU {distributed.get_local_rank()}",
+            unit=unit,
+            unit_scale=batch_size,
+            leave=False,
+            position=2 + distributed.get_local_rank(),
+        ):
+            idx, image = batch
+            image = image.to(device, non_blocking=True)
+            feature = model(image).cpu().numpy()
+            features[idx] = feature
+
+            # cleanup
+            del image, feature
+
+    # cleanup
+    del features
+    gc.collect()
 
 
 def main(args):
@@ -160,6 +159,7 @@ def main(args):
     feature_extraction_updates = {}
 
     transforms = create_transforms(cfg, model)
+    print(f"transforms: {transforms}")
 
     for wsi_fp in tqdm.tqdm(
         wsi_paths_to_process,
@@ -185,34 +185,33 @@ def main(args):
                 batch_size=cfg.model.batch_size,
                 sampler=sampler,
                 num_workers=num_workers,
-                pin_memory=True,
+                pin_memory=False,
             )
 
-            features, indices = run_inference(
+            tile_feature_path = features_dir / f"{wsi_fp.stem.replace(' ', '_')}_tile.npy"
+            feature_path = features_dir / f"{wsi_fp.stem.replace(' ', '_')}.pt"
+
+            # get feature dimension using a dry run
+            with torch.inference_mode(), autocast_context:
+                sample_batch = next(iter(dataloader))
+                sample_image = sample_batch[1].to(model.device)
+                sample_feature = model(sample_image).cpu().numpy()
+                feature_dim = sample_feature.shape[-1]
+                dtype = sample_feature.dtype
+
+            # create a memory-mapped tensor on disk
+            num_tiles = len(dataset)
+            tile_features = np.memmap(tile_feature_path, dtype=dtype, mode='w+', shape=(num_tiles, feature_dim))
+
+            run_inference(
                 dataloader,
                 model,
                 model.device,
                 autocast_context,
                 unit,
                 cfg.model.batch_size,
+                tile_features,
             )
-
-            # gather features from all gpus if needed
-            if distributed.is_enabled_and_multiple_gpus():
-                features_list = distributed.gather_tensor(features)
-                indices_list = distributed.gather_tensor(indices)
-                if distributed.is_main_process():
-                    features_gathered = torch.cat(features_list, dim=0)
-                    indices_gathered = torch.cat(indices_list, dim=0)
-                else:
-                    # For non-main processes, a placeholder is provided.
-                    features_gathered = torch.rand(
-                        (len(dataset), model.features_dim), device=model.device
-                    )
-                    indices_gathered = None
-
-            if distributed.is_main_process():
-                features, indices = deduplicate_and_sort_features(features_gathered, indices_gathered)
 
             torch.distributed.barrier()
 
@@ -222,34 +221,44 @@ def main(args):
                 if distributed.is_main_process():
                     if cfg.model.name == "prov-gigapath":
                         coordinates = torch.tensor(
-                            dataset.scaled_coordinates[indices],
+                            dataset.scaled_coordinates,
                             dtype=torch.int64,
                             device=model.device,
                         )
                     else:
                         coordinates = torch.tensor(
-                            dataset.coordinates[indices],
+                            dataset.coordinates,
                             dtype=torch.int64,
                             device=model.device,
                         )
                 else:
                     coordinates = torch.randint(
                         10000,
-                        (len(dataset), 2),
+                        (num_tiles, 2),
                         dtype=torch.int64,
                         device=model.device,
                     )
                 with torch.inference_mode():
                     with autocast_context:
-                        features = model.forward_slide(
-                            features,
+                        tile_features = torch.from_numpy(
+                            np.memmap(tile_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
+                        ).to(model.device)
+                        wsi_feature = model.forward_slide(
+                            tile_features,
                             tile_coordinates=coordinates,
                             tile_size_lv0=dataset.tile_size_lv0,
                         )
 
-            if distributed.is_main_process():
-                torch.save(features, Path(features_dir, f"{wsi_fp.stem}.pt"))
+            else:
+                wsi_feature = torch.from_numpy(
+                    np.memmap(tile_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
+                ).to(model.device)
 
+            if distributed.is_main_process():
+                torch.save(wsi_feature, feature_path)
+                os.remove(tile_feature_path)
+
+            torch.distributed.barrier()
             feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
 
         except Exception as e:

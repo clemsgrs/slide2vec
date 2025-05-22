@@ -108,13 +108,6 @@ def initialize_wandb(
             config=config,
             tags=tags,
         )
-    config_file_path = Path(cfg.output_dir, run.id, "run_config.yaml")
-    config_file_path.parent.mkdir(exist_ok=True, parents=True)
-    d = OmegaConf.to_container(cfg, resolve=True)
-    with open(config_file_path, "w+") as f:
-        write_dictconfig(d, f)
-        wandb.save(str(config_file_path))
-        f.close()
     return run
 
 

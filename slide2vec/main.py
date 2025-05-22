@@ -116,13 +116,13 @@ def main(args):
 if __name__ == "__main__":
     import warnings
     import torchvision
+    torchvision.disable_beta_transforms_warning()
 
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
     warnings.filterwarnings("ignore", category=FutureWarning)
-
-    torchvision.disable_beta_transforms_warning()
+    warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
 
     args = get_args_parser(add_help=True).parse_args()
     main(args)

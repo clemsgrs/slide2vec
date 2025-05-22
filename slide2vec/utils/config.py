@@ -62,7 +62,9 @@ def setup(config_file):
     fix_random_seeds(0)
     setup_logging(output=cfg.output_dir, level=logging.INFO)
     logger.info("git:\n  {}\n".format(get_sha()))
-    write_config(cfg, cfg.output_dir)
+    cfg_path = write_config(cfg, cfg.output_dir)
+    if cfg.wandb.enable:
+        wandb_run.save(cfg_path)
     return cfg
 
 
