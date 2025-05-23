@@ -188,7 +188,6 @@ def main(args):
                 pin_memory=False,
             )
 
-            tile_feature_path = features_dir / f"{wsi_fp.stem.replace(' ', '_')}_tile.npy"
             feature_path = features_dir / f"{wsi_fp.stem.replace(' ', '_')}.pt"
 
             # get feature dimension using a dry run
@@ -196,12 +195,22 @@ def main(args):
                 sample_batch = next(iter(dataloader))
                 sample_image = sample_batch[1].to(model.device)
                 sample_feature = model(sample_image).cpu().numpy()
-                feature_dim = sample_feature.shape[-1]
+                if cfg.model.level == "region":
+                    num_tiles = sample_feature.shape[-2]
+                    feature_dim = sample_feature.shape[-1]
+                else:
+                    feature_dim = sample_feature.shape[-1]
                 dtype = sample_feature.dtype
 
             # create a memory-mapped tensor on disk
-            num_tiles = len(dataset)
-            tile_features = np.memmap(tile_feature_path, dtype=dtype, mode='w+', shape=(num_tiles, feature_dim))
+            if cfg.model.level == "region":
+                num_regions = len(dataset)
+                tmp_feature_path = features_dir / f".{wsi_fp.stem.replace(' ', '_')}.npy"
+                features = np.memmap(tmp_feature_path, dtype=dtype, mode='w+', shape=(num_regions, num_tiles, feature_dim))
+            else:
+                num_tiles = len(dataset)
+                tmp_feature_path = features_dir / f".{wsi_fp.stem.replace(' ', '_')}.npy"
+                features = np.memmap(tmp_feature_path, dtype=dtype, mode='w+', shape=(num_tiles, feature_dim))
 
             run_inference(
                 dataloader,
@@ -210,7 +219,7 @@ def main(args):
                 autocast_context,
                 unit,
                 cfg.model.batch_size,
-                tile_features,
+                features,
             )
 
             torch.distributed.barrier()
@@ -240,23 +249,28 @@ def main(args):
                     )
                 with torch.inference_mode():
                     with autocast_context:
-                        tile_features = torch.from_numpy(
-                            np.memmap(tile_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
+                        features = torch.from_numpy(
+                            np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
                         ).to(model.device)
                         wsi_feature = model.forward_slide(
-                            tile_features,
+                            features,
                             tile_coordinates=coordinates,
                             tile_size_lv0=dataset.tile_size_lv0,
                         )
 
             else:
-                wsi_feature = torch.from_numpy(
-                    np.memmap(tile_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
-                ).to(model.device)
+                if cfg.model.level == "region":
+                    wsi_feature = torch.from_numpy(
+                        np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_regions, num_tiles, feature_dim))
+                    ).to(model.device)
+                else:
+                    wsi_feature = torch.from_numpy(
+                        np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim))
+                    ).to(model.device)
 
             if distributed.is_main_process():
                 torch.save(wsi_feature, feature_path)
-                os.remove(tile_feature_path)
+                os.remove(tmp_feature_path)
 
             torch.distributed.barrier()
             feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
