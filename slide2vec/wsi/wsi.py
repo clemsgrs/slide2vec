@@ -868,7 +868,7 @@ class WholeSlideImage(object):
             resize_factor >= 1
         ), f"Resize factor should be greater than or equal to 1. Got {resize_factor}"
 
-        tile_size_resized = int(tile_size * resize_factor)
+        tile_size_resized = int(round(tile_size * resize_factor),0)
         step_size = int(tile_size_resized * (1.0 - overlap))
 
         if contour is not None:
