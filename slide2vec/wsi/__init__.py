@@ -82,7 +82,7 @@ def save_coordinates(
     x = [x for x, _ in coordinates]  # defined w.r.t level 0
     y = [y for _, y in coordinates]  # defined w.r.t level 0
     ntile = len(x)
-    tile_size_resized = int(round(tile_size * resize_factor),0)
+    tile_size_resized = int(round(tile_size * resize_factor,0))
     dtype = [
         ("x", int),
         ("y", int),
