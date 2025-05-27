@@ -489,7 +489,7 @@ class WholeSlideImage(object):
                 - tile_size_lv0 (int): The tile size at level 0 of the wsi pyramid.
         """
         scale = tiling_params.spacing / self.get_level_spacing(0)
-        tile_size_lv0 = int(tiling_params.tile_size * scale)
+        tile_size_lv0 = int(round(tiling_params.tile_size * scale, 0))
 
         contours, holes = self.detect_contours(
             target_spacing=tiling_params.spacing,
