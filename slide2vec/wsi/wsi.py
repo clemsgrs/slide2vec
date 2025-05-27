@@ -610,7 +610,7 @@ class WholeSlideImage(object):
         target_scale = self.level_downsamples[self.seg_level]
         scale = tuple(a / b for a, b in zip(target_scale, current_scale))
         ref_tile_size = filter_params.ref_tile_size
-        scaled_ref_tile_area = int(ref_tile_size**2 / (scale[0] * scale[1]))
+        scaled_ref_tile_area = int(round(ref_tile_size**2 / (scale[0] * scale[1]),0))
 
         adjusted_filter_params = FilterParameters(
             ref_tile_size=filter_params.ref_tile_size,
@@ -910,8 +910,8 @@ class WholeSlideImage(object):
             pct=min_tissue_percentage,
         )
 
-        ref_step_size_x = int(step_size * tile_downsample[0])
-        ref_step_size_y = int(step_size * tile_downsample[1])
+        ref_step_size_x = int(round(step_size * tile_downsample[0], 0))
+        ref_step_size_y = int(round(step_size * tile_downsample[1], 0))
 
         x_range = np.arange(start_x, stop_x, step=ref_step_size_x)
         y_range = np.arange(start_y, stop_y, step=ref_step_size_y)

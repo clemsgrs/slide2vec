@@ -44,7 +44,7 @@ class HasEnoughTissue(object):
                 - keep_flag is 1 if the tile has enough tissue, otherwise 0.
                 - tissue_pct is the percentage of tissue in the tile.
         """
-        downsampled_tile_size = int(self.tile_size * 1 / self.scale[0])
+        downsampled_tile_size = int(round(self.tile_size * 1 / self.scale[0], 0))
         assert (
             downsampled_tile_size > 0
         ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
@@ -78,7 +78,7 @@ class HasEnoughTissue(object):
                 - keep_flags is a list of 1s and 0s indicating whether each tile has enough tissue.
                 - tissue_pcts is a list of tissue percentages for each tile.
         """
-        downsampled_tile_size = int(self.tile_size * 1 / self.scale[0])
+        downsampled_tile_size = int(round(self.tile_size * 1 / self.scale[0], 0))
         assert (
             downsampled_tile_size > 0
         ), "downsampled tile_size is equal to zero, aborting; please consider using a smaller seg_params.downsample parameter"
