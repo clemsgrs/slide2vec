@@ -107,16 +107,17 @@ def main(args):
     if process_list.is_file() and cfg.resume:
         process_df = pd.read_csv(process_list)
     else:
-        process_df = pd.DataFrame(
-            {
-                "wsi_path": [str(p) for p in wsi_paths],
-                "mask_path": [str(p) if p is not None else p for p in mask_paths],
-                "tiling_status": ["tbp"] * len(wsi_paths),
-                "feature_status": ["tbp"] * len(wsi_paths),
-                "error": [str(np.nan)] * len(wsi_paths),
-                "traceback": [str(np.nan)] * len(wsi_paths),
-            }
-        )
+        data = {
+            "wsi_path": [str(p) for p in wsi_paths],
+            "mask_path": [str(p) if p is not None else p for p in mask_paths],
+            "tiling_status": ["tbp"] * len(wsi_paths),
+            "feature_status": ["tbp"] * len(wsi_paths),
+            "error": [str(np.nan)] * len(wsi_paths),
+            "traceback": [str(np.nan)] * len(wsi_paths),
+        }
+        if getattr(cfg.model, "level", None) == "sllide":
+            data["aggregation_status"] = ["tbp"] * len(wsi_paths)
+        process_df = pd.DataFrame(data)
 
     skip_tiling = process_df["tiling_status"].str.contains("success").all()
 
