@@ -21,15 +21,13 @@ def get_args_parser(add_help: bool = True):
     return parser
 
 
-def log_progress(features_dir: Path, total_slides: int, log_interval: int = 10):
-    while True:
+def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: int = 10):
+    while not stop_event.is_set():
         if not features_dir.exists():
             time.sleep(log_interval)
             continue
         num_files = len(list(features_dir.glob("*.pt")))
         wandb.log({"processed": num_files})
-        if num_files >= total_slides:
-            break
         time.sleep(log_interval)
 
 
@@ -96,13 +94,13 @@ def main(args):
 
     run_tiling(config_file, run_id)
 
-    coordinates_dir = output_dir / "coordinates"
-    total_slides = len(list(coordinates_dir.glob("*.npy")))
+    print("Tiling completed.")
+    print("=+=" * 10)
 
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
         log_thread = threading.Thread(
-            target=log_progress, args=(features_dir, total_slides), daemon=True
+            target=log_progress, args=(features_dir, stop_event), daemon=True
         )
         log_thread.start()
 
