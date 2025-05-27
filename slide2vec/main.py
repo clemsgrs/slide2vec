@@ -21,15 +21,13 @@ def get_args_parser(add_help: bool = True):
     return parser
 
 
-def log_progress(features_dir: Path, total_slides: int, log_interval: int = 10):
-    while True:
+def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: int = 10):
+    while not stop_event.is_set():
         if not features_dir.exists():
             time.sleep(log_interval)
             continue
         num_files = len(list(features_dir.glob("*.pt")))
         wandb.log({"processed": num_files})
-        if num_files >= total_slides:
-            break
         time.sleep(log_interval)
 
 
@@ -81,7 +79,36 @@ def run_feature_extraction(config_file, run_id):
         proc.wait()
         sys.exit(1)
     if proc.returncode != 0:
-        print("Slide embedding failed. Exiting.")
+        print("Feature extraction failed. Exiting.")
+        sys.exit(proc.returncode)
+
+
+def run_feature_aggregation(config_file, run_id):
+    print("Running aggregate.py...")
+    # find a free port
+    cmd = [
+        sys.executable,
+        "slide2vec/aggregate.py",
+        "--run-id",
+        run_id,
+        "--config-file",
+        config_file,
+    ]
+    # launch in its own process group.
+    proc = subprocess.Popen(
+        cmd,
+        preexec_fn=os.setsid,
+        text=True,
+    )
+    try:
+        proc.communicate()
+    except KeyboardInterrupt:
+        print("Received CTRL+C, terminating embed.py process group...")
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        proc.wait()
+        sys.exit(1)
+    if proc.returncode != 0:
+        print("Feature aggregation failed. Exiting.")
         sys.exit(proc.returncode)
 
 
@@ -96,21 +123,32 @@ def main(args):
 
     run_tiling(config_file, run_id)
 
-    coordinates_dir = output_dir / "coordinates"
-    total_slides = len(list(coordinates_dir.glob("*.npy")))
+    print("Tiling completed.")
+    print("=+=" * 10)
 
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
+        stop_event = threading.Event()
         log_thread = threading.Thread(
-            target=log_progress, args=(features_dir, total_slides), daemon=True
+            target=log_progress, args=(features_dir, stop_event), daemon=True
         )
         log_thread.start()
 
     run_feature_extraction(config_file, run_id)
+    print("Feature extraction completed.")
+    print("=+=" * 10)
+
+    if cfg.model.level == "slide":
+        run_feature_aggregation(config_file, run_id)
+        print("Feature aggregation completed.")
+        print("=+=" * 10)
 
     if cfg.wandb.enable:
+        stop_event.set()
         log_thread.join()
-    print("Feature extraction and logging complete.")
+
+    print("All tasks finished successfully.")
+    print("=+=" * 10)
 
 
 if __name__ == "__main__":
