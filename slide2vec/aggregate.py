@@ -10,7 +10,6 @@ import pandas as pd
 import multiprocessing as mp
 import wholeslidedata as wsd
 
-from PIL import Image
 from pathlib import Path
 from contextlib import nullcontext
 
@@ -35,38 +34,6 @@ def get_args_parser(add_help: bool = True):
         help="Name of output subdirectory",
     )
     return parser
-
-
-def get_feature_dim_and_dtype(wsi_fp, coordinates_arr, model, backend, autocast_context):
-    """
-    Get the feature dimension and dtype using a dry run.
-    """
-    wsi = wsd.WholeSlideImage(wsi_fp, backend=backend)
-    x, y = coordinates_arr["x"][0], coordinates_arr["y"][0]
-    tile_size_resized = coordinates_arr["tile_size_resized"][0]
-    resize_factor = coordinates_arr["resize_factor"][0]
-    tile_size = np.round(tile_size_resized / resize_factor).astype(int)
-    tile_level = coordinates_arr["tile_level"][0]
-    tile_spacing = wsi.spacings[tile_level]
-    tile_arr = wsi.get_patch(
-        x,
-        y,
-        tile_size_resized,
-        tile_size_resized,
-        spacing=tile_spacing,
-        center=False,
-    )
-    tile = Image.fromarray(tile_arr).convert("RGB")
-    if tile_size != tile_size_resized:
-        tile = tile.resize((tile_size, tile_size))
-    transforms = model.get_transforms()
-    tile = transforms(tile)
-    with torch.inference_mode(), autocast_context:
-        tile = tile.to(model.device).unsqueeze(0)  # add batch dimension
-        sample_feature = model(tile).cpu().numpy()
-        feature_dim = sample_feature.shape[-1]
-        dtype = sample_feature.dtype
-    return feature_dim, dtype
 
 
 def scale_coordinates(wsi_fp, coordinates, spacing, backend):
@@ -117,7 +84,6 @@ def main(args):
     wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
 
     features_dir = Path(cfg.output_dir, "features")
-    tmp_dir = Path("/tmp")
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -139,16 +105,8 @@ def main(args):
             coordinates_file = coordinates_dir / f"{name}.npy"
             coordinates_arr = np.load(coordinates_file, allow_pickle=True)
             coordinates = (np.array([coordinates_arr["x"], coordinates_arr["y"]]).T).astype(int)
-            num_tiles = len(coordinates)
-
-            # get feature dimension and dtype using a dry run
-            feature_dim, dtype = get_feature_dim_and_dtype(
-                wsi_fp, coordinates_arr, model, cfg.tiling.backend, autocast_context
-            )
-            torch.cuda.empty_cache()
 
             feature_path = features_dir / f"{name}.pt"
-            tmp_feature_path = tmp_dir / f"{name}.npy"
 
             # run forward pass with slide encoder
             if cfg.model.name == "prov-gigapath":
@@ -168,9 +126,7 @@ def main(args):
 
             with torch.inference_mode():
                 with autocast_context:
-                    features = torch.from_numpy(
-                        np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim)).copy()
-                    ).to(model.device)
+                    features = torch.load(feature_path).to(model.device)
                     tile_size_lv0 = coordinates_arr["tile_size_lv0"][0]
                     wsi_feature = model.forward_slide(
                         features,
@@ -179,7 +135,6 @@ def main(args):
                     )
 
             torch.save(wsi_feature, feature_path)
-            os.remove(tmp_feature_path)
             del wsi_feature
             torch.cuda.empty_cache()
             gc.collect()
