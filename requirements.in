@@ -1,4 +1,5 @@
 omegaconf
+h5py
 huggingface-hub
 numpy<2
 pandas

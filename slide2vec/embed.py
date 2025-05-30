@@ -1,6 +1,6 @@
 import gc
 import os
-import numpy as np
+import h5py
 import tqdm
 import torch
 import argparse
@@ -61,27 +61,48 @@ def create_dataset(wsi_fp, coordinates_dir, spacing, backend, transforms):
     )
 
 
-def run_inference(dataloader, model, device, autocast_context, unit, batch_size, features):
-    with torch.inference_mode(), autocast_context:
-        for batch in tqdm.tqdm(
-            dataloader,
-            desc=f"Inference on GPU {distributed.get_local_rank()}",
-            unit=unit,
-            unit_scale=batch_size,
-            leave=False,
-            position=2 + distributed.get_local_rank(),
-        ):
-            idx, image = batch
-            image = image.to(device, non_blocking=True)
-            feature = model(image).cpu().numpy()
-            features[idx] = feature
+def run_inference(dataloader, model, device, autocast_context, unit, batch_size, feature_path, feature_dim, dtype):
+    with h5py.File(feature_path, "w") as f:
+        features = f.create_dataset("features", shape=(0, *feature_dim), maxshape=(None, *feature_dim), dtype=dtype, chunks=(batch_size, *feature_dim))
+        indices = f.create_dataset("indices", shape=(0,), maxshape=(None,), dtype='int64', chunks=(batch_size,))
+        with torch.inference_mode(), autocast_context:
+            for batch in tqdm.tqdm(
+                dataloader,
+                desc=f"Inference on GPU {distributed.get_global_rank()}",
+                unit=unit,
+                unit_scale=batch_size,
+                leave=False,
+                position=2 + distributed.get_global_rank(),
+            ):
+                idx, image = batch
+                image = image.to(device, non_blocking=True)
+                feature = model(image).cpu().numpy()
+                features.resize(features.shape[0] + feature.shape[0], axis=0)
+                features[-feature.shape[0]:] = feature
+                indices.resize(indices.shape[0] + idx.shape[0], axis=0)
+                indices[-idx.shape[0]:] = idx.cpu().numpy()
 
-            # cleanup
-            del image, feature
+                # cleanup
+                del image, feature
 
     # cleanup
     torch.cuda.empty_cache()
     gc.collect()
+
+
+def load_and_sort_features(tmp_dir, name):
+    features_list, indices_list = [], []
+    for rank in range(distributed.get_global_size()):
+        fp = tmp_dir / f"{name}-rank_{rank}.h5"
+        with h5py.File(fp, "r") as f:
+            features_list.append(torch.from_numpy(f["features"][:]))
+            indices_list.append(torch.from_numpy(f["indices"][:]))
+        os.remove(fp)
+    features = torch.cat(features_list, dim=0)
+    indices = torch.cat(indices_list, dim=0)
+    sorted_indices = torch.argsort(indices)
+    sorted_features = features[sorted_indices]
+    return sorted_features
 
 
 def main(args):
@@ -173,33 +194,20 @@ def main(args):
                     batch_size=cfg.model.batch_size,
                     sampler=sampler,
                     num_workers=num_workers,
-                    pin_memory=False,
+                    pin_memory=True,
                 )
 
                 name = wsi_fp.stem.replace(" ", "_")
                 feature_path = features_dir / f"{name}.pt"
+                tmp_feature_path = tmp_dir / f"{name}-rank_{distributed.get_global_rank()}.h5"
 
                 # get feature dimension and dtype using a dry run
                 with torch.inference_mode(), autocast_context:
                     sample_batch = next(iter(dataloader))
                     sample_image = sample_batch[1].to(model.device)
                     sample_feature = model(sample_image).cpu().numpy()
-                    if cfg.model.level == "region":
-                        num_tiles = sample_feature.shape[-2]
-                        feature_dim = sample_feature.shape[-1]
-                    else:
-                        feature_dim = sample_feature.shape[-1]
+                    feature_dim = sample_feature.shape[1:]
                     dtype = sample_feature.dtype
-
-                # create a memory-mapped tensor on disk
-                if cfg.model.level == "region":
-                    num_regions = len(dataset)
-                    tmp_feature_path = tmp_dir / f"{name}.npy"
-                    features = np.memmap(tmp_feature_path, dtype=dtype, mode='w+', shape=(num_regions, num_tiles, feature_dim))
-                else:
-                    num_tiles = len(dataset)
-                    tmp_feature_path = tmp_dir / f"{name}.npy"
-                    features = np.memmap(tmp_feature_path, dtype=dtype, mode='w+', shape=(num_tiles, feature_dim))
 
                 run_inference(
                     dataloader,
@@ -208,21 +216,23 @@ def main(args):
                     autocast_context,
                     unit,
                     cfg.model.batch_size,
-                    features,
+                    tmp_feature_path,
+                    feature_dim,
+                    dtype,
                 )
 
                 torch.distributed.barrier()
 
                 if distributed.is_main_process():
-                    if cfg.model.level == "region":
-                        wsi_feature = torch.from_numpy(
-                            np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_regions, num_tiles, feature_dim)).copy()
-                        )
-                    else:
-                        wsi_feature = torch.from_numpy(
-                            np.memmap(tmp_feature_path, dtype=dtype, mode='r', shape=(num_tiles, feature_dim)).copy()
-                        )
+                    wsi_feature = load_and_sort_features(tmp_dir, name)
                     torch.save(wsi_feature, feature_path)
+
+                    # cleanup
+                    del wsi_feature
+                    torch.cuda.empty_cache()
+                    gc.collect()
+
+                torch.distributed.barrier()
 
                 feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
 

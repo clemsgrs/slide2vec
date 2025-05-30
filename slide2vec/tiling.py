@@ -115,7 +115,7 @@ def main(args):
             "error": [str(np.nan)] * len(wsi_paths),
             "traceback": [str(np.nan)] * len(wsi_paths),
         }
-        if getattr(cfg.model, "level", None) == "sllide":
+        if getattr(cfg.model, "level", None) == "slide":
             data["aggregation_status"] = ["tbp"] * len(wsi_paths)
         process_df = pd.DataFrame(data)
 
