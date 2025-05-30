@@ -1,6 +1,15 @@
-csv: # path to csv containing slide paths
+# csv: "/data/temporary/clement/leopard/csvs/dev-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/tcga/tcga-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/validation-without-pen-marks-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/test-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/brazil-slide2vec.csv"
+csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv"
 
 output_dir: "output" # output directory
+resume: true
+resume_dirname: "pgl4vo8t"
+
+visualize: false
 
 tiling:
   params:
@@ -10,7 +19,19 @@ tiling:
 model:
   level: "slide" # level at which to extract the features ("tile", "region" or "slide")
   name: "prism"
-  batch_size: 1
+  batch_size: 32
 
 speed:
   fp16: true # use mixed precision during model inference
+
+wandb:
+  enable: true
+  project: "leopard"
+  username: "clemsg"
+  exp_name: "features"
+  # tags: ["features", "dev", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "tcga", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "validation", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "test", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
