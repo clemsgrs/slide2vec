@@ -1,9 +1,7 @@
-csv: # path to csv containing slide paths
-
-visualize: true
+csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv" # path to csv containing slide paths
 
 output_dir: "output" # output directory
-resume: false
+resume:
 resume_dirname:
 
 tiling:
@@ -18,3 +16,10 @@ model:
 
 speed:
   fp16: true # use mixed precision during model inference
+
+wandb:
+  enable: true
+  project: "leopard"
+  username: "clemsg"
+  exp_name: "features"
+  tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
