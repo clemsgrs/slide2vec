@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y python3-pip python3-dev python-is-pytho
     && rm -rf /var/lib/apt/lists/*
 
 # Install ASAP
-ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
+ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.1-(Nightly)/ASAP-2.1-Ubuntu2204.deb
 RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
     echo "/opt/ASAP/bin" > /usr/lib/python3/dist-packages/asap.pth && \
     rm -rf /var/lib/apt/lists/*
