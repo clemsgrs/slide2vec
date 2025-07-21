@@ -6,9 +6,6 @@ ARG UBUNTU_VERSION=22.04
 ARG CUDA_MAJOR_VERSION=11.8.0
 ARG CUDNN_MAJOR_VERSION=8
 ARG PYTHON_VERSION=3.10.9
-ARG PYTORCH_VERSION=2.2.2
-ARG TORCHVISION_VERSION=0.17.2
-ARG NUMPY_VERSION=1.26.4
 ARG BUILD_JOBS=16
 
 # =============================================================
@@ -108,12 +105,6 @@ WORKDIR /opt/app
 COPY --chown=user:user prism-requirements.in /opt/app/requirements.in
 
 RUN cd /opt/app/ && \
-    CUDA_IDENTIFIER_PYTORCH=`echo "cu${CUDA_MAJOR_VERSION}" | sed "s|\.||g" | cut -c1-5` && \
-    sed -i \
-        -e "s|%NUMPY_VERSION%|${NUMPY_VERSION}|g" \
-        -e "s|%PYTORCH_VERSION%|${PYTORCH_VERSION}+${CUDA_IDENTIFIER_PYTORCH}|g" \
-        -e "s|%TORCHVISION_VERSION%|${TORCHVISION_VERSION}+${CUDA_IDENTIFIER_PYTORCH}|g" \
-        requirements.in && \
     /usr/local/bin/python3 -m piptools compile requirements.in --verbose --find-links https://download.pytorch.org/whl/torch_stable.html && \
     /usr/local/bin/python3 -m piptools sync && \
     rm -rf ~/.cache/pip*
