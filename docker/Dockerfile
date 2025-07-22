@@ -80,15 +80,12 @@ RUN python3 -m pip install --upgrade pip pip-tools wheel setuptools && \
     rm -rf ~/.cache/pip
 
 # install ASAP
-RUN apt-get update && \
-    apt-get -y install curl git && \
-    curl --remote-name --location "https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.1-(Nightly)/ASAP-2.1-Ubuntu2204.deb" && \
-    dpkg --install ASAP-2.1-Ubuntu2204.deb || true && \
-    apt-get -f install --fix-missing --fix-broken --assume-yes && \
-    ldconfig -v && \
+ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
+RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
+    SITE_PACKAGES=`python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"` && \
+    printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth" && \
     apt-get clean && \
-    echo "/opt/ASAP/bin" > /usr/local/lib/python3.9/site-packages/asap.pth && \
-    rm ASAP-2.1-Ubuntu2204.deb
+    rm -rf /var/lib/apt/lists/*
 
 # Ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED 1
