@@ -113,7 +113,10 @@ def main(args):
 
     setup_distributed()
 
-    coordinates_dir = Path(cfg.output_dir, "coordinates")
+    if cfg.tiling.read_coordinates_from:
+        coordinates_dir = Path(cfg.tiling.read_coordinates_from)
+    else:
+        coordinates_dir = Path(cfg.output_dir, "coordinates")
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False

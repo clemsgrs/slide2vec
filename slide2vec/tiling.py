@@ -108,6 +108,7 @@ def main(args):
         process_df = pd.read_csv(process_list)
     else:
         data = {
+            "wsi_name": [p.stem for p in wsi_paths],
             "wsi_path": [str(p) for p in wsi_paths],
             "mask_path": [str(p) if p is not None else p for p in mask_paths],
             "tiling_status": ["tbp"] * len(wsi_paths),
@@ -126,10 +127,10 @@ def main(args):
             coordinates_dir = Path(cfg.tiling.read_coordinates_from)
             coordinates_files = list(coordinates_dir.glob("*.npy"))
             for coordinates_file in coordinates_files:
-                wsi_id = coordinates_file.stem
-                if wsi_id in process_df["wsi_path"].values:
+                wsi_name = coordinates_file.stem
+                if wsi_name in process_df["wsi_name"].values:
                     process_df.loc[
-                        process_df["wsi_path"] == wsi_id, "tiling_status"
+                        process_df["wsi_name"] == wsi_name, "tiling_status"
                     ] = "success"
             process_df.to_csv(process_list, index=False)
 
