@@ -1,13 +1,24 @@
-csv: # path to csv containing slide paths
+csv: "/data/temporary/clement/code/ab-mil/data/unicorn-task-1/validation+test.csv"
 
 output_dir: "output" # output directory
 
 tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     tile_size: 224 # size of the tiles to extract, in pixels
+    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+  filter_params:
+    ref_tile_size: 224
 
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "uni2"
   batch_size: 1
+
+wandb:
+  enable: true
+  project: "unicorn"
+  username: "clemsg"
+  exp_name: "features"
+  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]

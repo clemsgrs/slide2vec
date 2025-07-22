@@ -1,22 +1,21 @@
-csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv" # path to csv containing slide paths
+# csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv" # path to csv containing slide paths
+csv: "/data/temporary/clement/code/ab-mil/data/unicorn-task-1/validation+test.csv"
 
 visualize: true
 
 output_dir: "output" # output directory
-resume: true
-resume_dirname: "jthnfzot"
 
 tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    tile_size: 2048 # size of the tiles to extract, in pixels
+    tile_size: 224 # size of the tiles to extract, in pixels
     min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
   filter_params:
-    ref_tile_size: 256
+    ref_tile_size: 224
 
 model:
-  level: "region" # level at which to extract the features ("tile", "region" or "slide")
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "virchow2"
   batch_size: 1
 
@@ -25,7 +24,8 @@ speed:
 
 wandb:
   enable: true
-  project: "leopard"
+  project: "unicorn"
   username: "clemsg"
   exp_name: "features"
-  tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
