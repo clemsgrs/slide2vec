@@ -1,16 +1,37 @@
-csv: # path to csv containing slide paths
+# csv: "/data/temporary/clement/leopard/csvs/dev-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/tcga/tcga-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/validation-without-pen-marks-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/test-slide2vec.csv"
+# csv: "/data/temporary/clement/leopard/csvs/brazil-slide2vec.csv"
+csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv"
 
-output_dir: "output" # output directory
+output_dir: "output"
+resume: true
+resume_dirname: "48juvldi"
+
+visualize: false
 
 tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tile_size: 224 # size of the tiles to extract, in pixels
+    tile_size: 2048 # size of the tiles to extract, in pixels
 
 model:
-  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  level: "region"
   name: "h-optimus-0"
   batch_size: 1
 
 speed:
-  fp16: true # use mixed precision during model inference
+  fp16: true
+
+wandb:
+  enable: true
+  project: "leopard"
+  username: "clemsg"
+  exp_name: "features"
+  # tags: ["features", "dev", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "tcga", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "validation", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "test", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
