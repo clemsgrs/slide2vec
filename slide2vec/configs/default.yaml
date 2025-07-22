@@ -38,6 +38,7 @@ tiling:
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: # foundation model name ["uni", "uni2", "virchow", "virchow2", "prov-gigapath", "h-optimus-0", "h-optimus-1", "titan", "prism"] (leave empty when using a custom model)
+  mode: "cls" # embedding mode ["cls", "full"]
   arch: # architecture of custom model
   pretrained_weights: # path to the pretrained weights when using a custom model
   batch_size: 1

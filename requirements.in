@@ -17,3 +17,4 @@ transformers
 sacremoses
 environs
 xformers>=0.0.26
+matplotlib

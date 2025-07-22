@@ -44,9 +44,15 @@ def extract_coordinates(
         segment=True,
         segment_params=segment_params,
     )
-    assert (
-        tiling_params.spacing >= wsi.spacings[0]
-    ), f"Desired spacing ({tiling_params.spacing}) is smaller than the whole-slide image starting spacing ({wsi.spacings[0]})"
+    tolerance = tiling_params.tolerance
+    starting_spacing = wsi.spacings[0]
+    desired_spacing = tiling_params.spacing
+    if desired_spacing < starting_spacing:
+        relative_diff = abs(starting_spacing - desired_spacing) / desired_spacing
+        if relative_diff > tolerance:
+            raise ValueError(
+                f"Desired spacing ({desired_spacing}) is smaller than the whole-slide image starting spacing ({starting_spacing}) and does not fall within tolerance ({tolerance})"
+            )
     (
         contours,
         holes,

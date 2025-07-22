@@ -36,7 +36,9 @@ RUN apt-get update && apt-get install -y python3-pip python3-dev python-is-pytho
 # Install ASAP
 ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
 RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
-    echo "/opt/ASAP/bin" > /usr/lib/python3/dist-packages/asap.pth && \
+    SITE_PACKAGES=`python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"` && \
+    printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth" && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/app/

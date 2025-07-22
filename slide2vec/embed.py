@@ -113,7 +113,10 @@ def main(args):
 
     setup_distributed()
 
-    coordinates_dir = Path(cfg.output_dir, "coordinates")
+    if cfg.tiling.read_coordinates_from:
+        coordinates_dir = Path(cfg.tiling.read_coordinates_from)
+    else:
+        coordinates_dir = Path(cfg.output_dir, "coordinates")
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -266,13 +269,13 @@ def main(args):
             slides_with_tiles = len(tiled_df)
             total_slides = len(process_df)
             failed_feature_extraction = process_df[
-                ~(process_df["feature_status"] == "success")
+                process_df["feature_status"] == "failed"
             ]
             print("=+=" * 10)
             print(f"Total number of slides with {unit}s: {slides_with_tiles}/{total_slides}")
-            print(f"Failed {unit}-level feature extraction: {len(failed_feature_extraction)}")
+            print(f"Failed {unit}-level feature extraction: {len(failed_feature_extraction)}/{slides_with_tiles}")
             print(
-                f"Completed {unit}-level feature extraction: {total_slides - len(failed_feature_extraction)}"
+                f"Completed {unit}-level feature extraction: {slides_with_tiles - len(failed_feature_extraction)}"
             )
             print("=+=" * 10)
 
