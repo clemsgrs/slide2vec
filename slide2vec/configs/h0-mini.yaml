@@ -1,0 +1,20 @@
+csv: # path to csv containing slide paths
+
+output_dir: "output"
+
+tiling:
+  params:
+    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
+    tile_size: 224 # size of the tiles to extract, in pixels
+    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+  filter_params:
+    ref_tile_size: 224
+
+model:
+  level: "tile"
+  name: "h0-mini"
+  batch_size: 1
+
+speed:
+  fp16: true
