@@ -1,16 +1,16 @@
-import os
-import sys
-import time
-import wandb
-import socket
-import signal
 import argparse
-import threading
+import os
+import signal
+import socket
 import subprocess
-
+import sys
+import threading
+import time
 from pathlib import Path
 
-from slide2vec.utils.config import setup, hf_login
+import wandb
+
+from slide2vec.utils.config import hf_login, setup
 
 
 def get_args_parser(add_help: bool = True):
@@ -41,10 +41,22 @@ def run_tiling(config_file, run_id):
         "--config-file",
         config_file,
     ]
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        universal_newlines=True
+    )
+    # forward output in real-time
+    for line in proc.stdout:
+        print(line.rstrip())
+        sys.stdout.flush()
+    proc.wait()
+    if proc.returncode != 0:
         print("Slide tiling failed. Exiting.")
-        sys.exit(result.returncode)
+        sys.exit(proc.returncode)
 
 
 def run_feature_extraction(config_file, run_id):
@@ -69,10 +81,18 @@ def run_feature_extraction(config_file, run_id):
     proc = subprocess.Popen(
         cmd,
         preexec_fn=os.setsid,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
+        universal_newlines=True
     )
     try:
-        proc.communicate()
+        # forward output in real-time
+        for line in proc.stdout:
+            print(line.rstrip())
+            sys.stdout.flush()
+        proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating embed.py process group...")
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -98,10 +118,18 @@ def run_feature_aggregation(config_file, run_id):
     proc = subprocess.Popen(
         cmd,
         preexec_fn=os.setsid,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
+        universal_newlines=True
     )
     try:
-        proc.communicate()
+        # forward output in real-time
+        for line in proc.stdout:
+            print(line.rstrip())
+            sys.stdout.flush()
+        proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating embed.py process group...")
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -153,6 +181,7 @@ def main(args):
 
 if __name__ == "__main__":
     import warnings
+
     import torchvision
     torchvision.disable_beta_transforms_warning()
 

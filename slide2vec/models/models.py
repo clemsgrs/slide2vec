@@ -161,7 +161,7 @@ class DINOViT(FeatureExtractor):
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
             state_dict, prefix="backbone."
         )
-        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
+        state_dict, msg = update_state_dict(model_dict=self.encoder.state_dict(), state_dict=state_dict)
         if distributed.is_main_process():
             print(msg)
         self.encoder.load_state_dict(state_dict, strict=False)
@@ -242,7 +242,7 @@ class CustomViT(FeatureExtractor):
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
             state_dict, prefix="backbone."
         )
-        state_dict, msg = update_state_dict(self.encoder.state_dict(), state_dict)
+        state_dict, msg = update_state_dict(model_dict=self.encoder.state_dict(), state_dict=state_dict)
         if distributed.is_main_process():
             print(msg)
         self.encoder.load_state_dict(state_dict, strict=False)

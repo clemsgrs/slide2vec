@@ -170,9 +170,9 @@ def main(args):
     ]
     print("=+=" * 10)
     print(f"Total number of slides with tile-level features: {slides_with_tile_features}/{total_slides}")
-    print(f"Failed slide-level feature aggregation: {len(failed_feature_aggregation)}")
+    print(f"Failed slide-level feature aggregation: {len(failed_feature_aggregation)}/{total_slides}")
     print(
-        f"Completed slide-level feature aggregation: {total_slides - len(failed_feature_aggregation)}"
+        f"Completed slide-level feature aggregation: {total_slides - len(failed_feature_aggregation)}/{total_slides}"
     )
     print("=+=" * 10)
 
