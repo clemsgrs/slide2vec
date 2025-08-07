@@ -275,7 +275,7 @@ def main(args):
             print(f"Total number of slides with {unit}s: {slides_with_tiles}/{total_slides}")
             print(f"Failed {unit}-level feature extraction: {len(failed_feature_extraction)}/{slides_with_tiles}")
             print(
-                f"Completed {unit}-level feature extraction: {slides_with_tiles - len(failed_feature_extraction)}"
+                f"Completed {unit}-level feature extraction: {slides_with_tiles - len(failed_feature_extraction)}/{slides_with_tiles}"
             )
             print("=+=" * 10)
 

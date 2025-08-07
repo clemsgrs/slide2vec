@@ -56,7 +56,7 @@ def setup(config_file):
 
     output_dir = Path(cfg.output_dir, run_id)
     if distributed.is_main_process():
-        output_dir.mkdir(exist_ok=True, parents=True)
+        output_dir.mkdir(exist_ok=cfg.resume, parents=True)
     cfg.output_dir = str(output_dir)
 
     fix_random_seeds(0)

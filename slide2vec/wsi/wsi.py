@@ -306,7 +306,7 @@ class WholeSlideImage(object):
         # resize the mask to the size of the slide at seg_spacing
         mask = cv2.resize(
             mask.astype(np.uint8),
-            (int(height / scale), int(width / scale)),
+            (int(round(height / scale, 0)), int(round(width / scale, 0))),
             interpolation=cv2.INTER_NEAREST,
         )
 

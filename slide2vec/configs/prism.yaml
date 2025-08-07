@@ -1,11 +1,6 @@
-# csv: "/data/temporary/clement/dataset/tcga-prad/mutations/tcga-prad-tp53-slide2vec.csv"
-# csv: "/data/temporary/clement/dataset/tcga-blca/mutations/tcga-blca-tp53-slide2vec.csv"
-csv: "/data/temporary/clement/dataset/tcga-brca/mutations/tcga-brca-tp53-slide2vec.csv"
+csv:
 
-output_dir: "output" # output directory
-resume: true
-resume_dirname: "ssjvt5t6"
-
+output_dir: "output"
 visualize: true
 
 tiling:
@@ -18,18 +13,16 @@ tiling:
     ref_tile_size: 224
 
 model:
-  level: "slide" # level at which to extract the features ("tile", "region" or "slide")
+  level: "slide"
   name: "prism"
   batch_size: 32
 
 speed:
-  fp16: true # use mixed precision during model inference
+  fp16: true
 
 wandb:
   enable: true
-  project: "mut-pred"
-  username: "clemsg"
-  exp_name: "features"
-  # tags: ["features", "tcga-prad", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  project: ""
+  username: ""
+  exp_name: ""
+  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
