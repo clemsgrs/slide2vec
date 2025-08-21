@@ -63,11 +63,11 @@ def push_tag_and_branch(version: str) -> str:
 
 
 def create_pull_request(branch: str, version: str) -> None:
-    print(f"🔁 Creating pull request for {branch} → master...")
+    print(f"🔁 Creating pull request for {branch} → main...")
     run(
         f'gh pr create --title "Release v{version}" '
         f'--body "This PR bumps the version to v{version} and tags the release." '
-        f"--base master --head {branch}"
+        f"--base main --head {branch}"
     )
 
 
@@ -91,9 +91,9 @@ if __name__ == "__main__":
     parser.add_argument("--no-draft", action="store_true", help="Don't open GitHub release page")
     args = parser.parse_args()
 
-    # always start from master branch
-    run("git checkout master")
-    run("git pull origin master")  # make sure it's up-to-date
+    # always start from main branch
+    run("git checkout main")
+    run("git pull origin main")  # make sure it's up-to-date
 
     version = bump_version(args.level)
     branch = f"release-v{version}"
