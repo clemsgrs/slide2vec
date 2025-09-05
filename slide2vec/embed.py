@@ -90,7 +90,7 @@ def run_inference(dataloader, model, device, autocast_context, unit, batch_size,
     gc.collect()
 
 
-def load_and_sort_features(tmp_dir, name):
+def load_sort_and_deduplicate_features(tmp_dir, name, expected_len=None):
     features_list, indices_list = [], []
     for rank in range(distributed.get_global_size()):
         fp = tmp_dir / f"{name}-rank_{rank}.h5"
@@ -100,9 +100,18 @@ def load_and_sort_features(tmp_dir, name):
         os.remove(fp)
     features = torch.cat(features_list, dim=0)
     indices = torch.cat(indices_list, dim=0)
-    sorted_indices = torch.argsort(indices)
-    sorted_features = features[sorted_indices]
-    return sorted_features
+    order = torch.argsort(indices)
+    indices = indices[order]
+    features = features[order]
+    # deduplicate
+    keep = torch.ones_like(indices, dtype=torch.bool)
+    keep[1:] = indices[1:] != indices[:-1]
+    indices_unique = indices[keep]
+    features_unique = features[keep]
+    if expected_len is not None:
+        assert len(indices_unique) == expected_len, f"Got {len(indices_unique)} items, expected {expected_len}"
+        assert torch.unique(indices_unique).numel() == len(indices_unique), "Indices are not unique after sorting"
+    return features_unique
 
 
 def main(args):
@@ -227,7 +236,7 @@ def main(args):
                 torch.distributed.barrier()
 
                 if distributed.is_main_process():
-                    wsi_feature = load_and_sort_features(tmp_dir, name)
+                    wsi_feature = load_sort_and_deduplicate_features(tmp_dir, name, expected_len=len(dataset))
                     torch.save(wsi_feature, feature_path)
 
                     # cleanup
