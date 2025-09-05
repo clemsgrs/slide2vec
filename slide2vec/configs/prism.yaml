@@ -1,7 +1,11 @@
-csv:
+# csv: "/data/temporary/clement/mutation-prediction/csvs/tcga-coad/slide2vec-msi.csv"
+csv: "/data/temporary/clement/mutation-prediction/csvs/tcga-ucec/slide2vec-msi.csv"
 
 output_dir: "output"
 visualize: true
+
+resume: true
+resume_dirname: "lxbzb8rd"
 
 tiling:
   params:
@@ -15,14 +19,16 @@ tiling:
 model:
   level: "slide"
   name: "prism"
-  batch_size: 32
+  batch_size: 128
 
 speed:
   fp16: true
+  num_workers_embedding: 16
 
 wandb:
   enable: true
-  project: ""
-  username: ""
-  exp_name: ""
-  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  project: "mut-pred"
+  username: "clemsg"
+  exp_name: "features"
+  # tags: ["features", "tcga-coad", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "tcga-ucec", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
