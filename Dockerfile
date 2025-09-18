@@ -21,7 +21,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
     zlib1g-dev \
     curl \
+    vim screen \
+    zip unzip \
+    git \
     openssh-server \
+    && mkdir /var/run/sshd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
