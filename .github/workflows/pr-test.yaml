@@ -67,13 +67,13 @@ jobs:
           from numpy.testing import assert_array_equal
 
           # coordinates must match exactly (deterministic tiling)
-          gt_coordinates = np.load('/gt/coordinates.npy')
-          coordinates    = np.load('/output/coordinates.npy')
+          gt_coordinates = np.load('/gt/test-wsi.npy')
+          coordinates    = np.load('/output/coordinates/test-wsi.npy')
           assert_array_equal(coordinates, gt_coordinates)
 
           # embeddings: allow tiny numeric drift
-          gt = torch.load('/gt/embedding.pt', map_location='cpu')
-          emb = torch.load('/output/embedding.pt', map_location='cpu')
+          gt = torch.load('/gt/test-wsi.pt', map_location='cpu')
+          emb = torch.load('/output/features/test-wsi.pt', map_location='cpu')
 
           if emb.ndim == 1:
               emb = emb.unsqueeze(0)
