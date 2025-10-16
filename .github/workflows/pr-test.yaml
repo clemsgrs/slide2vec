@@ -26,9 +26,9 @@ jobs:
       - name: Verify required folders exist
         run: |
           set -euo pipefail
-          test -d tests/input
-          test -d tests/gt
-          mkdir -p tests/output  # ensure host-mapped output exists
+          test -d test/input
+          test -d test/gt
+          mkdir -p test/output  # ensure host-mapped output exists
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -67,8 +67,8 @@ jobs:
           set -euo pipefail
           docker run --rm \
             -e HF_TOKEN="$HF_TOKEN" \
-            -v "$GITHUB_WORKSPACE/tests/input:/input" \
-            -v "$GITHUB_WORKSPACE/tests/output:/output" \
+            -v "$GITHUB_WORKSPACE/test/input:/input" \
+            -v "$GITHUB_WORKSPACE/test/output:/output" \
             slide2vec:${{ github.sha }} \
             python slide2vec/main.py \
               --config /input/config.yaml \
@@ -78,8 +78,8 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm \
-            -v "$GITHUB_WORKSPACE/tests/gt:/gt" \
-            -v "$GITHUB_WORKSPACE/tests/output:/output" \
+            -v "$GITHUB_WORKSPACE/test/gt:/gt" \
+            -v "$GITHUB_WORKSPACE/test/output:/output" \
             slide2vec:${{ github.sha }} \
             bash -lc "python - <<'PY'
           import numpy as np, torch
