@@ -32,7 +32,7 @@ def get_cfg_from_file(config_file):
     return cfg
 
 
-def setup(config_file):
+def setup(config_file, skip_datetime: bool = False):
     """
     Basic configuration setup without any distributed or GPU-specific initialization.
     This function:
@@ -45,8 +45,10 @@ def setup(config_file):
 
     if cfg.resume:
         run_id = cfg.resume_dirname
-    else:
+    elif not skip_datetime:
         run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
+    else:
+        run_id = ""
 
     if cfg.wandb.enable:
         key = os.environ.get("WANDB_API_KEY")

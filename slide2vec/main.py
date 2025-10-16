@@ -18,6 +18,9 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument(
         "--config-file", default="", metavar="FILE", help="path to config file"
     )
+    parser.add_argument(
+        "--skip-datetime", action="store_true", help="skip run id datetime prefix"
+    )
     return parser
 
 
@@ -142,8 +145,9 @@ def run_feature_aggregation(config_file, run_id):
 
 def main(args):
     config_file = args.config_file
+    skip_datetime = args.skip_datetime
 
-    cfg = setup(config_file)
+    cfg = setup(config_file, skip_datetime=skip_datetime)
     hf_login()
 
     output_dir = Path(cfg.output_dir)
