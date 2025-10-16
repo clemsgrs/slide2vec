@@ -1,0 +1,94 @@
+name: Test WSI to embedding consistency 
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    workflow_dispatch:  # allows manual run from GitHub ui
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60 # should complete in 1h
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify required folders exist
+        run: |
+          set -euo pipefail
+          test -d tests/vision/input
+          test -d tests/vision/ground_truth
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Free disk space on runner
+        run: |
+          set -euxo pipefail
+          df -h
+
+          # Remove preinstalled SDKs and tool caches
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+
+          docker system prune -af || true
+          sudo apt-get clean
+
+          df -h
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.lightweight
+          push: false
+          load: true
+          tags: unicorn-eval:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test output consistency
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE/tests/input:/input" \
+            -v "$GITHUB_WORKSPACE/tests/gt:/gt" \
+            unicorn-eval:${{ github.sha }} \
+            --config /input/config.yaml \
+            --skip-datetime \
+            python - <<'PY'
+          import numpy as np, torch
+          from numpy.testing import assert_array_equal
+
+          # coordinates must match exactly (deterministic tiling)
+          gt_coordinates = np.load('/gt/coordinates.npy')
+          coordinates    = np.load('/output/coordinates.npy')
+          assert_array_equal(coordinates, gt_coordinates)
+
+          # embeddings: allow tiny numeric drift
+          gt = torch.load('/gt/embedding.pt', map_location='cpu')
+          emb = torch.load('/output/embedding.pt', map_location='cpu')
+
+          if emb.ndim == 1:
+              emb = emb.unsqueeze(0)
+          if gt.ndim == 1:
+              gt = gt.unsqueeze(0)
+
+          # shape guard
+          assert emb.shape == gt.shape, f"Shape mismatch: {emb.shape} vs {gt.shape}"
+
+          cos = torch.nn.functional.cosine_similarity(emb, gt, dim=1)
+          mean_cos = float(cos.mean())
+
+          # tight tolerances; tweak if needed
+          atol, rtol = 1e-2, 1e-3
+          if not torch.allclose(emb, gt, atol=atol, rtol=rtol):
+              raise AssertionError(f"Embedding mismatch: mean cosine similarity={mean_cos:.4f} (atol={atol}, rtol={rtol})")
+          print(f"OK: embeddings within tolerance; mean cosine similarity={mean_cos:.4f}")
+          PY
