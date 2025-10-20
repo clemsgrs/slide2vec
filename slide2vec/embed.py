@@ -181,7 +181,7 @@ def main(args):
 
         autocast_context = (
             torch.autocast(device_type="cuda", dtype=torch.float16)
-            (if cfg.speed.fp16 and not run_on_cpu)
+            if (cfg.speed.fp16 and not run_on_cpu)
             else nullcontext()
         )
         feature_extraction_updates = {}
