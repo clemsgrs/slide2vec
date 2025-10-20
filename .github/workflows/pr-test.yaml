@@ -72,7 +72,8 @@ jobs:
             slide2vec:${{ github.sha }} \
             python slide2vec/main.py \
               --config /input/config.yaml \
-              --skip-datetime
+              --skip-datetime \
+              --run-on-cpu
 
       - name: Verify output consistency (inside container)
         run: |
