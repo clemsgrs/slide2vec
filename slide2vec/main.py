@@ -131,9 +131,7 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
         config_file,
     ]
     if run_on_cpu:
-        cmd.append([
-            "--run-on-cpu",
-        ])
+        cmd.append("--run-on-cpu")
     # launch in its own process group.
     proc = subprocess.Popen(
         cmd,
@@ -151,7 +149,7 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
             sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
-        print("Received CTRL+C, terminating embed.py process group...")
+        print("Received CTRL+C, terminating aggregate.py process group...")
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         proc.wait()
         sys.exit(1)
@@ -185,13 +183,15 @@ def main(args):
         log_thread.start()
 
     run_feature_extraction(config_file, run_id, run_on_cpu)
-    print("Feature extraction completed.")
-    print("=+=" * 10)
 
     if cfg.model.level == "slide":
         run_feature_aggregation(config_file, run_id, run_on_cpu)
-        print("Feature aggregation completed.")
+        print("Feature extraction completed.")
         print("=+=" * 10)
+    else:
+        print("Feature extraction completed.")
+        print("=+=" * 10)
+
 
     if cfg.wandb.enable:
         stop_event.set()

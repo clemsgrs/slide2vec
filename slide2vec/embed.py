@@ -65,13 +65,14 @@ def create_dataset(wsi_fp, coordinates_dir, spacing, backend, transforms):
 
 
 def run_inference(dataloader, model, device, autocast_context, unit, batch_size, feature_path, feature_dim, dtype, run_on_cpu: False):
+    device_name = f"GPU {distributed.get_global_rank()}" if not run_on_cpu else "CPU"
     with h5py.File(feature_path, "w") as f:
         features = f.create_dataset("features", shape=(0, *feature_dim), maxshape=(None, *feature_dim), dtype=dtype, chunks=(batch_size, *feature_dim))
         indices = f.create_dataset("indices", shape=(0,), maxshape=(None,), dtype='int64', chunks=(batch_size,))
         with torch.inference_mode(), autocast_context:
             for batch in tqdm.tqdm(
                 dataloader,
-                desc=f"Inference on GPU {distributed.get_global_rank()}",
+                desc=f"Inference on {device_name}",
                 unit=unit,
                 unit_scale=batch_size,
                 leave=False,
