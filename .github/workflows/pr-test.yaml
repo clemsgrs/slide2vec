@@ -75,6 +75,15 @@ jobs:
               --skip-datetime \
               --run-on-cpu
 
+      - name: Inspect produced files
+        run: |
+          set -euo pipefail
+          echo "::group::tree test/output"
+          ls -lR test/output || true
+          echo "::endgroup::"
+          test -f test/output/coordinates/test-wsi.npy || { echo "Expected coordinates not found under test/output"; exit 1; }
+          test -f test/output/features/test-wsi.pt || { echo "Expected features not found under test/output"; exit 1; }
+
       - name: Verify output consistency (inside container)
         run: |
           set -euo pipefail
