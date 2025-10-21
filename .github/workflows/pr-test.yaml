@@ -89,15 +89,11 @@ jobs:
           # coordinates must match exactly (deterministic tiling)
           gt_coordinates = np.load('/gt/test-wsi.npy')
           coordinates    = np.load('/output/coordinates/test-wsi.npy')
-          assert_array_equal(coordinates, gt_coordinates)
+          assert_array_equal(coordinates, gt_coordinates), f'Coordinates mismatch: {coordinates} vs {gt_coordinates}'
 
           # embeddings: allow tiny numeric drift
           gt  = torch.load('/gt/test-wsi.pt', map_location='cpu')
           emb = torch.load('/output/features/test-wsi.pt', map_location='cpu')
-
-          if emb.ndim == 1: emb = emb.unsqueeze(0)
-          if gt.ndim  == 1: gt  = gt.unsqueeze(0)
-
           assert emb.shape == gt.shape, f'Shape mismatch: {emb.shape} vs {gt.shape}'
 
           cos = torch.nn.functional.cosine_similarity(emb, gt, dim=-1)
