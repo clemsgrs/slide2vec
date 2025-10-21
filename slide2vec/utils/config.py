@@ -67,7 +67,7 @@ def setup(config_file, skip_datetime: bool = False):
     cfg_path = write_config(cfg, cfg.output_dir)
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
-    return cfg
+    return cfg, run_id
 
 
 def setup_distributed():

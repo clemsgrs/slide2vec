@@ -163,17 +163,15 @@ def main(args):
     skip_datetime = args.skip_datetime
     run_on_cpu = args.run_on_cpu
 
-    cfg = setup(config_file, skip_datetime=skip_datetime)
+    cfg, run_id = setup(config_file, skip_datetime=skip_datetime)
     hf_login()
-
-    output_dir = Path(cfg.output_dir)
-    run_id = output_dir.stem
 
     run_tiling(config_file, run_id)
 
     print("Tiling completed.")
     print("=+=" * 10)
 
+    output_dir = Path(cfg.output_dir)
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
         stop_event = threading.Event()
