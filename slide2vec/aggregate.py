@@ -33,6 +33,9 @@ def get_args_parser(add_help: bool = True):
         default="",
         help="Name of output subdirectory",
     )
+    parser.add_argument(
+        "--run-on-cpu", action="store_true", help="run inference on cpu"
+    )
     return parser
 
 
@@ -49,6 +52,7 @@ def scale_coordinates(wsi_fp, coordinates, spacing, backend):
 
 def main(args):
     # setup configuration
+    run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
     output_dir = Path(cfg.output_dir, args.run_id)
     cfg.output_dir = str(output_dir)
@@ -87,7 +91,7 @@ def main(args):
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
-        if cfg.speed.fp16
+        if (cfg.speed.fp16 and not run_on_cpu)
         else nullcontext()
     )
     feature_aggregation_updates = {}
@@ -136,7 +140,8 @@ def main(args):
 
             torch.save(wsi_feature, feature_path)
             del wsi_feature
-            torch.cuda.empty_cache()
+            if not run_on_cpu:
+                torch.cuda.empty_cache()
             gc.collect()
 
             feature_aggregation_updates[str(wsi_fp)] = {"status": "success"}

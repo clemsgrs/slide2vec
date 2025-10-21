@@ -578,5 +578,5 @@ class PRISM(SlideFeatureExtractor):
     def forward_slide(self, tile_features, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         reprs = self.slide_encoder.slide_representations(tile_features)
-        output = reprs["image_embedding"]  # [1, 1280]
+        output = reprs["image_embedding"].squeeze(0)  # [1280]
         return output

@@ -58,7 +58,7 @@ def setup(config_file, skip_datetime: bool = False):
 
     output_dir = Path(cfg.output_dir, run_id)
     if distributed.is_main_process():
-        output_dir.mkdir(exist_ok=cfg.resume, parents=True)
+        output_dir.mkdir(exist_ok=cfg.resume or skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
     fix_random_seeds(0)
@@ -67,7 +67,7 @@ def setup(config_file, skip_datetime: bool = False):
     cfg_path = write_config(cfg, cfg.output_dir)
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
-    return cfg
+    return cfg, run_id
 
 
 def setup_distributed():
