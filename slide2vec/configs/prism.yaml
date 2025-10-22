@@ -17,6 +17,7 @@ model:
   name: "prism"
   batch_size: 32
   save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
+  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
 
 speed:
   fp16: true

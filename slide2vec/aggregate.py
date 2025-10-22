@@ -132,11 +132,17 @@ def main(args):
                 with autocast_context:
                     features = torch.load(feature_path).to(model.device)
                     tile_size_lv0 = coordinates_arr["tile_size_lv0"][0]
-                    wsi_feature = model.forward_slide(
+                    output = model.forward_slide(
                         features,
                         tile_coordinates=coordinates,
                         tile_size_lv0=tile_size_lv0,
                     )
+                    wsi_feature = output["embedding"].cpu()
+                    if cfg.model.name == "prism" and cfg.model.save_latents:
+                        latent_path = features_dir / f"{name}-latents.pt"
+                        latents = output["latents"].cpu()
+                        torch.save(latents, latent_path)
+                        del latents
 
             torch.save(wsi_feature, feature_path)
             del wsi_feature
