@@ -1,7 +1,6 @@
-# csv: "/data/temporary/clement/mutation-prediction/csvs/tcga-coad/slide2vec-msi.csv"
-csv: "/data/temporary/clement/mutation-prediction/csvs/tcga-ucec/slide2vec-msi.csv"
+csv: # path to csv containing slide paths
 
-output_dir: "output"
+output_dir: "output" # output directory
 visualize: true
 
 tiling:
@@ -16,16 +15,9 @@ tiling:
 model:
   level: "slide"
   name: "prism"
-  batch_size: 128
+  batch_size: 32
+  save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
 
 speed:
   fp16: true
   num_workers_embedding: 16
-
-wandb:
-  enable: true
-  project: "mut-pred"
-  username: "clemsg"
-  exp_name: "features"
-  # tags: ["features", "tcga-coad", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  tags: ["features", "tcga-ucec", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]

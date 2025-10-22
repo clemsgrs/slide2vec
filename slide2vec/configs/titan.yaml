@@ -1,8 +1,7 @@
-csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv" # path to csv containing slide paths
+csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
-resume:
-resume_dirname:
+visualize: true
 
 tiling:
   params:
@@ -12,14 +11,8 @@ tiling:
 model:
   level: "slide" # level at which to extract the features ("tile", "region" or "slide")
   name: "titan"
-  batch_size: 1
+  batch_size: 32
+  save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
 
 speed:
   fp16: true # use mixed precision during model inference
-
-wandb:
-  enable: true
-  project: "leopard"
-  username: "clemsg"
-  exp_name: "features"
-  tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
