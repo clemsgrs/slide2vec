@@ -219,6 +219,8 @@ def main(args):
 
                 name = wsi_fp.stem.replace(" ", "_")
                 feature_path = features_dir / f"{name}.pt"
+                if cfg.model.save_tile_embeddings:
+                    feature_path = features_dir / f"{name}-tiles.pt"
                 tmp_feature_path = tmp_dir / f"{name}-rank_{distributed.get_global_rank()}.h5"
 
                 # get feature dimension and dtype using a dry run
