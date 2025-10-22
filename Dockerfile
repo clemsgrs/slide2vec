@@ -8,16 +8,12 @@ ARG USER_GID=1001
 RUN groupadd --gid ${USER_GID} user \
     && useradd -m --no-log-init --uid ${USER_UID} --gid ${USER_GID} user
 
-# create input/output directory
-RUN mkdir /input /output && \
-    chown user:user /input /output
-
-# ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
+# Ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Amsterdam
 USER root
 
-# set /home/user as working directory
+# Set /home/user as working directory
 WORKDIR /home/user
 ENV PATH="/home/user/.local/bin:${PATH}"
 
@@ -25,23 +21,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
     zlib1g-dev \
     curl \
-    vim screen \
-    zip unzip \
-    git \
     openssh-server \
-    && mkdir /var/run/sshd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# expose port for ssh and jupyter
+# Expose port for ssh and jupyter
 EXPOSE 22 8888
 
-# install python
+# Install python
 RUN apt-get update && apt-get install -y python3-pip python3-dev python-is-python3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# install ASAP
+# Install ASAP
 ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
 RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
     SITE_PACKAGES=`python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"` && \
@@ -49,15 +41,9 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# clone prov-gigapath repo
-RUN git clone https://github.com/prov-gigapath/prov-gigapath.git
-
-# add gigapath folder to python path
-ENV PYTHONPATH="/home/user/prov-gigapath:$PYTHONPATH"
-
 WORKDIR /opt/app/
 
-# you can add any Python dependencies to requirements.in
+# You can add any Python dependencies to requirements.in
 RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /home/user/.cache/pip
 
@@ -70,5 +56,5 @@ RUN python -m pip install \
     && rm -rf /home/user/.cache/pip
 RUN python -m pip install /opt/app
 
-# switch to user
+# Switch to user
 USER user

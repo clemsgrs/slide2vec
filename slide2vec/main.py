@@ -18,12 +18,6 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument(
         "--config-file", default="", metavar="FILE", help="path to config file"
     )
-    parser.add_argument(
-        "--skip-datetime", action="store_true", help="skip run id datetime prefix"
-    )
-    parser.add_argument(
-        "--run-on-cpu", action="store_true", help="run inference on cpu"
-    )
     return parser
 
 
@@ -65,7 +59,7 @@ def run_tiling(config_file, run_id):
         sys.exit(proc.returncode)
 
 
-def run_feature_extraction(config_file, run_id, run_on_cpu: False):
+def run_feature_extraction(config_file, run_id):
     print("Running embed.py...")
     # find a free port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -83,16 +77,6 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
         "--config-file",
         config_file,
     ]
-    if run_on_cpu:
-        cmd = [
-            sys.executable,
-            "slide2vec/embed.py",
-            "--run-id",
-            run_id,
-            "--config-file",
-            config_file,
-            "--run-on-cpu",
-        ]
     # launch in its own process group.
     proc = subprocess.Popen(
         cmd,
@@ -119,7 +103,7 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
         sys.exit(proc.returncode)
 
 
-def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
+def run_feature_aggregation(config_file, run_id):
     print("Running aggregate.py...")
     # find a free port
     cmd = [
@@ -130,8 +114,6 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
         "--config-file",
         config_file,
     ]
-    if run_on_cpu:
-        cmd.append("--run-on-cpu")
     # launch in its own process group.
     proc = subprocess.Popen(
         cmd,
@@ -149,7 +131,7 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
             sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
-        print("Received CTRL+C, terminating aggregate.py process group...")
+        print("Received CTRL+C, terminating embed.py process group...")
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
         proc.wait()
         sys.exit(1)
@@ -160,18 +142,19 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
 
 def main(args):
     config_file = args.config_file
-    skip_datetime = args.skip_datetime
-    run_on_cpu = args.run_on_cpu
 
-    cfg, run_id = setup(config_file, skip_datetime=skip_datetime)
+    cfg = setup(config_file)
     hf_login()
+
+    output_dir = Path(cfg.output_dir)
+    run_id = output_dir.stem
 
     run_tiling(config_file, run_id)
 
     print("Tiling completed.")
     print("=+=" * 10)
 
-    output_dir = Path(cfg.output_dir)
+    
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
         stop_event = threading.Event()
@@ -180,16 +163,14 @@ def main(args):
         )
         log_thread.start()
 
-    run_feature_extraction(config_file, run_id, run_on_cpu)
+    run_feature_extraction(config_file, run_id)
+    print("Feature extraction completed.")
+    print("=+=" * 10)
 
     if cfg.model.level == "slide":
-        run_feature_aggregation(config_file, run_id, run_on_cpu)
-        print("Feature extraction completed.")
+        run_feature_aggregation(config_file, run_id)
+        print("Feature aggregation completed.")
         print("=+=" * 10)
-    else:
-        print("Feature extraction completed.")
-        print("=+=" * 10)
-
 
     if cfg.wandb.enable:
         stop_event.set()
@@ -200,21 +181,16 @@ def main(args):
 
 
 if __name__ == "__main__":
-
     import warnings
+
     import torchvision
-    
     torchvision.disable_beta_transforms_warning()
-    
+
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
     warnings.filterwarnings("ignore", category=FutureWarning)
     warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
-    warnings.filterwarnings(
-        "ignore",
-        message=".*'frozen' attribute with value True was provided to the `Field`.*"
-    )
 
     args = get_args_parser(add_help=True).parse_args()
     main(args)

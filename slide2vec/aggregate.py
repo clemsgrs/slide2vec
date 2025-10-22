@@ -33,9 +33,6 @@ def get_args_parser(add_help: bool = True):
         default="",
         help="Name of output subdirectory",
     )
-    parser.add_argument(
-        "--run-on-cpu", action="store_true", help="run inference on cpu"
-    )
     return parser
 
 
@@ -52,7 +49,6 @@ def scale_coordinates(wsi_fp, coordinates, spacing, backend):
 
 def main(args):
     # setup configuration
-    run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
     output_dir = Path(cfg.output_dir, args.run_id)
     cfg.output_dir = str(output_dir)
@@ -88,10 +84,19 @@ def main(args):
     wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
 
     features_dir = Path(cfg.output_dir, "features")
+    aggregated_dir = Path(cfg.output_dir, "aggregated")
+    aggregated_dir.mkdir(exist_ok=True, parents=True)
+    latents_dir = None
+    
+    # Create latents directory if return_latents is enabled
+    return_latents = cfg.model.return_latents
+    if return_latents:
+        latents_dir = Path(cfg.output_dir, "latents")
+        latents_dir.mkdir(exist_ok=True, parents=True)
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
-        if (cfg.speed.fp16 and not run_on_cpu)
+        if cfg.speed.fp16
         else nullcontext()
     )
     feature_aggregation_updates = {}
@@ -111,6 +116,7 @@ def main(args):
             coordinates = (np.array([coordinates_arr["x"], coordinates_arr["y"]]).T).astype(int)
 
             feature_path = features_dir / f"{name}.pt"
+            aggregated_path = aggregated_dir / f"{name}.pt"  # NEW: different path
 
             # run forward pass with slide encoder
             if cfg.model.name == "prov-gigapath":
@@ -138,10 +144,22 @@ def main(args):
                         tile_size_lv0=tile_size_lv0,
                     )
 
-            torch.save(wsi_feature, feature_path)
-            del wsi_feature
-            if not run_on_cpu:
-                torch.cuda.empty_cache()
+            # Handle the case where model returns both embeddings and latents
+            if return_latents and isinstance(wsi_feature, dict):
+                # Save image_embedding to aggregated directory (CHANGED)
+                torch.save(wsi_feature["image_embedding"], aggregated_path)
+                
+                # Save image_latents to latents directory
+                latents_path = latents_dir / f"{name}.pt"
+                torch.save(wsi_feature["image_latents"], latents_path)
+                
+                del wsi_feature
+            else:
+                # Save aggregated feature to aggregated directory (CHANGED)
+                torch.save(wsi_feature, aggregated_path)
+                del wsi_feature
+            
+            torch.cuda.empty_cache()
             gc.collect()
 
             feature_aggregation_updates[str(wsi_fp)] = {"status": "success"}

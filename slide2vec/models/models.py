@@ -90,7 +90,8 @@ class ModelFactory:
             elif options.name == "titan":
                 model = TITAN()
             elif options.name == "prism":
-                model = PRISM()
+                print("Return latents:", options.get('return_latents', False))
+                model = PRISM(return_latents=options.return_latents)
             else:
                 raise ValueError(f"{options.name} doesn't support slide-level encoding")
 
@@ -565,8 +566,9 @@ class TITAN(SlideFeatureExtractor):
 
 
 class PRISM(SlideFeatureExtractor):
-    def __init__(self):
+    def __init__(self, return_latents: bool = False):
         super(PRISM, self).__init__()
+        self.return_latents = return_latents
         self.features_dim = self.tile_encoder.features_dim
 
     def build_encoders(self):
@@ -578,5 +580,15 @@ class PRISM(SlideFeatureExtractor):
     def forward_slide(self, tile_features, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         reprs = self.slide_encoder.slide_representations(tile_features)
-        output = reprs["image_embedding"].squeeze(0)  # [1280]
-        return output
+
+        if self.return_latents:
+            # Return both image_embedding and image_latents
+            output = {
+                "image_embedding": reprs["image_embedding"],  # [1, 1280]
+                "image_latents": reprs["image_latents"]
+            }
+            return output
+        else:
+            # Original behavior: return only image_embedding
+            output = reprs["image_embedding"]  # [1, 1280]
+            return output

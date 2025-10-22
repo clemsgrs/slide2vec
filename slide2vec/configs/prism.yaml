@@ -4,6 +4,9 @@ csv: "/data/temporary/clement/mutation-prediction/csvs/tcga-ucec/slide2vec-msi.c
 output_dir: "output"
 visualize: true
 
+resume: true
+resume_dirname: "lxbzb8rd"
+
 tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel

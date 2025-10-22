@@ -33,9 +33,6 @@ def get_args_parser(add_help: bool = True):
         default="",
         help="Name of output subdirectory",
     )
-    parser.add_argument(
-        "--run-on-cpu", action="store_true", help="run inference on cpu"
-    )
     return parser
 
 
@@ -64,15 +61,14 @@ def create_dataset(wsi_fp, coordinates_dir, spacing, backend, transforms):
     )
 
 
-def run_inference(dataloader, model, device, autocast_context, unit, batch_size, feature_path, feature_dim, dtype, run_on_cpu: False):
-    device_name = f"GPU {distributed.get_global_rank()}" if not run_on_cpu else "CPU"
+def run_inference(dataloader, model, device, autocast_context, unit, batch_size, feature_path, feature_dim, dtype):
     with h5py.File(feature_path, "w") as f:
         features = f.create_dataset("features", shape=(0, *feature_dim), maxshape=(None, *feature_dim), dtype=dtype, chunks=(batch_size, *feature_dim))
         indices = f.create_dataset("indices", shape=(0,), maxshape=(None,), dtype='int64', chunks=(batch_size,))
         with torch.inference_mode(), autocast_context:
             for batch in tqdm.tqdm(
                 dataloader,
-                desc=f"Inference on {device_name}",
+                desc=f"Inference on GPU {distributed.get_global_rank()}",
                 unit=unit,
                 unit_scale=batch_size,
                 leave=False,
@@ -90,8 +86,7 @@ def run_inference(dataloader, model, device, autocast_context, unit, batch_size,
                 del image, feature
 
     # cleanup
-    if not run_on_cpu:
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     gc.collect()
 
 
@@ -121,13 +116,11 @@ def load_sort_and_deduplicate_features(tmp_dir, name, expected_len=None):
 
 def main(args):
     # setup configuration
-    run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
     output_dir = Path(cfg.output_dir, args.run_id)
     cfg.output_dir = str(output_dir)
 
-    if not run_on_cpu:
-        setup_distributed()
+    setup_distributed()
 
     if cfg.tiling.read_coordinates_from:
         coordinates_dir = Path(cfg.tiling.read_coordinates_from)
@@ -162,8 +155,7 @@ def main(args):
         model = ModelFactory(cfg.model).get_model()
         if distributed.is_main_process():
             print(f"Starting {unit}-level feature extraction...")
-        if not run_on_cpu:
-            torch.distributed.barrier()
+        torch.distributed.barrier()
 
         # select slides that were successfully tiled but not yet processed for feature extraction
         tiled_df = process_df[process_df.tiling_status == "success"]
@@ -182,7 +174,7 @@ def main(args):
 
         autocast_context = (
             torch.autocast(device_type="cuda", dtype=torch.float16)
-            if (cfg.speed.fp16 and not run_on_cpu)
+            if cfg.speed.fp16
             else nullcontext()
         )
         feature_extraction_updates = {}
@@ -239,11 +231,9 @@ def main(args):
                     tmp_feature_path,
                     feature_dim,
                     dtype,
-                    run_on_cpu,
                 )
 
-                if not run_on_cpu:
-                    torch.distributed.barrier()
+                torch.distributed.barrier()
 
                 if distributed.is_main_process():
                     wsi_feature = load_sort_and_deduplicate_features(tmp_dir, name, expected_len=len(dataset))
@@ -251,12 +241,10 @@ def main(args):
 
                     # cleanup
                     del wsi_feature
-                    if not run_on_cpu:
-                        torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
                     gc.collect()
 
-                if not run_on_cpu:
-                    torch.distributed.barrier()
+                torch.distributed.barrier()
 
                 feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
 

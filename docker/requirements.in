@@ -1,0 +1,14 @@
+timm
+wandb
+numpy==%NUMPY_VERSION%
+pandas
+pillow
+einops
+tqdm
+omegaconf
+transformers
+wholeslidedata
+huggingface-hub
+torch==%PYTORCH_VERSION%
+torchvision==%TORCHVISION_VERSION%
+opencv-python==4.4.0.46
