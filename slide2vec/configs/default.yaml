@@ -44,6 +44,7 @@ model:
   batch_size: 1
   tile_size: ${tiling.params.tile_size}
   patch_size: 256 # if level is "region", size used to unroll the region into patches
+  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
 
 speed:
   fp16: false # use mixed precision during model inference

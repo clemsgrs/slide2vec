@@ -17,6 +17,7 @@ model:
   level: "slide"
   name: "prism"
   batch_size: 128
+  save_latents: false
 
 speed:
   fp16: true

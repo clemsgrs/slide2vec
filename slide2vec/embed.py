@@ -80,7 +80,7 @@ def run_inference(dataloader, model, device, autocast_context, unit, batch_size,
             ):
                 idx, image = batch
                 image = image.to(device, non_blocking=True)
-                feature = model(image).cpu().numpy()
+                feature = model(image)["embedding"].cpu().numpy()
                 features.resize(features.shape[0] + feature.shape[0], axis=0)
                 features[-feature.shape[0]:] = feature
                 indices.resize(indices.shape[0] + idx.shape[0], axis=0)
@@ -225,7 +225,7 @@ def main(args):
                 with torch.inference_mode(), autocast_context:
                     sample_batch = next(iter(dataloader))
                     sample_image = sample_batch[1].to(model.device)
-                    sample_feature = model(sample_image).cpu().numpy()
+                    sample_feature = model(sample_image)["embedding"].cpu().numpy()
                     feature_dim = sample_feature.shape[1:]
                     dtype = sample_feature.dtype
 

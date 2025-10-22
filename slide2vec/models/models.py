@@ -191,8 +191,9 @@ class DINOViT(FeatureExtractor):
         return transform
 
     def forward(self, x):
-        return self.encoder(x)
-
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 class CustomViT(FeatureExtractor):
     def __init__(
@@ -263,7 +264,9 @@ class CustomViT(FeatureExtractor):
         return transform
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class UNI(FeatureExtractor):
@@ -281,7 +284,9 @@ class UNI(FeatureExtractor):
         return encoder
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class UNI2(FeatureExtractor):
@@ -311,7 +316,9 @@ class UNI2(FeatureExtractor):
         return encoder
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class Virchow(FeatureExtractor):
@@ -338,12 +345,13 @@ class Virchow(FeatureExtractor):
             :, 1:
         ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
         if self.mode == "cls":
-            return class_token
+            output = {"embedding": class_token}
         elif self.mode == "full":
             embedding = torch.cat(
                 [class_token, patch_tokens.mean(1)], dim=-1
             )  # size: 1 x 2560
-            return embedding
+            output = {"embedding": embedding}
+        return output
 
 
 class Virchow2(FeatureExtractor):
@@ -370,12 +378,13 @@ class Virchow2(FeatureExtractor):
             :, 5:
         ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
         if self.mode == "cls":
-            return class_token
+            output = {"embedding": class_token}
         elif self.mode == "full":
             embedding = torch.cat(
                 [class_token, patch_tokens.mean(1)], dim=-1
             )  # size: 1 x 2560
-            return embedding
+            output = {"embedding": embedding}
+        return output
 
 
 class ProvGigaPath(FeatureExtractor):
@@ -391,7 +400,9 @@ class ProvGigaPath(FeatureExtractor):
         return encoder
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class Hoptimus0(FeatureExtractor):
@@ -409,7 +420,9 @@ class Hoptimus0(FeatureExtractor):
         return encoder
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class Hoptimus1(FeatureExtractor):
@@ -427,7 +440,9 @@ class Hoptimus1(FeatureExtractor):
         return encoder
 
     def forward(self, x):
-        return self.encoder(x)
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class Hoptimus0Mini(FeatureExtractor):
@@ -454,12 +469,13 @@ class Hoptimus0Mini(FeatureExtractor):
             :, self.encoder.num_prefix_tokens :
         ]  # size: 1 x 256 x 768
         if self.mode == "cls":
-            return cls_features
+            output = {"embedding": cls_features}
         elif self.mode == "full":
             embedding = torch.cat(
                 [cls_features, patch_token_features.mean(1)], dim=-1
             )  # size: 1 x 1536
-            return embedding
+            output = {"embedding": embedding}
+        return output
 
 
 class RegionFeatureExtractor(nn.Module):
@@ -482,9 +498,10 @@ class RegionFeatureExtractor(nn.Module):
         B = x.size(0)
         x = rearrange(x, "b p c w h -> (b p) c w h")  # [B*num_tiles, 3, 224, 224]
         output = self.tile_encoder(x)  # [B*num_tiles, features_dim]
-        output = rearrange(
+        embedding = rearrange(
             output, "(b p) f -> b p f", b=B
         )  # [B, num_tiles, features_dim]
+        output = {"embedding": embedding}
         return output
 
 
@@ -514,7 +531,7 @@ class SlideFeatureExtractor(nn.Module):
         return self.tile_encoder(x)
 
     def forward_slide(self, **kwargs):
-        return self.slide_encoder(**kwargs)
+        raise NotImplementedError
 
 
 class ProvGigaPathSlide(SlideFeatureExtractor):
@@ -537,7 +554,8 @@ class ProvGigaPathSlide(SlideFeatureExtractor):
     def forward_slide(self, tile_features, tile_coordinates, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         output = self.slide_encoder(tile_features, tile_coordinates)
-        output = output[0].squeeze()
+        embedding = output[0].squeeze()
+        output = {"embedding": embedding}
         return output
 
 
@@ -558,16 +576,18 @@ class TITAN(SlideFeatureExtractor):
     def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         tile_coordinates = tile_coordinates.unsqueeze(0)
-        output = self.slide_encoder.encode_slide_from_patch_features(
+        embedding = self.slide_encoder.encode_slide_from_patch_features(
             tile_features, tile_coordinates, tile_size_lv0
         )
+        output = {"embedding": embedding.squeeze(0)}
         return output
 
 
 class PRISM(SlideFeatureExtractor):
-    def __init__(self):
+    def __init__(self, return_latents: bool = False):
         super(PRISM, self).__init__()
         self.features_dim = self.tile_encoder.features_dim
+        self.return_latents = return_latents
 
     def build_encoders(self):
         self.slide_encoder = AutoModel.from_pretrained(
@@ -578,5 +598,10 @@ class PRISM(SlideFeatureExtractor):
     def forward_slide(self, tile_features, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         reprs = self.slide_encoder.slide_representations(tile_features)
-        output = reprs["image_embedding"].squeeze(0)  # [1280]
+        embedding = reprs["image_embedding"].squeeze(0)  # [1280]
+        if self.return_latents:
+            latents = reprs["image_latents"].squeeze(0)  # [512, 1280]
+            output = {"embedding": embedding, "latents": latents}
+        else:
+            output = {"embedding": embedding}
         return output
