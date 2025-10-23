@@ -5,10 +5,15 @@ import torch.nn as nn
 
 from einops import rearrange
 from omegaconf import DictConfig
-from transformers import AutoModel
+from transformers import AutoModel, AutoImageProcessor
 from torchvision import transforms
 from timm.data import resolve_data_config
+from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
+
+from conch.open_clip_custom import create_model_from_pretrained
+from musk import modeling as musk_modeling
+from musk import utils as musk_utils
 
 import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer_dino as vits_dino
@@ -41,9 +46,17 @@ class ModelFactory:
             elif options.name == "h-optimus-1":
                 model = Hoptimus1()
             elif options.name == "h-optimus-0-mini" or options.name == "h0-mini":
-                model = Hoptimus0Mini(
-                    mode=options.mode
-                )
+                model = Hoptimus0Mini(mode=options.mode)
+            elif options.name == "conch":
+                model = Conch()
+            elif options.name == "musk":
+                model = MUSK()
+            elif options.name == "phikonv2":
+                model = PhikonV2()
+            elif options.name == "hibou":
+                model = Hibou()
+            elif options.name == "kaiko":
+                model = Kaiko(mode=options.mode)
             elif options.name == "rumc-vit-s-50k":
                 model = CustomViT(
                     arch=options.arch,
@@ -71,6 +84,16 @@ class ModelFactory:
                 tile_encoder = Hoptimus0()
             elif options.name == "h-optimus-1":
                 tile_encoder = Hoptimus1()
+            elif options.name == "conch":
+                model = Conch()
+            elif options.name == "musk":
+                model = MUSK()
+            elif options.name == "phikonv2":
+                model = PhikonV2()
+            elif options.name == "hibou":
+                model = Hibou()
+            elif options.name == "kaiko":
+                model = Kaiko(mode=options.mode)
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
                     arch=options.arch,
@@ -161,7 +184,9 @@ class DINOViT(FeatureExtractor):
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
             state_dict, prefix="backbone."
         )
-        state_dict, msg = update_state_dict(model_dict=self.encoder.state_dict(), state_dict=state_dict)
+        state_dict, msg = update_state_dict(
+            model_dict=self.encoder.state_dict(), state_dict=state_dict
+        )
         if distributed.is_main_process():
             print(msg)
         self.encoder.load_state_dict(state_dict, strict=False)
@@ -243,7 +268,9 @@ class CustomViT(FeatureExtractor):
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
             state_dict, prefix="backbone."
         )
-        state_dict, msg = update_state_dict(model_dict=self.encoder.state_dict(), state_dict=state_dict)
+        state_dict, msg = update_state_dict(
+            model_dict=self.encoder.state_dict(), state_dict=state_dict
+        )
         if distributed.is_main_process():
             print(msg)
         self.encoder.load_state_dict(state_dict, strict=False)
@@ -475,6 +502,140 @@ class Hoptimus0Mini(FeatureExtractor):
                 [cls_features, patch_token_features.mean(1)], dim=-1
             )  # size: 1 x 1536
             output = {"embedding": embedding}
+        return output
+
+
+class Conch(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 512
+        super(Conch, self).__init__()
+
+    def build_encoder(self):
+        encoder, transform = create_model_from_pretrained(
+            "conch_ViT-B-16",
+            "hf_hub:MahmoodLab/conch",
+        )
+        self.transform = transform
+        return encoder
+
+    def get_transforms(self):
+        return self.transform
+
+    def forward(self, x):
+        embedding = self.encoder.encode_image(x, proj_contrast=False, normalize=False)
+        output = {"embedding": embedding}
+        return output
+
+
+class MUSK(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 2048
+        super(MUSK, self).__init__()
+
+    def build_encoder(self):
+        encoder = timm.create_model("musk_large_patch16_384")
+        musk_utils.load_model_and_may_interpolate(
+            "hf_hub:xiangjx/musk", encoder, "model|module", ""
+        )
+        return encoder
+
+    def get_transforms(self):
+        return transforms.Compose(
+            [
+                transforms.Resize(384, interpolation=3, antialias=True),
+                transforms.CenterCrop((384, 384)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=IMAGENET_INCEPTION_MEAN, std=IMAGENET_INCEPTION_STD
+                ),
+            ]
+        )
+
+    def forward(self, x):
+        embedding = self.encoder(
+            image=x,
+            with_head=False,
+            out_norm=False,
+            ms_aug=True,
+            return_global=True,
+        )[0]
+        output = {"embedding": embedding}
+        return output
+
+
+class PhikonV2(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 1024
+        super(PhikonV2, self).__init__()
+
+    def build_encoder(self):
+        return AutoModel.from_pretrained("owkin/phikon-v2", trust_remote_code=True)
+
+    def get_transforms(self):
+        return AutoImageProcessor.from_pretrained("owkin/phikon-v2", trust_remote_code=True)
+
+    def forward(self, x):
+        embedding = self.encoder(x).last_hidden_state[:, 0, :]
+        output = {"embedding": embedding}
+        return output
+
+
+class Kaiko(FeatureExtractor):
+    def __init__(self, mode: str = "vits16"):
+        self.mode = mode
+        self.features_dim = 384
+        if mode == "vits8":
+            self.features_dim = 384
+        elif mode == "vitb8":
+            self.features_dim = 768
+        elif mode == "vitb16":
+            self.features_dim = 768
+        elif mode == "vitl14":
+            self.features_dim = 1024
+        super(Kaiko, self).__init__()
+
+    def build_encoder(self):
+        encoder = torch.hub.load(
+            "kaiko-ai/towards_large_pathology_fms", self.mode, trust_repo=True
+        )
+        return encoder
+
+    def get_transforms(self):
+        return transforms.Compose(
+            [
+                transforms.Resize(size=224),
+                transforms.CenterCrop(size=224),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=(0.5, 0.5, 0.5),
+                    std=(0.5, 0.5, 0.5),
+                ),
+            ]
+        )
+
+    def forward(self, x):
+        embedding = self.encoder(x)
+        import ipdb; ipdb.set_trace()
+        output = {"embedding": embedding}
+        return output
+
+
+class Hibou(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 1024
+        super(Hibou, self).__init__()
+
+    def build_encoder(self):
+        return AutoModel.from_pretrained("histai/hibou-L", trust_remote_code=True)
+
+    def get_transforms(self):
+        return AutoImageProcessor.from_pretrained(
+            "histai/hibou-L", trust_remote_code=True
+        )
+
+    def forward(self, x):
+        embedding = self.encoder(x).last_hidden_state[:, 0, :]
+        output = {"embedding": embedding}
         return output
 
 

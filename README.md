@@ -41,7 +41,7 @@ pip install slide2vec
 
    A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.<br>
    We've also added default configuration files for each of the foundation models currently supported:
-   - tile-level: `uni`, `uni2`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`, `h-optimus-1`, `h0-mini`
+   - tile-level: `uni`, `uni2`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`, `h-optimus-1`, `h0-mini`, `conch`, `musk`, `phikonv2`, `hibou`, `kaiko`
    - slide-level: `prov-gigapath`, `titan`, `prism`
 
 

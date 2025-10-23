@@ -19,6 +19,10 @@ environs
 xformers>=0.0.31
 matplotlib
 
+## MUSK & Conch
+git+https://github.com/lilab-stanford/MUSK.git
+git+https://github.com/Mahmoodlab/CONCH.git
+
 ## gigapath
 torchmetrics>=0.10.3
 fvcore
