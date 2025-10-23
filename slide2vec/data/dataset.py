@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import wholeslidedata as wsd
 
+from transformers.image_processing_utils import BaseImageProcessor
 from PIL import Image
 from pathlib import Path
 
@@ -58,5 +59,8 @@ class TileDataset(torch.utils.data.Dataset):
         if self.tile_size[idx] != self.tile_size_resized[idx]:
             tile = tile.resize((self.tile_size[idx], self.tile_size[idx]))
         if self.transforms:
-            tile = self.transforms(tile)
+            if isinstance(self.transforms, BaseImageProcessor):  # Hugging Face (`transformer`) 
+                tile = self.transforms(tile, return_tensors="pt")["pixel_values"].squeeze(0)
+            else:  # general callable such as torchvision transforms
+                tile = self.transforms(tile)
         return idx, tile
