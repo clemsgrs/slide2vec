@@ -56,7 +56,7 @@ class ModelFactory:
             elif options.name == "hibou":
                 model = Hibou()
             elif options.name == "kaiko":
-                model = Kaiko(mode=options.mode)
+                model = Kaiko(arch=options.arch)
             elif options.name == "rumc-vit-s-50k":
                 model = CustomViT(
                     arch=options.arch,
@@ -93,7 +93,7 @@ class ModelFactory:
             elif options.name == "hibou":
                 model = Hibou()
             elif options.name == "kaiko":
-                model = Kaiko(mode=options.mode)
+                model = Kaiko(arch=options.arch)
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
                     arch=options.arch,
@@ -581,22 +581,22 @@ class PhikonV2(FeatureExtractor):
 
 
 class Kaiko(FeatureExtractor):
-    def __init__(self, mode: str = "vits16"):
-        self.mode = mode
+    def __init__(self, arch: str = "vits16"):
+        self.arch = arch
         self.features_dim = 384
-        if mode == "vits8":
+        if arch == "vits8":
             self.features_dim = 384
-        elif mode == "vitb8":
+        elif arch == "vitb8":
             self.features_dim = 768
-        elif mode == "vitb16":
+        elif arch == "vitb16":
             self.features_dim = 768
-        elif mode == "vitl14":
+        elif arch == "vitl14":
             self.features_dim = 1024
         super(Kaiko, self).__init__()
 
     def build_encoder(self):
         encoder = torch.hub.load(
-            "kaiko-ai/towards_large_pathology_fms", self.mode, trust_repo=True
+            "kaiko-ai/towards_large_pathology_fms", self.arch, trust_repo=True
         )
         return encoder
 

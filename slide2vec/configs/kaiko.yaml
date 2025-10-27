@@ -12,7 +12,7 @@ tiling:
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "kaiko"
-  mode: "vitl14" # kaiko model mode, options: ("vits8", "vits16", "vitb8", "vitb16", "vitl14")
+  arch: "vitl14" # kaiko model architectures, options: ("vits8", "vits16", "vitb8", "vitb16", "vitl14")
   batch_size: 1
 
 speed:
