@@ -7,6 +7,7 @@ from einops import rearrange
 from omegaconf import DictConfig
 from transformers import AutoModel, AutoImageProcessor
 from torchvision import transforms
+from torchvision.transforms import v2
 from timm.data import resolve_data_config
 from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
@@ -601,12 +602,13 @@ class Kaiko(FeatureExtractor):
         return encoder
 
     def get_transforms(self):
-        return transforms.Compose(
+        return v2.Compose(
             [
-                transforms.Resize(size=224),
-                transforms.CenterCrop(size=224),
-                transforms.ToTensor(),
-                transforms.Normalize(
+                v2.ToImage(),
+                v2.Resize(size=224),
+                v2.CenterCrop(size=224),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(
                     mean=(0.5, 0.5, 0.5),
                     std=(0.5, 0.5, 0.5),
                 ),
