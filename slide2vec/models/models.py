@@ -48,7 +48,7 @@ class ModelFactory:
             elif options.name == "h-optimus-0-mini" or options.name == "h0-mini":
                 model = Hoptimus0Mini(mode=options.mode)
             elif options.name == "conch":
-                model = Conch()
+                model = CONCH()
             elif options.name == "musk":
                 model = MUSK()
             elif options.name == "phikonv2":
@@ -85,7 +85,7 @@ class ModelFactory:
             elif options.name == "h-optimus-1":
                 tile_encoder = Hoptimus1()
             elif options.name == "conch":
-                model = Conch()
+                model = CONCH()
             elif options.name == "musk":
                 model = MUSK()
             elif options.name == "phikonv2":
@@ -505,10 +505,10 @@ class Hoptimus0Mini(FeatureExtractor):
         return output
 
 
-class Conch(FeatureExtractor):
+class CONCH(FeatureExtractor):
     def __init__(self):
         self.features_dim = 512
-        super(Conch, self).__init__()
+        super(CONCH, self).__init__()
 
     def build_encoder(self):
         encoder, transform = create_model_from_pretrained(
