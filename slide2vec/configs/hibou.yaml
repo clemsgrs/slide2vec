@@ -11,6 +11,7 @@ tiling:
 
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  arch: "hibou-b" # Hibou model architectures, options: ("hibou-b", "hibou-L")
   name: "hibou"
   batch_size: 1
 

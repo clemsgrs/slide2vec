@@ -54,7 +54,7 @@ class ModelFactory:
             elif options.name == "phikonv2":
                 model = PhikonV2()
             elif options.name == "hibou":
-                model = Hibou()
+                model = Hibou(arch=options.arch)
             elif options.name == "kaiko":
                 model = Kaiko(arch=options.arch)
             elif options.name == "rumc-vit-s-50k":
@@ -621,12 +621,16 @@ class Kaiko(FeatureExtractor):
 
 
 class Hibou(FeatureExtractor):
-    def __init__(self):
-        self.features_dim = 1024
+    def __init__(self, arch="hibou-b"):
+        self.arch = arch
+        self.features_dim = 768
+        if arch == "hibou-L":
+            self.features_dim = 1024
         super(Hibou, self).__init__()
 
     def build_encoder(self):
-        return AutoModel.from_pretrained("histai/hibou-L", trust_remote_code=True)
+        model = f"histai/{self.arch}"
+        return AutoModel.from_pretrained(model, trust_remote_code=True)
 
     def get_transforms(self):
         return AutoImageProcessor.from_pretrained(
