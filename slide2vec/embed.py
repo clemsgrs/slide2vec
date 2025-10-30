@@ -54,20 +54,18 @@ def create_transforms(cfg, model):
         raise ValueError(f"Unknown model level: {cfg.model.level}")
 
 
-def create_dataset(wsi_fp, in_dir, spacing, backend, transforms, buffer: bool):
+def create_dataset(wsi_path, in_dir, spacing, backend, transforms, buffer: bool):
     if buffer:
         dataset = BufferedTileDataset(
-            wsi_fp,
-            in_dir,
-            spacing,
-            backend=backend,
+            wsi_path=wsi_path,
+            tile_dir=in_dir,
             transforms=transforms,
         )
     else:
         dataset = TileDataset(
-            wsi_fp,
-            in_dir,
-            spacing,
+            wsi_path=wsi_path,
+            coordinates_dir=in_dir,
+            target_spacing=spacing,
             backend=backend,
             transforms=transforms,
         )
@@ -216,7 +214,14 @@ def main(args):
             position=1,
         ):
             try:
-                dataset = create_dataset(wsi_fp, in_dir, cfg.tiling.params.spacing, cfg.tiling.backend, transforms, cfg.buffer_tiles)
+                dataset = create_dataset(
+                    wsi_path=wsi_fp,
+                    in_dir=in_dir,
+                    spacing=cfg.tiling.params.spacing,
+                    backend=cfg.tiling.backend,
+                    transforms=transforms,
+                    buffer=cfg.buffer_tiles,
+                )
                 if distributed.is_enabled_and_multiple_gpus():
                     sampler = torch.utils.data.DistributedSampler(
                         dataset,
