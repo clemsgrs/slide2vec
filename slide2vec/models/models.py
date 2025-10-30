@@ -695,7 +695,9 @@ class SlideFeatureExtractor(nn.Module):
         return self.tile_encoder.get_transforms()
 
     def forward(self, x):
-        return self.tile_encoder(x)
+        embedding = self.tile_encoder(x)
+        output = {"embedding": embedding}
+        return output
 
     def forward_slide(self, **kwargs):
         raise NotImplementedError
