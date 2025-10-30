@@ -17,7 +17,7 @@ import slide2vec.distributed as distributed
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
 from slide2vec.models import ModelFactory
-from slide2vec.data import TileDataset, RegionUnfolding
+from slide2vec.data import TileDataset, BufferedTileDataset, RegionUnfolding
 
 torchvision.disable_beta_transforms_warning()
 
@@ -54,14 +54,24 @@ def create_transforms(cfg, model):
         raise ValueError(f"Unknown model level: {cfg.model.level}")
 
 
-def create_dataset(wsi_fp, coordinates_dir, spacing, backend, transforms):
-    return TileDataset(
-        wsi_fp,
-        coordinates_dir,
-        spacing,
-        backend=backend,
-        transforms=transforms,
-    )
+def create_dataset(wsi_fp, in_dir, spacing, backend, transforms, buffer: bool):
+    if buffer:
+        dataset = BufferedTileDataset(
+            wsi_fp,
+            in_dir,
+            spacing,
+            backend=backend,
+            transforms=transforms,
+        )
+    else:
+        dataset = TileDataset(
+            wsi_fp,
+            in_dir,
+            spacing,
+            backend=backend,
+            transforms=transforms,
+        )
+    return dataset
 
 
 def run_inference(dataloader, model, device, autocast_context, unit, batch_size, feature_path, feature_dim, dtype, run_on_cpu: False):
@@ -133,6 +143,12 @@ def main(args):
         coordinates_dir = Path(cfg.tiling.read_coordinates_from)
     else:
         coordinates_dir = Path(cfg.output_dir, "coordinates")
+
+    if cfg.buffer_tiles:
+        in_dir = Path("/tmp/buffered_tiles")
+    else:
+        in_dir = coordinates_dir
+
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -200,7 +216,7 @@ def main(args):
             position=1,
         ):
             try:
-                dataset = create_dataset(wsi_fp, coordinates_dir, cfg.tiling.params.spacing, cfg.tiling.backend, transforms)
+                dataset = create_dataset(wsi_fp, in_dir, cfg.tiling.params.spacing, cfg.tiling.backend, transforms, cfg.buffer_tiles)
                 if distributed.is_enabled_and_multiple_gpus():
                     sampler = torch.utils.data.DistributedSampler(
                         dataset,

@@ -5,6 +5,7 @@ resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
 visualize: true # save a visualization of slide tiling in a .jpg
+buffer_tiles: false
 
 seed: 0 # seed for reproducibility
 

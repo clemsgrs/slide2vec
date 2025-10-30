@@ -65,6 +65,23 @@ def run_tiling(config_file, run_id):
         sys.exit(proc.returncode)
 
 
+def run_buffering(config_file, run_id):
+    cmd = [
+        sys.executable,
+        "slide2vec/buffer.py",
+        "--run-id", run_id,
+        "--config-file", config_file,
+    ]
+    # run fully silent in the background (no stdout/stderr capture or print)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,   # discard stdout
+        stderr=subprocess.DEVNULL,   # discard stderr
+        start_new_session=True,
+    )
+    return proc
+
+
 def run_feature_extraction(config_file, run_id, run_on_cpu: False):
     print("Running embed.py...")
     # find a free port
@@ -171,6 +188,9 @@ def main(args):
     print("Tiling completed.")
     print("=+=" * 10)
 
+    if cfg.buffer_tiles:
+        buffer_proc = run_buffering(config_file, run_id)
+
     output_dir = Path(cfg.output_dir)
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
@@ -181,6 +201,14 @@ def main(args):
         log_thread.start()
 
     run_feature_extraction(config_file, run_id, run_on_cpu)
+
+    # stop tile buffer process once tile encoding is done
+    if buffer_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(buffer_proc.pid), signal.SIGTERM)
+        except Exception:
+            pass
+        buffer_proc.wait(timeout=30)
 
     if cfg.model.level == "slide":
         run_feature_aggregation(config_file, run_id, run_on_cpu)
@@ -203,9 +231,9 @@ if __name__ == "__main__":
 
     import warnings
     import torchvision
-    
+
     torchvision.disable_beta_transforms_warning()
-    
+
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
