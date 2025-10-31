@@ -696,7 +696,11 @@ class SlideFeatureExtractor(nn.Module):
 
     def forward(self, x):
         embedding = self.tile_encoder(x)
-        output = {"embedding": embedding}
+        if isinstance(embedding, dict) and "embedding" in embedding:
+            output = embedding
+        else:
+            # Edge case for TITAN model because it implements its own forward method
+            output = {"embedding": embedding}
         return output
 
     def forward_slide(self, **kwargs):
@@ -746,7 +750,7 @@ class TITAN(SlideFeatureExtractor):
         tile_features = tile_features.unsqueeze(0)
         tile_coordinates = tile_coordinates.unsqueeze(0)
         embedding = self.slide_encoder.encode_slide_from_patch_features(
-            tile_features, tile_coordinates, tile_size_lv0
+            tile_features, tile_coordinates.long(), tile_size_lv0
         )
         output = {"embedding": embedding.squeeze(0)}
         return output
