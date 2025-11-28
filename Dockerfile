@@ -50,11 +50,7 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     rm -rf /var/lib/apt/lists/*
 
 # clone & install relevant repositories
-RUN git clone https://github.com/prov-gigapath/prov-gigapath.git && \
-    git+https://github.com/lilab-stanford/MUSK.git && \
-    git+https://github.com/Mahmoodlab/CONCH.git && \
-    python -m pip install -e /home/user/MUSK && \
-    python -m pip install -e /home/user/CONCH
+RUN git clone https://github.com/prov-gigapath/prov-gigapath.git
 
 # add folders to python path
 ENV PYTHONPATH="/home/user/prov-gigapath:/home/user/CONCH:/home/user/MUSK:$PYTHONPATH"

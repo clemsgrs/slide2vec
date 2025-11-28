@@ -95,6 +95,8 @@ class ModelFactory:
                 model = Hibou()
             elif options.name == "kaiko":
                 model = Kaiko(arch=options.arch)
+            elif options.name == "kaiko-midnight":
+                model = Midnight12k()
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
                     arch=options.arch,
@@ -618,6 +620,32 @@ class Kaiko(FeatureExtractor):
     def forward(self, x):
         embedding = self.encoder(x)
         import ipdb; ipdb.set_trace()
+        output = {"embedding": embedding}
+        return output
+
+
+class Midnight12k(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 1536
+        super(Midnight12k, self).__init__()
+
+    def build_encoder(self):
+        return AutoModel.from_pretrained('kaiko-ai/midnight')
+
+    def get_transforms(self):
+        return v2.Compose(
+            [
+                v2.Resize(224),
+                v2.CenterCrop(224),
+                v2.ToTensor(),
+                v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+            ]
+        )
+
+    def forward(self, x):
+        tensor = self.encoder(x).last_hidden_state
+        cls_embedding, patch_embeddings = tensor[:, 0, :], tensor[:, 1:, :]
+        embedding = torch.cat([cls_embedding, patch_embeddings.mean(1)], dim=-1)
         output = {"embedding": embedding}
         return output
 
