@@ -17,7 +17,7 @@ import slide2vec.distributed as distributed
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
 from slide2vec.models import ModelFactory
-from slide2vec.data import TileDataset, BufferedTileDataset, RegionUnfolding
+from slide2vec.data import TileDataset, BufferedTileIterableDataset, RegionUnfolding
 
 torchvision.disable_beta_transforms_warning()
 
@@ -54,11 +54,12 @@ def create_transforms(cfg, model):
         raise ValueError(f"Unknown model level: {cfg.model.level}")
 
 
-def create_dataset(wsi_path, in_dir, spacing, backend, transforms, buffer: bool):
+def create_dataset(wsi_path, in_dir, spacing, backend, transforms, buffer: bool, batch_size: int | None = None):
     if buffer:
-        dataset = BufferedTileDataset(
+        dataset = BufferedTileIterableDataset(
             wsi_path=wsi_path,
             tile_dir=in_dir,
+            batch_size=batch_size,
             transforms=transforms,
         )
     else:
@@ -221,8 +222,9 @@ def main(args):
                     backend=cfg.tiling.backend,
                     transforms=transforms,
                     buffer=cfg.buffer_tiles,
+                    batch_size=cfg.model.batch_size,
                 )
-                if distributed.is_enabled_and_multiple_gpus():
+                if distributed.is_enabled_and_multiple_gpus() and not cfg.buffer_tiles:
                     sampler = torch.utils.data.DistributedSampler(
                         dataset,
                         shuffle=False,
@@ -230,13 +232,22 @@ def main(args):
                     )
                 else:
                     sampler = None
-                dataloader = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=cfg.model.batch_size,
-                    sampler=sampler,
-                    num_workers=num_workers,
-                    pin_memory=True,
-                )
+
+                if cfg.buffer_tiles:
+                    dataloader = torch.utils.data.DataLoader(
+                        dataset,
+                        batch_size=None,
+                        num_workers=num_workers,
+                        persistent_workers=True,
+                    )
+                else:
+                    dataloader = torch.utils.data.DataLoader(
+                        dataset,
+                        batch_size=cfg.model.batch_size,
+                        sampler=sampler,
+                        num_workers=num_workers,
+                        pin_memory=True,
+                    )
 
                 name = wsi_fp.stem.replace(" ", "_")
                 feature_path = features_dir / f"{name}.pt"

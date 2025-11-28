@@ -1,13 +1,16 @@
+import os
 import zarr
 import time
+import cv2
 import argparse
-from PIL import Image
-from pathlib import Path
-from numcodecs import Blosc
-
+import concurrent.futures
+import multiprocessing as mp
 import numpy as np
 import pandas as pd
 import wholeslidedata as wsd
+
+from pathlib import Path
+from numcodecs import Blosc
 
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file
@@ -27,21 +30,47 @@ def get_args_parser(add_help: bool = True):
     return parser
 
 
+_WSI = None
+
+
+def _worker_init(wsi_path: str, backend: str):
+    global _WSI
+    _WSI = wsd.WholeSlideImage(Path(wsi_path), backend=backend)
+
+
+def _fetch_tile(args):
+    """
+    args: (x, y, tile_size_resized, tile_level, ts)
+    returns: uint8 ndarray (ts, ts, 3)
+    """
+    x, y, tile_size_resized, tile_level, ts = args
+    global _WSI
+    tile_spacing = _WSI.spacings[tile_level]
+    tile = _WSI.get_patch(
+        x,
+        y,
+        tile_size_resized,
+        tile_size_resized,
+        spacing=tile_spacing,
+        center=False
+    )
+    if ts != tile_size_resized:
+        tile = cv2.resize(tile, (ts, ts), interpolation=cv2.INTER_AREA)
+    return tile.astype(np.uint8)
+
+
 def save_tiles_to_zarr(
     *,
     wsi_path: Path,
     coordinates_dir: Path,
     save_dir: Path,
     target_spacing: float,
-    backend: str = "openslide",
-    batch_size: int = 256,
-    chunk_tiles: int = 256,
+    backend: str,
+    batch_size: int,
 ):
     name = wsi_path.stem.replace(" ", "_")
     tmp_path = save_dir / f"{name}.zarr.partial"
     save_path = save_dir / f"{name}.zarr"
-
-    wsi = wsd.WholeSlideImage(wsi_path, backend=backend)
 
     coords_path = coordinates_dir / f"{name}.npy"
     coords = np.load(coords_path, allow_pickle=True)
@@ -64,30 +93,53 @@ def save_tiles_to_zarr(
         tmp_path,
         mode="w",
         shape=(num_tiles, ts, ts, 3),
-        chunks=(min(chunk_tiles, num_tiles), ts, ts, 3),
+        chunks=(min(batch_size, num_tiles), ts, ts, 3),
         dtype="uint8",
         compressor=compressor
     )
 
-    # write tiles in batches to improve I/O
-    for i in range(0, num_tiles, batch_size):
-        j = min(i + batch_size, num_tiles)
-        batch = []
-        for idx in range(i, j):
-            tile_spacing = wsi.spacings[tile_level[idx]]
-            tile_arr = wsi.get_patch(
-                xs[idx],
-                ys[idx],
-                tile_size_resized[idx],
-                tile_size_resized[idx],
-                spacing=tile_spacing,
-                center=False
-            )
-            tile = Image.fromarray(tile_arr).convert("RGB")
-            if ts != tile_size_resized[idx]:
-                tile = tile.resize((ts, ts))
-            batch.append(np.asarray(tile, dtype=np.uint8))
-        z[i:j] = np.stack(batch, axis=0)
+    parallel_workers = mp.cpu_count()
+    if "SLURM_JOB_CPUS_PER_NODE" in os.environ:
+        parallel_workers = min(
+            parallel_workers, int(os.environ["SLURM_JOB_CPUS_PER_NODE"])
+        )
+
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=parallel_workers,
+        initializer=_worker_init,
+        initargs=(str(wsi_path), backend),
+    ) as exc:
+
+        # write tiles in batches to improve I/O
+        start_time = time.time()
+        for i in range(0, num_tiles, batch_size):
+            batch_start_time = time.time()
+            j = min(i + batch_size, num_tiles)
+
+            # prepare tasks for workers (no wsi_path/backend to avoid reopening)
+            args = [
+                (
+                    int(xs[idx]),
+                    int(ys[idx]),
+                    int(tile_size_resized[idx]),
+                    int(tile_level[idx]),
+                    int(ts),
+                )
+                for idx in range(i, j)
+            ]
+
+            # map preserves order so z[i:j] will match coordinates
+            tiles = list(exc.map(_fetch_tile, args))
+
+            # write batch directly into zarr
+            z[i:j] = np.stack(tiles, axis=0)
+            batch_end_time = time.time()
+            batch_elapsed = batch_end_time - batch_start_time
+            print(f"Saved {j-i} tiles in {batch_elapsed:.2f} seconds.")
+
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print(f"Saved {num_tiles} tiles for slide {name} to zarr in {elapsed:.2f} seconds.")
 
     z.attrs.update({
         "slide_name": name,
@@ -96,7 +148,7 @@ def save_tiles_to_zarr(
         "channels": 3,
         "dtype": "uint8",
         "backend": backend,
-        "chunks_tiles": int(min(chunk_tiles, num_tiles)),
+        "chunks_tiles": int(min(batch_size, num_tiles)),
     })
 
     tmp_path.rename(save_path)
@@ -130,7 +182,7 @@ def main(args):
     tile_dir = Path("/tmp/buffered_tiles")
     tile_dir.mkdir(exist_ok=True, parents=True)
 
-    buffer_size = 3
+    buffer_size = 3 # max number of slides to keep in buffer
     for wsi_fp in wsi_paths_to_process:
 
         while len(list(tile_dir.glob("*.zarr"))) >= buffer_size:
@@ -143,6 +195,7 @@ def main(args):
             save_dir=tile_dir,
             target_spacing=cfg.tiling.params.spacing,
             backend=cfg.tiling.backend,
+            batch_size=cfg.model.batch_size,
         )
 
 

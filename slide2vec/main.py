@@ -203,7 +203,7 @@ def main(args):
     run_feature_extraction(config_file, run_id, run_on_cpu)
 
     # stop tile buffer process once tile encoding is done
-    if buffer_proc.poll() is None:
+    if cfg.buffer_tiles and buffer_proc.poll() is None:
         try:
             os.killpg(os.getpgid(buffer_proc.pid), signal.SIGTERM)
         except Exception:

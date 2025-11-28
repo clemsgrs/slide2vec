@@ -1,2 +1,2 @@
-from .dataset import TileDataset, BufferedTileDataset
+from .dataset import TileDataset, BufferedTileIterableDataset
 from .augmentations import RegionUnfolding
