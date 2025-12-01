@@ -47,18 +47,7 @@ def run_tiling(config_file, run_id):
         "--config-file",
         config_file,
     ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
-    # forward output in real-time
-    for line in proc.stdout:
-        print(line.rstrip())
-        sys.stdout.flush()
+    proc = subprocess.Popen(cmd)
     proc.wait()
     if proc.returncode != 0:
         print("Slide tiling failed. Exiting.")
@@ -94,20 +83,8 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
             "--run-on-cpu",
         ]
     # launch in its own process group.
-    proc = subprocess.Popen(
-        cmd,
-        preexec_fn=os.setsid,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
+    proc = subprocess.Popen(cmd)
     try:
-        # forward output in real-time
-        for line in proc.stdout:
-            print(line.rstrip())
-            sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating embed.py process group...")
@@ -133,20 +110,8 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
     if run_on_cpu:
         cmd.append("--run-on-cpu")
     # launch in its own process group.
-    proc = subprocess.Popen(
-        cmd,
-        preexec_fn=os.setsid,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
+    proc = subprocess.Popen(cmd)
     try:
-        # forward output in real-time
-        for line in proc.stdout:
-            print(line.rstrip())
-            sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating aggregate.py process group...")
@@ -203,9 +168,9 @@ if __name__ == "__main__":
 
     import warnings
     import torchvision
-    
+
     torchvision.disable_beta_transforms_warning()
-    
+
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)
