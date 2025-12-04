@@ -73,7 +73,7 @@ RUN python -m pip install \
     --requirement /opt/app/requirements.in \
     && rm -rf /home/user/.cache/pip
 RUN python -m pip install /opt/app
-RUN pip install flash-attn --no-build-isolation
+RUN python -m pip install flash-attn==2.5.8 --no-build-isolation
 
 # switch to user
 USER user
