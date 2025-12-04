@@ -1,4 +1,4 @@
-csv: # path to csv containing slide paths
+csv: "/data/temporary/clement/notebooks/discern/prostate-bladder-breast-debug.csv" # path to csv containing slide paths
 
 output_dir: "output" # output directory
 
@@ -16,3 +16,10 @@ model:
 
 speed:
   fp16: true # use mixed precision during model inference
+
+wandb:
+  enable: true
+  project: "discern"
+  username: "clemsg"
+  exp_name: "features"
+  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]

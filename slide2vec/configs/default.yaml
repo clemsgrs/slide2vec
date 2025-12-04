@@ -41,7 +41,7 @@ model:
   mode: "cls" # embedding mode ["cls", "full"]
   arch: # architecture of custom model
   pretrained_weights: # path to the pretrained weights when using a custom model
-  batch_size: 1
+  batch_size: 256
   tile_size: ${tiling.params.tile_size}
   patch_size: 256 # if level is "region", size used to unroll the region into patches
   save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"

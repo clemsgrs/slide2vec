@@ -1,9 +1,9 @@
 # csv: "/data/temporary/clement/dataset/tcga-prad/mutations/tcga-prad-tp53-slide2vec.csv"
 # csv: "/data/temporary/clement/dataset/tcga-blca/mutations/tcga-blca-tp53-slide2vec.csv"
 # csv: "/data/temporary/clement/dataset/tcga-brca/mutations/tcga-brca-tp53-slide2vec.csv"
-csv: "/data/temporary/clement/leopard/csvs/dev-slide2vec.csv"
+csv: "/data/temporary/clement/leopard/csvs/brazil-slide2vec-august-2025-revision.csv"
 
-output_dir: "output"
+output_dir: "/data/temporary/clement/code/slide2vec/output"
 
 visualize: true
 
@@ -11,14 +11,11 @@ tiling:
   # read_coordinates_from: "/data/temporary/clement/code/slide2vec/output/vjh3hrr6/coordinates"
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    # tolerance: 0.07 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     tile_size: 2048 # size of the tiles to extract, in pixels
-    # min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
-    min_tissue_percentage: 0.01 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
   filter_params:
-    # ref_tile_size: 224
-    ref_tile_size: 16
+    ref_tile_size: 256
 
 model:
   level: "region"
@@ -29,10 +26,10 @@ speed:
   fp16: true
 
 wandb:
-  enable: false
-  project: "mut-pred"
+  enable: true
+  project: "leopard"
   username: "clemsg"
   exp_name: "features"
-  tags: ["features", "tcga-prad", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
   # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
   # tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
