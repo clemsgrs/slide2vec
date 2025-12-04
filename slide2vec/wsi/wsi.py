@@ -456,6 +456,7 @@ class WholeSlideImage(object):
         self,
         tiling_params: TilingParameters,
         filter_params: FilterParameters,
+        disable_tqdm: bool = False,
         num_workers: int = 1,
     ):
         """
@@ -512,6 +513,7 @@ class WholeSlideImage(object):
             drop_holes=tiling_params.drop_holes,
             min_tissue_percentage=tiling_params.min_tissue_percentage,
             use_padding=tiling_params.use_padding,
+            disable_tqdm=disable_tqdm,
             num_workers=num_workers,
         )
         tile_coordinates = list(zip(running_x_coords, running_y_coords))
@@ -738,6 +740,7 @@ class WholeSlideImage(object):
         drop_holes: bool,
         min_tissue_percentage: float,
         use_padding: bool,
+        disable_tqdm: bool = False,
         num_workers: int = 1,
     ):
         """
@@ -791,6 +794,7 @@ class WholeSlideImage(object):
                     unit=" tissue blob",
                     total=len(contours),
                     leave=True,
+                    disable=disable_tqdm,
                     file=sys.stdout,
                 )
             )

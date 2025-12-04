@@ -37,6 +37,7 @@ def process_slide(
     cfg,
     mask_visualize_dir,
     tile_visualize_dir,
+    disable_tqdm: bool = False,
     num_workers: int = 4,
 ):
     """
@@ -55,6 +56,7 @@ def process_slide(
             segment_params=cfg.tiling.seg_params,
             filter_params=cfg.tiling.filter_params,
             mask_visu_path=tissue_mask_visu_path,
+            disable_tqdm=disable_tqdm,
             num_workers=num_workers,
         )
         coordinates_dir = Path(cfg.output_dir, "coordinates")
@@ -168,6 +170,7 @@ def main(args):
                         "cfg": cfg,
                         "mask_visualize_dir": mask_visualize_dir,
                         "tile_visualize_dir": tile_visualize_dir,
+                        "disable_tqdm": True,
                         "num_workers": parallel_workers,
                     }
                     for wsi_fp, mask_fp in zip(
@@ -176,7 +179,7 @@ def main(args):
                 ]
                 results = list(
                     tqdm.tqdm(
-                        pool.map(process_slide_wrapper, args_list),
+                        pool.imap(process_slide_wrapper, args_list),
                         total=total,
                         desc="Slide tiling",
                         unit="slide",

@@ -33,8 +33,8 @@ def extract_coordinates(
     segment_params: SegmentationParameters,
     tiling_params: TilingParameters,
     filter_params: FilterParameters,
-    # mask_visu_path: Path | None = None,
-    mask_visu_path: Path = None,
+    mask_visu_path: Path | None = None,
+    disable_tqdm: bool = False,
     num_workers: int = 1,
 ):
     wsi = WholeSlideImage(
@@ -61,7 +61,7 @@ def extract_coordinates(
         tile_level,
         resize_factor,
         tile_size_lv0,
-    ) = wsi.get_tile_coordinates(tiling_params, filter_params, num_workers=num_workers)
+    ) = wsi.get_tile_coordinates(tiling_params, filter_params, disable_tqdm=disable_tqdm,num_workers=num_workers)
     sorted_coordinates, _ = sort_coordinates_with_tissue(
         coordinates, tissue_percentages
     )
@@ -132,8 +132,7 @@ def draw_grid_from_coordinates(
     tile_size_at_0,
     vis_level: int,
     thickness: int = 2,
-    # indices: list[int] | None = None,
-    indices: list[int] = None,
+    indices: list[int] | None = None,
 ):
     downsamples = wsi.level_downsamples[vis_level]
     if indices is None:

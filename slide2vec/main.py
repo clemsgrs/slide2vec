@@ -24,6 +24,17 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument(
         "--run-on-cpu", action="store_true", help="run inference on cpu"
     )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="output directory to save logs and checkpoints",
+    )
+    parser.add_argument(
+        "opts",
+        help="Modify config options at the end of the command using \"path.key=value\".",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
     return parser
 
 
@@ -47,18 +58,7 @@ def run_tiling(config_file, run_id):
         "--config-file",
         config_file,
     ]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
-    # forward output in real-time
-    for line in proc.stdout:
-        print(line.rstrip())
-        sys.stdout.flush()
+    proc = subprocess.Popen(cmd)
     proc.wait()
     if proc.returncode != 0:
         print("Slide tiling failed. Exiting.")
@@ -94,20 +94,8 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
             "--run-on-cpu",
         ]
     # launch in its own process group.
-    proc = subprocess.Popen(
-        cmd,
-        preexec_fn=os.setsid,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
+    proc = subprocess.Popen(cmd)
     try:
-        # forward output in real-time
-        for line in proc.stdout:
-            print(line.rstrip())
-            sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating embed.py process group...")
@@ -133,20 +121,8 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
     if run_on_cpu:
         cmd.append("--run-on-cpu")
     # launch in its own process group.
-    proc = subprocess.Popen(
-        cmd,
-        preexec_fn=os.setsid,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        universal_newlines=True
-    )
+    proc = subprocess.Popen(cmd)
     try:
-        # forward output in real-time
-        for line in proc.stdout:
-            print(line.rstrip())
-            sys.stdout.flush()
         proc.wait()
     except KeyboardInterrupt:
         print("Received CTRL+C, terminating aggregate.py process group...")
@@ -159,14 +135,12 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
 
 
 def main(args):
-    config_file = args.config_file
-    skip_datetime = args.skip_datetime
     run_on_cpu = args.run_on_cpu
 
-    cfg, run_id = setup(config_file, skip_datetime=skip_datetime)
+    cfg, cfg_path, run_id = setup(args)
     hf_login()
 
-    run_tiling(config_file, run_id)
+    run_tiling(cfg_path, run_id)
 
     print("Tiling completed.")
     print("=+=" * 10)
@@ -180,10 +154,10 @@ def main(args):
         )
         log_thread.start()
 
-    run_feature_extraction(config_file, run_id, run_on_cpu)
+    run_feature_extraction(cfg_path, run_id, run_on_cpu)
 
     if cfg.model.level == "slide":
-        run_feature_aggregation(config_file, run_id, run_on_cpu)
+        run_feature_aggregation(cfg_path, run_id, run_on_cpu)
         print("Feature extraction completed.")
         print("=+=" * 10)
     else:
@@ -203,9 +177,9 @@ if __name__ == "__main__":
 
     import warnings
     import torchvision
-    
+
     torchvision.disable_beta_transforms_warning()
-    
+
     warnings.filterwarnings("ignore", message=".*Could not set the permissions.*")
     warnings.filterwarnings("ignore", message=".*antialias.*", category=UserWarning)
     warnings.filterwarnings("ignore", message=".*TypedStorage.*", category=UserWarning)

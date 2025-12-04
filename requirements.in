@@ -7,7 +7,7 @@ pillow
 tqdm
 wandb
 torch>=2.3,<2.8
-torchvision>=0.15.0
+torchvision>=0.18.0
 opencv-python
 wholeslidedata<0.0.16
 timm>=1.0.3
@@ -19,6 +19,14 @@ environs
 xformers>=0.0.31
 matplotlib
 
+## Hibou
+scipy~=1.8.1
+scikit-image~=0.19.3
+
+## MUSK & CONCH
+git+https://github.com/lilab-stanford/MUSK.git
+git+https://github.com/Mahmoodlab/CONCH.git
+
 ## gigapath
 torchmetrics>=0.10.3
 fvcore
@@ -29,3 +37,4 @@ scikit-learn
 fairscale
 packaging==23.2
 ninja==1.11.1.1
+psutil<6

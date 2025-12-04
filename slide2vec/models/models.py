@@ -60,9 +60,15 @@ class ModelFactory:
                 model = Kaiko(arch=options.arch)
             elif options.name == "rumc-vit-s-50k":
                 model = CustomViT(
-                    arch=options.arch,
+                    arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
                     num_register_tokens=0,
+                )
+            elif options.name == "panda-vit-s":
+                model = PandaViT(
+                    arch="vit_small",
+                    pretrained_weights=options.pretrained_weights,
+                    input_size=options.tile_size,
                 )
             elif options.name is None and options.arch:
                 model = DINOViT(
@@ -95,11 +101,19 @@ class ModelFactory:
                 model = Hibou()
             elif options.name == "kaiko":
                 model = Kaiko(arch=options.arch)
+            elif options.name == "kaiko-midnight":
+                model = Midnight12k()
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
-                    arch=options.arch,
+                    arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
                     num_register_tokens=0,
+                )
+            elif options.name == "panda-vit-s":
+                tile_encoder = PandaViT(
+                    arch="vit_small",
+                    pretrained_weights=options.pretrained_weights,
+                    input_size=options.tile_size,
                 )
             elif options.name is None and options.arch:
                 tile_encoder = DINOViT(
@@ -152,6 +166,75 @@ class FeatureExtractor(nn.Module):
 
     def forward(self, x):
         raise NotImplementedError
+
+
+class PandaViT(FeatureExtractor):
+    def __init__(
+        self,
+        arch: str,
+        pretrained_weights: str,
+        input_size: int = 224,
+        ckpt_key: str = "teacher",
+    ):
+        self.arch = arch
+        self.pretrained_weights = pretrained_weights
+        if input_size != 224:
+            print(
+                f"Warning: PandaViT will center-crop input images to 224x224"
+            )
+        self.input_size = input_size
+        self.ckpt_key = ckpt_key
+        self.features_dim = 384
+        super(PandaViT, self).__init__()
+        self.load_weights()
+
+    def load_weights(self):
+        if distributed.is_main_process():
+            print(f"Loading pretrained weights from: {self.pretrained_weights}")
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
+        if self.ckpt_key:
+            state_dict = state_dict[self.ckpt_key]
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="module."
+        )
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="backbone."
+        )
+        state_dict, msg = update_state_dict(
+            model_dict=self.encoder.state_dict(), state_dict=state_dict
+        )
+        if distributed.is_main_process():
+            print(msg)
+        self.encoder.load_state_dict(state_dict, strict=False)
+
+    def build_encoder(self):
+        encoder = vits_dino.__dict__[self.arch](
+            img_size=256, patch_size=16
+        )
+        return encoder
+
+    def get_transforms(self):
+        if self.input_size == 224:
+            transform = transforms.Compose(
+                [
+                    MaybeToTensor(),
+                    make_normalize_transform(),
+                ]
+            )
+        else:
+            transform = transforms.Compose(
+                [
+                    transforms.CenterCrop(224),
+                    MaybeToTensor(),
+                    make_normalize_transform(),
+                ]
+            )
+        return transform
+
+    def forward(self, x):
+        embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
 
 
 class DINOViT(FeatureExtractor):
@@ -220,6 +303,7 @@ class DINOViT(FeatureExtractor):
         embedding = self.encoder(x)
         output = {"embedding": embedding}
         return output
+
 
 class CustomViT(FeatureExtractor):
     def __init__(
@@ -618,6 +702,32 @@ class Kaiko(FeatureExtractor):
     def forward(self, x):
         embedding = self.encoder(x)
         import ipdb; ipdb.set_trace()
+        output = {"embedding": embedding}
+        return output
+
+
+class Midnight12k(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 1536
+        super(Midnight12k, self).__init__()
+
+    def build_encoder(self):
+        return AutoModel.from_pretrained('kaiko-ai/midnight')
+
+    def get_transforms(self):
+        return v2.Compose(
+            [
+                v2.Resize(224),
+                v2.CenterCrop(224),
+                v2.ToTensor(),
+                v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+            ]
+        )
+
+    def forward(self, x):
+        tensor = self.encoder(x).last_hidden_state
+        cls_embedding, patch_embeddings = tensor[:, 0, :], tensor[:, 1:, :]
+        embedding = torch.cat([cls_embedding, patch_embeddings.mean(1)], dim=-1)
         output = {"embedding": embedding}
         return output
 
