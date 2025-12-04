@@ -1,7 +1,7 @@
 ARG UBUNTU_VERSION=22.04
 ARG CUDA_MAJOR_VERSION=11.8.0
 ARG CUDNN_MAJOR_VERSION=8
-FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS base
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS base
 
 ARG USER_UID=1001
 ARG USER_GID=1001
@@ -69,6 +69,7 @@ RUN python -m pip install \
     --requirement /opt/app/requirements.in \
     && rm -rf /home/user/.cache/pip
 RUN python -m pip install /opt/app
+RUN python -m pip install flash-attn==2.5.8 --no-build-isolation
 
 # switch to user
 USER user

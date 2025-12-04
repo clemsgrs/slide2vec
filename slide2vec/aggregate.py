@@ -111,6 +111,9 @@ def main(args):
             coordinates = (np.array([coordinates_arr["x"], coordinates_arr["y"]]).T).astype(int)
 
             feature_path = features_dir / f"{name}.pt"
+            output_path = features_dir / f"{name}.pt"
+            if cfg.model.save_tile_embeddings:
+                feature_path = features_dir / f"{name}-tiles.pt"
 
             # run forward pass with slide encoder
             if cfg.model.name == "prov-gigapath":
@@ -144,7 +147,7 @@ def main(args):
                         torch.save(latents, latent_path)
                         del latents
 
-            torch.save(wsi_feature, feature_path)
+            torch.save(wsi_feature, output_path)
             del wsi_feature
             if not run_on_cpu:
                 torch.cuda.empty_cache()
