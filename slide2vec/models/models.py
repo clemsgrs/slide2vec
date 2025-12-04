@@ -740,11 +740,16 @@ class TITAN(SlideFeatureExtractor):
     def get_transforms(self):
         return self.eval_transform
 
+    def forward(self, x):
+        embedding = self.tile_encoder(x)
+        output = {"embedding": embedding}
+        return output
+
     def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0, **kwargs):
         tile_features = tile_features.unsqueeze(0)
         tile_coordinates = tile_coordinates.unsqueeze(0)
         embedding = self.slide_encoder.encode_slide_from_patch_features(
-            tile_features, tile_coordinates, tile_size_lv0
+            tile_features, tile_coordinates.long(), tile_size_lv0
         )
         output = {"embedding": embedding.squeeze(0)}
         return output
