@@ -37,3 +37,4 @@ scikit-learn
 fairscale
 packaging==23.2
 ninja==1.11.1.1
+psutil<6
