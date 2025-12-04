@@ -180,7 +180,7 @@ class PandaViT(FeatureExtractor):
         self.pretrained_weights = pretrained_weights
         if input_size != 224:
             print(
-                f"Warning: PandaViT will crop input images to 224x224"
+                f"Warning: PandaViT will center-crop input images to 224x224"
             )
         self.input_size = input_size
         self.ckpt_key = ckpt_key

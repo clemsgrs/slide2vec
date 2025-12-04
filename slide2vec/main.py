@@ -25,6 +25,11 @@ def get_args_parser(add_help: bool = True):
         "--run-on-cpu", action="store_true", help="run inference on cpu"
     )
     parser.add_argument(
+        "--output-dir",
+        type=str,
+        help="output directory to save logs and checkpoints",
+    )
+    parser.add_argument(
         "opts",
         help="Modify config options at the end of the command using \"path.key=value\".",
         default=None,
