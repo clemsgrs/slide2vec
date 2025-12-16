@@ -1,0 +1,3 @@
+[submodule "slide2vec/hs2p"]
+	path = slide2vec/hs2p
+	url = https://github.com/clemsgrs/hs2p.git

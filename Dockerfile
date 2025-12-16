@@ -35,26 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    build-essential \
-    ninja-build \
     python3-pip python3-dev python-is-python3 \
     && mkdir /var/run/sshd \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# install ASAP
-ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
-RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
-    SITE_PACKAGES=`python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"` && \
-    printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth" && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
 # clone & install relevant repositories
 RUN git clone https://github.com/prov-gigapath/prov-gigapath.git /home/user/prov-gigapath
-
-# add folders to python path
-ENV PYTHONPATH="/home/user/prov-gigapath:/home/user/CONCH:/home/user/MUSK:$PYTHONPATH"
 
 WORKDIR /opt/app/
 
@@ -72,7 +59,7 @@ RUN python -m pip install \
 
 COPY --chown=user:user . /opt/app/
 RUN python -m pip install /opt/app
-RUN python -m pip install flash-attn>=2.5.8 --no-build-isolation
+RUN python -m pip install 'flash-attn>=2.7.1,<=2.8.0' --no-build-isolation
 
 
 ##########################
@@ -112,12 +99,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# install ASAP
+ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
+RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
+    SITE_PACKAGES=`python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])"` && \
+    printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth" && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
 COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
 
-# copy ASAP installation, app code, and prov-gigapath
-COPY --from=build /opt/ASAP /opt/ASAP
+# copy app code, and prov-gigapath
 COPY --from=build /opt/app /opt/app
 COPY --from=build /home/user/prov-gigapath /home/user/prov-gigapath
 
