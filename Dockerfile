@@ -57,7 +57,14 @@ RUN python -m pip install \
     --requirement /opt/app/requirements.in \
     && rm -rf /home/user/.cache/pip
 
-COPY --chown=user:user . /opt/app/
+COPY --chown=user:user slide2vec /opt/app/slide2vec
+COPY --chown=user:user setup.py /opt/app/setup.py
+COPY --chown=user:user setup.cfg /opt/app/setup.cfg
+COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
+COPY --chown=user:user MANIFEST.in /opt/app/MANIFEST.in
+COPY --chown=user:user README.md /opt/app/README.md
+COPY --chown=user:user LICENSE /opt/app/LICENSE
+
 RUN python -m pip install /opt/app
 RUN python -m pip install 'flash-attn>=2.7.1,<=2.8.0' --no-build-isolation
 
