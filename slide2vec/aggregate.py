@@ -28,13 +28,19 @@ def get_args_parser(add_help: bool = True):
         "--config-file", default="", metavar="FILE", help="path to config file"
     )
     parser.add_argument(
-        "--run-id",
+        "--output-dir",
         type=str,
-        default="",
-        help="Name of output subdirectory",
+        default=None,
+        help="output directory to save logs and checkpoints",
     )
     parser.add_argument(
         "--run-on-cpu", action="store_true", help="run inference on cpu"
+    )
+    parser.add_argument(
+        "opts",
+        help="Modify config options at the end of the command using \"path.key=value\".",
+        default=None,
+        nargs=argparse.REMAINDER,
     )
     return parser
 
@@ -54,7 +60,7 @@ def main(args):
     # setup configuration
     run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
-    output_dir = Path(cfg.output_dir, args.run_id)
+    output_dir = Path(cfg.output_dir, args.output_dir)
     cfg.output_dir = str(output_dir)
 
     coordinates_dir = Path(cfg.output_dir, "coordinates")
@@ -71,6 +77,11 @@ def main(args):
         process_list.is_file()
     ), "Process list CSV not found. Ensure tiling has been run."
     process_df = pd.read_csv(process_list)
+    if "aggregation_status" not in process_df.columns:
+        process_df["aggregation_status"] = ["tbp"] * len(process_df)
+        cols = ["wsi_name", "wsi_path", "mask_path", "tiling_status", "feature_status", "aggregation_status", "error", "traceback"]
+        process_df = process_df[cols]
+
     skip_feature_aggregation = process_df["aggregation_status"].str.contains("success").all()
 
     if skip_feature_aggregation and distributed.is_main_process():

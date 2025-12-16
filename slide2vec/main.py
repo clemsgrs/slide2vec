@@ -48,24 +48,26 @@ def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: 
         time.sleep(log_interval)
 
 
-def run_tiling(config_file, run_id):
-    print("Running tiling.py...")
+def run_tiling(root_dir, config_file, output_dir):
+    print(f"Running tiling.py from {root_dir}...")
     cmd = [
         sys.executable,
-        "slide2vec/tiling.py",
-        "--run-id",
-        run_id,
+        "hs2p/tiling.py",
         "--config-file",
-        config_file,
+        os.path.abspath(config_file),
+        "--output-dir",
+        os.path.abspath(output_dir),
+        "--skip-datetime",
+        "--skip-logging",
+        "wandb.enable=false", # disable wandb to avoid dupliacte logging
     ]
-    proc = subprocess.Popen(cmd)
-    proc.wait()
+    proc = subprocess.run(cmd, cwd=root_dir)
     if proc.returncode != 0:
         print("Slide tiling failed. Exiting.")
         sys.exit(proc.returncode)
 
 
-def run_feature_extraction(config_file, run_id, run_on_cpu: False):
+def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
     print("Running embed.py...")
     # find a free port
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -78,19 +80,19 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
         f"--master_port={free_port}",
         "--nproc_per_node=gpu",
         "slide2vec/embed.py",
-        "--run-id",
-        run_id,
         "--config-file",
-        config_file,
+        os.path.abspath(config_file),
+        "--output-dir",
+        os.path.abspath(output_dir),
     ]
     if run_on_cpu:
         cmd = [
             sys.executable,
             "slide2vec/embed.py",
-            "--run-id",
-            run_id,
             "--config-file",
-            config_file,
+            os.path.abspath(config_file),
+            "--output-dir",
+            os.path.abspath(output_dir),
             "--run-on-cpu",
         ]
     # launch in its own process group.
@@ -107,16 +109,16 @@ def run_feature_extraction(config_file, run_id, run_on_cpu: False):
         sys.exit(proc.returncode)
 
 
-def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
+def run_feature_aggregation(config_file, output_dir, run_on_cpu: False):
     print("Running aggregate.py...")
     # find a free port
     cmd = [
         sys.executable,
         "slide2vec/aggregate.py",
-        "--run-id",
-        run_id,
         "--config-file",
-        config_file,
+        os.path.abspath(config_file),
+        "--output-dir",
+        os.path.abspath(output_dir),
     ]
     if run_on_cpu:
         cmd.append("--run-on-cpu")
@@ -137,15 +139,17 @@ def run_feature_aggregation(config_file, run_id, run_on_cpu: False):
 def main(args):
     run_on_cpu = args.run_on_cpu
 
-    cfg, cfg_path, run_id = setup(args)
+    cfg, cfg_path = setup(args)
+    output_dir = Path(cfg.output_dir)
+
     hf_login()
 
-    run_tiling(cfg_path, run_id)
+    root_dir = "slide2vec/hs2p"
+    run_tiling(root_dir, cfg_path, output_dir)
 
     print("Tiling completed.")
     print("=+=" * 10)
 
-    output_dir = Path(cfg.output_dir)
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
         stop_event = threading.Event()
@@ -154,10 +158,10 @@ def main(args):
         )
         log_thread.start()
 
-    run_feature_extraction(cfg_path, run_id, run_on_cpu)
+    run_feature_extraction(cfg_path, output_dir, run_on_cpu)
 
     if cfg.model.level == "slide":
-        run_feature_aggregation(cfg_path, run_id, run_on_cpu)
+        run_feature_aggregation(cfg_path, output_dir, run_on_cpu)
         print("Feature extraction completed.")
         print("=+=" * 10)
     else:
