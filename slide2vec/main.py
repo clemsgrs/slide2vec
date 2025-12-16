@@ -58,6 +58,7 @@ def run_tiling(root_dir, config_file, output_dir):
         "--output-dir",
         os.path.abspath(output_dir),
         "--skip-datetime",
+        "--skip-logging",
         "wandb.enable=false", # disable wandb to avoid dupliacte logging
     ]
     proc = subprocess.run(cmd, cwd=root_dir)
