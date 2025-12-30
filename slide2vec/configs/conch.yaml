@@ -1,6 +1,6 @@
-csv: "/data/temporary/clement/notebooks/discern/prostate-bladder-breast-debug.csv" # path to csv containing slide paths
+csv: "/data/temporary/clement/discern/multi-organ-1k.csv" # path to csv containing slide paths
 
-output_dir: "output" # output directory
+output_dir: "/data/temporary/clement/discern/slide2vec" # output directory
 
 visualize: true
 
@@ -12,7 +12,7 @@ tiling:
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "conch"
-  batch_size: 1
+  batch_size: 32
 
 speed:
   fp16: true # use mixed precision during model inference
