@@ -60,13 +60,13 @@ class TileDataset(torch.utils.data.Dataset):
         coordinates = np.load(Path(coordinates_dir, f"{self.name}.npy"), allow_pickle=True)
         self.x = coordinates["x"]
         self.y = coordinates["y"]
-        self.contour_index = coordinates["contour_index"]
         self.coordinates = (np.array([self.x, self.y]).T).astype(int)
         self.scaled_coordinates = self.scale_coordinates()
+        self.contour_index = coordinates["contour_index"]
+        self.target_tile_size = coordinates["target_tile_size"]
         self.tile_level = coordinates["tile_level"]
-        self.tile_size_resized = coordinates["tile_size_resized"]
         self.resize_factor = coordinates["resize_factor"]
-        self.tile_size = np.round(self.tile_size_resized / self.resize_factor).astype(int)
+        self.tile_size_resized = coordinates["tile_size_resized"]
         self.tile_size_lv0 = coordinates["tile_size_lv0"][0]
 
     def scale_coordinates(self):
@@ -104,7 +104,7 @@ class TileDataset(torch.utils.data.Dataset):
                 contour=contour,
                 contour_holes=holes,
                 tissue_mask=self.tissue_mask,
-                tile_size=self.tile_size[idx],
+                tile_size=self.target_tile_size[idx],
                 tile_spacing=tile_spacing,
                 resize_factor=self.resize_factor[idx],
                 seg_spacing=self.seg_spacing,
@@ -116,10 +116,10 @@ class TileDataset(torch.utils.data.Dataset):
             # apply mask
             tile_arr = cv2.bitwise_and(tile_arr, tile_arr, mask=tissue_mask)
         tile = Image.fromarray(tile_arr).convert("RGB")
-        if self.tile_size[idx] != self.tile_size_resized[idx]:
-            tile = tile.resize((self.tile_size[idx], self.tile_size[idx]))
+        if self.target_tile_size[idx] != self.tile_size_resized[idx]:
+            tile = tile.resize((self.target_tile_size[idx], self.target_tile_size[idx]))
         if self.transforms:
-            if isinstance(self.transforms, BaseImageProcessor):  # Hugging Face (`transformer`) 
+            if isinstance(self.transforms, BaseImageProcessor):  # Hugging Face (`transformer`)
                 tile = self.transforms(tile, return_tensors="pt")["pixel_values"].squeeze(0)
             else:  # general callable such as torchvision transforms
                 tile = self.transforms(tile)
