@@ -18,6 +18,7 @@ from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
+from slide2vec.hs2p.hs2p.wsi import SamplingParameters
 
 torchvision.disable_beta_transforms_warning()
 
@@ -60,13 +61,31 @@ def create_transforms(cfg, model):
         raise ValueError(f"Unknown model level: {cfg.model.level}")
 
 
-def create_dataset(wsi_fp, coordinates_dir, spacing, backend, transforms):
+def create_dataset(
+    wsi_path,
+    mask_path,
+    coordinates_dir,
+    target_spacing,
+    tolerance,
+    backend,
+    segment_params,
+    sampling_params,
+    filter_params,
+    transforms,
+    restrict_to_tissue: bool,
+):
     return TileDataset(
-        wsi_fp,
-        coordinates_dir,
-        spacing,
+        wsi_path=wsi_path,
+        mask_path=mask_path,
+        coordinates_dir=coordinates_dir,
+        target_spacing=target_spacing,
+        tolerance=tolerance,
         backend=backend,
+        segment_params=segment_params,
+        sampling_params=sampling_params,
+        filter_params=filter_params,
         transforms=transforms,
+        restrict_to_tissue=restrict_to_tissue,
     )
 
 
@@ -176,12 +195,30 @@ def main(args):
         if not run_on_cpu:
             torch.distributed.barrier()
 
+        pixel_mapping = {k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()}
+        tissue_percentage = {k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()}
+        if "tissue" not in tissue_percentage:
+            tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
+        if cfg.tiling.sampling_params.color_mapping is not None:
+            color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
+        else:
+            color_mapping = None
+
+        sampling_params = SamplingParameters(
+            pixel_mapping=pixel_mapping,
+            color_mapping=color_mapping,
+            tissue_percentage=tissue_percentage,
+        )
+
         # select slides that were successfully tiled but not yet processed for feature extraction
         tiled_df = process_df[process_df.tiling_status == "success"]
         mask = tiled_df["feature_status"] != "success"
         process_stack = tiled_df[mask]
         total = len(process_stack)
+
         wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
+        mask_paths_to_process = [Path(x) for x in process_stack.mask_path.values.tolist()]
+        combined_paths = zip(wsi_paths_to_process, mask_paths_to_process)
 
         features_dir = Path(cfg.output_dir, "features")
         if distributed.is_main_process():
@@ -201,8 +238,8 @@ def main(args):
         transforms = create_transforms(cfg, model)
         print(f"transforms: {transforms}")
 
-        for wsi_fp in tqdm.tqdm(
-            wsi_paths_to_process,
+        for wsi_fp, mask_fp in tqdm.tqdm(
+            combined_paths,
             desc="Inference",
             unit="slide",
             total=total,
@@ -211,7 +248,19 @@ def main(args):
             position=1,
         ):
             try:
-                dataset = create_dataset(wsi_fp, coordinates_dir, cfg.tiling.params.spacing, cfg.tiling.backend, transforms)
+                dataset = create_dataset(
+                    wsi_path=wsi_fp,
+                    mask_path=mask_fp,
+                    coordinates_dir=coordinates_dir,
+                    target_spacing=cfg.tiling.params.spacing,
+                    tolerance=cfg.tiling.params.tolerance,
+                    backend=cfg.tiling.backend,
+                    segment_params=cfg.tiling.seg_params,
+                    sampling_params=sampling_params,
+                    filter_params=cfg.tiling.filter_params,
+                    transforms=transforms,
+                    restrict_to_tissue=cfg.model.restrict_to_tissue,
+                )
                 if distributed.is_enabled_and_multiple_gpus():
                     sampler = torch.utils.data.DistributedSampler(
                         dataset,
