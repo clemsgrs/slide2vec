@@ -9,12 +9,12 @@ def load_config(config_name: str):
 
 
 default_tiling_config = load_config("default_tiling")
-default_embedding_config = load_config("default_embedding")
+default_model_config = load_config("default_model")
 
 
 def load_and_merge_config(config_name: str):
     default_tiling_config = OmegaConf.create(default_tiling_config)
-    default_embedding_config = OmegaConf.create(default_embedding_config)
-    default_config = OmegaConf.merge(default_tiling_config, default_embedding_config)
+    default_model_config = OmegaConf.create(default_model_config)
+    default_config = OmegaConf.merge(default_tiling_config, default_model_config)
     loaded_config = load_config(config_name)
     return OmegaConf.merge(default_config, loaded_config)
