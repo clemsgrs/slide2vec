@@ -1,0 +1,34 @@
+csv: # path to csv containing slide paths
+
+output_dir: "output" # output directory
+resume: false # resume from a previous run
+resume_dirname: # directory name to resume from
+
+seed: 0 # seed for reproducibility
+
+model:
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  name: # foundation model name ["uni", "uni2", "virchow", "virchow2", "prov-gigapath", "h-optimus-0", "h-optimus-1", "titan", "prism"] (leave empty when using a custom model)
+  mode: "cls" # embedding mode ["cls", "full"]
+  arch: # architecture of custom model
+  pretrained_weights: # path to the pretrained weights when using a custom model
+  batch_size: 256
+  tile_size: ${tiling.params.tile_size}
+  restrict_to_tissue: false # whether to restrict tile content to tissue pixels only when feeding tile through encoder
+  patch_size: 256 # if level is "region", size used to unroll the region into patches
+  save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
+  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
+
+speed:
+  fp16: false # use mixed precision during model inference
+  num_workers_embedding: 8 # number of workers for data loading when embedding slides
+
+wandb:
+  enable: false
+  project: "" # wandb project name
+  username: "" # wandb username
+  exp_name: "" # wandb experiment name
+  tags: ["features", "${model.level}", "${tiling.params.tile_size}"] # wandb tags
+  dir: "/home/user/"
+  group:
+  resume_id: "${resume_dirname}"

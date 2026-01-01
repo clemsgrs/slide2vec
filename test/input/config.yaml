@@ -19,7 +19,7 @@ model:
 
 speed:
   fp16: true
-  num_workers_tiling: 4
+  num_workers: 4
   num_workers_embedding: 4
 
 wandb:

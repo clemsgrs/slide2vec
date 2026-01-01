@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 
 import slide2vec.distributed as distributed
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
-from slide2vec.configs import default_config
+from slide2vec.configs import default_tiling_config, default_embedding_config
 
 logger = logging.getLogger("slide2vec")
 
@@ -25,7 +25,9 @@ def write_config(cfg, output_dir, name="config.yaml"):
 
 
 def get_cfg_from_file(config_file):
-    default_cfg = OmegaConf.create(default_config)
+    default_tiling_cfg = OmegaConf.create(default_tiling_config)
+    default_embedding_cfg = OmegaConf.create(default_embedding_config)
+    default_cfg = OmegaConf.merge(default_tiling_cfg, default_embedding_cfg)
     cfg = OmegaConf.load(config_file)
     cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.resolve(cfg)
@@ -36,7 +38,9 @@ def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_cfg = OmegaConf.create(default_config)
+    default_tiling_cfg = OmegaConf.create(default_tiling_config)
+    default_embedding_cfg = OmegaConf.create(default_embedding_config)
+    default_cfg = OmegaConf.merge(default_tiling_cfg, default_embedding_cfg)
     cfg = OmegaConf.load(args.config_file)
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
