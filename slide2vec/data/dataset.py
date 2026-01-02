@@ -41,6 +41,7 @@ class TileDataset(torch.utils.data.Dataset):
                 path=self.path,
                 mask_path=self.mask_path,
                 backend=self.backend,
+                segment=self.mask_path is None,
                 segment_params=segment_params,
                 sampling_params=sampling_params,
             )

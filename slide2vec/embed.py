@@ -173,10 +173,13 @@ def main(args):
         process_list.is_file()
     ), "Process list CSV not found. Ensure tiling has been run."
     process_df = pd.read_csv(process_list)
+    cols = ["wsi_name", "wsi_path", "tiling_status", "error", "traceback"]
     if "feature_status" not in process_df.columns:
         process_df["feature_status"] = ["tbp"] * len(process_df)
-        cols = ["wsi_name", "wsi_path", "mask_path", "tiling_status", "feature_status", "error", "traceback"]
-        process_df = process_df[cols]
+    if "mask_path" not in process_df.columns:
+        process_df["mask_path"] = [None] * len(process_df)
+    cols = ["wsi_name", "wsi_path", "mask_path", "tiling_status", "feature_status", "error", "traceback"]
+    process_df = process_df[cols]
 
     skip_feature_extraction = process_df["feature_status"].str.contains("success").all()
 
@@ -217,7 +220,7 @@ def main(args):
         total = len(process_stack)
 
         wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
-        mask_paths_to_process = [Path(x) for x in process_stack.mask_path.values.tolist()]
+        mask_paths_to_process = [Path(x) if x is not None and not pd.isna(x) else None  for x in process_stack.mask_path.values.tolist()]
         combined_paths = zip(wsi_paths_to_process, mask_paths_to_process)
 
         features_dir = Path(cfg.output_dir, "features")

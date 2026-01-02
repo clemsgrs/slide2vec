@@ -39,9 +39,12 @@ pip install slide2vec
 
 2. Create a configuration file
 
-   A good starting point is the default configuration file `slide2vec/configs/default.yaml` where parameters are documented.<br>
+   A good starting point are the default configuration files where parameters are documented:<br>
+   - for preprocessing options: `slide2vec/configs/default_tiling.yaml`
+   - for model options: `slide2vec/configs/default_model_.yaml`
+
    We've also added default configuration files for each of the foundation models currently supported:
-   - tile-level: `uni`, `uni2`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`, `h-optimus-1`, `h0-mini`, `conch`, `musk`, `phikonv2`, `hibou-b`, `hibou-L`, [`kaiko`](https://github.com/kaiko-ai/towards_large_pathology_fms)
+   - tile-level: `uni`, `uni2`, `virchow`, `virchow2`, `prov-gigapath`, `h-optimus-0`, `h-optimus-1`, `h0-mini`, `conch`, `musk`, `phikonv2`, `hibou-b`, `hibou-L`, `MidNight12k`, [`kaiko`](https://github.com/kaiko-ai/towards_large_pathology_fms)
    - slide-level: `prov-gigapath`, `titan`, `prism`
 
 

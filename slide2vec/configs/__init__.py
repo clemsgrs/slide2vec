@@ -8,10 +8,13 @@ def load_config(config_name: str):
     return OmegaConf.load(pathlib.Path(__file__).parent.resolve() / config_filename)
 
 
-default_config = load_config("default")
+default_tiling_config = load_config("default_tiling")
+default_model_config = load_config("default_model")
 
 
 def load_and_merge_config(config_name: str):
-    default_config = OmegaConf.create(default_config)
+    default_tiling_config = OmegaConf.create(default_tiling_config)
+    default_model_config = OmegaConf.create(default_model_config)
+    default_config = OmegaConf.merge(default_tiling_config, default_model_config)
     loaded_config = load_config(config_name)
     return OmegaConf.merge(default_config, loaded_config)
