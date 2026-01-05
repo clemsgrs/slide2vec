@@ -259,7 +259,17 @@ class DINOViT(FeatureExtractor):
     def load_weights(self):
         if distributed.is_main_process():
             print(f"Loading pretrained weights from: {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+
+        # Fix for loading checkpoints saved with numpy 2.0+ in an environment with numpy < 2.0
+        try:
+            import numpy._core
+        except ImportError:
+            import numpy as np
+            import sys
+            sys.modules["numpy._core"] = np.core
+            sys.modules["numpy._core.multiarray"] = np.core.multiarray
+
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
         if self.ckpt_key:
             state_dict = state_dict[self.ckpt_key]
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
