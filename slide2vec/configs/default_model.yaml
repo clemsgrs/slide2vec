@@ -16,6 +16,7 @@ model:
   tile_size: ${tiling.params.tile_size}
   restrict_to_tissue: false # whether to restrict tile content to tissue pixels only when feeding tile through encoder
   patch_size: 256 # if level is "region", size used to unroll the region into patches
+  token_size: 16 # size of the tokens used model is a custom pretrained ViT
   save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
   save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
 
