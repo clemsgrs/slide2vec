@@ -111,21 +111,6 @@ def initialize_wandb(
     return run
 
 
-def load_csv(cfg):
-    df = pd.read_csv(cfg.csv)
-    if "wsi_path" in df.columns:
-        wsi_paths = [Path(x) for x in df.wsi_path.values.tolist()]
-    elif "slide_path" in df.columns:
-        wsi_paths = [Path(x) for x in df.slide_path.values.tolist()]
-    if "mask_path" in df.columns:
-        mask_paths = [Path(x) for x in df.mask_path.values.tolist()]
-    elif "segmentation_mask_path" in df.columns:
-        mask_paths = [Path(x) for x in df.segmentation_mask_path.values.tolist()]
-    else:
-        mask_paths = [None for _ in wsi_paths]
-    return wsi_paths, mask_paths
-
-
 def update_state_dict(
     *,
     model_dict: dict,
