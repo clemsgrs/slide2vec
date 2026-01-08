@@ -1,6 +1,7 @@
-csv: "/data/temporary/clement/discern/multi-organ-1k.csv" # path to csv containing slide paths
+# csv: "/data/temporary/clement/discern/multi-organ-1k.csv"
+csv: "/data/pathology/projects/clement/discern/multi-center-prostate-no-mask.csv"
 
-output_dir: "/data/temporary/clement/discern/slide2vec" # output directory
+output_dir: "/data/pathology/projects/clement/discern/hs2p" # output directory
 
 visualize: true
 
@@ -8,18 +9,36 @@ tiling:
   params:
     spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
     tile_size: 448 # size of the tiles to extract, in pixels
+    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+  seg_params:
+    downsample: 16 # find the closest downsample in the slide for tissue segmentation
+  filter_params:
+    ref_tile_size: 448 # reference tile size at spacing tiling.spacing
+    a_t: 16 # area filter threshold for tissue ; positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size
+    # e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept
+    a_h: 4 # area filter threshold for holes ; positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size
+    max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
+    filter_white: true # whether to filter out mostly white tiles
+    filter_black: true # whether to filter out mostly black tiles
+    white_threshold: 220 # threshold for white pixels (0-255)
+    black_threshold: 25 # threshold for black pixels (0-255)
+    fraction_threshold: 0.9 # fraction of pixels that must be white/black to filter out the tile
 
 model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: "conch"
-  batch_size: 32
+  batch_size: 64
 
 speed:
   fp16: true # use mixed precision during model inference
+  num_workers: 16 # number of workers for tiling slides
+  num_workers_embedding: 16 # number of workers for data loading when embedding slides
 
 wandb:
   enable: true
   project: "discern"
   username: "clemsg"
-  exp_name: "features"
-  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  exp_name: "tiling"
+  # exp_name: "features"
+  tags: ["tiling", "${tiling.params.tile_size}"]
+  # tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
