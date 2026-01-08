@@ -13,7 +13,6 @@ from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
 
 from conch.open_clip_custom import create_model_from_pretrained
-from musk import modeling as musk_modeling
 from musk import utils as musk_utils
 
 import slide2vec.distributed as distributed
@@ -70,11 +69,12 @@ class ModelFactory:
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.tile_size,
                 )
-            elif options.name is None and options.arch:
+            elif options.name == "dino" and options.arch:
                 model = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.tile_size,
+                    patch_size=options.token_size,
                 )
         elif options.level == "region":
             if options.name == "virchow":
@@ -259,7 +259,17 @@ class DINOViT(FeatureExtractor):
     def load_weights(self):
         if distributed.is_main_process():
             print(f"Loading pretrained weights from: {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+
+        # Fix for loading checkpoints saved with numpy 2.0+ in an environment with numpy < 2.0
+        try:
+            import numpy._core
+        except ImportError:
+            import numpy as np
+            import sys
+            sys.modules["numpy._core"] = np.core
+            sys.modules["numpy._core.multiarray"] = np.core.multiarray
+
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
         if self.ckpt_key:
             state_dict = state_dict[self.ckpt_key]
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
@@ -282,21 +292,13 @@ class DINOViT(FeatureExtractor):
         return encoder
 
     def get_transforms(self):
-        if self.input_size > 224:
-            transform = transforms.Compose(
-                [
-                    MaybeToTensor(),
-                    transforms.CenterCrop(224),
-                    make_normalize_transform(),
-                ]
-            )
-        else:
-            transforms.Compose(
-                [
-                    MaybeToTensor(),
-                    make_normalize_transform(),
-                ]
-            )
+        transform = transforms.Compose(
+            [
+                MaybeToTensor(),
+                transforms.CenterCrop(self.input_size),
+                make_normalize_transform(),
+            ]
+        )
         return transform
 
     def forward(self, x):
@@ -344,7 +346,7 @@ class CustomViT(FeatureExtractor):
     def load_weights(self):
         if distributed.is_main_process():
             print(f"Loading pretrained weights from: {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu")
+        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
         if self.ckpt_key:
             state_dict = state_dict[self.ckpt_key]
         nn.modules.utils.consume_prefix_in_state_dict_if_present(
