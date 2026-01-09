@@ -776,9 +776,9 @@ class RegionFeatureExtractor(nn.Module):
         # x = [B, num_tiles, 3, 224, 224]
         B = x.size(0)
         x = rearrange(x, "b p c w h -> (b p) c w h")  # [B*num_tiles, 3, 224, 224]
-        output = self.tile_encoder(x)  # [B*num_tiles, features_dim]
+        tile_embedding = self.tile_encoder(x)["embedding"]  # [B*num_tiles, features_dim]
         embedding = rearrange(
-            output, "(b p) f -> b p f", b=B
+            tile_embedding, "(b p) f -> b p f", b=B
         )  # [B, num_tiles, features_dim]
         output = {"embedding": embedding}
         return output
