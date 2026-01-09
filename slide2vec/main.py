@@ -50,6 +50,15 @@ def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: 
 
 def run_tiling(root_dir, config_file, output_dir):
     print(f"Running tiling.py from {root_dir}...")
+    
+    # add root_dir to PYTHONPATH so hs2p module can be found
+    env = os.environ.copy()
+    root_dir_abs = os.path.abspath(root_dir)
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = f"{root_dir_abs}:{env['PYTHONPATH']}"
+    else:
+        env["PYTHONPATH"] = root_dir_abs
+
     cmd = [
         sys.executable,
         "hs2p/tiling.py",
@@ -61,7 +70,7 @@ def run_tiling(root_dir, config_file, output_dir):
         "--skip-logging",
         "wandb.enable=false", # disable wandb to avoid dupliacte logging
     ]
-    proc = subprocess.run(cmd, cwd=root_dir)
+    proc = subprocess.run(cmd, cwd=root_dir, env=env)
     if proc.returncode != 0:
         print("Slide tiling failed. Exiting.")
         sys.exit(proc.returncode)
