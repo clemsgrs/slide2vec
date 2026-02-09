@@ -22,6 +22,9 @@ def get_args_parser(add_help: bool = True):
         "--skip-datetime", action="store_true", help="skip run id datetime prefix"
     )
     parser.add_argument(
+        "--tiling-only", action="store_true", help="only run slide tiling"
+    )
+    parser.add_argument(
         "--run-on-cpu", action="store_true", help="run inference on cpu"
     )
     parser.add_argument(
@@ -154,10 +157,19 @@ def main(args):
     hf_login()
 
     root_dir = "slide2vec/hs2p"
-    run_tiling(root_dir, cfg_path, output_dir)
+    if cfg.resume:
+        # need to remove the dirname to avoid nested output directories
+        hs2p_output_dir = output_dir.parent
+    else:
+        hs2p_output_dir = output_dir
+    run_tiling(root_dir, cfg_path, hs2p_output_dir)
 
     print("Tiling completed.")
     print("=+=" * 10)
+
+    if args.tiling_only:
+        print("Tiling only flag set, exiting.")
+        return
 
     features_dir = output_dir / "features"
     if cfg.wandb.enable:
