@@ -120,6 +120,7 @@ class ModelFactory:
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.patch_size,
+                    patch_size=options.token_size,
                 )
             model = RegionFeatureExtractor(tile_encoder)
         elif options.level == "slide":
