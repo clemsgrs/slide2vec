@@ -92,17 +92,17 @@ class ModelFactory:
             elif options.name == "h-optimus-1":
                 tile_encoder = Hoptimus1()
             elif options.name == "conch":
-                model = CONCH()
+                tile_encoder = CONCH()
             elif options.name == "musk":
-                model = MUSK()
+                tile_encoder = MUSK()
             elif options.name == "phikonv2":
-                model = PhikonV2()
+                tile_encoder = PhikonV2()
             elif options.name == "hibou":
-                model = Hibou()
+                tile_encoder = Hibou()
             elif options.name == "kaiko":
-                model = Kaiko(arch=options.arch)
+                tile_encoder = Kaiko(arch=options.arch)
             elif options.name == "kaiko-midnight":
-                model = Midnight12k()
+                tile_encoder = Midnight12k()
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
                     arch="vit_small",

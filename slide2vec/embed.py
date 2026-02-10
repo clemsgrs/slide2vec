@@ -144,11 +144,27 @@ def load_sort_and_deduplicate_features(tmp_dir, name, expected_len=None):
     return features_unique
 
 
+def resolve_output_dir(config_output_dir: str, cli_output_dir: str | None) -> Path:
+    if cli_output_dir is None:
+        return Path(config_output_dir)
+    cli_path = Path(cli_output_dir)
+    if cli_path.is_absolute():
+        return cli_path
+    return Path(config_output_dir, cli_output_dir)
+
+
+def cleanup_tmp_features(tmp_dir: Path, name: str):
+    for rank in range(distributed.get_global_size()):
+        fp = tmp_dir / f"{name}-rank_{rank}.h5"
+        if fp.exists():
+            os.remove(fp)
+
+
 def main(args):
     # setup configuration
     run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
-    output_dir = Path(cfg.output_dir, args.output_dir)
+    output_dir = resolve_output_dir(cfg.output_dir, args.output_dir)
     cfg.output_dir = str(output_dir)
 
     if not run_on_cpu:
@@ -250,6 +266,14 @@ def main(args):
             disable=not distributed.is_main_process(),
             position=1,
         ):
+            name = wsi_fp.stem.replace(" ", "_")
+            feature_path = features_dir / f"{name}.pt"
+            if cfg.model.save_tile_embeddings:
+                feature_path = features_dir / f"{name}-tiles.pt"
+            tmp_feature_path = tmp_dir / f"{name}-rank_{distributed.get_global_rank()}.h5"
+
+            status_info = {"status": "success"}
+            local_failed = False
             try:
                 dataset = create_dataset(
                     wsi_path=wsi_fp,
@@ -280,12 +304,6 @@ def main(args):
                     pin_memory=True,
                 )
 
-                name = wsi_fp.stem.replace(" ", "_")
-                feature_path = features_dir / f"{name}.pt"
-                if cfg.model.save_tile_embeddings:
-                    feature_path = features_dir / f"{name}-tiles.pt"
-                tmp_feature_path = tmp_dir / f"{name}-rank_{distributed.get_global_rank()}.h5"
-
                 # get feature dimension and dtype using a dry run
                 with torch.inference_mode(), autocast_context:
                     sample_batch = next(iter(dataloader))
@@ -307,30 +325,75 @@ def main(args):
                     run_on_cpu,
                 )
 
-                if not run_on_cpu:
-                    torch.distributed.barrier()
-
-                if distributed.is_main_process():
-                    wsi_feature = load_sort_and_deduplicate_features(tmp_dir, name, expected_len=len(dataset))
-                    torch.save(wsi_feature, feature_path)
-
-                    # cleanup
-                    del wsi_feature
-                    if not run_on_cpu:
-                        torch.cuda.empty_cache()
-                    gc.collect()
-
-                if not run_on_cpu:
-                    torch.distributed.barrier()
-
-                feature_extraction_updates[str(wsi_fp)] = {"status": "success"}
-
             except Exception as e:
-                feature_extraction_updates[str(wsi_fp)] = {
+                local_failed = True
+                status_info = {
                     "status": "failed",
                     "error": str(e),
                     "traceback": str(traceback.format_exc()),
                 }
+
+            any_rank_failed = local_failed
+            if not run_on_cpu:
+                # Ensure every rank reaches sync points, even when one rank failed.
+                torch.distributed.barrier()
+                failure_flag = torch.tensor(
+                    1 if local_failed else 0, device=model.device, dtype=torch.int32
+                )
+                torch.distributed.all_reduce(
+                    failure_flag, op=torch.distributed.ReduceOp.MAX
+                )
+                any_rank_failed = bool(failure_flag.item())
+
+            if any_rank_failed:
+                if distributed.is_main_process():
+                    cleanup_tmp_features(tmp_dir, name)
+                    if status_info["status"] != "failed":
+                        status_info = {
+                            "status": "failed",
+                            "error": "Feature extraction failed on at least one distributed rank.",
+                            "traceback": "",
+                        }
+            elif distributed.is_main_process():
+                try:
+                    wsi_feature = load_sort_and_deduplicate_features(
+                        tmp_dir, name, expected_len=len(dataset)
+                    )
+                    torch.save(wsi_feature, feature_path)
+                except Exception as e:
+                    any_rank_failed = True
+                    cleanup_tmp_features(tmp_dir, name)
+                    status_info = {
+                        "status": "failed",
+                        "error": str(e),
+                        "traceback": str(traceback.format_exc()),
+                    }
+                finally:
+                    if "wsi_feature" in locals():
+                        del wsi_feature
+                    if not run_on_cpu:
+                        torch.cuda.empty_cache()
+                    gc.collect()
+
+            if not run_on_cpu:
+                # Propagate post-processing failures from rank 0 to all ranks.
+                failure_flag = torch.tensor(
+                    1 if (distributed.is_main_process() and any_rank_failed) else 0,
+                    device=model.device,
+                    dtype=torch.int32,
+                )
+                torch.distributed.broadcast(failure_flag, src=0)
+                torch.distributed.barrier()
+                any_rank_failed = bool(failure_flag.item())
+
+            if distributed.is_main_process():
+                if any_rank_failed and status_info["status"] != "failed":
+                    status_info = {
+                        "status": "failed",
+                        "error": "Feature extraction failed on at least one distributed rank.",
+                        "traceback": "",
+                    }
+                feature_extraction_updates[str(wsi_fp)] = status_info
 
             # update process_df
             if distributed.is_main_process():

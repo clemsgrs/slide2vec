@@ -12,6 +12,8 @@ import wandb
 
 from slide2vec.utils.config import hf_login, setup
 
+PACKAGE_ROOT = Path(__file__).resolve().parent
+
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("slide2vec", add_help=add_help)
@@ -91,7 +93,8 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
         "torch.distributed.run",
         f"--master_port={free_port}",
         "--nproc_per_node=gpu",
-        "slide2vec/embed.py",
+        "-m",
+        "slide2vec.embed",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
@@ -100,7 +103,8 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
     if run_on_cpu:
         cmd = [
             sys.executable,
-            "slide2vec/embed.py",
+            "-m",
+            "slide2vec.embed",
             "--config-file",
             os.path.abspath(config_file),
             "--output-dir",
@@ -108,7 +112,7 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
             "--run-on-cpu",
         ]
     # launch in its own process group.
-    proc = subprocess.Popen(cmd)
+    proc = subprocess.Popen(cmd, start_new_session=True)
     try:
         proc.wait()
     except KeyboardInterrupt:
@@ -126,7 +130,8 @@ def run_feature_aggregation(config_file, output_dir, run_on_cpu: False):
     # find a free port
     cmd = [
         sys.executable,
-        "slide2vec/aggregate.py",
+        "-m",
+        "slide2vec.aggregate",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
@@ -135,7 +140,7 @@ def run_feature_aggregation(config_file, output_dir, run_on_cpu: False):
     if run_on_cpu:
         cmd.append("--run-on-cpu")
     # launch in its own process group.
-    proc = subprocess.Popen(cmd)
+    proc = subprocess.Popen(cmd, start_new_session=True)
     try:
         proc.wait()
     except KeyboardInterrupt:
@@ -156,7 +161,7 @@ def main(args):
 
     hf_login()
 
-    root_dir = "slide2vec/hs2p"
+    root_dir = PACKAGE_ROOT / "hs2p"
     if cfg.resume:
         # need to remove the dirname to avoid nested output directories
         hs2p_output_dir = output_dir.parent
