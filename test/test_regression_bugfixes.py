@@ -108,6 +108,26 @@ class RegressionBugfixTests(unittest.TestCase):
                 f"Region-level branch for {model_name} should assign to tile_encoder",
             )
 
+    def test_embed_reads_new_loader_config_keys(self):
+        src = read_source("slide2vec/embed.py")
+        expected_keys = [
+            "embedding_pipeline",
+            "rank_sharding_mode",
+            "storage_mode",
+            "num_workers_embedding",
+            "prefetch_factor_embedding",
+            "persistent_workers_embedding",
+            "pin_memory_embedding",
+            "loader_batch_timeout_sec",
+            "log_perf_embedding",
+        ]
+        for key in expected_keys:
+            self.assertIn(
+                f"\"{key}\"",
+                src,
+                f"embed.py should reference speed.{key}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
