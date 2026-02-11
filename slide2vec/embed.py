@@ -141,9 +141,8 @@ def resolve_loader_settings(cfg, run_on_cpu: bool):
 
     if run_on_cpu:
         # CPU inference in containerized CI frequently has very limited /dev/shm.
-        # Keep auto mode single-process to avoid worker shared-memory crashes.
-        if auto_workers:
-            workers_per_rank = 0
+        # Force single-process loading to avoid worker shared-memory crashes.
+        workers_per_rank = 0
         pin_memory = False
         persistent_workers = False
 

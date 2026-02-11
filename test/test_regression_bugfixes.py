@@ -128,7 +128,7 @@ class RegressionBugfixTests(unittest.TestCase):
                 f"embed.py should reference speed.{key}",
             )
 
-    def test_embed_cpu_auto_workers_guard_exists(self):
+    def test_embed_cpu_workers_guard_exists(self):
         src = read_source("slide2vec/embed.py")
         self.assertIn(
             "if run_on_cpu:",
@@ -136,14 +136,9 @@ class RegressionBugfixTests(unittest.TestCase):
             "embed.py should have a dedicated CPU loader branch",
         )
         self.assertIn(
-            "if auto_workers:",
-            src,
-            "embed.py should treat auto worker mode explicitly",
-        )
-        self.assertIn(
             "workers_per_rank = 0",
             src,
-            "embed.py should force single-process loading for CPU+auto workers",
+            "embed.py should force single-process loading for CPU runs",
         )
 
 
