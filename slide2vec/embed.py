@@ -115,7 +115,8 @@ def resolve_loader_settings(cfg, run_on_cpu: bool):
     cpu_count = mp.cpu_count()
 
     workers_cfg = get_speed_option(cfg, "num_workers_embedding", "auto")
-    if isinstance(workers_cfg, str) and workers_cfg.lower() == "auto":
+    auto_workers = isinstance(workers_cfg, str) and workers_cfg.lower() == "auto"
+    if auto_workers:
         workers_per_rank = cpu_count // world_size
         workers_per_rank = max(4, min(16, workers_per_rank))
     else:
@@ -139,6 +140,10 @@ def resolve_loader_settings(cfg, run_on_cpu: bool):
     loader_timeout_sec = int(get_speed_option(cfg, "loader_batch_timeout_sec", 0))
 
     if run_on_cpu:
+        # CPU inference in containerized CI frequently has very limited /dev/shm.
+        # Keep auto mode single-process to avoid worker shared-memory crashes.
+        if auto_workers:
+            workers_per_rank = 0
         pin_memory = False
         persistent_workers = False
 
@@ -784,6 +789,8 @@ def main(args):
         "traceback",
     ]
     process_df = process_df[cols]
+    process_df["error"] = process_df["error"].astype("object")
+    process_df["traceback"] = process_df["traceback"].astype("object")
 
     skip_feature_extraction = process_df["feature_status"].str.contains("success").all()
 
