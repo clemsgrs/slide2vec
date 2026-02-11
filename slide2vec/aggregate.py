@@ -56,11 +56,20 @@ def scale_coordinates(wsi_fp, coordinates, spacing, backend):
     return scaled_coordinates
 
 
+def resolve_output_dir(config_output_dir: str, cli_output_dir: str | None) -> Path:
+    if cli_output_dir is None:
+        return Path(config_output_dir)
+    cli_path = Path(cli_output_dir)
+    if cli_path.is_absolute():
+        return cli_path
+    return Path(config_output_dir, cli_output_dir)
+
+
 def main(args):
     # setup configuration
     run_on_cpu = args.run_on_cpu
     cfg = get_cfg_from_file(args.config_file)
-    output_dir = Path(cfg.output_dir, args.output_dir)
+    output_dir = resolve_output_dir(cfg.output_dir, args.output_dir)
     cfg.output_dir = str(output_dir)
 
     coordinates_dir = Path(cfg.output_dir, "coordinates")
