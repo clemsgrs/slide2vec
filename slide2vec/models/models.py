@@ -63,7 +63,7 @@ class ModelFactory:
                 model = PathoJEPA(
                     pretrained_weights=options.pretrained_weights,
                     arch=options.arch,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                     normalize_embeddings=options.normalize_embeddings,
                 )
@@ -77,13 +77,13 @@ class ModelFactory:
                 model = PandaViT(
                     arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                 )
             elif options.name == "dino" and options.arch:
                 model = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                 )
         elif options.level == "region":
@@ -117,7 +117,7 @@ class ModelFactory:
                 tile_encoder = PathoJEPA(
                     pretrained_weights=options.pretrained_weights,
                     arch=options.arch,
-                    input_size=options.patch_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                     normalize_embeddings=options.normalize_embeddings,
                 )
@@ -131,13 +131,13 @@ class ModelFactory:
                 tile_encoder = PandaViT(
                     arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                 )
             elif options.name is None and options.arch:
                 tile_encoder = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.patch_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                 )
             model = RegionFeatureExtractor(tile_encoder, tile_size=options.patch_size)
@@ -861,7 +861,7 @@ class RegionFeatureExtractor(nn.Module):
     def __init__(
         self,
         tile_encoder: nn.Module,
-        tile_size: int = 256,
+        tile_size: int,
     ):
         super(RegionFeatureExtractor, self).__init__()
         self.tile_encoder = tile_encoder
