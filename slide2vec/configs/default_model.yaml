@@ -13,7 +13,7 @@ model:
   arch: # architecture of custom model
   pretrained_weights: # path to the pretrained weights when using a custom model
   batch_size: 256
-  tile_size: ${tiling.params.tile_size}
+  input_size: ${tiling.params.tile_size}
   restrict_to_tissue: false # whether to restrict tile content to tissue pixels only when feeding tile through encoder
   patch_size: 256 # if level is "region", size used to unroll the region into patches
   token_size: 16 # size of the tokens used model is a custom pretrained ViT

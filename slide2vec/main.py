@@ -93,8 +93,7 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
         "torch.distributed.run",
         f"--master_port={free_port}",
         "--nproc_per_node=gpu",
-        "-m",
-        "slide2vec.embed",
+        "slide2vec/embed.py",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
@@ -103,8 +102,7 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
     if run_on_cpu:
         cmd = [
             sys.executable,
-            "-m",
-            "slide2vec.embed",
+            "slide2vec/embed.py",
             "--config-file",
             os.path.abspath(config_file),
             "--output-dir",
@@ -127,11 +125,9 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
 
 def run_feature_aggregation(config_file, output_dir, run_on_cpu: False):
     print("Running aggregate.py...")
-    # find a free port
     cmd = [
         sys.executable,
-        "-m",
-        "slide2vec.aggregate",
+        "slide2vec/aggregate.py",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
