@@ -711,7 +711,7 @@ class Kaiko(FeatureExtractor):
 
 class Midnight12k(FeatureExtractor):
     def __init__(self):
-        self.features_dim = 1536
+        self.features_dim = 3072
         super(Midnight12k, self).__init__()
 
     def build_encoder(self):
@@ -749,7 +749,7 @@ class Hibou(FeatureExtractor):
 
     def get_transforms(self):
         return AutoImageProcessor.from_pretrained(
-            "histai/hibou-L", trust_remote_code=True
+            f"histai/{self.arch}", trust_remote_code=True
         )
 
     def forward(self, x):
