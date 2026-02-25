@@ -99,6 +99,7 @@ class RegressionBugfixTests(unittest.TestCase):
             "hibou": "tile_encoder = Hibou()",
             "kaiko": "tile_encoder = Kaiko(arch=options.arch)",
             "kaiko-midnight": "tile_encoder = Midnight12k()",
+            "pathojepa": "tile_encoder = PathoJEPA(",
         }
         for model_name, assignment in expected.items():
             pattern = rf'elif options.name == "{re.escape(model_name)}":\n\s+{re.escape(assignment)}'
@@ -107,6 +108,24 @@ class RegressionBugfixTests(unittest.TestCase):
                 pattern,
                 f"Region-level branch for {model_name} should assign to tile_encoder",
             )
+
+    def test_tile_model_factory_has_pathojepa_branch(self):
+        src = read_source("slide2vec/models/models.py")
+        pattern = r'elif options\.name == "pathojepa":\n\s+model = PathoJEPA\('
+        self.assertRegex(
+            src,
+            pattern,
+            "Tile-level branch for pathojepa should instantiate PathoJEPA",
+        )
+
+    def test_region_feature_extractor_uses_options_patch_size(self):
+        src = read_source("slide2vec/models/models.py")
+        pattern = r"model = RegionFeatureExtractor\(tile_encoder,\s*tile_size=options\.patch_size\)"
+        self.assertRegex(
+            src,
+            pattern,
+            "RegionFeatureExtractor should use options.patch_size to define region unrolling tile size",
+        )
 
 
 if __name__ == "__main__":

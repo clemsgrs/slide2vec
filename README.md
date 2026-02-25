@@ -25,6 +25,7 @@
 | [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | ViT-G/14 | 1.1B |
 | [H-optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | ViT-G/14 | 1.1B |
 | [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | Various | 86M - 307M |
+| PathoJEPA (`model.name: "pathojepa"`) | ViT-S/16 (default) | 22M |
 
 ### Slide-level models
 
