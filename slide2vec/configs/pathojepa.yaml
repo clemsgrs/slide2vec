@@ -1,0 +1,27 @@
+csv: ""
+
+visualize: true
+
+output_dir: "output" # output directory
+
+tiling:
+  params:
+    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1)
+    tile_size: 224 # PathoJEPA inference target tile size
+    min_tissue_percentage: 0.1 # threshold used to filter out tiles with too little tissue
+  filter_params:
+    ref_tile_size: 224
+
+model:
+  level: "tile" # set to "region" to run region-level inference with this tile encoder
+  name: "pathojepa"
+  arch: "vit_small"
+  pretrained_weights: "/path/to/pathojepa/checkpoint.pth.tar"
+  patch_size: 256 # region-unrolling size when model.level == "region"
+  token_size: 16 # ViT patch size used by PathoJEPA
+  normalize_embeddings: false
+  batch_size: 1
+
+speed:
+  fp16: false

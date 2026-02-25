@@ -2,6 +2,7 @@ import timm
 import torch
 import logging
 import torch.nn as nn
+import torch.nn.functional as F
 
 from einops import rearrange
 from omegaconf import DictConfig
@@ -18,6 +19,7 @@ from musk import utils as musk_utils
 import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer_dino as vits_dino
 import slide2vec.models.vision_transformer_dinov2 as vits_dinov2
+import slide2vec.models.vision_transformer_pathojepa as vits_pathojepa
 
 from slide2vec.utils import update_state_dict
 from slide2vec.data.augmentations import make_normalize_transform, MaybeToTensor
@@ -57,6 +59,14 @@ class ModelFactory:
                 model = Hibou(arch=options.arch)
             elif options.name == "kaiko":
                 model = Kaiko(arch=options.arch)
+            elif options.name == "pathojepa":
+                model = PathoJEPA(
+                    pretrained_weights=options.pretrained_weights,
+                    arch=options.arch,
+                    input_size=options.input_size,
+                    patch_size=options.token_size,
+                    normalize_embeddings=options.normalize_embeddings,
+                )
             elif options.name == "rumc-vit-s-50k":
                 model = CustomViT(
                     arch="vit_small",
@@ -67,13 +77,13 @@ class ModelFactory:
                 model = PandaViT(
                     arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                 )
             elif options.name == "dino" and options.arch:
                 model = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                 )
         elif options.level == "region":
@@ -103,6 +113,14 @@ class ModelFactory:
                 tile_encoder = Kaiko(arch=options.arch)
             elif options.name == "kaiko-midnight":
                 tile_encoder = Midnight12k()
+            elif options.name == "pathojepa":
+                tile_encoder = PathoJEPA(
+                    pretrained_weights=options.pretrained_weights,
+                    arch=options.arch,
+                    input_size=options.input_size,
+                    patch_size=options.token_size,
+                    normalize_embeddings=options.normalize_embeddings,
+                )
             elif options.name == "rumc-vit-s-50k":
                 tile_encoder = CustomViT(
                     arch="vit_small",
@@ -113,16 +131,16 @@ class ModelFactory:
                 tile_encoder = PandaViT(
                     arch="vit_small",
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.tile_size,
+                    input_size=options.input_size,
                 )
             elif options.name is None and options.arch:
                 tile_encoder = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
-                    input_size=options.patch_size,
+                    input_size=options.input_size,
                     patch_size=options.token_size,
                 )
-            model = RegionFeatureExtractor(tile_encoder)
+            model = RegionFeatureExtractor(tile_encoder, tile_size=options.patch_size)
         elif options.level == "slide":
             if options.name == "prov-gigapath":
                 model = ProvGigaPathSlide()
@@ -304,6 +322,87 @@ class DINOViT(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
+        output = {"embedding": embedding}
+        return output
+
+
+class PathoJEPA(FeatureExtractor):
+    def __init__(
+        self,
+        pretrained_weights: str,
+        arch: str,
+        input_size: int = 224,
+        patch_size: int = 16,
+        normalize_embeddings: bool = False,
+    ):
+        self.arch = arch
+        self.pretrained_weights = pretrained_weights
+        self.input_size = int(input_size)
+        self.patch_size = int(patch_size)
+        self.normalize_embeddings = bool(normalize_embeddings)
+        if self.arch not in vits_pathojepa.VIT_EMBED_DIMS:
+            raise ValueError(
+                f"Unsupported PathoJEPA architecture: {self.arch}. "
+                f"Expected one of {list(vits_pathojepa.VIT_EMBED_DIMS.keys())}"
+            )
+        self.features_dim = vits_pathojepa.VIT_EMBED_DIMS[self.arch]
+        super(PathoJEPA, self).__init__()
+        self.load_weights()
+
+    def _extract_backbone_state_dict(self, checkpoint):
+        if isinstance(checkpoint, dict):
+            return checkpoint["target_encoder"]
+        return checkpoint
+
+    def load_weights(self):
+        if not self.pretrained_weights:
+            raise ValueError(
+                "model.pretrained_weights must be provided for model.name=pathojepa"
+            )
+        if distributed.is_main_process():
+            print(f"Loading pretrained weights from: {self.pretrained_weights}")
+        checkpoint = torch.load(
+            self.pretrained_weights, map_location="cpu", weights_only=False
+        )
+        state_dict = self._extract_backbone_state_dict(checkpoint)
+        if not isinstance(state_dict, dict):
+            raise ValueError(
+                "Unsupported PathoJEPA checkpoint format: expected a state_dict-like mapping"
+            )
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            state_dict, prefix="module."
+        )
+        state_dict, msg = update_state_dict(
+            model_dict=self.encoder.state_dict(), state_dict=state_dict
+        )
+        if distributed.is_main_process():
+            print(msg)
+        self.encoder.load_state_dict(state_dict, strict=False)
+
+    def build_encoder(self):
+        return vits_pathojepa.__dict__[self.arch](
+            img_size=self.input_size,
+            patch_size=self.patch_size,
+        )
+
+    def get_transforms(self):
+        return transforms.Compose(
+            [
+                transforms.Resize(
+                    self.input_size,
+                    interpolation=transforms.InterpolationMode.BICUBIC,
+                    antialias=True,
+                ),
+                MaybeToTensor(),
+                make_normalize_transform(),
+            ]
+        )
+
+    def forward(self, x):
+        tokens = self.encoder(x, masks=None)
+        embedding = tokens.mean(dim=1)
+        if self.normalize_embeddings:
+            embedding = F.normalize(embedding, p=2, dim=-1)
         output = {"embedding": embedding}
         return output
 
@@ -711,7 +810,7 @@ class Kaiko(FeatureExtractor):
 
 class Midnight12k(FeatureExtractor):
     def __init__(self):
-        self.features_dim = 1536
+        self.features_dim = 3072
         super(Midnight12k, self).__init__()
 
     def build_encoder(self):
@@ -749,7 +848,7 @@ class Hibou(FeatureExtractor):
 
     def get_transforms(self):
         return AutoImageProcessor.from_pretrained(
-            "histai/hibou-L", trust_remote_code=True
+            f"histai/{self.arch}", trust_remote_code=True
         )
 
     def forward(self, x):
@@ -762,7 +861,7 @@ class RegionFeatureExtractor(nn.Module):
     def __init__(
         self,
         tile_encoder: nn.Module,
-        tile_size: int = 256,
+        tile_size: int,
     ):
         super(RegionFeatureExtractor, self).__init__()
         self.tile_encoder = tile_encoder
