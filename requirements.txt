@@ -3,6 +3,7 @@ wandb
 numpy==1.26.1
 pandas
 pillow
+pyarrow
 einops
 tqdm
 omegaconf
