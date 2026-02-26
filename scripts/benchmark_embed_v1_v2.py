@@ -115,11 +115,10 @@ def build_command(
             "-m",
             "torch.distributed.run",
             f"--nproc_per_node={gpu_count}",
-            "-m",
-            "slide2vec.embed",
+            "slide2vec/embed.py",
         ]
     else:
-        cmd = [python_exe, "-m", "slide2vec.embed"]
+        cmd = [python_exe, "slide2vec/embed.py"]
 
     cmd.extend(
         [
