@@ -55,3 +55,6 @@ class RegionUnfolding:
             x, "c p1 p2 w h -> (p1 p2) c w h"
         )  # [num_tilees, 3, tile_size, tile_size]
         return x
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.tile_size})"

@@ -6,6 +6,7 @@ pandas
 pillow
 tqdm
 wandb
+pyarrow
 torch>=2.3,<2.8
 torchvision>=0.18.0
 opencv-python

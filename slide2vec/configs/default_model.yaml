@@ -23,7 +23,13 @@ model:
 
 speed:
   fp16: false # use mixed precision during model inference
-  num_workers_embedding: 8 # number of workers for data loading when embedding slides
+  num_workers_embedding: 16 # number of workers for data loading when embedding slides
+  persistent_workers_embedding: true # keep DataLoader workers alive across iterator re-creation for a slide
+  prefetch_factor_embedding: 4 # number of batches prefetched per worker
+  use_parquet: true # if false, use legacy TileDataset and read per-slide .npy coordinates directly
+  max_open_slides_per_worker: 16 # worker-local LRU cache size for open WSI readers
+  deterministic_inference: false # if true, force deterministic cuDNN behavior
+  cudnn_benchmark: true # enable cuDNN autotuner for faster fixed-shape inference
 
 wandb:
   enable: false
