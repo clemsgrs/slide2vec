@@ -23,7 +23,15 @@ model:
 
 speed:
   fp16: false # use mixed precision during model inference
-  num_workers_embedding: 8 # number of workers for data loading when embedding slides
+  embedding_pipeline: "v1" # embedding execution pipeline ("v1" keeps synchronized tile sharding, "v2" enables adaptive sharding)
+  rank_sharding_mode: "auto" # sharding strategy for v2 ("auto", "slide", "tile")
+  storage_mode: "auto" # storage profile used for loader heuristics ("auto", "network", "local")
+  num_workers_embedding: "auto" # number of data loading workers, or "auto" to derive from CPU cores per rank
+  prefetch_factor_embedding: # DataLoader prefetch factor; leave empty to use storage-aware defaults
+  persistent_workers_embedding: true # keep DataLoader workers alive between batches when num_workers > 0
+  pin_memory_embedding: true # use pinned host memory for faster H2D transfers
+  loader_batch_timeout_sec: 0 # DataLoader timeout in seconds
+  log_perf_embedding: false # log per-slide data loading/compute timing breakdown
 
 wandb:
   enable: false

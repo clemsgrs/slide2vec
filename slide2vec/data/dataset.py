@@ -32,6 +32,8 @@ class TileDataset(torch.utils.data.Dataset):
         self.target_spacing = target_spacing
         self.backend = backend
         self.name = wsi_path.stem.replace(" ", "_")
+        self._wsi = None
+        self._worker_id = None
         self.load_coordinates(coordinates_dir)
         self.transforms = transforms
         self.restrict_to_tissue = restrict_to_tissue
@@ -83,10 +85,16 @@ class TileDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.x)
 
+    def _get_worker_wsi(self):
+        worker_info = torch.utils.data.get_worker_info()
+        worker_id = worker_info.id if worker_info is not None else -1
+        if self._wsi is None or self._worker_id != worker_id:
+            self._wsi = wsd.WholeSlideImage(self.path, backend=self.backend)
+            self._worker_id = worker_id
+        return self._wsi
+
     def __getitem__(self, idx):
-        wsi = wsd.WholeSlideImage(
-            self.path, backend=self.backend
-        )  # cannot be defined in __init__ because of multiprocessing
+        wsi = self._get_worker_wsi()
         tile_level = self.tile_level[idx]
         tile_spacing = wsi.spacings[tile_level]
         tile_arr = wsi.get_patch(

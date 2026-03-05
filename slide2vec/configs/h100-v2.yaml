@@ -1,0 +1,32 @@
+csv: # path to csv containing slide paths
+
+output_dir: "output"
+
+tiling:
+  params:
+    spacing: 0.5
+    tolerance: 0.05
+    tile_size: 256
+    min_tissue_percentage: 0.1
+  filter_params:
+    ref_tile_size: 256
+
+model:
+  level: "tile"
+  name: "conch"
+  batch_size: 64
+
+speed:
+  fp16: true
+  embedding_pipeline: "v2"
+  rank_sharding_mode: "auto"
+  storage_mode: "network"
+  num_workers_embedding: "auto"
+  prefetch_factor_embedding: 4
+  persistent_workers_embedding: true
+  pin_memory_embedding: true
+  loader_batch_timeout_sec: 0
+  log_perf_embedding: true
+
+wandb:
+  enable: false

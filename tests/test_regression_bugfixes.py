@@ -109,6 +109,39 @@ class RegressionBugfixTests(unittest.TestCase):
                 f"Region-level branch for {model_name} should assign to tile_encoder",
             )
 
+<<<<<<< HEAD:test/test_regression_bugfixes.py
+    def test_embed_reads_new_loader_config_keys(self):
+        src = read_source("slide2vec/embed.py")
+        expected_keys = [
+            "embedding_pipeline",
+            "rank_sharding_mode",
+            "storage_mode",
+            "num_workers_embedding",
+            "prefetch_factor_embedding",
+            "persistent_workers_embedding",
+            "pin_memory_embedding",
+            "loader_batch_timeout_sec",
+            "log_perf_embedding",
+        ]
+        for key in expected_keys:
+            self.assertIn(
+                f"\"{key}\"",
+                src,
+                f"embed.py should reference speed.{key}",
+            )
+
+    def test_embed_cpu_workers_guard_exists(self):
+        src = read_source("slide2vec/embed.py")
+        self.assertIn(
+            "if run_on_cpu:",
+            src,
+            "embed.py should have a dedicated CPU loader branch",
+        )
+        self.assertIn(
+            "workers_per_rank = 0",
+            src,
+            "embed.py should force single-process loading for CPU runs",
+=======
     def test_tile_model_factory_has_pathojepa_branch(self):
         src = read_source("slide2vec/models/models.py")
         pattern = r'elif options\.name == "pathojepa":\n\s+model = PathoJEPA\('
@@ -125,6 +158,7 @@ class RegressionBugfixTests(unittest.TestCase):
             src,
             pattern,
             "RegionFeatureExtractor should use options.patch_size to define region unrolling tile size",
+>>>>>>> 29cb71d0d5f96f382d266c36fcb8f74e6b619e80:tests/test_regression_bugfixes.py
         )
 
 
