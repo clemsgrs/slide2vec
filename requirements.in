@@ -27,7 +27,7 @@ scikit-image~=0.19.3
 git+https://github.com/lilab-stanford/MUSK.git
 git+https://github.com/Mahmoodlab/CONCH.git
 
-## gigapath
+## Prov-GigaPath
 torchmetrics>=0.10.3
 fvcore
 iopath
@@ -38,3 +38,4 @@ fairscale
 packaging==23.2
 ninja==1.11.1.1
 psutil<6
+git+https://github.com/prov-gigapath/prov-gigapath.git
