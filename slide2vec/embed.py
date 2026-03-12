@@ -16,6 +16,7 @@ import slide2vec.distributed as distributed
 
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
+from slide2vec.utils.paths import resolve_coordinates_dir, resolve_output_dir
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
 from slide2vec.hs2p.hs2p.wsi import SamplingParameters
@@ -144,15 +145,6 @@ def load_sort_and_deduplicate_features(tmp_dir, name, expected_len=None):
     return features_unique
 
 
-def resolve_output_dir(config_output_dir: str, cli_output_dir: str | None) -> Path:
-    if cli_output_dir is None:
-        return Path(config_output_dir)
-    cli_path = Path(cli_output_dir)
-    if cli_path.is_absolute():
-        return cli_path
-    return Path(config_output_dir, cli_output_dir)
-
-
 def cleanup_tmp_features(tmp_dir: Path, name: str):
     for rank in range(distributed.get_global_size()):
         fp = tmp_dir / f"{name}-rank_{rank}.h5"
@@ -170,10 +162,7 @@ def main(args):
     if not run_on_cpu:
         setup_distributed()
 
-    if cfg.tiling.read_coordinates_from:
-        coordinates_dir = Path(cfg.tiling.read_coordinates_from)
-    else:
-        coordinates_dir = Path(cfg.output_dir, "coordinates")
+    coordinates_dir = resolve_coordinates_dir(cfg)
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False

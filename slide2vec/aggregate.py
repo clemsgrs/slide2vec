@@ -17,6 +17,7 @@ import slide2vec.distributed as distributed
 
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file
+from slide2vec.utils.paths import resolve_coordinates_dir, resolve_output_dir
 from slide2vec.models import ModelFactory
 
 torchvision.disable_beta_transforms_warning()
@@ -56,15 +57,6 @@ def scale_coordinates(wsi_fp, coordinates, spacing, backend):
     return scaled_coordinates
 
 
-def resolve_output_dir(config_output_dir: str, cli_output_dir: str | None) -> Path:
-    if cli_output_dir is None:
-        return Path(config_output_dir)
-    cli_path = Path(cli_output_dir)
-    if cli_path.is_absolute():
-        return cli_path
-    return Path(config_output_dir, cli_output_dir)
-
-
 def main(args):
     # setup configuration
     run_on_cpu = args.run_on_cpu
@@ -72,7 +64,7 @@ def main(args):
     output_dir = resolve_output_dir(cfg.output_dir, args.output_dir)
     cfg.output_dir = str(output_dir)
 
-    coordinates_dir = Path(cfg.output_dir, "coordinates")
+    coordinates_dir = resolve_coordinates_dir(cfg)
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
