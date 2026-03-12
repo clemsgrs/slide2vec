@@ -14,12 +14,16 @@ from contextlib import nullcontext
 
 import slide2vec.distributed as distributed
 
+from hs2p import TilingResult
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
-from slide2vec.utils.paths import resolve_coordinates_dir, resolve_output_dir
+from slide2vec.utils.tiling_io import (
+    load_process_df,
+    load_tiling_result_from_row,
+)
+from slide2vec.utils.paths import resolve_output_dir
 from slide2vec.models import ModelFactory
 from slide2vec.data import TileDataset, RegionUnfolding
-from slide2vec.hs2p.hs2p.wsi import SamplingParameters
 
 torchvision.disable_beta_transforms_warning()
 
@@ -63,30 +67,20 @@ def create_transforms(cfg, model):
 
 
 def create_dataset(
+    sample_id,
     wsi_path,
     mask_path,
-    coordinates_dir,
-    target_spacing,
-    tolerance,
+    tiling_result: TilingResult,
     backend,
-    segment_params,
-    sampling_params,
-    filter_params,
     transforms,
-    restrict_to_tissue: bool,
 ):
     return TileDataset(
+        sample_id=sample_id,
         wsi_path=wsi_path,
         mask_path=mask_path,
-        coordinates_dir=coordinates_dir,
-        target_spacing=target_spacing,
-        tolerance=tolerance,
+        tiling_result=tiling_result,
         backend=backend,
-        segment_params=segment_params,
-        sampling_params=sampling_params,
-        filter_params=filter_params,
         transforms=transforms,
-        restrict_to_tissue=restrict_to_tissue,
     )
 
 
@@ -162,7 +156,6 @@ def main(args):
     if not run_on_cpu:
         setup_distributed()
 
-    coordinates_dir = resolve_coordinates_dir(cfg)
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -177,14 +170,10 @@ def main(args):
     assert (
         process_list.is_file()
     ), "Process list CSV not found. Ensure tiling has been run."
-    process_df = pd.read_csv(process_list)
-    cols = ["wsi_name", "wsi_path", "tiling_status", "error", "traceback"]
-    if "feature_status" not in process_df.columns:
-        process_df["feature_status"] = ["tbp"] * len(process_df)
-    if "mask_path" not in process_df.columns:
-        process_df["mask_path"] = [None] * len(process_df)
-    cols = ["wsi_name", "wsi_path", "mask_path", "tiling_status", "feature_status", "error", "traceback"]
-    process_df = process_df[cols]
+    current_columns = pd.read_csv(process_list).columns
+    process_df = load_process_df(process_list, include_feature_status=True)
+    if "feature_status" not in current_columns:
+        process_df.to_csv(process_list, index=False)
 
     skip_feature_extraction = process_df["feature_status"].str.contains("success").all()
 
@@ -203,30 +192,11 @@ def main(args):
         if not run_on_cpu:
             torch.distributed.barrier()
 
-        pixel_mapping = {k: v for e in cfg.tiling.sampling_params.pixel_mapping for k, v in e.items()}
-        tissue_percentage = {k: v for e in cfg.tiling.sampling_params.tissue_percentage for k, v in e.items()}
-        if "tissue" not in tissue_percentage:
-            tissue_percentage["tissue"] = cfg.tiling.params.min_tissue_percentage
-        if cfg.tiling.sampling_params.color_mapping is not None:
-            color_mapping = {k: v for e in cfg.tiling.sampling_params.color_mapping for k, v in e.items()}
-        else:
-            color_mapping = None
-
-        sampling_params = SamplingParameters(
-            pixel_mapping=pixel_mapping,
-            color_mapping=color_mapping,
-            tissue_percentage=tissue_percentage,
-        )
-
         # select slides that were successfully tiled but not yet processed for feature extraction
         tiled_df = process_df[process_df.tiling_status == "success"]
         mask = tiled_df["feature_status"] != "success"
         process_stack = tiled_df[mask]
         total = len(process_stack)
-
-        wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
-        mask_paths_to_process = [Path(x) if x is not None and not pd.isna(x) else None  for x in process_stack.mask_path.values.tolist()]
-        combined_paths = zip(wsi_paths_to_process, mask_paths_to_process)
 
         features_dir = Path(cfg.output_dir, "features")
         if distributed.is_main_process():
@@ -246,8 +216,8 @@ def main(args):
         transforms = create_transforms(cfg, model)
         print(f"transforms: {transforms}")
 
-        for wsi_fp, mask_fp in tqdm.tqdm(
-            combined_paths,
+        for row in tqdm.tqdm(
+            process_stack.to_dict(orient="records"),
             desc="Inference",
             unit="slide",
             total=total,
@@ -255,27 +225,29 @@ def main(args):
             disable=not distributed.is_main_process(),
             position=1,
         ):
-            name = wsi_fp.stem.replace(" ", "_")
-            feature_path = features_dir / f"{name}.pt"
+            sample_id = str(row["sample_id"])
+            wsi_fp = Path(row["image_path"])
+            mask_fp = (
+                Path(row["mask_path"])
+                if row["mask_path"] is not None and not pd.isna(row["mask_path"])
+                else None
+            )
+            tiling_result = load_tiling_result_from_row(row)
+            feature_path = features_dir / f"{sample_id}.pt"
             if cfg.model.save_tile_embeddings:
-                feature_path = features_dir / f"{name}-tiles.pt"
-            tmp_feature_path = tmp_dir / f"{name}-rank_{distributed.get_global_rank()}.h5"
+                feature_path = features_dir / f"{sample_id}-tiles.pt"
+            tmp_feature_path = tmp_dir / f"{sample_id}-rank_{distributed.get_global_rank()}.h5"
 
             status_info = {"status": "success"}
             local_failed = False
             try:
                 dataset = create_dataset(
+                    sample_id=sample_id,
                     wsi_path=wsi_fp,
                     mask_path=mask_fp,
-                    coordinates_dir=coordinates_dir,
-                    target_spacing=cfg.tiling.params.spacing,
-                    tolerance=cfg.tiling.params.tolerance,
+                    tiling_result=tiling_result,
                     backend=cfg.tiling.backend,
-                    segment_params=cfg.tiling.seg_params,
-                    sampling_params=sampling_params,
-                    filter_params=cfg.tiling.filter_params,
                     transforms=transforms,
-                    restrict_to_tissue=cfg.model.restrict_to_tissue,
                 )
                 if distributed.is_enabled_and_multiple_gpus():
                     sampler = torch.utils.data.DistributedSampler(
@@ -336,7 +308,7 @@ def main(args):
 
             if any_rank_failed:
                 if distributed.is_main_process():
-                    cleanup_tmp_features(tmp_dir, name)
+                    cleanup_tmp_features(tmp_dir, sample_id)
                     if status_info["status"] != "failed":
                         status_info = {
                             "status": "failed",
@@ -346,12 +318,12 @@ def main(args):
             elif distributed.is_main_process():
                 try:
                     wsi_feature = load_sort_and_deduplicate_features(
-                        tmp_dir, name, expected_len=len(dataset)
+                        tmp_dir, sample_id, expected_len=len(dataset)
                     )
                     torch.save(wsi_feature, feature_path)
                 except Exception as e:
                     any_rank_failed = True
-                    cleanup_tmp_features(tmp_dir, name)
+                    cleanup_tmp_features(tmp_dir, sample_id)
                     status_info = {
                         "status": "failed",
                         "error": str(e),
@@ -382,20 +354,20 @@ def main(args):
                         "error": "Feature extraction failed on at least one distributed rank.",
                         "traceback": "",
                     }
-                feature_extraction_updates[str(wsi_fp)] = status_info
+                feature_extraction_updates[sample_id] = status_info
 
             # update process_df
             if distributed.is_main_process():
-                status_info = feature_extraction_updates[str(wsi_fp)]
+                status_info = feature_extraction_updates[sample_id]
                 process_df.loc[
-                    process_df["wsi_path"] == str(wsi_fp), "feature_status"
+                    process_df["sample_id"] == sample_id, "feature_status"
                 ] = status_info["status"]
                 if "error" in status_info:
                     process_df.loc[
-                        process_df["wsi_path"] == str(wsi_fp), "error"
+                        process_df["sample_id"] == sample_id, "error"
                     ] = status_info["error"]
                     process_df.loc[
-                        process_df["wsi_path"] == str(wsi_fp), "traceback"
+                        process_df["sample_id"] == sample_id, "traceback"
                     ] = status_info["traceback"]
                 process_df.to_csv(process_list, index=False)
 

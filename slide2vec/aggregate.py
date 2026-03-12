@@ -15,9 +15,10 @@ from contextlib import nullcontext
 
 import slide2vec.distributed as distributed
 
+from slide2vec.utils.tiling_io import load_process_df, load_tiling_result_from_row
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file
-from slide2vec.utils.paths import resolve_coordinates_dir, resolve_output_dir
+from slide2vec.utils.paths import resolve_output_dir
 from slide2vec.models import ModelFactory
 
 torchvision.disable_beta_transforms_warning()
@@ -64,7 +65,6 @@ def main(args):
     output_dir = resolve_output_dir(cfg.output_dir, args.output_dir)
     cfg.output_dir = str(output_dir)
 
-    coordinates_dir = resolve_coordinates_dir(cfg)
     fix_random_seeds(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -77,11 +77,14 @@ def main(args):
     assert (
         process_list.is_file()
     ), "Process list CSV not found. Ensure tiling has been run."
-    process_df = pd.read_csv(process_list)
-    if "aggregation_status" not in process_df.columns:
-        process_df["aggregation_status"] = ["tbp"] * len(process_df)
-        cols = ["wsi_name", "wsi_path", "mask_path", "tiling_status", "feature_status", "aggregation_status", "error", "traceback"]
-        process_df = process_df[cols]
+    current_columns = pd.read_csv(process_list).columns
+    process_df = load_process_df(
+        process_list,
+        include_feature_status=True,
+        include_aggregation_status=True,
+    )
+    if "feature_status" not in current_columns or "aggregation_status" not in current_columns:
+        process_df.to_csv(process_list, index=False)
 
     skip_feature_aggregation = process_df["aggregation_status"].str.contains("success").all()
 
@@ -97,8 +100,6 @@ def main(args):
     mask = tiled_and_features_df["aggregation_status"] != "success"
     process_stack = tiled_and_features_df[mask]
     total = len(process_stack)
-    wsi_paths_to_process = [Path(x) for x in process_stack.wsi_path.values.tolist()]
-
     features_dir = Path(cfg.output_dir, "features")
 
     autocast_context = (
@@ -108,29 +109,33 @@ def main(args):
     )
     feature_aggregation_updates = {}
 
-    for wsi_fp in tqdm.tqdm(
-        wsi_paths_to_process,
+    for row in tqdm.tqdm(
+        process_stack.to_dict(orient="records"),
         desc="Pooling tile features",
         unit="slide",
         total=total,
         leave=True,
     ):
+        sample_id = str(row["sample_id"])
         try:
+            wsi_fp = Path(row["image_path"])
+            tiling_result = load_tiling_result_from_row(row)
+            coordinates = np.column_stack((tiling_result.x, tiling_result.y)).astype(int)
 
-            name = wsi_fp.stem.replace(" ", "_")
-            coordinates_file = coordinates_dir / f"{name}.npy"
-            coordinates_arr = np.load(coordinates_file, allow_pickle=True)
-            coordinates = (np.array([coordinates_arr["x"], coordinates_arr["y"]]).T).astype(int)
-
-            feature_path = features_dir / f"{name}.pt"
-            output_path = features_dir / f"{name}.pt"
+            feature_path = features_dir / f"{sample_id}.pt"
+            output_path = features_dir / f"{sample_id}.pt"
             if cfg.model.save_tile_embeddings:
-                feature_path = features_dir / f"{name}-tiles.pt"
+                feature_path = features_dir / f"{sample_id}-tiles.pt"
 
             # run forward pass with slide encoder
             if cfg.model.name == "prov-gigapath":
                 # need to scale coordinates for gigapath
-                scaled_coordinates = scale_coordinates(wsi_fp, coordinates, cfg.tiling.params.spacing, cfg.tiling.backend)
+                scaled_coordinates = scale_coordinates(
+                    wsi_fp,
+                    coordinates,
+                    tiling_result.target_spacing_um,
+                    cfg.tiling.backend,
+                )
                 coordinates = torch.tensor(
                     scaled_coordinates,
                     dtype=torch.int,
@@ -146,15 +151,14 @@ def main(args):
             with torch.inference_mode():
                 with autocast_context:
                     features = torch.load(feature_path).to(model.device)
-                    tile_size_lv0 = coordinates_arr["tile_size_lv0"][0]
                     output = model.forward_slide(
                         features,
                         tile_coordinates=coordinates,
-                        tile_size_lv0=tile_size_lv0,
+                        tile_size_lv0=tiling_result.tile_size_lv0,
                     )
                     wsi_feature = output["embedding"].cpu()
                     if cfg.model.name == "prism" and cfg.model.save_latents:
-                        latent_path = features_dir / f"{name}-latents.pt"
+                        latent_path = features_dir / f"{sample_id}-latents.pt"
                         latents = output["latents"].cpu()
                         torch.save(latents, latent_path)
                         del latents
@@ -165,26 +169,26 @@ def main(args):
                 torch.cuda.empty_cache()
             gc.collect()
 
-            feature_aggregation_updates[str(wsi_fp)] = {"status": "success"}
+            feature_aggregation_updates[sample_id] = {"status": "success"}
 
         except Exception as e:
-            feature_aggregation_updates[str(wsi_fp)] = {
+            feature_aggregation_updates[sample_id] = {
                 "status": "failed",
                 "error": str(e),
                 "traceback": str(traceback.format_exc()),
             }
 
         # update process_df
-        status_info = feature_aggregation_updates[str(wsi_fp)]
+        status_info = feature_aggregation_updates[sample_id]
         process_df.loc[
-            process_df["wsi_path"] == str(wsi_fp), "aggregation_status"
+            process_df["sample_id"] == sample_id, "aggregation_status"
         ] = status_info["status"]
         if "error" in status_info:
             process_df.loc[
-                process_df["wsi_path"] == str(wsi_fp), "error"
+                process_df["sample_id"] == sample_id, "error"
             ] = status_info["error"]
             process_df.loc[
-                process_df["wsi_path"] == str(wsi_fp), "traceback"
+                process_df["sample_id"] == sample_id, "traceback"
             ] = status_info["traceback"]
         process_df.to_csv(process_list, index=False)
 

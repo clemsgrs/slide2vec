@@ -1,4 +1,5 @@
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -14,11 +15,11 @@ from omegaconf import OmegaConf
 
 # -- tiling.params --
 TILING_PARAMS = dict(
-    spacing=0.5,
+    target_spacing_um=0.5,
     tolerance=0.07,           # override (default: 0.05)
-    tile_size=224,            # override (default: 256)
+    target_tile_size_px=224,  # override (default: 256)
     overlap=0.0,
-    min_tissue_percentage=0.1,  # override (default: 0.01)
+    tissue_threshold=0.1,     # override (default: 0.01)
     drop_holes=False,
     use_padding=True,
 )
@@ -58,8 +59,7 @@ MODEL_PARAMS = dict(
     arch=None,
     pretrained_weights=None,
     batch_size=8,            # override (default: 256)
-    tile_size=224,           # resolved from ${tiling.params.tile_size}
-    restrict_to_tissue=False,
+    input_size=224,          # resolved from ${tiling.params.target_tile_size_px}
     patch_size=256,
     token_size=16,
     save_tile_embeddings=False,
@@ -108,7 +108,9 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
 
     # 1. Build a temporary CSV with resolved absolute paths
     tmp_csv = tmp_path / "test.csv"
-    tmp_csv.write_text(f"wsi_path,mask_path\n{wsi_path},{mask_path}\n")
+    tmp_csv.write_text(
+        f"sample_id,image_path,mask_path\ntest-wsi,{wsi_path},{mask_path}\n"
+    )
 
     # 2. Build config from hardcoded constants (no dependency on test/input/config.yaml)
     cfg = OmegaConf.create({
@@ -119,7 +121,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "visualize": False,  # override (default: true)
         "seed": 0,
         "tiling": {
-            "read_coordinates_from": None,
+            "read_tiles_from": None,
             "backend": "asap",
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,
@@ -147,8 +149,14 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
 
     # 4. Assert coordinates match exactly (tiling is deterministic)
     gt_coords = np.load(GT_DIR / "test-wsi.npy", allow_pickle=False)
-    coords = np.load(tmp_path / "coordinates" / "test-wsi.npy", allow_pickle=False)
-    np.testing.assert_array_equal(coords, gt_coords)
+    coords = np.load(tmp_path / "coordinates" / "test-wsi.tiles.npz", allow_pickle=False)
+    np.testing.assert_array_equal(coords["x"], gt_coords["x"])
+    np.testing.assert_array_equal(coords["y"], gt_coords["y"])
+
+    meta = json.loads((tmp_path / "coordinates" / "test-wsi.tiles.meta.json").read_text())
+    assert meta["sample_id"] == "test-wsi"
+    assert meta["target_spacing_um"] == pytest.approx(0.5)
+    assert meta["target_tile_size_px"] == 224
 
     # 5. Assert embeddings are within tolerance
     gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu")

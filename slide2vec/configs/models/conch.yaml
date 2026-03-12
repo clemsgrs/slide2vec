@@ -7,15 +7,15 @@ visualize: true
 
 tiling:
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tile_size: 448 # size of the tiles to extract, in pixels
-    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_tile_size_px: 448 # size of the tiles to extract, in pixels
+    tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
   seg_params:
     downsample: 16 # find the closest downsample in the slide for tissue segmentation
   filter_params:
-    ref_tile_size: 448 # reference tile size at spacing tiling.spacing
+    ref_tile_size: 448 # reference tile size at spacing tiling.params.target_spacing_um
     a_t: 16 # area filter threshold for tissue ; positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size
-    # e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.spacing will be kept
+    # e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.target_spacing_um will be kept
     a_h: 4 # area filter threshold for holes ; positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size
     max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
     filter_white: true # whether to filter out mostly white tiles
@@ -40,5 +40,5 @@ wandb:
   username: "clemsg"
   exp_name: "tiling"
   # exp_name: "features"
-  tags: ["tiling", "${tiling.params.tile_size}"]
-  # tags: ["features", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["tiling", "${tiling.params.target_tile_size_px}"]
+  # tags: ["features", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
