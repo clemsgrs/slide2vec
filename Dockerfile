@@ -40,9 +40,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# clone & install relevant repositories
-RUN git clone https://github.com/prov-gigapath/prov-gigapath.git /home/user/prov-gigapath
-
 WORKDIR /opt/app/
 
 # you can add any Python dependencies to requirements.in
@@ -118,12 +115,8 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
 COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
 
-# copy app code, and prov-gigapath
+# copy app code
 COPY --from=build /opt/app /opt/app
-COPY --from=build /home/user/prov-gigapath /home/user/prov-gigapath
-
-# add folders to python path (same as before)
-ENV PYTHONPATH="/home/user/prov-gigapath:/home/user/CONCH:/home/user/MUSK:$PYTHONPATH"
 
 # expose port for ssh and jupyter
 EXPOSE 22 8888
