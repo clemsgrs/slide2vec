@@ -15,4 +15,5 @@
 - `aggregate.py` now follows the same process-list bootstrap order as `embed.py` and drops the stale duplicate `sample_id` assignment in its error path.
 - The unused `tiling.sampling_params` block was removed from the preprocessing default config to keep the HS2P cutover surface honest.
 - The output-consistency regression now reads the HS2P `.tiles.npz` ground-truth fixture, matching the packaged-tiling artifact format.
+- The output-consistency regression now compares coordinate content after lexicographic sorting, so deterministic ordering changes in HS2P do not create false negatives.
 - Config cleanup removed the unused `load_and_merge_config` helper and renamed stale preprocessing/model default locals for clarity.
