@@ -148,7 +148,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     )
 
     # 4. Assert coordinates match exactly (tiling is deterministic)
-    gt_coords = np.load(GT_DIR / "test-wsi.npy", allow_pickle=False)
+    gt_coords = np.load(GT_DIR / "test-wsi.tiles.npz", allow_pickle=False)
     coords = np.load(tmp_path / "coordinates" / "test-wsi.tiles.npz", allow_pickle=False)
     np.testing.assert_array_equal(coords["x"], gt_coords["x"])
     np.testing.assert_array_equal(coords["y"], gt_coords["y"])

@@ -122,10 +122,10 @@ def main(args):
             tiling_result = load_tiling_result_from_row(row)
             coordinates = np.column_stack((tiling_result.x, tiling_result.y)).astype(int)
 
-            feature_path = features_dir / f"{sample_id}.pt"
+            input_path = features_dir / f"{sample_id}.pt"
             output_path = features_dir / f"{sample_id}.pt"
             if cfg.model.save_tile_embeddings:
-                feature_path = features_dir / f"{sample_id}-tiles.pt"
+                input_path = features_dir / f"{sample_id}-tiles.pt"
 
             # run forward pass with slide encoder
             if cfg.model.name == "prov-gigapath":
@@ -150,7 +150,7 @@ def main(args):
 
             with torch.inference_mode():
                 with autocast_context:
-                    features = torch.load(feature_path).to(model.device)
+                    features = torch.load(input_path).to(model.device)
                     output = model.forward_slide(
                         features,
                         tile_coordinates=coordinates,
