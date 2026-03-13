@@ -54,7 +54,7 @@ def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: 
 
 
 def run_tiling(cfg, output_dir: Path):
-    print("Running hs2p tiling via Python API...")
+    print("Running tiling with hs2p...")
     whole_slides = load_slide_manifest(cfg.csv)
     tiling, segmentation, filtering, qc = build_tiling_configs(cfg)
     tile_slides(
