@@ -82,12 +82,6 @@ GT_DIR = TEST_DIR / "fixtures" / "gt"
 REPO_ROOT = TEST_DIR.parent
 
 
-def sorted_coordinate_pairs(coords_npz) -> np.ndarray:
-    pairs = np.column_stack((coords_npz["x"], coords_npz["y"]))
-    order = np.lexsort((pairs[:, 1], pairs[:, 0]))
-    return pairs[order]
-
-
 @pytest.fixture(scope="module")
 def wsi_path() -> Path:
     p = INPUT_DIR / "test-wsi.tif"
@@ -156,10 +150,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     # 4. Assert coordinates match exactly (tiling is deterministic)
     gt_coords = np.load(GT_DIR / "test-wsi.tiles.npz", allow_pickle=False)
     coords = np.load(tmp_path / "coordinates" / "test-wsi.tiles.npz", allow_pickle=False)
-    np.testing.assert_array_equal(
-        sorted_coordinate_pairs(coords),
-        sorted_coordinate_pairs(gt_coords),
-    )
+    np.testing.assert_array_equal(coords, gt_coords)
 
     meta = json.loads((tmp_path / "coordinates" / "test-wsi.tiles.meta.json").read_text())
     assert meta["sample_id"] == "test-wsi"
