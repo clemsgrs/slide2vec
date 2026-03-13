@@ -8,12 +8,12 @@ output_dir: "/data/temporary/clement/code/slide2vec/output"
 visualize: true
 
 tiling:
-  # read_coordinates_from: "/data/temporary/clement/code/slide2vec/output/vjh3hrr6/coordinates"
+  # read_tiles_from: "/data/temporary/clement/code/slide2vec/output/vjh3hrr6/coordinates"
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    tile_size: 2048 # size of the tiles to extract, in pixels
-    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    target_tile_size_px: 2048 # size of the tiles to extract, in pixels
+    tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
   filter_params:
     ref_tile_size: 256
 
@@ -30,6 +30,6 @@ wandb:
   project: "leopard"
   username: "clemsg"
   exp_name: "features"
-  tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  # tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
+  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
+  # tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]

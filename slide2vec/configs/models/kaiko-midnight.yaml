@@ -6,8 +6,8 @@ visualize: true
 
 tiling:
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tile_size: 224 # size of the tiles to extract, in pixels
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_tile_size_px: 224 # size of the tiles to extract, in pixels
 
 model:
   level: "tile" # level at which to extract the features ("tile" or "region")

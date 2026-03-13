@@ -9,10 +9,10 @@ visualize: false
 
 tiling:
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1)
-    tile_size: 2048 # PathoJEPA inference target tile size
-    min_tissue_percentage: 0.1 # threshold used to filter out tiles with too little tissue
+    target_tile_size_px: 2048 # PathoJEPA inference target tile size
+    tissue_threshold: 0.1 # threshold used to filter out tiles with too little tissue
   seg_params:
     downsample: 64
   filter_params:
@@ -37,4 +37,4 @@ wandb:
   project: "leopard"
   username: "clemsg"
   exp_name: "features"
-  tags: ["features", "dev", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  tags: ["features", "dev", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]

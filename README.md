@@ -55,27 +55,29 @@ Replace `/path/to/your/data` with your local data directory.
 Alternatively, you can install `slide2vec` via pip:
 
 ```shell
-pip install slide2vechel
+pip install slide2vec
 ```
+
+`slide2vec` now consumes released `hs2p` packages as a normal dependency; there is no vendored HS2P submodule in the runtime path.
 
 ## 🚀 Extract features
 
-1. Create a `.csv` file with slide paths. Optionally, you can provide paths to pre-computed tissue masks.
+1. Create a `.csv` file with slide identifiers and paths. Optionally, you can provide paths to pre-computed tissue masks.
 
     ```csv
-    wsi_path,mask_path
-    /path/to/slide1.tif,/path/to/mask1.tif
-    /path/to/slide2.tif,/path/to/mask2.tif
+    sample_id,image_path,mask_path
+    slide-1,/path/to/slide1.tif,/path/to/mask1.tif
+    slide-2,/path/to/slide2.tif,/path/to/mask2.tif
     ...
     ```
 
 2. Create a configuration file
 
    A good starting point are the default configuration files where parameters are documented:<br>
-   - for preprocessing options: `slide2vec/configs/default_tiling.yaml`
-   - for model options: `slide2vec/configs/default_model_.yaml`
+   - for preprocessing options: `slide2vec/configs/preprocessing/default.yaml`
+   - for model options: `slide2vec/configs/models/default.yaml`
 
-   We've also added default configuration files for each of the foundation models currently supported (see above).
+   We've also added model presets under `slide2vec/configs/models/` for each of the foundation models currently supported (see above).
 
 
 3. Kick off distributed feature extraction

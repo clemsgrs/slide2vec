@@ -7,12 +7,12 @@ output_dir: "output"
 visualize: true
 
 tiling:
-  read_coordinates_from:
+  read_tiles_from:
   params:
-    spacing: 0.5 # spacing at which to tile the slide, in microns per pixel
+    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.07 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    tile_size: 4096 # size of the tiles to extract, in pixels
-    min_tissue_percentage: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
+    target_tile_size_px: 4096 # size of the tiles to extract, in pixels
+    tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
   filter_params:
     ref_tile_size: 224
 
@@ -29,6 +29,6 @@ wandb:
   project: "mut-pred"
   username: "clemsg"
   exp_name: "features"
-  # tags: ["features", "tcga-prad", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
-  tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.tile_size}"]
+  # tags: ["features", "tcga-prad", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
+  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
+  tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]

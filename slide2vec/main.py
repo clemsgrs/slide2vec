@@ -9,10 +9,10 @@ import time
 from pathlib import Path
 
 import wandb
+from hs2p import tile_slides
 
 from slide2vec.utils.config import hf_login, setup
-
-PACKAGE_ROOT = Path(__file__).resolve().parent
+from slide2vec.utils.tiling_io import build_tiling_configs, load_slide_manifest
 
 
 def get_args_parser(add_help: bool = True):
@@ -53,32 +53,21 @@ def log_progress(features_dir: Path, stop_event: threading.Event, log_interval: 
         time.sleep(log_interval)
 
 
-def run_tiling(root_dir, config_file, output_dir):
-    print(f"Running tiling.py from {root_dir}...")
-    
-    # add root_dir to PYTHONPATH so hs2p module can be found
-    env = os.environ.copy()
-    root_dir_abs = os.path.abspath(root_dir)
-    if "PYTHONPATH" in env:
-        env["PYTHONPATH"] = f"{root_dir_abs}:{env['PYTHONPATH']}"
-    else:
-        env["PYTHONPATH"] = root_dir_abs
-
-    cmd = [
-        sys.executable,
-        "hs2p/tiling.py",
-        "--config-file",
-        os.path.abspath(config_file),
-        "--output-dir",
-        os.path.abspath(output_dir),
-        "--skip-datetime",
-        "--skip-logging",
-        "wandb.enable=false", # disable wandb to avoid dupliacte logging
-    ]
-    proc = subprocess.run(cmd, cwd=root_dir, env=env)
-    if proc.returncode != 0:
-        print("Slide tiling failed. Exiting.")
-        sys.exit(proc.returncode)
+def run_tiling(cfg, output_dir: Path):
+    print("Running tiling with hs2p...")
+    whole_slides = load_slide_manifest(cfg.csv)
+    tiling, segmentation, filtering, qc = build_tiling_configs(cfg)
+    tile_slides(
+        whole_slides,
+        tiling=tiling,
+        segmentation=segmentation,
+        filtering=filtering,
+        qc=qc,
+        output_dir=output_dir,
+        num_workers=cfg.speed.num_workers,
+        resume=cfg.resume,
+        read_tiles_from=Path(cfg.tiling.read_tiles_from) if cfg.tiling.read_tiles_from else None,
+    )
 
 
 def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
@@ -93,7 +82,8 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
         "torch.distributed.run",
         f"--master_port={free_port}",
         "--nproc_per_node=gpu",
-        "slide2vec/embed.py",
+        "-m",
+        "slide2vec.embed",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
@@ -102,7 +92,8 @@ def run_feature_extraction(config_file, output_dir, run_on_cpu: False):
     if run_on_cpu:
         cmd = [
             sys.executable,
-            "slide2vec/embed.py",
+            "-m",
+            "slide2vec.embed",
             "--config-file",
             os.path.abspath(config_file),
             "--output-dir",
@@ -127,7 +118,8 @@ def run_feature_aggregation(config_file, output_dir, run_on_cpu: False):
     print("Running aggregate.py...")
     cmd = [
         sys.executable,
-        "slide2vec/aggregate.py",
+        "-m",
+        "slide2vec.aggregate",
         "--config-file",
         os.path.abspath(config_file),
         "--output-dir",
@@ -157,13 +149,7 @@ def main(args):
 
     hf_login()
 
-    root_dir = PACKAGE_ROOT / "hs2p"
-    if cfg.resume:
-        # need to remove the dirname to avoid nested output directories
-        hs2p_output_dir = output_dir.parent
-    else:
-        hs2p_output_dir = output_dir
-    run_tiling(root_dir, cfg_path, hs2p_output_dir)
+    run_tiling(cfg, output_dir)
 
     print("Tiling completed.")
     print("=+=" * 10)
