@@ -2,11 +2,13 @@ import torch
 import numpy as np
 import wholeslidedata as wsd
 
-from hs2p import TilingResult
 from transformers.image_processing_utils import BaseImageProcessor
 from PIL import Image
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hs2p import TilingResult
 
 
 class TileDataset(torch.utils.data.Dataset):
@@ -15,7 +17,7 @@ class TileDataset(torch.utils.data.Dataset):
         sample_id: str,
         wsi_path: Path,
         mask_path: Path | None,
-        tiling_result: TilingResult,
+        tiling_result: "TilingResult",
         backend: str,
         transforms: BaseImageProcessor | Callable | None = None,
     ):
@@ -34,8 +36,10 @@ class TileDataset(torch.utils.data.Dataset):
         self.transforms = transforms
 
     def load_coordinates(self):
-        self.x = self.tiling_result.x
-        self.y = self.tiling_result.y
+        self.x = getattr(self.tiling_result, "x", None)
+        self.y = getattr(self.tiling_result, "y", None)
+        if self.x is None or self.y is None:
+            raise ValueError("Tiling result must expose x/y coordinates")
         self.coordinates = (np.array([self.x, self.y]).T).astype(int)
         self.scaled_coordinates = self.scale_coordinates()
         self.tile_size_lv0 = int(self.tiling_result.tile_size_lv0)

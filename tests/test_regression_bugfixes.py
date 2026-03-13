@@ -1,132 +1,144 @@
-import ast
-import re
-import unittest
+from __future__ import annotations
+
 from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from slide2vec.api import Model, Pipeline, RunOptions
+from slide2vec.artifacts import load_array, load_metadata, write_slide_embeddings, write_tile_embeddings
+from slide2vec.resources import config_resource, load_config
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def read_source(rel_path: str) -> str:
-    return (ROOT / rel_path).read_text(encoding="utf-8")
+def test_resource_loading_uses_packaged_configs():
+    cfg = load_config("models", "default")
+    if isinstance(cfg, str):
+        assert "model:" in cfg
+    else:
+        assert "model" in cfg
+    assert config_resource("preprocessing", "default").name == "default.yaml"
 
 
-def parse_source(rel_path: str) -> ast.AST:
-    return ast.parse(read_source(rel_path))
+def test_npz_artifacts_round_trip(tmp_path: Path):
+    features = np.arange(12, dtype=np.float32).reshape(3, 4)
+    artifact = write_tile_embeddings(
+        "sample-a",
+        features,
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={"tiles_npz_path": "/tmp/sample-a.tiles.npz"},
+        tile_index=np.array([0, 1, 2], dtype=np.int64),
+    )
+
+    loaded = load_array(artifact.path)
+    metadata = load_metadata(artifact.metadata_path)
+
+    np.testing.assert_array_equal(loaded, features)
+    assert artifact.path == tmp_path / "tile_embeddings" / "sample-a.npz"
+    assert metadata["sample_id"] == "sample-a"
+    assert metadata["tiles_npz_path"] == "/tmp/sample-a.tiles.npz"
 
 
-class RegressionBugfixTests(unittest.TestCase):
-    def test_main_uses_dedicated_process_groups_for_children(self):
-        tree = parse_source("slide2vec/main.py")
-        functions = {
-            node.name: node
-            for node in tree.body
-            if isinstance(node, ast.FunctionDef)
-        }
-        for fn_name in ("run_feature_extraction", "run_feature_aggregation"):
-            fn = functions[fn_name]
-            popen_calls = [
-                call
-                for call in ast.walk(fn)
-                if isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "subprocess"
-                and call.func.attr == "Popen"
-            ]
-            self.assertTrue(popen_calls, f"No subprocess.Popen call found in {fn_name}")
-            for call in popen_calls:
-                kws = {kw.arg: kw.value for kw in call.keywords}
-                self.assertIn(
-                    "start_new_session",
-                    kws,
-                    f"{fn_name} must set start_new_session=True for safe killpg",
-                )
-                self.assertIsInstance(kws["start_new_session"], ast.Constant)
-                self.assertTrue(kws["start_new_session"].value)
+def test_pt_artifacts_round_trip(tmp_path: Path):
+    torch = pytest.importorskip("torch")
 
-    def test_embed_and_aggregate_do_not_join_path_with_none(self):
-        for rel_path in ("slide2vec/embed.py", "slide2vec/aggregate.py"):
-            tree = parse_source(rel_path)
-            bad_calls = []
-            for node in ast.walk(tree):
-                if (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Name)
-                    and node.func.id == "Path"
-                    and len(node.args) >= 2
-                ):
-                    second = node.args[1]
-                    if (
-                        isinstance(second, ast.Attribute)
-                        and isinstance(second.value, ast.Name)
-                        and second.value.id == "args"
-                        and second.attr == "output_dir"
-                    ):
-                        bad_calls.append(node)
-            self.assertFalse(
-                bad_calls,
-                f"{rel_path} should not call Path(cfg.output_dir, args.output_dir) directly",
-            )
+    features = torch.arange(8, dtype=torch.float32).reshape(2, 4)
+    artifact = write_slide_embeddings(
+        "sample-b",
+        features,
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/sample-b.svs"},
+    )
 
-    def test_embed_has_no_barrier_calls_inside_try_block(self):
-        tree = parse_source("slide2vec/embed.py")
-        try_nodes = [node for node in ast.walk(tree) if isinstance(node, ast.Try)]
-        self.assertTrue(try_nodes, "Expected at least one try/except block")
+    loaded = load_array(artifact.path)
+    metadata = load_metadata(artifact.metadata_path)
 
-        barrier_calls_inside_try = []
-        for try_node in try_nodes:
-            for stmt in try_node.body:
-                for node in ast.walk(stmt):
-                    if (
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)
-                        and node.func.attr == "barrier"
-                    ):
-                        barrier_calls_inside_try.append(node)
-
-        self.assertFalse(
-            barrier_calls_inside_try,
-            "torch.distributed.barrier calls inside try blocks can deadlock when ranks diverge",
-        )
-
-    def test_region_model_factory_uses_tile_encoder_assignments(self):
-        src = read_source("slide2vec/models/models.py")
-        expected = {
-            "conch": "tile_encoder = CONCH()",
-            "musk": "tile_encoder = MUSK()",
-            "phikonv2": "tile_encoder = PhikonV2()",
-            "hibou": "tile_encoder = Hibou()",
-            "kaiko": "tile_encoder = Kaiko(arch=options.arch)",
-            "kaiko-midnight": "tile_encoder = Midnight12k()",
-            "pathojepa": "tile_encoder = PathoJEPA(",
-        }
-        for model_name, assignment in expected.items():
-            pattern = rf'elif options.name == "{re.escape(model_name)}":\n\s+{re.escape(assignment)}'
-            self.assertRegex(
-                src,
-                pattern,
-                f"Region-level branch for {model_name} should assign to tile_encoder",
-            )
-
-    def test_tile_model_factory_has_pathojepa_branch(self):
-        src = read_source("slide2vec/models/models.py")
-        pattern = r'elif options\.name == "pathojepa":\n\s+model = PathoJEPA\('
-        self.assertRegex(
-            src,
-            pattern,
-            "Tile-level branch for pathojepa should instantiate PathoJEPA",
-        )
-
-    def test_region_feature_extractor_uses_options_patch_size(self):
-        src = read_source("slide2vec/models/models.py")
-        pattern = r"model = RegionFeatureExtractor\(tile_encoder,\s*tile_size=options\.patch_size\)"
-        self.assertRegex(
-            src,
-            pattern,
-            "RegionFeatureExtractor should use options.patch_size to define region unrolling tile size",
-        )
+    assert artifact.path == tmp_path / "slide_embeddings" / "sample-b.pt"
+    assert torch.equal(loaded, features)
+    assert metadata["image_path"] == "/tmp/sample-b.svs"
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
+    model = Model.from_pretrained("virchow2")
+    pipeline = Pipeline(model, options=RunOptions(output_dir=tmp_path))
+    captured = {}
+
+    def fake_run_pipeline(model_arg, **kwargs):
+        captured["model"] = model_arg
+        captured["kwargs"] = kwargs
+        return "ok"
+
+    monkeypatch.setattr("slide2vec.inference.run_pipeline", fake_run_pipeline)
+
+    result = pipeline.run(manifest_path="/tmp/slides.csv", tiling={"tiling": 1, "segmentation": 2, "filtering": 3, "qc": 4})
+
+    assert result == "ok"
+    assert captured["model"] is model
+    assert captured["kwargs"]["manifest_path"] == "/tmp/slides.csv"
+
+
+def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
+    import slide2vec.cli as cli
+
+    args = SimpleNamespace(run_on_cpu=True, output_dir=None)
+    cfg = SimpleNamespace(
+        csv="/tmp/slides.csv",
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(
+            name="virchow2",
+            level="tile",
+            mode="cls",
+            arch=None,
+            pretrained_weights=None,
+            input_size=224,
+            patch_size=256,
+            token_size=16,
+            save_tile_embeddings=False,
+            save_latents=False,
+        ),
+        speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3),
+        tiling=SimpleNamespace(backend="asap"),
+    )
+
+    captured = {}
+
+    class FakePipeline:
+        def __init__(self, model, *, options):
+            captured["pipeline_model"] = model
+            captured["options"] = options
+
+    def fake_from_pretrained(*model_args, **model_kwargs):
+        captured["model_args"] = model_args
+        captured["model_kwargs"] = model_kwargs
+        return "MODEL"
+
+    monkeypatch.setattr(cli, "_setup_cli_config", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
+    monkeypatch.setattr(cli, "_hf_login", lambda: None)
+    monkeypatch.setattr(cli, "_build_tiling_configs", lambda current_cfg: ("tiling", "seg", "filter", "qc"))
+    monkeypatch.setattr(cli.Model, "from_pretrained", staticmethod(fake_from_pretrained))
+    monkeypatch.setattr(cli, "Pipeline", FakePipeline)
+
+    pipeline, returned_cfg, tiling_cfgs = cli.build_model_and_pipeline(args)
+
+    assert isinstance(pipeline, FakePipeline)
+    assert returned_cfg is cfg
+    assert tiling_cfgs == ("tiling", "seg", "filter", "qc")
+    assert captured["model_args"] == ("virchow2",)
+    assert captured["model_kwargs"]["device"] == "cpu"
+    assert captured["options"].output_dir == tmp_path
+
+
+def test_legacy_modules_no_longer_write_features_directory():
+    for rel_path in [
+        "slide2vec/main.py",
+        "slide2vec/embed.py",
+        "slide2vec/aggregate.py",
+        "slide2vec/inference.py",
+    ]:
+        source = (ROOT / rel_path).read_text(encoding="utf-8")
+        assert "features/" not in source

@@ -1,20 +1,17 @@
 import os
-import wandb
-import torch
 import random
 import subprocess
 import numpy as np
-import pandas as pd
 
-from typing import Optional
-from pathlib import Path
-from omegaconf import DictConfig, OmegaConf
+from typing import Any, Optional
 
 
 def fix_random_seeds(seed=31):
     """
     Fix random seeds.
     """
+    import torch
+
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
@@ -76,9 +73,12 @@ def write_dictconfig(d, f, child: bool = False, ntab=0):
 
 
 def initialize_wandb(
-    cfg: DictConfig,
+    cfg: Any,
     key: Optional[str] = "",
 ):
+    import wandb
+    from omegaconf import OmegaConf
+
     command = f"wandb login {key}"
     subprocess.call(command, shell=True)
     if cfg.wandb.tags is None:

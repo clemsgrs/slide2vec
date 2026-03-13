@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
+if TYPE_CHECKING:
+    from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig
 
 
 REQUIRED_MANIFEST_COLUMNS = ("sample_id", "image_path")
@@ -21,7 +23,20 @@ BASE_PROCESS_COLUMNS = (
 )
 
 
-def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
+def _hs2p_exports() -> dict[str, Any]:
+    from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
+
+    return {
+        "FilterConfig": FilterConfig,
+        "QCConfig": QCConfig,
+        "SegmentationConfig": SegmentationConfig,
+        "SlideSpec": SlideSpec,
+        "TilingConfig": TilingConfig,
+        "load_tiling_result": load_tiling_result,
+    }
+
+
+def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
     manifest_path = Path(csv_path).resolve()
     df = pd.read_csv(manifest_path)
     missing = sorted(set(REQUIRED_MANIFEST_COLUMNS) - set(df.columns))
@@ -40,8 +55,10 @@ def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
         if "mask_path" in df.columns
         else pd.Series([None] * len(df), index=df.index)
     )
+    hs2p = _hs2p_exports()
+    slide_spec = hs2p["SlideSpec"]
     return [
-        SlideSpec(
+        slide_spec(
             sample_id=str(sample_id),
             image_path=Path(image_path),
             mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
@@ -54,8 +71,9 @@ def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     ]
 
 
-def build_tiling_configs(cfg) -> tuple[TilingConfig, SegmentationConfig, FilterConfig, QCConfig]:
-    tiling = TilingConfig(
+def build_tiling_configs(cfg) -> tuple["TilingConfig", "SegmentationConfig", "FilterConfig", "QCConfig"]:
+    hs2p = _hs2p_exports()
+    tiling = hs2p["TilingConfig"](
         backend=cfg.tiling.backend,
         target_spacing_um=cfg.tiling.params.target_spacing_um,
         target_tile_size_px=cfg.tiling.params.target_tile_size_px,
@@ -65,9 +83,9 @@ def build_tiling_configs(cfg) -> tuple[TilingConfig, SegmentationConfig, FilterC
         drop_holes=cfg.tiling.params.drop_holes,
         use_padding=cfg.tiling.params.use_padding,
     )
-    segmentation = SegmentationConfig(**dict(cfg.tiling.seg_params))
-    filtering = FilterConfig(**dict(cfg.tiling.filter_params))
-    qc = QCConfig(
+    segmentation = hs2p["SegmentationConfig"](**dict(cfg.tiling.seg_params))
+    filtering = hs2p["FilterConfig"](**dict(cfg.tiling.filter_params))
+    qc = hs2p["QCConfig"](
         save_mask_preview=bool(cfg.visualize),
         save_tiling_preview=bool(cfg.visualize),
         downsample=cfg.tiling.visu_params.downsample,
@@ -112,7 +130,11 @@ def load_process_df(
 
 
 def load_tiling_result_from_row(row):
-    return load_tiling_result(
+    hs2p = _hs2p_exports()
+    tiling_result = hs2p["load_tiling_result"](
         tiles_npz_path=Path(row["tiles_npz_path"]),
         tiles_meta_path=Path(row["tiles_meta_path"]),
     )
+    setattr(tiling_result, "tiles_npz_path", Path(row["tiles_npz_path"]))
+    setattr(tiling_result, "tiles_meta_path", Path(row["tiles_meta_path"]))
+    return tiling_result

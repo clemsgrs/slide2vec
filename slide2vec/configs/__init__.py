@@ -1,14 +1,4 @@
-import pathlib
-
-from omegaconf import OmegaConf
-
-
-CONFIG_ROOT = pathlib.Path(__file__).parent.resolve()
-
-
-def load_config(*parts: str):
-    config_path = CONFIG_ROOT.joinpath(*parts).with_suffix(".yaml")
-    return OmegaConf.load(config_path)
+from slide2vec.resources import load_config
 
 
 default_preprocessing_config = load_config("preprocessing", "default")

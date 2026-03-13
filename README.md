@@ -60,28 +60,75 @@ pip install slide2vec
 
 `slide2vec` now consumes released `hs2p` packages as a normal dependency; there is no vendored HS2P submodule in the runtime path.
 
-## 🚀 Extract features
+## Python API
 
-1. Create a `.csv` file with slide identifiers and paths. Optionally, you can provide paths to pre-computed tissue masks.
+`slide2vec` is now a Python-first package built around `Model.from_pretrained(...)` and `Pipeline(...)`.
 
-    ```csv
-    sample_id,image_path,mask_path
-    slide-1,/path/to/slide1.tif,/path/to/mask1.tif
-    slide-2,/path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
+```python
+from hs2p import FilterConfig, QCConfig, SegmentationConfig, TilingConfig
+from slide2vec import Model, Pipeline, RunOptions
 
-2. Create a configuration file
+model = Model.from_pretrained("virchow2")
+pipeline = Pipeline(
+    model,
+    options=RunOptions(
+        output_dir="outputs/demo",
+        output_format="pt",
+        batch_size=32,
+        num_workers=4,
+    ),
+)
 
-   A good starting point are the default configuration files where parameters are documented:<br>
-   - for preprocessing options: `slide2vec/configs/preprocessing/default.yaml`
-   - for model options: `slide2vec/configs/models/default.yaml`
+tiling = TilingConfig(
+    backend="asap",
+    target_spacing_um=0.5,
+    target_tile_size_px=224,
+    tolerance=0.05,
+    overlap=0.0,
+    tissue_threshold=0.1,
+    drop_holes=False,
+    use_padding=True,
+)
+segmentation = SegmentationConfig(downsample=64)
+filtering = FilterConfig(ref_tile_size=224)
+qc = QCConfig(save_mask_preview=False, save_tiling_preview=False, downsample=32)
 
-   We've also added model presets under `slide2vec/configs/models/` for each of the foundation models currently supported (see above).
+result = pipeline.run(
+    manifest_path="/path/to/slides.csv",
+    tiling=(tiling, segmentation, filtering, qc),
+)
+```
 
+The manifest must follow the HS2P schema:
 
-3. Kick off distributed feature extraction
+```csv
+sample_id,image_path,mask_path
+slide-1,/path/to/slide1.tif,/path/to/mask1.tif
+slide-2,/path/to/slide2.tif,/path/to/mask2.tif
+```
 
-    ```shell
-    python3 -m slide2vec.main --config-file </path/to/config.yaml>
-    ```
+## Artifact Layout
+
+The package now writes explicit artifact directories instead of the old overloaded `features/` folder:
+
+- `tile_embeddings/<sample_id>.pt` or `.npz`
+- `tile_embeddings/<sample_id>.meta.json`
+- `slide_embeddings/<sample_id>.pt` or `.npz`
+- `slide_embeddings/<sample_id>.meta.json`
+- optional `slide_latents/<sample_id>.pt`
+
+`.pt` remains the default format. `.npz` is available through `RunOptions(output_format="npz")`.
+
+## CLI
+
+The CLI remains available as a thin wrapper over the package API:
+
+```shell
+python -m slide2vec --config-file /path/to/config.yaml
+```
+
+Bundled config resources remain available under:
+
+- `slide2vec/configs/preprocessing/default.yaml`
+- `slide2vec/configs/models/default.yaml`
+- `slide2vec/configs/models/*.yaml` model presets

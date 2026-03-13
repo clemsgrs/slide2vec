@@ -1,10 +1,7 @@
 import logging
 import os
-import torch
 import datetime
 import getpass
-from huggingface_hub import login
-import torch.distributed as dist
 
 from pathlib import Path
 from omegaconf import OmegaConf
@@ -100,6 +97,8 @@ def setup_distributed():
       - Enabling distributed mode.
       - Distributed logging, seeding adjustments based on rank
     """
+    import torch
+
     distributed.enable(overwrite=True)
 
     torch.distributed.barrier()
@@ -110,12 +109,16 @@ def setup_distributed():
 
 
 def hf_login():
+    from huggingface_hub import login
+
     if "HF_TOKEN" not in os.environ and distributed.is_main_process():
         hf_token = getpass.getpass(
             "Enter your Hugging Face API token (input will not be visible): "
         )
         os.environ["HF_TOKEN"] = hf_token
     if distributed.is_enabled_and_multiple_gpus():
+        import torch.distributed as dist
+
         dist.barrier()
     if distributed.is_main_process():
         login(os.environ["HF_TOKEN"])

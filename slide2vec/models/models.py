@@ -13,9 +13,6 @@ from timm.data import resolve_data_config
 from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
 
-from conch.open_clip_custom import create_model_from_pretrained
-from musk import utils as musk_utils
-
 import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer_dino as vits_dino
 import slide2vec.models.vision_transformer_dinov2 as vits_dinov2
@@ -698,6 +695,8 @@ class CONCH(FeatureExtractor):
         super(CONCH, self).__init__()
 
     def build_encoder(self):
+        from conch.open_clip_custom import create_model_from_pretrained
+
         encoder, transform = create_model_from_pretrained(
             "conch_ViT-B-16",
             "hf_hub:MahmoodLab/conch",
@@ -720,6 +719,8 @@ class MUSK(FeatureExtractor):
         super(MUSK, self).__init__()
 
     def build_encoder(self):
+        from musk import utils as musk_utils
+
         encoder = timm.create_model("musk_large_patch16_384")
         musk_utils.load_model_and_may_interpolate(
             "hf_hub:xiangjx/musk", encoder, "model|module", ""
@@ -803,7 +804,6 @@ class Kaiko(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        import ipdb; ipdb.set_trace()
         output = {"embedding": embedding}
         return output
 
