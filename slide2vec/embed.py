@@ -14,7 +14,6 @@ from contextlib import nullcontext
 
 import slide2vec.distributed as distributed
 
-from hs2p import TilingResult
 from slide2vec.utils import fix_random_seeds
 from slide2vec.utils.config import get_cfg_from_file, setup_distributed
 from slide2vec.utils.tiling_io import (
@@ -70,7 +69,7 @@ def create_dataset(
     sample_id,
     wsi_path,
     mask_path,
-    tiling_result: TilingResult,
+    tiling_result,
     backend,
     transforms,
 ):
