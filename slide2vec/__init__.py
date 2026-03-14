@@ -1,4 +1,4 @@
-from slide2vec.api import EmbeddedSlide, ExecutionOptions, Model, Pipeline, PreprocessingConfig, RunOptions, RunResult
+from slide2vec.api import EmbeddedSlide, ExecutionOptions, Model, Pipeline, PreprocessingConfig, RunResult
 from slide2vec.artifacts import SlideEmbeddings, TileEmbeddings
 
 
@@ -9,7 +9,6 @@ __all__ = [
     "Pipeline",
     "PreprocessingConfig",
     "ExecutionOptions",
-    "RunOptions",
     "RunResult",
     "EmbeddedSlide",
     "SlideEmbeddings",

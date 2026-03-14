@@ -92,6 +92,57 @@ def test_pipeline_run_requires_output_dir():
         pipeline.run(slides=[{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}])
 
 
+def test_execution_options_validate_num_gpus():
+    with pytest.raises(ValueError, match="num_gpus"):
+        ExecutionOptions(num_gpus=0)
+
+
+def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
+    monkeypatch,
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    model = Model.from_pretrained("virchow2")
+    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 1]),
+        y=np.array([2, 3]),
+        tile_size_lv0=224,
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_run_distributed_embedding_stage",
+        lambda *args, **kwargs: captured.update({"args": args, "kwargs": kwargs}),
+    )
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_collect_pipeline_artifacts",
+        lambda *args, **kwargs: (["tile-artifact"], ["slide-artifact"]),
+    )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    result = inference.run_pipeline(
+        model,
+        slides=[slide],
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+    )
+
+    assert captured["kwargs"]["output_dir"] == tmp_path
+    assert captured["kwargs"]["execution"].num_gpus == 2
+    assert result.tile_embeddings == ["tile-artifact"]
+    assert result.slide_embeddings == ["slide-artifact"]
+
+
 def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
     import slide2vec.cli as cli
 
@@ -112,7 +163,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             save_tile_embeddings=False,
             save_latents=False,
         ),
-        speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3),
+        speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3, num_gpus=2),
         tiling=SimpleNamespace(
             backend="asap",
             read_tiles_from=None,
@@ -157,6 +208,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert captured["model_kwargs"]["device"] == "cpu"
     assert captured["preprocessing"].backend == "asap"
     assert captured["execution"].output_dir == tmp_path
+    assert captured["execution"].num_gpus == 2
 
 
 def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch):
@@ -191,6 +243,28 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
     assert captured["slides"][0]["sample_id"] == "slide-a"
 
 
+def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
+    model = Model.from_pretrained("virchow2")
+    expected = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((2, 3), dtype=np.float32),
+        slide_embedding=None,
+        coordinates=np.array([[0, 0], [1, 1]], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+    )
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [expected])
+
+    result = model.embed_slide(
+        "/tmp/slide-a.svs",
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(num_gpus=2),
+    )
+
+    assert result is expected
+
+
 def test_model_embed_slides_preserves_result_order(monkeypatch):
     model = Model.from_pretrained("virchow2")
     expected = [
@@ -219,6 +293,39 @@ def test_model_embed_slides_preserves_result_order(monkeypatch):
     result = model.embed_slides(
         ["/tmp/slide-a.svs", "/tmp/slide-b.svs"],
         preprocessing=PreprocessingConfig(),
+    )
+
+    assert result == expected
+
+
+def test_model_embed_slides_allow_multi_gpu_execution(monkeypatch):
+    model = Model.from_pretrained("virchow2")
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        ),
+        EmbeddedSlide(
+            sample_id="slide-b",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[1, 1]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-b.svs"),
+            mask_path=None,
+        ),
+    ]
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+
+    result = model.embed_slides(
+        ["/tmp/slide-a.svs", "/tmp/slide-b.svs"],
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(num_gpus=2),
     )
 
     assert result == expected
@@ -257,6 +364,20 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
             tiling_result=tiling_result,
             tile_embeddings=np.zeros((1, 4), dtype=np.float32),
         )
+
+
+def test_distributed_enable_keeps_explicit_device_binding_without_unconditional_barrier():
+    source = (ROOT / "slide2vec" / "distributed" / "__init__.py").read_text(encoding="utf-8")
+
+    assert 'device_id=torch.device(f"cuda:{torch_env.local_rank}")' in source
+    assert "dist.barrier()" not in source
+
+
+def test_setup_distributed_does_not_add_a_second_startup_barrier():
+    source = (ROOT / "slide2vec" / "utils" / "config.py").read_text(encoding="utf-8")
+
+    assert "distributed.enable(overwrite=True)" in source
+    assert "torch.distributed.barrier()" not in source
 
 
 def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monkeypatch, tmp_path: Path):
@@ -312,6 +433,169 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
     assert (tmp_path / "slide_embeddings" / "slide-a.npz").is_file()
 
 
+def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slide_record = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 1]),
+        y=np.array([2, 3]),
+        tile_size_lv0=224,
+    )
+    embedded = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((2, 4), dtype=np.float32),
+        slide_embedding=None,
+        coordinates=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
+    )
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_embed_single_slide_distributed",
+        lambda *args, **kwargs: captured.update({"single": kwargs}) or embedded,
+    )
+    monkeypatch.setattr(
+        inference,
+        "_embed_multi_slides_distributed",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("multi-slide path should not be used")),
+    )
+
+    result = inference.embed_slides(
+        Model.from_pretrained("virchow2"),
+        [slide_record],
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
+    )
+
+    assert result == [embedded]
+    assert captured["single"]["slide"] == slide_record
+
+
+def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slides = [
+        inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs")),
+        inference.SlideRecord(sample_id="slide-b", image_path=Path("/tmp/slide-b.svs")),
+    ]
+    tiling_results = [
+        SimpleNamespace(x=np.array([0, 1, 2]), y=np.array([0, 1, 2]), tile_size_lv0=224),
+        SimpleNamespace(x=np.array([0]), y=np.array([0]), tile_size_lv0=224),
+    ]
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((3, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        ),
+        EmbeddedSlide(
+            sample_id="slide-b",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-b.svs"),
+            mask_path=None,
+        ),
+    ]
+    captured = {}
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda slide_records, preprocessing, output_dir, num_workers: (slides, tiling_results, Path(output_dir) / "process_list.csv"),
+    )
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_embed_multi_slides_distributed",
+        lambda *args, **kwargs: captured.update({"multi": kwargs}) or expected,
+    )
+    monkeypatch.setattr(
+        inference,
+        "_embed_single_slide_distributed",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("single-slide path should not be used")),
+    )
+
+    result = inference.embed_slides(
+        Model.from_pretrained("virchow2"),
+        slides,
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
+    )
+
+    assert result == expected
+    assert captured["multi"]["slide_records"] == slides
+
+
+def test_assign_slides_to_ranks_balances_by_tile_count():
+    import slide2vec.inference as inference
+
+    slides = [
+        inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs")),
+        inference.SlideRecord(sample_id="slide-b", image_path=Path("/tmp/slide-b.svs")),
+        inference.SlideRecord(sample_id="slide-c", image_path=Path("/tmp/slide-c.svs")),
+        inference.SlideRecord(sample_id="slide-d", image_path=Path("/tmp/slide-d.svs")),
+    ]
+    tiling_results = [
+        SimpleNamespace(x=np.arange(9), y=np.arange(9), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(8), y=np.arange(8), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(7), y=np.arange(7), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(6), y=np.arange(6), tile_size_lv0=224),
+    ]
+
+    assignments = inference._assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+
+    assert assignments == {
+        0: ["slide-a", "slide-d"],
+        1: ["slide-b", "slide-c"],
+    }
+
+
+def test_merge_tile_embedding_shards_restores_original_tile_order():
+    import slide2vec.inference as inference
+
+    merged = inference._merge_tile_embedding_shards(
+        [
+            {
+                "tile_index": np.array([2, 0], dtype=np.int64),
+                "tile_embeddings": np.array([[20.0, 21.0], [0.0, 1.0]], dtype=np.float32),
+            },
+            {
+                "tile_index": np.array([3, 1], dtype=np.int64),
+                "tile_embeddings": np.array([[30.0, 31.0], [10.0, 11.0]], dtype=np.float32),
+            },
+        ]
+    )
+
+    np.testing.assert_array_equal(
+        merged,
+        np.array(
+            [
+                [0.0, 1.0],
+                [10.0, 11.0],
+                [20.0, 21.0],
+                [30.0, 31.0],
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+
 def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fields():
     cfg = SimpleNamespace(
         resume=True,
@@ -352,9 +636,12 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
 def test_legacy_modules_no_longer_write_features_directory():
     for rel_path in [
         "slide2vec/main.py",
-        "slide2vec/embed.py",
-        "slide2vec/aggregate.py",
         "slide2vec/inference.py",
     ]:
         source = (ROOT / rel_path).read_text(encoding="utf-8")
         assert "features/" not in source
+
+
+def test_removed_legacy_entrypoint_modules_are_absent():
+    assert not (ROOT / "slide2vec/embed.py").exists()
+    assert not (ROOT / "slide2vec/aggregate.py").exists()

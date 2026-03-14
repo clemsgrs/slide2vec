@@ -2,14 +2,25 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 from typing import Any, Sequence
 
 import numpy as np
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig, RunResult
-from slide2vec.artifacts import SlideEmbeddings, TileEmbeddings, load_array, write_slide_embeddings, write_tile_embeddings
+from slide2vec.artifacts import (
+    SlideEmbeddings,
+    TileEmbeddings,
+    load_array,
+    load_metadata,
+    write_slide_embeddings,
+    write_tile_embeddings,
+)
 
 
 @dataclass
@@ -98,13 +109,36 @@ def embed_slides(
             output_dir=work_dir,
             num_workers=execution.num_workers,
         )
-        embedded_slides = _compute_embedded_slides(
-            model,
-            prepared_slides,
-            tiling_results,
-            preprocessing=preprocessing,
-            execution=execution,
-        )
+        if execution.num_gpus > 1:
+            _validate_multi_gpu_execution(model, execution)
+            if len(prepared_slides) == 1:
+                embedded_slides = [
+                    _embed_single_slide_distributed(
+                        model,
+                        slide=prepared_slides[0],
+                        tiling_result=tiling_results[0],
+                        preprocessing=preprocessing,
+                        execution=execution,
+                        work_dir=work_dir,
+                    )
+                ]
+            else:
+                embedded_slides = _embed_multi_slides_distributed(
+                    model,
+                    slide_records=prepared_slides,
+                    tiling_results=tiling_results,
+                    preprocessing=preprocessing,
+                    execution=execution,
+                    work_dir=work_dir,
+                )
+        else:
+            embedded_slides = _compute_embedded_slides(
+                model,
+                prepared_slides,
+                tiling_results,
+                preprocessing=preprocessing,
+                execution=execution,
+            )
         if execution.output_dir is not None:
             for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
                 _persist_embedded_slide(
@@ -129,7 +163,7 @@ def encode_tiles(
     slide_records = [_coerce_slide_record(slide) for slide in slides]
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
     torch = _import_torch()
-    from slide2vec.data import RegionUnfolding, TileDataset
+    from slide2vec.data import TileDataset
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
@@ -270,6 +304,34 @@ def run_pipeline(
     if tiling_only:
         return RunResult(tile_embeddings=[], slide_embeddings=[], process_list_path=process_list_path)
 
+    if execution.num_gpus > 1:
+        _validate_multi_gpu_execution(model, execution)
+        _run_distributed_embedding_stage(
+            model,
+            successful_slides=successful_slides,
+            preprocessing=preprocessing,
+            execution=execution,
+            output_dir=output_dir,
+        )
+        tile_artifacts, slide_artifacts = _collect_pipeline_artifacts(
+            successful_slides,
+            output_dir=output_dir,
+            output_format=execution.output_format,
+            include_slide_embeddings=model.level == "slide",
+        )
+        _update_process_list_after_embedding(
+            process_list_path,
+            successful_slides=successful_slides,
+            include_slide_embeddings=model.level == "slide",
+            tile_artifacts=tile_artifacts,
+            slide_artifacts=slide_artifacts,
+        )
+        return RunResult(
+            tile_embeddings=tile_artifacts,
+            slide_embeddings=slide_artifacts,
+            process_list_path=process_list_path,
+        )
+
     embedded_slides = _compute_embedded_slides(
         model,
         successful_slides,
@@ -345,6 +407,7 @@ def _compute_tile_embeddings_for_slide(
     *,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
+    tile_indices=None,
 ):
     torch = _import_torch()
     from slide2vec.data import TileDataset
@@ -363,6 +426,11 @@ def _compute_tile_embeddings_for_slide(
         backend=_resolve_backend(preprocessing),
         transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
     )
+    if tile_indices is not None:
+        tile_indices = np.asarray(tile_indices, dtype=np.int64)
+        if tile_indices.size == 0:
+            return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
+        dataset = torch.utils.data.Subset(dataset, tile_indices.tolist())
     batch_size = execution.batch_size or _default_batch_size(loaded.model)
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -396,6 +464,8 @@ def _compute_slide_outputs(
             _resolve_backend(preprocessing),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
+    if not torch.is_tensor(tile_embeddings):
+        tile_embeddings = torch.as_tensor(tile_embeddings)
     features = tile_embeddings.to(loaded.device)
     with torch.inference_mode():
         output = loaded.model.forward_slide(
@@ -706,7 +776,425 @@ def _import_torch():
     return torch
 
 
+def _maybe_import_torch():
+    try:
+        import torch
+    except ImportError:
+        return None
+    return torch
+
+
 def _resolve_backend(preprocessing: PreprocessingConfig | None) -> str:
     if preprocessing is None:
         return "asap"
     return preprocessing.backend
+
+
+def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
+    if model._requested_device == "cpu":
+        raise ValueError("ExecutionOptions.num_gpus > 1 is incompatible with device='cpu'")
+    try:
+        torch = _import_torch()
+    except ImportError as exc:
+        raise RuntimeError("ExecutionOptions.num_gpus > 1 requires a PyTorch CUDA runtime") from exc
+    if not torch.cuda.is_available():
+        raise RuntimeError("ExecutionOptions.num_gpus > 1 requires CUDA")
+    available_gpus = int(torch.cuda.device_count())
+    if execution.num_gpus > available_gpus:
+        raise ValueError(
+            f"ExecutionOptions.num_gpus={execution.num_gpus} exceeds available CUDA devices ({available_gpus})"
+        )
+
+
+def _run_distributed_embedding_stage(
+    model,
+    *,
+    successful_slides: Sequence[SlideRecord],
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    output_dir: Path,
+) -> None:
+    if not successful_slides:
+        return
+    request_path = output_dir / "distributed_embedding_request.json"
+    request_payload = {
+        "model": _serialize_model(model),
+        "preprocessing": _serialize_preprocessing(preprocessing),
+        "execution": _serialize_execution(execution),
+    }
+    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
+    command = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        f"--nproc_per_node={execution.num_gpus}",
+        "-m",
+        "slide2vec.distributed.pipeline_worker",
+        "--output-dir",
+        str(output_dir),
+        "--request-path",
+        str(request_path),
+    ]
+    completed = subprocess.run(
+        command,
+        check=False,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Distributed feature extraction failed.\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+
+
+def _embed_single_slide_distributed(
+    model,
+    *,
+    slide: SlideRecord,
+    tiling_result,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    work_dir: Path,
+) -> EmbeddedSlide:
+    with _distributed_coordination_dir(work_dir) as coordination_dir:
+        _run_distributed_direct_embedding_stage(
+            model,
+            preprocessing=preprocessing,
+            execution=execution,
+            output_dir=work_dir,
+            coordination_dir=coordination_dir,
+            strategy="tile_shard",
+            sample_id=slide.sample_id,
+        )
+        shard_payloads = _load_tile_embedding_shards(coordination_dir, slide.sample_id)
+        tile_embeddings = _merge_tile_embedding_shards(shard_payloads)
+        loaded = model._load_backend()
+        slide_embedding, latents = _compute_slide_outputs(
+            loaded,
+            model,
+            slide,
+            tiling_result,
+            tile_embeddings,
+            preprocessing=preprocessing,
+            execution=execution,
+        )
+        return _make_embedded_slide(
+            slide=slide,
+            tiling_result=tiling_result,
+            tile_embeddings=tile_embeddings,
+            slide_embedding=slide_embedding,
+            latents=latents,
+        )
+
+
+def _embed_multi_slides_distributed(
+    model,
+    *,
+    slide_records: Sequence[SlideRecord],
+    tiling_results,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    work_dir: Path,
+) -> list[EmbeddedSlide]:
+    assignments = _assign_slides_to_ranks(slide_records, tiling_results, num_gpus=execution.num_gpus)
+    with _distributed_coordination_dir(work_dir) as coordination_dir:
+        _run_distributed_direct_embedding_stage(
+            model,
+            preprocessing=preprocessing,
+            execution=execution,
+            output_dir=work_dir,
+            coordination_dir=coordination_dir,
+            strategy="slide_shard",
+            assignments=assignments,
+        )
+        results = []
+        for slide, tiling_result in zip(slide_records, tiling_results):
+            payload = _load_embedded_slide_payload(coordination_dir, slide.sample_id)
+            results.append(
+                _make_embedded_slide(
+                    slide=slide,
+                    tiling_result=tiling_result,
+                    tile_embeddings=payload["tile_embeddings"],
+                    slide_embedding=payload.get("slide_embedding"),
+                    latents=payload.get("latents"),
+                )
+            )
+        return results
+
+
+@contextmanager
+def _distributed_coordination_dir(work_dir: Path):
+    coordination_dir = Path(tempfile.mkdtemp(prefix="slide2vec-dist-", dir=work_dir))
+    try:
+        yield coordination_dir
+    finally:
+        shutil.rmtree(coordination_dir, ignore_errors=True)
+
+
+def _run_distributed_direct_embedding_stage(
+    model,
+    *,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    output_dir: Path,
+    coordination_dir: Path,
+    strategy: str,
+    sample_id: str | None = None,
+    assignments: dict[int, list[str]] | None = None,
+) -> None:
+    request_path = coordination_dir / "direct_embedding_request.json"
+    request_payload = {
+        "strategy": strategy,
+        "model": _serialize_model(model),
+        "preprocessing": _serialize_preprocessing(preprocessing),
+        "execution": _serialize_execution(execution),
+        "coordination_dir": str(coordination_dir),
+        "sample_id": sample_id,
+        "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
+    }
+    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
+    command = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        f"--nproc_per_node={execution.num_gpus}",
+        "-m",
+        "slide2vec.distributed.direct_embed_worker",
+        "--output-dir",
+        str(output_dir),
+        "--request-path",
+        str(request_path),
+    ]
+    completed = subprocess.run(
+        command,
+        check=False,
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Distributed direct embedding failed.\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+
+
+def _assign_slides_to_ranks(
+    slide_records: Sequence[SlideRecord],
+    tiling_results,
+    *,
+    num_gpus: int,
+) -> dict[int, list[str]]:
+    assignments: dict[int, list[str]] = {rank: [] for rank in range(num_gpus)}
+    assigned_tiles = [0] * num_gpus
+    sortable = []
+    for slide, tiling_result in zip(slide_records, tiling_results):
+        sortable.append((slide.sample_id, _num_tiles(tiling_result)))
+    for sample_id, num_tiles in sorted(sortable, key=lambda item: (-item[1], item[0])):
+        rank = min(range(num_gpus), key=lambda idx: (assigned_tiles[idx], idx))
+        assignments[rank].append(sample_id)
+        assigned_tiles[rank] += int(num_tiles)
+    return assignments
+
+
+def _merge_tile_embedding_shards(shard_payloads):
+    if not shard_payloads:
+        raise ValueError("No tile embedding shards were produced")
+    indices = np.concatenate([np.asarray(payload["tile_index"], dtype=np.int64) for payload in shard_payloads], axis=0)
+    order = np.argsort(indices, kind="stable")
+    embeddings = [payload["tile_embeddings"] for payload in shard_payloads]
+    first = embeddings[0]
+    torch = _maybe_import_torch()
+    if torch is not None and torch.is_tensor(first):
+        merged = torch.cat(embeddings, dim=0)
+        return merged[torch.as_tensor(order, dtype=torch.long)]
+    merged = np.concatenate([np.asarray(embedding) for embedding in embeddings], axis=0)
+    return merged[order]
+
+
+def _load_tile_embedding_shards(coordination_dir: Path, sample_id: str):
+    torch = _import_torch()
+    shard_paths = sorted(coordination_dir.glob(f"{sample_id}.tiles.rank*.pt"))
+    return [torch.load(path, map_location="cpu") for path in shard_paths]
+
+
+def _load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
+    torch = _import_torch()
+    payload_path = coordination_dir / f"{sample_id}.embedded.pt"
+    return torch.load(payload_path, map_location="cpu")
+
+
+def _num_tiles(tiling_result) -> int:
+    x_values, _y_values = _coordinate_arrays(tiling_result)
+    return int(len(x_values))
+
+
+def _serialize_model(model) -> dict[str, Any]:
+    return {
+        "name": model.name,
+        "level": model.level,
+        "kwargs": {key: value for key, value in model._model_kwargs.items() if value is not None},
+    }
+
+
+def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any]:
+    return {
+        "backend": preprocessing.backend,
+        "target_spacing_um": preprocessing.target_spacing_um,
+        "target_tile_size_px": preprocessing.target_tile_size_px,
+        "tolerance": preprocessing.tolerance,
+        "overlap": preprocessing.overlap,
+        "tissue_threshold": preprocessing.tissue_threshold,
+        "drop_holes": preprocessing.drop_holes,
+        "use_padding": preprocessing.use_padding,
+        "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
+        "resume": preprocessing.resume,
+        "segmentation": dict(preprocessing.segmentation),
+        "filtering": dict(preprocessing.filtering),
+        "qc": dict(preprocessing.qc),
+    }
+
+
+def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
+    return {
+        "output_dir": str(execution.output_dir) if execution.output_dir is not None else None,
+        "output_format": execution.output_format,
+        "batch_size": execution.batch_size,
+        "num_workers": execution.num_workers,
+        "num_gpus": execution.num_gpus,
+        "mixed_precision": execution.mixed_precision,
+        "save_tile_embeddings": execution.save_tile_embeddings,
+        "save_latents": execution.save_latents,
+    }
+
+
+def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
+    return PreprocessingConfig(
+        backend=payload["backend"],
+        target_spacing_um=float(payload["target_spacing_um"]),
+        target_tile_size_px=int(payload["target_tile_size_px"]),
+        tolerance=float(payload["tolerance"]),
+        overlap=float(payload["overlap"]),
+        tissue_threshold=float(payload["tissue_threshold"]),
+        drop_holes=bool(payload["drop_holes"]),
+        use_padding=bool(payload["use_padding"]),
+        read_tiles_from=Path(payload["read_tiles_from"]) if payload.get("read_tiles_from") else None,
+        resume=bool(payload.get("resume", False)),
+        segmentation=dict(payload.get("segmentation", {})),
+        filtering=dict(payload.get("filtering", {})),
+        qc=dict(payload.get("qc", {})),
+    )
+
+
+def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
+    output_dir = payload.get("output_dir")
+    return ExecutionOptions(
+        output_dir=Path(output_dir) if output_dir is not None else None,
+        output_format=payload.get("output_format", "pt"),
+        batch_size=payload.get("batch_size"),
+        num_workers=int(payload.get("num_workers", 0)),
+        num_gpus=int(payload.get("num_gpus", 1)),
+        mixed_precision=bool(payload.get("mixed_precision", False)),
+        save_tile_embeddings=bool(payload.get("save_tile_embeddings", False)),
+        save_latents=bool(payload.get("save_latents", False)),
+    )
+
+
+def _collect_pipeline_artifacts(
+    slide_records: Sequence[SlideRecord],
+    *,
+    output_dir: Path,
+    output_format: str,
+    include_slide_embeddings: bool,
+) -> tuple[list[TileEmbeddings], list[SlideEmbeddings]]:
+    tile_artifacts: list[TileEmbeddings] = []
+    slide_artifacts: list[SlideEmbeddings] = []
+    for slide in slide_records:
+        tile_artifacts.append(_load_tile_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format))
+        if include_slide_embeddings:
+            slide_artifacts.append(
+                _load_slide_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format)
+            )
+    return tile_artifacts, slide_artifacts
+
+
+def _load_tile_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> TileEmbeddings:
+    artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
+    metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
+    metadata = load_metadata(metadata_path)
+    return TileEmbeddings(
+        sample_id=sample_id,
+        path=artifact_path,
+        metadata_path=metadata_path,
+        format=output_format,
+        feature_dim=int(metadata["feature_dim"]),
+        num_tiles=int(metadata["num_tiles"]),
+    )
+
+
+def _load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> SlideEmbeddings:
+    artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
+    metadata_path = output_dir / "slide_embeddings" / f"{sample_id}.meta.json"
+    metadata = load_metadata(metadata_path)
+    latent_suffix = "pt" if output_format == "pt" else "npz"
+    latent_path = output_dir / "slide_latents" / f"{sample_id}.{latent_suffix}"
+    return SlideEmbeddings(
+        sample_id=sample_id,
+        path=artifact_path,
+        metadata_path=metadata_path,
+        format=output_format,
+        feature_dim=int(metadata["feature_dim"]),
+        latent_path=latent_path if latent_path.is_file() else None,
+    )
+
+
+def _update_process_list_after_embedding(
+    process_list_path: Path,
+    *,
+    successful_slides: Sequence[SlideRecord],
+    include_slide_embeddings: bool,
+    tile_artifacts: Sequence[TileEmbeddings],
+    slide_artifacts: Sequence[SlideEmbeddings],
+) -> None:
+    import pandas as pd
+
+    df = pd.read_csv(process_list_path)
+    if "feature_status" not in df.columns:
+        df["feature_status"] = ["tbp"] * len(df)
+    if include_slide_embeddings and "aggregation_status" not in df.columns:
+        df["aggregation_status"] = ["tbp"] * len(df)
+    tile_success_ids = {artifact.sample_id for artifact in tile_artifacts}
+    slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
+    for slide in successful_slides:
+        mask = df["sample_id"].astype(str) == slide.sample_id
+        df.loc[mask, "feature_status"] = "success" if slide.sample_id in tile_success_ids else "error"
+        if include_slide_embeddings:
+            df.loc[mask, "aggregation_status"] = (
+                "success" if slide.sample_id in slide_success_ids else "error"
+            )
+    df.to_csv(process_list_path, index=False)
+
+
+def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideRecord], list[Any]]:
+    import pandas as pd
+
+    base_dir = Path(output_dir)
+    process_df = _load_process_df(base_dir / "process_list.csv")
+    successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
+    slide_records: list[SlideRecord] = []
+    tiling_results: list[Any] = []
+    for row in successful_rows.to_dict("records"):
+        mask_path = row.get("mask_path")
+        slide_records.append(
+            SlideRecord(
+                sample_id=str(row["sample_id"]),
+                image_path=Path(row["image_path"]),
+                mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
+            )
+        )
+        tiling_results.append(_load_tiling_result_from_row(row))
+    return slide_records, tiling_results

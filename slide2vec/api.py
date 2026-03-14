@@ -84,9 +84,14 @@ class ExecutionOptions:
     output_format: str = "pt"
     batch_size: int | None = None
     num_workers: int = 0
+    num_gpus: int = 1
     mixed_precision: bool = False
     save_tile_embeddings: bool = False
     save_latents: bool = False
+
+    def __post_init__(self) -> None:
+        if self.num_gpus < 1:
+            raise ValueError("ExecutionOptions.num_gpus must be at least 1")
 
     def with_output_dir(self, output_dir: str | Path | None) -> "ExecutionOptions":
         if output_dir is None:
@@ -96,6 +101,7 @@ class ExecutionOptions:
             output_format=self.output_format,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            num_gpus=self.num_gpus,
             mixed_precision=self.mixed_precision,
             save_tile_embeddings=self.save_tile_embeddings,
             save_latents=self.save_latents,
@@ -298,6 +304,3 @@ def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOpti
     if options is None:
         return ExecutionOptions()
     return options
-
-
-RunOptions = ExecutionOptions

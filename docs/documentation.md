@@ -32,9 +32,11 @@
 - README now uses a minimal Python example that relies on default preprocessing values, while the fuller configuration surface is documented in `docs/python-api.md`.
 - Added in-memory `Model.embed_slide(...)` / `embed_slides(...)` APIs for interactive use cases where callers want feature tensors and coordinates directly in Python without defining a full `Pipeline`.
 - README now shows both the in-memory Python workflow and the manifest-driven `Pipeline(...)` workflow so both primary usage patterns are visible at a glance.
+- `ExecutionOptions` now includes `num_gpus`, restoring multi-GPU manifest execution through `Pipeline.run(...)` and the CLI and extending multi-GPU support to the direct `embed_slide(...)` / `embed_slides(...)` APIs.
+- Direct multi-GPU embedding now uses two strategies: `embed_slide(...)` shards one slide's tiles across GPUs, while `embed_slides(...)` balances whole slides across GPUs using tile counts.
 - The package root is import-light and no longer eagerly imports `wandb` or HS2P helpers just to expose the public API.
 - Artifact output has hard-cut over from the old overloaded `features/` directory to explicit `tile_embeddings/` and `slide_embeddings/` directories with required `.meta.json` sidecars.
 - Added writer/reader support for both `.pt` and `.npz` artifact payloads under one logical contract.
 - Added `slide2vec.resources` for importlib-based packaged config access, and `setup.cfg` now explicitly ships the bundled YAML configs plus a `slide2vec` console entrypoint.
-- `python -m slide2vec` and `slide2vec.main` now act as thin CLI wrappers over the package API; legacy `slide2vec.embed` and `slide2vec.aggregate` script entrypoints are retired.
+- `python -m slide2vec` and `slide2vec.main` now act as thin CLI wrappers over the package API; the legacy `slide2vec.embed` and `slide2vec.aggregate` script entrypoints have been removed.
 - HS2P tiling integration in this repository remains keyed on `TilingResult.x` / `TilingResult.y`.

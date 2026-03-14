@@ -97,11 +97,7 @@ def setup_distributed():
       - Enabling distributed mode.
       - Distributed logging, seeding adjustments based on rank
     """
-    import torch
-
     distributed.enable(overwrite=True)
-
-    torch.distributed.barrier()
 
     # update random seed using rank
     rank = distributed.get_global_rank()

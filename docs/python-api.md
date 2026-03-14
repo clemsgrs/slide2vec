@@ -38,6 +38,11 @@ coordinates = embedded.coordinates
 
 Use `embed_slides(...)` for ordered multi-slide in-memory extraction.
 
+When `ExecutionOptions(num_gpus > 1)` is used:
+
+- `embed_slide(...)` shards one slide's tiles across GPUs
+- `embed_slides(...)` balances whole slides across GPUs using tile counts, while preserving input order in the returned list
+
 ## `PreprocessingConfig`
 
 The public preprocessing API combines tiling, segmentation, filtering, and QC into a single user-facing object.
@@ -87,11 +92,18 @@ preprocessing = PreprocessingConfig(
 - `output_format`
 - `batch_size`
 - `num_workers`
+- `num_gpus`
 - `mixed_precision`
 - `save_tile_embeddings`
 - `save_latents`
 
 `.pt` is the default output format. Use `output_format="npz"` to write NumPy artifacts instead.
+
+`num_gpus` defaults to `1`. Values greater than `1` are supported for both direct and manifest-driven workflows:
+
+- `Model.embed_slide(...)` uses tile sharding for a single slide
+- `Model.embed_slides(...)` uses balanced slide sharding for multiple slides
+- `Pipeline.run(...)` uses manifest-driven slide sharding
 
 ## `Pipeline`
 
@@ -109,7 +121,7 @@ preprocessing = PreprocessingConfig(
 pipeline = Pipeline(
     model=model,
     preprocessing=preprocessing,
-    execution=ExecutionOptions(output_dir="outputs/demo"),
+    execution=ExecutionOptions(output_dir="outputs/demo", num_gpus=2),
 )
 
 result = pipeline.run(manifest_path="/path/to/slides.csv")

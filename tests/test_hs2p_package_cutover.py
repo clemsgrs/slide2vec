@@ -30,8 +30,6 @@ def test_package_root_exports_api_without_importing_wandb():
 def test_slide2vec_code_does_not_import_vendored_hs2p_paths():
     for rel_path in [
         "slide2vec/main.py",
-        "slide2vec/embed.py",
-        "slide2vec/aggregate.py",
         "slide2vec/data/dataset.py",
     ]:
         source = (ROOT / rel_path).read_text(encoding="utf-8")

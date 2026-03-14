@@ -283,21 +283,8 @@ def enable(
         timeout=datetime.timedelta(days=14),
         device_id=torch.device(f"cuda:{torch_env.local_rank}")
     )
-    dist.barrier()
 
     # Finalize setup
     _LOCAL_RANK = torch_env.local_rank
     _LOCAL_WORLD_SIZE = torch_env.local_world_size
     _restrict_print_to_main_process()
-
-
-def gather_tensor(t: torch.Tensor, dst_rank: int = 0):
-    """
-    Gather a tensor t from all ranks to dst_rank.
-    Returns a list of size world_size on dst_rank, otherwise an empty list on other ranks.
-    """
-    gather_list = []
-    if dist.get_rank() == dst_rank:
-        gather_list = [torch.empty_like(t) for _ in range(get_global_size())]
-    dist.gather(t, gather_list, dst=dst_rank)
-    return gather_list

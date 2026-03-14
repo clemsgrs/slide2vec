@@ -43,6 +43,7 @@ def build_model_and_pipeline(args):
         output_format="pt",
         batch_size=int(getattr(cfg.model, "batch_size", 1)),
         num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
+        num_gpus=int(getattr(cfg.speed, "num_gpus", 1)),
         mixed_precision=bool(cfg.speed.fp16 and not args.run_on_cpu),
         save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
         save_latents=bool(getattr(cfg.model, "save_latents", False)),
