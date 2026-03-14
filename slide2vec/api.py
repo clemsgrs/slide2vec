@@ -109,6 +109,18 @@ class RunResult:
     process_list_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class EmbeddedSlide:
+    sample_id: str
+    tile_embeddings: Any
+    slide_embedding: Any | None
+    coordinates: Any
+    tile_size_lv0: int
+    image_path: Path
+    mask_path: Path | None = None
+    latents: Any | None = None
+
+
 class Model:
     def __init__(
         self,
@@ -192,6 +204,46 @@ class Model:
 
         resolved = _coerce_execution_options(options)
         return aggregate_slides(self, tile_embeddings, execution=resolved)
+
+    def embed_slide(
+        self,
+        slide,
+        *,
+        preprocessing: PreprocessingConfig,
+        execution: ExecutionOptions | None = None,
+        sample_id: str | None = None,
+        mask_path: str | Path | None = None,
+    ) -> EmbeddedSlide:
+        if isinstance(slide, (str, Path)):
+            slide = {
+                "sample_id": sample_id or Path(slide).stem,
+                "image_path": Path(slide),
+                "mask_path": Path(mask_path) if mask_path is not None else None,
+            }
+        elif sample_id is not None or mask_path is not None:
+            raise ValueError("sample_id and mask_path overrides are only supported when slide is a path-like input")
+        return self.embed_slides(
+            [slide],
+            preprocessing=preprocessing,
+            execution=execution,
+        )[0]
+
+    def embed_slides(
+        self,
+        slides,
+        *,
+        preprocessing: PreprocessingConfig,
+        execution: ExecutionOptions | None = None,
+    ) -> list[EmbeddedSlide]:
+        from slide2vec.inference import embed_slides
+
+        resolved = _coerce_execution_options(execution)
+        return embed_slides(
+            self,
+            slides,
+            preprocessing=preprocessing,
+            execution=resolved,
+        )
 
     def _load_backend(self) -> "LoadedModel":
         if self._backend is None:

@@ -62,44 +62,31 @@ pip install slide2vec
 
 ## Python API
 
-`slide2vec` is now a Python-first package built around `Model.from_pretrained(...)`, `PreprocessingConfig(...)`, and `Pipeline(...)`.
+`slide2vec` is now a Python-first package built around `Model.from_pretrained(...)`, `embed_slide(...)`, `PreprocessingConfig(...)`, and `Pipeline(...)`.
+
+### In-Memory Python Workflow
 
 ```python
-from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+from slide2vec import Model, PreprocessingConfig
 
 model = Model.from_pretrained("virchow2")
 preprocessing = PreprocessingConfig(
-    backend="asap",
     target_spacing_um=0.5,
     target_tile_size_px=224,
-    tolerance=0.05,
-    overlap=0.0,
     tissue_threshold=0.1,
-    drop_holes=False,
-    use_padding=True,
-    segmentation={"downsample": 64},
-    filtering={"ref_tile_size": 224},
-    qc={
-        "save_mask_preview": False,
-        "save_tiling_preview": False,
-        "downsample": 32,
-    },
 )
-pipeline = Pipeline(
-    model=model,
+embedded = model.embed_slide(
+    "/path/to/slide1.tif",
     preprocessing=preprocessing,
-    execution=ExecutionOptions(
-        output_dir="outputs/demo",
-        output_format="pt",
-        batch_size=32,
-        num_workers=4,
-    ),
 )
 
-result = pipeline.run(
-    manifest_path="/path/to/slides.csv",
-)
+tile_embeddings = embedded.tile_embeddings
+coordinates = embedded.coordinates
 ```
+
+### Pipeline Workflow
+
+Use `Pipeline(...)` when you want manifest-driven batch processing and on-disk artifacts.
 
 The manifest must follow the HS2P schema:
 
@@ -108,6 +95,26 @@ sample_id,image_path,mask_path
 slide-1,/path/to/slide1.tif,/path/to/mask1.tif
 slide-2,/path/to/slide2.tif,/path/to/mask2.tif
 ```
+
+```python
+from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+
+model = Model.from_pretrained("virchow2")
+preprocessing = PreprocessingConfig(
+    target_spacing_um=0.5,
+    target_tile_size_px=224,
+    tissue_threshold=0.1,
+)
+pipeline = Pipeline(
+    model=model,
+    preprocessing=preprocessing,
+    execution=ExecutionOptions(output_dir="outputs/demo"),
+)
+
+result = pipeline.run(manifest_path="/path/to/slides.csv")
+```
+
+Most preprocessing settings use sensible defaults. For the full `PreprocessingConfig` surface, more `embed_slide(...)` examples, and additional `Pipeline(...)` details, see [`docs/python-api.md`](/Users/clems/Code/slide2vec/docs/python-api.md).
 
 ## Artifact Layout
 

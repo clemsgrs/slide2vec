@@ -29,6 +29,9 @@
 - `Model.from_pretrained(...)` is now the canonical public model-loading entrypoint.
 - `Pipeline` is now the long-lived configured workflow object: it owns the model, preprocessing config, and execution config, so callers can simply invoke `pipeline.run(manifest_path=...)`.
 - Preprocessing is now unified behind a single user-facing `PreprocessingConfig` instead of asking API users to pass separate tiling/segmentation/filtering/qc objects at run time.
+- README now uses a minimal Python example that relies on default preprocessing values, while the fuller configuration surface is documented in `docs/python-api.md`.
+- Added in-memory `Model.embed_slide(...)` / `embed_slides(...)` APIs for interactive use cases where callers want feature tensors and coordinates directly in Python without defining a full `Pipeline`.
+- README now shows both the in-memory Python workflow and the manifest-driven `Pipeline(...)` workflow so both primary usage patterns are visible at a glance.
 - The package root is import-light and no longer eagerly imports `wandb` or HS2P helpers just to expose the public API.
 - Artifact output has hard-cut over from the old overloaded `features/` directory to explicit `tile_embeddings/` and `slide_embeddings/` directories with required `.meta.json` sidecars.
 - Added writer/reader support for both `.pt` and `.npz` artifact payloads under one logical contract.

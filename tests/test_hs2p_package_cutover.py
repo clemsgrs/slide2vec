@@ -21,6 +21,7 @@ def test_package_root_exports_api_without_importing_wandb():
     assert hasattr(package, "Pipeline")
     assert hasattr(package, "PreprocessingConfig")
     assert hasattr(package, "ExecutionOptions")
+    assert hasattr(package, "EmbeddedSlide")
     assert hasattr(package, "TileEmbeddings")
     assert hasattr(package, "SlideEmbeddings")
     assert "wandb" not in sys.modules

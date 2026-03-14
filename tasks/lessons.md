@@ -25,3 +25,6 @@
 - Remove narrow temporary tests once the fix is verified unless they protect a stable contract or key structural behavior; avoid leaving implementation-detail assertions behind.
 - For HS2P integration in this repository, stick to the actual public `TilingResult` coordinate fields (`x` and `y`) instead of inventing alternate names from memory.
 - For user-facing workflow APIs in this repository, prefer long-lived configured objects (for example `Pipeline(model, preprocessing, execution=...)`) over passing core configuration pieces again at `run(...)` time.
+- In README examples for this repository, prefer the minimal happy path and rely on defaults when reasonable; move fuller option matrices into dedicated docs instead of crowding the first example.
+- For interactive analysis workflows in this repository, prefer direct in-memory APIs (for example `model.embed_slide(...)`) over presenting the batch `Pipeline` path as the first example.
+- When the repository supports two primary workflows (interactive in-memory use and batch/pipeline use), show both in the README rather than forcing readers to infer the second one from deeper docs.
