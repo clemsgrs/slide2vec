@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -21,9 +21,65 @@ MODEL_NAME_ALIASES = {
     "hibou-l": "hibou",
 }
 
+@dataclass(frozen=True)
+class PreprocessingConfig:
+    backend: str = "asap"
+    target_spacing_um: float = 0.5
+    target_tile_size_px: int = 224
+    tolerance: float = 0.05
+    overlap: float = 0.0
+    tissue_threshold: float = 0.01
+    drop_holes: bool = False
+    use_padding: bool = True
+    read_tiles_from: Path | None = None
+    resume: bool = False
+    segmentation: dict[str, Any] = field(default_factory=dict)
+    filtering: dict[str, Any] = field(default_factory=dict)
+    qc: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_config(cls, cfg) -> "PreprocessingConfig":
+        tiling = cfg.tiling
+        return cls(
+            backend=tiling.backend,
+            target_spacing_um=float(tiling.params.target_spacing_um),
+            target_tile_size_px=int(tiling.params.target_tile_size_px),
+            tolerance=float(tiling.params.tolerance),
+            overlap=float(tiling.params.overlap),
+            tissue_threshold=float(tiling.params.tissue_threshold),
+            drop_holes=bool(tiling.params.drop_holes),
+            use_padding=bool(tiling.params.use_padding),
+            read_tiles_from=Path(tiling.read_tiles_from) if tiling.read_tiles_from else None,
+            resume=bool(getattr(cfg, "resume", False)),
+            segmentation=dict(tiling.seg_params),
+            filtering=dict(tiling.filter_params),
+            qc={
+                "save_mask_preview": bool(cfg.visualize),
+                "save_tiling_preview": bool(cfg.visualize),
+                "downsample": int(tiling.visu_params.downsample),
+            },
+        )
+
+    def with_backend(self, backend: str) -> "PreprocessingConfig":
+        return PreprocessingConfig(
+            backend=backend,
+            target_spacing_um=self.target_spacing_um,
+            target_tile_size_px=self.target_tile_size_px,
+            tolerance=self.tolerance,
+            overlap=self.overlap,
+            tissue_threshold=self.tissue_threshold,
+            drop_holes=self.drop_holes,
+            use_padding=self.use_padding,
+            read_tiles_from=self.read_tiles_from,
+            resume=self.resume,
+            segmentation=dict(self.segmentation),
+            filtering=dict(self.filtering),
+            qc=dict(self.qc),
+        )
+
 
 @dataclass(frozen=True)
-class RunOptions:
+class ExecutionOptions:
     output_dir: Path | None = None
     output_format: str = "pt"
     batch_size: int | None = None
@@ -31,12 +87,11 @@ class RunOptions:
     mixed_precision: bool = False
     save_tile_embeddings: bool = False
     save_latents: bool = False
-    backend: str = "asap"
 
-    def with_output_dir(self, output_dir: str | Path | None) -> "RunOptions":
+    def with_output_dir(self, output_dir: str | Path | None) -> "ExecutionOptions":
         if output_dir is None:
             return self
-        return RunOptions(
+        return ExecutionOptions(
             output_dir=Path(output_dir),
             output_format=self.output_format,
             batch_size=self.batch_size,
@@ -44,7 +99,6 @@ class RunOptions:
             mixed_precision=self.mixed_precision,
             save_tile_embeddings=self.save_tile_embeddings,
             save_latents=self.save_latents,
-            backend=self.backend,
         )
 
 
@@ -122,20 +176,22 @@ class Model:
     def feature_dim(self) -> int:
         return int(self._load_backend().feature_dim)
 
-    def encode_tiles(self, slides, tiling_results, *, options: RunOptions | None = None) -> list[TileEmbeddings]:
+    def encode_tiles(self, slides, tiling_results, *, options: ExecutionOptions | None = None) -> list[TileEmbeddings]:
         from slide2vec.inference import encode_tiles
 
-        return encode_tiles(self, slides, tiling_results, options=options or RunOptions())
+        resolved = _coerce_execution_options(options)
+        return encode_tiles(self, slides, tiling_results, execution=resolved)
 
     def aggregate_slides(
         self,
         tile_embeddings: list[TileEmbeddings],
         *,
-        options: RunOptions | None = None,
+        options: ExecutionOptions | None = None,
     ) -> list[SlideEmbeddings]:
         from slide2vec.inference import aggregate_slides
 
-        return aggregate_slides(self, tile_embeddings, options=options or RunOptions())
+        resolved = _coerce_execution_options(options)
+        return aggregate_slides(self, tile_embeddings, execution=resolved)
 
     def _load_backend(self) -> "LoadedModel":
         if self._backend is None:
@@ -151,16 +207,22 @@ class Model:
 
 
 class Pipeline:
-    def __init__(self, model: Model, *, options: RunOptions | None = None) -> None:
+    def __init__(
+        self,
+        model: Model,
+        preprocessing: PreprocessingConfig,
+        *,
+        execution: ExecutionOptions | None = None,
+    ) -> None:
         self.model = model
-        self.options = options or RunOptions()
+        self.preprocessing = preprocessing
+        self.execution = _coerce_execution_options(execution)
 
     def run(
         self,
         slides=None,
         manifest_path: str | Path | None = None,
         *,
-        tiling=None,
         tiling_only: bool = False,
     ) -> RunResult:
         from slide2vec.inference import run_pipeline
@@ -169,12 +231,21 @@ class Pipeline:
             self.model,
             slides=slides,
             manifest_path=manifest_path,
-            tiling=tiling,
+            preprocessing=self.preprocessing,
             tiling_only=tiling_only,
-            options=self.options,
+            execution=self.execution,
         )
 
 
 def _canonical_model_name(name: str) -> str:
     normalized = name.strip().lower()
     return MODEL_NAME_ALIASES.get(normalized, normalized)
+
+
+def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOptions:
+    if options is None:
+        return ExecutionOptions()
+    return options
+
+
+RunOptions = ExecutionOptions

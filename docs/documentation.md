@@ -25,8 +25,10 @@
 
 ## 2026-03-13
 
-- `slide2vec` now exposes a Python-first public API from the package root: `Model`, `Pipeline`, `RunOptions`, `TileEmbeddings`, `SlideEmbeddings`, and `RunResult`.
+- `slide2vec` now exposes a Python-first public API from the package root: `Model`, `PreprocessingConfig`, `Pipeline`, `ExecutionOptions`, `TileEmbeddings`, `SlideEmbeddings`, and `RunResult`.
 - `Model.from_pretrained(...)` is now the canonical public model-loading entrypoint.
+- `Pipeline` is now the long-lived configured workflow object: it owns the model, preprocessing config, and execution config, so callers can simply invoke `pipeline.run(manifest_path=...)`.
+- Preprocessing is now unified behind a single user-facing `PreprocessingConfig` instead of asking API users to pass separate tiling/segmentation/filtering/qc objects at run time.
 - The package root is import-light and no longer eagerly imports `wandb` or HS2P helpers just to expose the public API.
 - Artifact output has hard-cut over from the old overloaded `features/` directory to explicit `tile_embeddings/` and `slide_embeddings/` directories with required `.meta.json` sidecars.
 - Added writer/reader support for both `.pt` and `.npz` artifact payloads under one logical contract.

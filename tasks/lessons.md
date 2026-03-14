@@ -24,3 +24,4 @@
 - After a refactor that changes integration boundaries or helper APIs, do a quick unused-import and dead-symbol sweep so stale type imports do not linger in the touched modules.
 - Remove narrow temporary tests once the fix is verified unless they protect a stable contract or key structural behavior; avoid leaving implementation-detail assertions behind.
 - For HS2P integration in this repository, stick to the actual public `TilingResult` coordinate fields (`x` and `y`) instead of inventing alternate names from memory.
+- For user-facing workflow APIs in this repository, prefer long-lived configured objects (for example `Pipeline(model, preprocessing, execution=...)`) over passing core configuration pieces again at `run(...)` time.

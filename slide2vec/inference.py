@@ -7,7 +7,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from slide2vec.api import RunOptions, RunResult
+from slide2vec.api import ExecutionOptions, PreprocessingConfig, RunResult
 from slide2vec.artifacts import SlideEmbeddings, TileEmbeddings, load_array, write_slide_embeddings, write_tile_embeddings
 
 
@@ -80,7 +80,14 @@ def load_model(
     )
 
 
-def encode_tiles(model, slides, tiling_results, *, options: RunOptions) -> list[TileEmbeddings]:
+def encode_tiles(
+    model,
+    slides,
+    tiling_results,
+    *,
+    execution: ExecutionOptions,
+    preprocessing: PreprocessingConfig | None = None,
+) -> list[TileEmbeddings]:
     loaded = model._load_backend()
     slide_records = [_coerce_slide_record(slide) for slide in slides]
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
@@ -89,7 +96,7 @@ def encode_tiles(model, slides, tiling_results, *, options: RunOptions) -> list[
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
-        if options.mixed_precision and str(loaded.device).startswith("cuda")
+        if execution.mixed_precision and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
     artifacts: list[TileEmbeddings] = []
@@ -100,20 +107,20 @@ def encode_tiles(model, slides, tiling_results, *, options: RunOptions) -> list[
             wsi_path=slide.image_path,
             mask_path=slide.mask_path,
             tiling_result=tiling_result,
-            backend=options.backend,
+            backend=_resolve_backend(preprocessing),
             transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
         )
-        batch_size = options.batch_size or _default_batch_size(loaded.model)
+        batch_size = execution.batch_size or _default_batch_size(loaded.model)
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=options.num_workers,
+            num_workers=execution.num_workers,
             pin_memory=str(loaded.device).startswith("cuda"),
         )
         features = _run_forward_pass(dataloader, loaded, autocast_context)
-        if options.output_dir is None:
-            raise ValueError("RunOptions.output_dir is required to persist tile embeddings")
+        if execution.output_dir is None:
+            raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
         metadata = {
             "encoder_name": model.name,
             "encoder_level": model.level,
@@ -122,13 +129,13 @@ def encode_tiles(model, slides, tiling_results, *, options: RunOptions) -> list[
             "image_path": str(slide.image_path),
             "mask_path": str(slide.mask_path) if slide.mask_path is not None else None,
             "tile_size_lv0": int(_require_attr(tiling_result, "tile_size_lv0")),
-            "backend": options.backend,
+            "backend": _resolve_backend(preprocessing),
         }
         artifact = write_tile_embeddings(
             slide.sample_id,
             features,
-            output_dir=options.output_dir,
-            output_format=options.output_format,
+            output_dir=execution.output_dir,
+            output_format=execution.output_format,
             metadata=metadata,
             tile_index=np.arange(features.shape[0], dtype=np.int64),
         )
@@ -136,7 +143,13 @@ def encode_tiles(model, slides, tiling_results, *, options: RunOptions) -> list[
     return artifacts
 
 
-def aggregate_slides(model, tile_embeddings: list[TileEmbeddings], *, options: RunOptions) -> list[SlideEmbeddings]:
+def aggregate_slides(
+    model,
+    tile_embeddings: list[TileEmbeddings],
+    *,
+    execution: ExecutionOptions,
+    preprocessing: PreprocessingConfig | None = None,
+) -> list[SlideEmbeddings]:
     loaded = model._load_backend()
     torch = _import_torch()
     outputs: list[SlideEmbeddings] = []
@@ -157,7 +170,7 @@ def aggregate_slides(model, tile_embeddings: list[TileEmbeddings], *, options: R
                 image_path,
                 coordinates,
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", options.backend),
+                metadata.get("backend", _resolve_backend(preprocessing)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -173,9 +186,9 @@ def aggregate_slides(model, tile_embeddings: list[TileEmbeddings], *, options: R
         embedding = output["embedding"]
         if embedding.ndim == 1:
             embedding = embedding.unsqueeze(0)
-        latents = output.get("latents") if options.save_latents else None
-        if options.output_dir is None:
-            raise ValueError("RunOptions.output_dir is required to persist slide embeddings")
+        latents = output.get("latents") if execution.save_latents else None
+        if execution.output_dir is None:
+            raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
         slide_metadata = {
             "encoder_name": model.name,
             "encoder_level": model.level,
@@ -184,8 +197,8 @@ def aggregate_slides(model, tile_embeddings: list[TileEmbeddings], *, options: R
         slide_artifact = write_slide_embeddings(
             artifact.sample_id,
             embedding,
-            output_dir=options.output_dir,
-            output_format=options.output_format,
+            output_dir=execution.output_dir,
+            output_format=execution.output_format,
             metadata=slide_metadata,
             latents=latents,
         )
@@ -198,21 +211,19 @@ def run_pipeline(
     *,
     slides=None,
     manifest_path: str | Path | None = None,
-    tiling=None,
+    preprocessing: PreprocessingConfig,
     tiling_only: bool = False,
-    options: RunOptions,
+    execution: ExecutionOptions,
 ) -> RunResult:
     slide_records = _resolve_slides(slides=slides, manifest_path=manifest_path)
     if not slide_records:
         raise ValueError("At least one slide is required")
-    if tiling is None:
-        raise ValueError("Pipeline.run(...) requires tiling configuration or precomputed HS2P outputs")
-    if options.output_dir is None:
-        raise ValueError("RunOptions.output_dir is required for Pipeline.run(...)")
+    if execution.output_dir is None:
+        raise ValueError("ExecutionOptions.output_dir is required for Pipeline.run(...)")
 
-    output_dir = Path(options.output_dir)
+    output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _tile_slides(slide_records, tiling, output_dir=output_dir, num_workers=options.num_workers)
+    _tile_slides(slide_records, preprocessing, output_dir=output_dir, num_workers=execution.num_workers)
     process_list_path = output_dir / "process_list.csv"
     process_df = _load_process_df(process_list_path)
     tiling_results = []
@@ -230,10 +241,21 @@ def run_pipeline(
     if tiling_only:
         return RunResult(tile_embeddings=[], slide_embeddings=[], process_list_path=process_list_path)
 
-    tile_artifacts = encode_tiles(model, successful_slides, tiling_results, options=options)
+    tile_artifacts = encode_tiles(
+        model,
+        successful_slides,
+        tiling_results,
+        execution=execution,
+        preprocessing=preprocessing,
+    )
     slide_artifacts: list[SlideEmbeddings] = []
     if model.level == "slide":
-        slide_artifacts = aggregate_slides(model, tile_artifacts, options=options)
+        slide_artifacts = aggregate_slides(
+            model,
+            tile_artifacts,
+            execution=execution,
+            preprocessing=preprocessing,
+        )
     return RunResult(
         tile_embeddings=tile_artifacts,
         slide_embeddings=slide_artifacts,
@@ -340,10 +362,10 @@ def _require_attr(obj, name: str, allow_missing: bool = False):
     return value
 
 
-def _tile_slides(slides: Sequence[SlideRecord], tiling, *, output_dir: Path, num_workers: int):
+def _tile_slides(slides: Sequence[SlideRecord], preprocessing: PreprocessingConfig, *, output_dir: Path, num_workers: int):
     from hs2p import tile_slides
 
-    tiling_cfg, segmentation_cfg, filtering_cfg, qc_cfg, read_tiles_from, resume = _coerce_tiling_bundle(tiling)
+    tiling_cfg, segmentation_cfg, filtering_cfg, qc_cfg, read_tiles_from, resume = _build_hs2p_configs(preprocessing)
     tile_slides(
         slides,
         tiling=tiling_cfg,
@@ -357,20 +379,29 @@ def _tile_slides(slides: Sequence[SlideRecord], tiling, *, output_dir: Path, num
     )
 
 
-def _coerce_tiling_bundle(tiling):
-    if isinstance(tiling, tuple) and len(tiling) == 4:
-        return (*tiling, None, False)
-    if isinstance(tiling, dict):
-        return (
-            tiling["tiling"],
-            tiling["segmentation"],
-            tiling["filtering"],
-            tiling["qc"],
-            tiling.get("read_tiles_from"),
-            bool(tiling.get("resume", False)),
-        )
-    raise ValueError(
-        "tiling must be a 4-tuple of HS2P configs or a dict with tiling/segmentation/filtering/qc keys"
+def _build_hs2p_configs(preprocessing: PreprocessingConfig):
+    from hs2p import FilterConfig, QCConfig, SegmentationConfig, TilingConfig
+
+    tiling_cfg = TilingConfig(
+        backend=preprocessing.backend,
+        target_spacing_um=preprocessing.target_spacing_um,
+        target_tile_size_px=preprocessing.target_tile_size_px,
+        tolerance=preprocessing.tolerance,
+        overlap=preprocessing.overlap,
+        tissue_threshold=preprocessing.tissue_threshold,
+        drop_holes=preprocessing.drop_holes,
+        use_padding=preprocessing.use_padding,
+    )
+    segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
+    filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
+    qc_cfg = QCConfig(**dict(preprocessing.qc))
+    return (
+        tiling_cfg,
+        segmentation_cfg,
+        filtering_cfg,
+        qc_cfg,
+        preprocessing.read_tiles_from,
+        preprocessing.resume,
     )
 
 
@@ -405,3 +436,9 @@ def _import_torch():
     import torch
 
     return torch
+
+
+def _resolve_backend(preprocessing: PreprocessingConfig | None) -> str:
+    if preprocessing is None:
+        return "asap"
+    return preprocessing.backend

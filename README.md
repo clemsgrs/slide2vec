@@ -62,24 +62,13 @@ pip install slide2vec
 
 ## Python API
 
-`slide2vec` is now a Python-first package built around `Model.from_pretrained(...)` and `Pipeline(...)`.
+`slide2vec` is now a Python-first package built around `Model.from_pretrained(...)`, `PreprocessingConfig(...)`, and `Pipeline(...)`.
 
 ```python
-from hs2p import FilterConfig, QCConfig, SegmentationConfig, TilingConfig
-from slide2vec import Model, Pipeline, RunOptions
+from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
 model = Model.from_pretrained("virchow2")
-pipeline = Pipeline(
-    model,
-    options=RunOptions(
-        output_dir="outputs/demo",
-        output_format="pt",
-        batch_size=32,
-        num_workers=4,
-    ),
-)
-
-tiling = TilingConfig(
+preprocessing = PreprocessingConfig(
     backend="asap",
     target_spacing_um=0.5,
     target_tile_size_px=224,
@@ -88,14 +77,27 @@ tiling = TilingConfig(
     tissue_threshold=0.1,
     drop_holes=False,
     use_padding=True,
+    segmentation={"downsample": 64},
+    filtering={"ref_tile_size": 224},
+    qc={
+        "save_mask_preview": False,
+        "save_tiling_preview": False,
+        "downsample": 32,
+    },
 )
-segmentation = SegmentationConfig(downsample=64)
-filtering = FilterConfig(ref_tile_size=224)
-qc = QCConfig(save_mask_preview=False, save_tiling_preview=False, downsample=32)
+pipeline = Pipeline(
+    model=model,
+    preprocessing=preprocessing,
+    execution=ExecutionOptions(
+        output_dir="outputs/demo",
+        output_format="pt",
+        batch_size=32,
+        num_workers=4,
+    ),
+)
 
 result = pipeline.run(
     manifest_path="/path/to/slides.csv",
-    tiling=(tiling, segmentation, filtering, qc),
 )
 ```
 
@@ -117,7 +119,7 @@ The package now writes explicit artifact directories instead of the old overload
 - `slide_embeddings/<sample_id>.meta.json`
 - optional `slide_latents/<sample_id>.pt`
 
-`.pt` remains the default format. `.npz` is available through `RunOptions(output_format="npz")`.
+`.pt` remains the default format. `.npz` is available through `ExecutionOptions(output_format="npz")`.
 
 ## CLI
 

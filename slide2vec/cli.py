@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from slide2vec.api import Model, Pipeline, RunOptions
+from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
 
 def get_args_parser(add_help: bool = True):
@@ -37,7 +37,8 @@ def build_model_and_pipeline(args):
         normalize_embeddings=getattr(cfg.model, "normalize_embeddings", None),
         device="cpu" if args.run_on_cpu else "auto",
     )
-    options = RunOptions(
+    preprocessing = PreprocessingConfig.from_config(cfg)
+    execution = ExecutionOptions(
         output_dir=Path(cfg.output_dir),
         output_format="pt",
         batch_size=int(getattr(cfg.model, "batch_size", 1)),
@@ -45,20 +46,17 @@ def build_model_and_pipeline(args):
         mixed_precision=bool(cfg.speed.fp16 and not args.run_on_cpu),
         save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
         save_latents=bool(getattr(cfg.model, "save_latents", False)),
-        backend=cfg.tiling.backend,
     )
-    pipeline = Pipeline(model, options=options)
-    tiling_cfgs = _build_tiling_configs(cfg)
-    return pipeline, cfg, tiling_cfgs
+    pipeline = Pipeline(model, preprocessing, execution=execution)
+    return pipeline, cfg
 
 
 def main(argv=None):
     parser = get_args_parser(add_help=True)
     args = parser.parse_args(argv)
-    pipeline, cfg, tiling_cfgs = build_model_and_pipeline(args)
+    pipeline, cfg = build_model_and_pipeline(args)
     return pipeline.run(
         manifest_path=cfg.csv,
-        tiling=tiling_cfgs,
         tiling_only=args.tiling_only,
     )
 
@@ -73,9 +71,3 @@ def _hf_login():
     from slide2vec.utils.config import hf_login
 
     return hf_login()
-
-
-def _build_tiling_configs(cfg):
-    from slide2vec.utils.tiling_io import build_tiling_configs
-
-    return build_tiling_configs(cfg)
