@@ -232,6 +232,14 @@ def test_execution_options_validate_num_gpus():
         ExecutionOptions(num_gpus=0)
 
 
+def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 4)
+
+    assert ExecutionOptions().num_gpus == 4
+
+
 def test_execution_options_default_batch_size_is_one():
     assert ExecutionOptions().batch_size == 1
 
@@ -264,7 +272,34 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.save_latents is True
 
 
-def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(tmp_path: Path):
+def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset(monkeypatch, tmp_path: Path):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 6)
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(
+            batch_size=4,
+            save_tile_embeddings=False,
+            save_latents=False,
+        ),
+        speed=SimpleNamespace(
+            fp16=False,
+            num_workers=6,
+            num_workers_embedding=2,
+            num_gpus=None,
+        ),
+    )
+
+    execution = ExecutionOptions.from_config(cfg)
+
+    assert execution.num_gpus == 6
+
+
+def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 8)
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
         model=SimpleNamespace(
@@ -283,6 +318,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(tmp
     execution = ExecutionOptions.from_config(cfg, run_on_cpu=True)
 
     assert execution.mixed_precision is False
+    assert execution.num_gpus == 1
 
 
 def test_preprocessing_with_backend_preserves_other_fields():
@@ -734,7 +770,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert captured["model_kwargs"]["device"] == "cpu"
     assert captured["preprocessing"].backend == "asap"
     assert captured["execution"].output_dir == tmp_path
-    assert captured["execution"].num_gpus == 2
+    assert captured["execution"].num_gpus == 1
 
 
 def test_model_factory_region_dino_branch_uses_dino_encoder(monkeypatch):

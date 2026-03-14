@@ -23,7 +23,7 @@ model:
 speed:
   fp16: false # use mixed precision during model inference
   num_workers_embedding: 8 # number of workers for data loading when embedding slides
-  num_gpus: 1 # number of GPUs to use for manifest-driven feature extraction
+  num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
 
 wandb:
   enable: false

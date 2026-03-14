@@ -84,26 +84,29 @@ class ExecutionOptions:
     output_format: str = "pt"
     batch_size: int = 1
     num_workers: int = 0
-    num_gpus: int = 1
+    num_gpus: int | None = None
     mixed_precision: bool = False
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
     @classmethod
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
+        configured_num_gpus = getattr(cfg.speed, "num_gpus", None)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(getattr(cfg.model, "batch_size", 1)),
             num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
-            num_gpus=int(getattr(cfg.speed, "num_gpus", 1)),
+            num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )
 
     def __post_init__(self) -> None:
-        if self.num_gpus < 1:
+        resolved_num_gpus = _default_num_gpus() if self.num_gpus is None else self.num_gpus
+        object.__setattr__(self, "num_gpus", resolved_num_gpus)
+        if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
@@ -342,6 +345,22 @@ def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOpti
     if options is None:
         return ExecutionOptions()
     return options
+
+
+def _coerce_num_gpus(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _default_num_gpus() -> int:
+    try:
+        import torch
+    except ImportError:
+        return 1
+    if torch.cuda.is_available():
+        return max(1, int(torch.cuda.device_count()))
+    return 1
 
 
 def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_name: str) -> None:

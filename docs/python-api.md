@@ -107,7 +107,7 @@ preprocessing = PreprocessingConfig(
 
 For slide-level models, `save_tile_embeddings=False` skips persisted tile embedding artifacts while still returning tile embeddings in-memory from direct APIs.
 
-`num_gpus` defaults to `1`. Values greater than `1` are supported for both direct and manifest-driven workflows:
+`num_gpus` defaults to all available GPUs. You can set it to control how many GPUs `slide2vec` uses for either direct or manifest-driven workflows:
 
 - `Model.embed_slide(...)` uses tile sharding for a single slide
 - `Model.embed_slides(...)` uses balanced slide sharding for multiple slides
