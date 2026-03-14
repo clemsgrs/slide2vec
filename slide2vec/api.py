@@ -1,13 +1,14 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, Mapping, Protocol, Sequence, TYPE_CHECKING, overload
 
-from slide2vec.artifacts import SlideEmbeddings, TileEmbeddings
+from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
 
 if TYPE_CHECKING:
-    from slide2vec.inference import LoadedModel
+    from slide2vec.inference import LoadedModel, SlideRecord
+else:
+    LoadedModel = Any
+    SlideRecord = Any
 
 
 DEFAULT_LEVEL_BY_NAME = {
@@ -20,6 +21,19 @@ MODEL_NAME_ALIASES = {
     "hibou-b": "hibou",
     "hibou-l": "hibou",
 }
+
+PathLike = str | Path
+
+
+class SlideLike(Protocol):
+    sample_id: str
+    image_path: PathLike
+    mask_path: PathLike | None
+
+
+SlideInput = PathLike | Mapping[str, object] | SlideLike | SlideRecord
+SlideSequence = Sequence[SlideInput]
+TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 @dataclass(frozen=True)
 class PreprocessingConfig:
@@ -38,7 +52,7 @@ class PreprocessingConfig:
     qc: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg) -> "PreprocessingConfig":
+    def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
         return cls(
             backend=tiling.backend,
@@ -82,7 +96,7 @@ class PreprocessingConfig:
 class ExecutionOptions:
     output_dir: Path | None = None
     output_format: str = "pt"
-    batch_size: int | None = None
+    batch_size: int = 1
     num_workers: int = 0
     num_gpus: int = 1
     mixed_precision: bool = False
@@ -93,7 +107,7 @@ class ExecutionOptions:
         if self.num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
 
-    def with_output_dir(self, output_dir: str | Path | None) -> "ExecutionOptions":
+    def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
             return self
         return ExecutionOptions(
@@ -110,8 +124,8 @@ class ExecutionOptions:
 
 @dataclass(frozen=True)
 class RunResult:
-    tile_embeddings: list[TileEmbeddings]
-    slide_embeddings: list[SlideEmbeddings]
+    tile_artifacts: list[TileEmbeddingArtifact]
+    slide_artifacts: list[SlideEmbeddingArtifact]
     process_list_path: Path | None = None
 
 
@@ -187,38 +201,72 @@ class Model:
         )
 
     @property
-    def device(self):
+    def device(self) -> Any:
         return self._load_backend().device
 
     @property
     def feature_dim(self) -> int:
         return int(self._load_backend().feature_dim)
 
-    def encode_tiles(self, slides, tiling_results, *, options: ExecutionOptions | None = None) -> list[TileEmbeddings]:
-        from slide2vec.inference import encode_tiles
-
-        resolved = _coerce_execution_options(options)
-        return encode_tiles(self, slides, tiling_results, execution=resolved)
-
-    def aggregate_slides(
+    def embed_tiles(
         self,
-        tile_embeddings: list[TileEmbeddings],
+        slides: SlideSequence,
+        tiling_results: TilingResultsInput,
         *,
-        options: ExecutionOptions | None = None,
-    ) -> list[SlideEmbeddings]:
-        from slide2vec.inference import aggregate_slides
+        preprocessing: PreprocessingConfig | None = None,
+        execution: ExecutionOptions | None = None,
+    ) -> list[TileEmbeddingArtifact]:
+        from slide2vec.inference import embed_tiles
 
-        resolved = _coerce_execution_options(options)
-        return aggregate_slides(self, tile_embeddings, execution=resolved)
+        resolved = _coerce_execution_options(execution)
+        _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
+        return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
 
+    def aggregate_tiles(
+        self,
+        tile_artifacts: list[TileEmbeddingArtifact],
+        *,
+        preprocessing: PreprocessingConfig | None = None,
+        execution: ExecutionOptions | None = None,
+    ) -> list[SlideEmbeddingArtifact]:
+        from slide2vec.inference import aggregate_tiles
+
+        resolved = _coerce_execution_options(execution)
+        _require_output_dir_for_persistence(resolved, method_name="Model.aggregate_tiles(...)")
+        return aggregate_tiles(self, tile_artifacts, execution=resolved, preprocessing=preprocessing)
+
+    @overload
     def embed_slide(
         self,
-        slide,
+        slide: PathLike,
         *,
         preprocessing: PreprocessingConfig,
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
-        mask_path: str | Path | None = None,
+        mask_path: PathLike | None = None,
+    ) -> EmbeddedSlide:
+        ...
+
+    @overload
+    def embed_slide(
+        self,
+        slide: Mapping[str, object] | SlideLike | SlideRecord,
+        *,
+        preprocessing: PreprocessingConfig,
+        execution: ExecutionOptions | None = None,
+        sample_id: None = None,
+        mask_path: None = None,
+    ) -> EmbeddedSlide:
+        ...
+
+    def embed_slide(
+        self,
+        slide: SlideInput,
+        *,
+        preprocessing: PreprocessingConfig,
+        execution: ExecutionOptions | None = None,
+        sample_id: str | None = None,
+        mask_path: PathLike | None = None,
     ) -> EmbeddedSlide:
         if isinstance(slide, (str, Path)):
             slide = {
@@ -236,7 +284,7 @@ class Model:
 
     def embed_slides(
         self,
-        slides,
+        slides: SlideSequence,
         *,
         preprocessing: PreprocessingConfig,
         execution: ExecutionOptions | None = None,
@@ -278,7 +326,7 @@ class Pipeline:
 
     def run(
         self,
-        slides=None,
+        slides: SlideSequence | None = None,
         manifest_path: str | Path | None = None,
         *,
         tiling_only: bool = False,
@@ -304,3 +352,8 @@ def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOpti
     if options is None:
         return ExecutionOptions()
     return options
+
+
+def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_name: str) -> None:
+    if execution.output_dir is None:
+        raise ValueError(f"ExecutionOptions.output_dir is required for {method_name}")

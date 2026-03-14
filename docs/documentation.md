@@ -12,20 +12,13 @@
 ## 2026-03-13
 
 - `load_process_df(...)` now treats aggregation status as depending on `feature_status`, so requesting aggregation columns alone no longer raises a `KeyError`.
-- `aggregate.py` now follows the same process-list bootstrap order as `embed.py` and drops the stale duplicate `sample_id` assignment in its error path.
 - The unused `tiling.sampling_params` block was removed from the preprocessing default config to keep the HS2P cutover surface honest.
 - The output-consistency regression now reads the HS2P `.tiles.npz` ground-truth fixture, matching the packaged-tiling artifact format.
 - The output-consistency regression now compares coordinate content after lexicographic sorting, so deterministic ordering changes in HS2P do not create false negatives.
 - Config cleanup removed the unused `load_and_merge_config` helper and renamed stale preprocessing/model default locals for clarity.
-
-## 2026-03-13
-
 - Added `docs/2026-03-13-api-refactor-plan.md`, a staged plan for turning `slide2vec` into a Python-first package.
 - The plan keeps `.pt` as the default embedding format, adds optional `.npz` output for `eval-blocks`, and recommends separating reusable embedding APIs from CLI/DDP/process-list orchestration.
-
-## 2026-03-13
-
-- `slide2vec` now exposes a Python-first public API from the package root: `Model`, `PreprocessingConfig`, `Pipeline`, `ExecutionOptions`, `TileEmbeddings`, `SlideEmbeddings`, and `RunResult`.
+- `slide2vec` now exposes a Python-first public API from the package root: `Model`, `PreprocessingConfig`, `Pipeline`, `ExecutionOptions`, `TileEmbeddingArtifact`, `SlideEmbeddingArtifact`, and `RunResult`.
 - `Model.from_pretrained(...)` is now the canonical public model-loading entrypoint.
 - `Pipeline` is now the long-lived configured workflow object: it owns the model, preprocessing config, and execution config, so callers can simply invoke `pipeline.run(manifest_path=...)`.
 - Preprocessing is now unified behind a single user-facing `PreprocessingConfig` instead of asking API users to pass separate tiling/segmentation/filtering/qc objects at run time.
@@ -40,3 +33,17 @@
 - Added `slide2vec.resources` for importlib-based packaged config access, and `setup.cfg` now explicitly ships the bundled YAML configs plus a `slide2vec` console entrypoint.
 - `python -m slide2vec` and `slide2vec.main` now act as thin CLI wrappers over the package API; the legacy `slide2vec.embed` and `slide2vec.aggregate` script entrypoints have been removed.
 - HS2P tiling integration in this repository remains keyed on `TilingResult.x` / `TilingResult.y`.
+
+## 2026-03-14
+
+- Fixed `ModelFactory` fall-throughs so unsupported model names/levels and misconfigured DINO requests now raise clear `ValueError`s instead of `UnboundLocalError`.
+- The persisted-artifact API now uses clearer terminology: `Model.embed_tiles(...)` writes tile embedding artifacts, `Model.aggregate_tiles(...)` turns tile embedding artifacts into slide embedding artifacts, and `RunResult` exposes `tile_artifacts` / `slide_artifacts`.
+- Slide-level workflows now honor `save_tile_embeddings=False` by skipping persisted tile artifacts while keeping in-memory direct API results unchanged.
+- Cleaned up dead helpers and stale compatibility code in `resources.py`, `utils/config.py`, `utils/tiling_io.py`, and `utils/utils.py`.
+- Updated artifact and distributed shard loads to use `weights_only=True` where safe, and hardened the `wandb` import regression test to clear cached `slide2vec.*` submodules.
+- Regression tests now favor behavior- and AST-level checks over exact source-string matches where possible, and misleading delegation test names/permanent no-op checks were cleaned up.
+- `slide2vec.api` now carries clearer public type hints, including aliases/overloads for the supported slide input forms accepted by `embed_slide(...)`, `embed_slides(...)`, `embed_tiles(...)`, and `Pipeline.run(...)`.
+- Simplified the public typing surface again by removing redundant dict-shape aliases and keeping only the minimal high-signal slide input helpers.
+- The Python API now uses an explicit `ExecutionOptions.batch_size=1` default instead of inferring batch size from model internals.
+- `inference.embed_tiles(...)` now fails fast on missing `ExecutionOptions.output_dir` before loading models or constructing dataloaders, matching the API-boundary validation already present on `Model.embed_tiles(...)`.
+- Applied the same fail-fast pattern more broadly in `inference.py`: `aggregate_tiles(...)` now checks `output_dir` before loading the model, and both `embed_slides(...)` and `run_pipeline(...)` validate multi-GPU feasibility before tiling work begins.

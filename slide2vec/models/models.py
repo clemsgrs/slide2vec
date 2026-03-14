@@ -76,13 +76,17 @@ class ModelFactory:
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.input_size,
                 )
-            elif options.name == "dino" and options.arch:
+            elif options.name == "dino":
+                if not options.arch:
+                    raise ValueError("Model 'dino' requires 'arch' for tile-level encoding")
                 model = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.input_size,
                     patch_size=options.token_size,
                 )
+            else:
+                raise ValueError(f"Unsupported model name '{options.name}' for tile-level encoding")
         elif options.level == "region":
             if options.name == "virchow":
                 tile_encoder = Virchow()
@@ -130,13 +134,17 @@ class ModelFactory:
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.input_size,
                 )
-            elif options.name is None and options.arch:
+            elif options.name == "dino":
+                if not options.arch:
+                    raise ValueError("Model 'dino' requires 'arch' for region-level encoding")
                 tile_encoder = DINOViT(
                     arch=options.arch,
                     pretrained_weights=options.pretrained_weights,
                     input_size=options.input_size,
                     patch_size=options.token_size,
                 )
+            else:
+                raise ValueError(f"Unsupported model name '{options.name}' for region-level encoding")
             model = RegionFeatureExtractor(tile_encoder, tile_size=options.patch_size)
         elif options.level == "slide":
             if options.name == "prov-gigapath":
@@ -147,6 +155,8 @@ class ModelFactory:
                 model = PRISM()
             else:
                 raise ValueError(f"{options.name} doesn't support slide-level encoding")
+        else:
+            raise ValueError(f"Unsupported encoding level '{options.level}'")
 
         self.model = model.eval()
         self.model = self.model.to(self.model.device)

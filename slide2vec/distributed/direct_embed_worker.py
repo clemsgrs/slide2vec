@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
@@ -58,7 +56,7 @@ def main(argv=None) -> int:
         if request["strategy"] == "tile_shard":
             sample_id = request["sample_id"]
             slide, tiling_result = paired_by_sample[sample_id]
-            num_tiles = len(getattr(tiling_result, "x"))
+            num_tiles = len(tiling_result.x)
             tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
             loaded = model._load_backend()
             tile_embeddings = _compute_tile_embeddings_for_slide(

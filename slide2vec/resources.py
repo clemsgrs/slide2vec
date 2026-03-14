@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Iterator
@@ -11,14 +9,11 @@ def config_resource(*parts: str):
 
 
 def load_config(*parts: str):
+    from omegaconf import OmegaConf
+
     resource = config_resource(*parts)
     with resource.open("r", encoding="utf-8") as handle:
-        try:
-            from omegaconf import OmegaConf
-
-            return OmegaConf.load(handle)
-        except ImportError:
-            return handle.read()
+        return OmegaConf.load(handle)
 
 
 @contextmanager

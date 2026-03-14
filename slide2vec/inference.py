@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import json
@@ -14,8 +12,8 @@ import numpy as np
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig, RunResult
 from slide2vec.artifacts import (
-    SlideEmbeddings,
-    TileEmbeddings,
+    SlideEmbeddingArtifact,
+    TileEmbeddingArtifact,
     load_array,
     load_metadata,
     write_slide_embeddings,
@@ -102,6 +100,8 @@ def embed_slides(
     slide_records = [_coerce_slide_record(slide) for slide in slides]
     if not slide_records:
         raise ValueError("At least one slide is required")
+    if execution.num_gpus > 1:
+        _validate_multi_gpu_execution(model, execution)
     with _embedding_work_dir(execution.output_dir) as work_dir:
         prepared_slides, tiling_results, _process_list_path = _prepare_tiled_slides(
             slide_records,
@@ -110,7 +110,6 @@ def embed_slides(
             num_workers=execution.num_workers,
         )
         if execution.num_gpus > 1:
-            _validate_multi_gpu_execution(model, execution)
             if len(prepared_slides) == 1:
                 embedded_slides = [
                     _embed_single_slide_distributed(
@@ -151,14 +150,17 @@ def embed_slides(
         return embedded_slides
 
 
-def encode_tiles(
+def embed_tiles(
     model,
     slides,
     tiling_results,
     *,
     execution: ExecutionOptions,
     preprocessing: PreprocessingConfig | None = None,
-) -> list[TileEmbeddings]:
+) -> list[TileEmbeddingArtifact]:
+    if execution.output_dir is None:
+        raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
+
     loaded = model._load_backend()
     slide_records = [_coerce_slide_record(slide) for slide in slides]
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
@@ -170,9 +172,9 @@ def encode_tiles(
         if execution.mixed_precision and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    artifacts: list[TileEmbeddings] = []
+    artifacts: list[TileEmbeddingArtifact] = []
     for slide, tiling_result in zip(slide_records, resolved_tiling_results):
-        transforms = _create_transforms(loaded, model.level)
+        transforms = _create_transforms(loaded)
         dataset = TileDataset(
             sample_id=slide.sample_id,
             wsi_path=slide.image_path,
@@ -181,17 +183,14 @@ def encode_tiles(
             backend=_resolve_backend(preprocessing),
             transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
         )
-        batch_size = execution.batch_size or _default_batch_size(loaded.model)
         dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=batch_size,
+            batch_size=execution.batch_size,
             shuffle=False,
             num_workers=execution.num_workers,
             pin_memory=str(loaded.device).startswith("cuda"),
         )
         features = _run_forward_pass(dataloader, loaded, autocast_context)
-        if execution.output_dir is None:
-            raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
         metadata = {
             "encoder_name": model.name,
             "encoder_level": model.level,
@@ -214,17 +213,20 @@ def encode_tiles(
     return artifacts
 
 
-def aggregate_slides(
+def aggregate_tiles(
     model,
-    tile_embeddings: list[TileEmbeddings],
+    tile_artifacts: list[TileEmbeddingArtifact],
     *,
     execution: ExecutionOptions,
     preprocessing: PreprocessingConfig | None = None,
-) -> list[SlideEmbeddings]:
+) -> list[SlideEmbeddingArtifact]:
+    if execution.output_dir is None:
+        raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
+
     loaded = model._load_backend()
     torch = _import_torch()
-    outputs: list[SlideEmbeddings] = []
-    for artifact in tile_embeddings:
+    outputs: list[SlideEmbeddingArtifact] = []
+    for artifact in tile_artifacts:
         metadata = artifact.metadata
         if not metadata.get("tiles_npz_path") or not metadata.get("tiles_meta_path"):
             raise ValueError(
@@ -255,11 +257,7 @@ def aggregate_slides(
                 tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
             )
         embedding = output["embedding"]
-        if embedding.ndim == 1:
-            embedding = embedding.unsqueeze(0)
         latents = output.get("latents") if execution.save_latents else None
-        if execution.output_dir is None:
-            raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
         slide_metadata = {
             "encoder_name": model.name,
             "encoder_level": model.level,
@@ -291,6 +289,8 @@ def run_pipeline(
         raise ValueError("At least one slide is required")
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required for Pipeline.run(...)")
+    if execution.num_gpus > 1:
+        _validate_multi_gpu_execution(model, execution)
 
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -302,10 +302,9 @@ def run_pipeline(
     )
 
     if tiling_only:
-        return RunResult(tile_embeddings=[], slide_embeddings=[], process_list_path=process_list_path)
+        return RunResult(tile_artifacts=[], slide_artifacts=[], process_list_path=process_list_path)
 
     if execution.num_gpus > 1:
-        _validate_multi_gpu_execution(model, execution)
         _run_distributed_embedding_stage(
             model,
             successful_slides=successful_slides,
@@ -317,18 +316,20 @@ def run_pipeline(
             successful_slides,
             output_dir=output_dir,
             output_format=execution.output_format,
+            include_tile_embeddings=_should_persist_tile_embeddings(model, execution),
             include_slide_embeddings=model.level == "slide",
         )
         _update_process_list_after_embedding(
             process_list_path,
             successful_slides=successful_slides,
+            persist_tile_embeddings=_should_persist_tile_embeddings(model, execution),
             include_slide_embeddings=model.level == "slide",
             tile_artifacts=tile_artifacts,
             slide_artifacts=slide_artifacts,
         )
         return RunResult(
-            tile_embeddings=tile_artifacts,
-            slide_embeddings=slide_artifacts,
+            tile_artifacts=tile_artifacts,
+            slide_artifacts=slide_artifacts,
             process_list_path=process_list_path,
         )
 
@@ -339,8 +340,8 @@ def run_pipeline(
         preprocessing=preprocessing,
         execution=execution,
     )
-    tile_artifacts: list[TileEmbeddings] = []
-    slide_artifacts: list[SlideEmbeddings] = []
+    tile_artifacts: list[TileEmbeddingArtifact] = []
+    slide_artifacts: list[SlideEmbeddingArtifact] = []
     for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
         tile_artifact, slide_artifact = _persist_embedded_slide(
             model,
@@ -349,12 +350,13 @@ def run_pipeline(
             preprocessing=preprocessing,
             execution=execution,
         )
-        tile_artifacts.append(tile_artifact)
+        if tile_artifact is not None:
+            tile_artifacts.append(tile_artifact)
         if slide_artifact is not None:
             slide_artifacts.append(slide_artifact)
     return RunResult(
-        tile_embeddings=tile_artifacts,
-        slide_embeddings=slide_artifacts,
+        tile_artifacts=tile_artifacts,
+        slide_artifacts=slide_artifacts,
         process_list_path=process_list_path,
     )
 
@@ -378,7 +380,7 @@ def _compute_embedded_slides(
             preprocessing=preprocessing,
             execution=execution,
         )
-        slide_embedding, latents = _compute_slide_outputs(
+        slide_embedding, latents = _aggregate_tile_embeddings_for_slide(
             loaded,
             model,
             slide,
@@ -417,7 +419,7 @@ def _compute_tile_embeddings_for_slide(
         if execution.mixed_precision and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    transforms = _create_transforms(loaded, model.level)
+    transforms = _create_transforms(loaded)
     dataset = TileDataset(
         sample_id=slide.sample_id,
         wsi_path=slide.image_path,
@@ -431,10 +433,9 @@ def _compute_tile_embeddings_for_slide(
         if tile_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
         dataset = torch.utils.data.Subset(dataset, tile_indices.tolist())
-    batch_size = execution.batch_size or _default_batch_size(loaded.model)
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=execution.batch_size,
         shuffle=False,
         num_workers=execution.num_workers,
         pin_memory=str(loaded.device).startswith("cuda"),
@@ -442,7 +443,7 @@ def _compute_tile_embeddings_for_slide(
     return _run_forward_pass(dataloader, loaded, autocast_context)
 
 
-def _compute_slide_outputs(
+def _aggregate_tile_embeddings_for_slide(
     loaded: LoadedModel,
     model,
     slide: SlideRecord,
@@ -474,8 +475,6 @@ def _compute_slide_outputs(
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
         )
     slide_embedding = output["embedding"].detach().cpu()
-    if slide_embedding.ndim == 1:
-        slide_embedding = slide_embedding.unsqueeze(0)
     latents = output.get("latents") if execution.save_latents else None
     if latents is not None and torch.is_tensor(latents):
         latents = latents.detach().cpu()
@@ -514,27 +513,29 @@ def _persist_embedded_slide(
     *,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
-) -> tuple[TileEmbeddings, SlideEmbeddings | None]:
+) -> tuple[TileEmbeddingArtifact | None, SlideEmbeddingArtifact | None]:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist embedded slides")
-    tile_metadata = {
-        "encoder_name": model.name,
-        "encoder_level": model.level,
-        "tiles_npz_path": str(_require_attr(tiling_result, "tiles_npz_path", allow_missing=True) or ""),
-        "tiles_meta_path": str(_require_attr(tiling_result, "tiles_meta_path", allow_missing=True) or ""),
-        "image_path": str(embedded_slide.image_path),
-        "mask_path": str(embedded_slide.mask_path) if embedded_slide.mask_path is not None else None,
-        "tile_size_lv0": embedded_slide.tile_size_lv0,
-        "backend": _resolve_backend(preprocessing),
-    }
-    tile_artifact = write_tile_embeddings(
-        embedded_slide.sample_id,
-        embedded_slide.tile_embeddings,
-        output_dir=execution.output_dir,
-        output_format=execution.output_format,
-        metadata=tile_metadata,
-        tile_index=np.arange(_num_rows(embedded_slide.tile_embeddings), dtype=np.int64),
-    )
+    tile_artifact = None
+    if _should_persist_tile_embeddings(model, execution):
+        tile_metadata = {
+            "encoder_name": model.name,
+            "encoder_level": model.level,
+            "tiles_npz_path": str(_require_attr(tiling_result, "tiles_npz_path", allow_missing=True) or ""),
+            "tiles_meta_path": str(_require_attr(tiling_result, "tiles_meta_path", allow_missing=True) or ""),
+            "image_path": str(embedded_slide.image_path),
+            "mask_path": str(embedded_slide.mask_path) if embedded_slide.mask_path is not None else None,
+            "tile_size_lv0": embedded_slide.tile_size_lv0,
+            "backend": _resolve_backend(preprocessing),
+        }
+        tile_artifact = write_tile_embeddings(
+            embedded_slide.sample_id,
+            embedded_slide.tile_embeddings,
+            output_dir=execution.output_dir,
+            output_format=execution.output_format,
+            metadata=tile_metadata,
+            tile_index=np.arange(_num_rows(embedded_slide.tile_embeddings), dtype=np.int64),
+        )
     slide_artifact = None
     if embedded_slide.slide_embedding is not None:
         slide_metadata = {
@@ -553,7 +554,7 @@ def _persist_embedded_slide(
     return tile_artifact, slide_artifact
 
 
-def _create_transforms(loaded: LoadedModel, level: str):
+def _create_transforms(loaded: LoadedModel):
     return loaded.transforms
 
 
@@ -570,11 +571,6 @@ def _create_region_transforms(base_transforms, backend_model):
         ]
     )
 
-
-def _default_batch_size(backend_model) -> int:
-    return int(getattr(backend_model, "batch_size", 1) or 1)
-
-
 def _run_forward_pass(dataloader, loaded: LoadedModel, autocast_context):
     torch = _import_torch()
     outputs = []
@@ -582,6 +578,8 @@ def _run_forward_pass(dataloader, loaded: LoadedModel, autocast_context):
         for _, image in dataloader:
             image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
             outputs.append(loaded.model(image)["embedding"].detach().cpu())
+    if not outputs:
+        return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
     return torch.cat(outputs, dim=0)
 
 
@@ -663,6 +661,12 @@ def _num_rows(data) -> int:
     if hasattr(data, "shape") and len(data.shape) >= 1:
         return int(data.shape[0])
     return len(data)
+
+
+def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
+    if model.level == "slide":
+        return bool(execution.save_tile_embeddings)
+    return True
 
 
 def _prepare_tiled_slides(
@@ -1019,13 +1023,13 @@ def _merge_tile_embedding_shards(shard_payloads):
 def _load_tile_embedding_shards(coordination_dir: Path, sample_id: str):
     torch = _import_torch()
     shard_paths = sorted(coordination_dir.glob(f"{sample_id}.tiles.rank*.pt"))
-    return [torch.load(path, map_location="cpu") for path in shard_paths]
+    return [torch.load(path, map_location="cpu", weights_only=True) for path in shard_paths]
 
 
 def _load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
     torch = _import_torch()
     payload_path = coordination_dir / f"{sample_id}.embedded.pt"
-    return torch.load(payload_path, map_location="cpu")
+    return torch.load(payload_path, map_location="cpu", weights_only=True)
 
 
 def _num_tiles(tiling_result) -> int:
@@ -1109,12 +1113,14 @@ def _collect_pipeline_artifacts(
     *,
     output_dir: Path,
     output_format: str,
+    include_tile_embeddings: bool,
     include_slide_embeddings: bool,
-) -> tuple[list[TileEmbeddings], list[SlideEmbeddings]]:
-    tile_artifacts: list[TileEmbeddings] = []
-    slide_artifacts: list[SlideEmbeddings] = []
+) -> tuple[list[TileEmbeddingArtifact], list[SlideEmbeddingArtifact]]:
+    tile_artifacts: list[TileEmbeddingArtifact] = []
+    slide_artifacts: list[SlideEmbeddingArtifact] = []
     for slide in slide_records:
-        tile_artifacts.append(_load_tile_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format))
+        if include_tile_embeddings:
+            tile_artifacts.append(_load_tile_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format))
         if include_slide_embeddings:
             slide_artifacts.append(
                 _load_slide_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format)
@@ -1122,11 +1128,11 @@ def _collect_pipeline_artifacts(
     return tile_artifacts, slide_artifacts
 
 
-def _load_tile_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> TileEmbeddings:
+def _load_tile_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> TileEmbeddingArtifact:
     artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
     metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
     metadata = load_metadata(metadata_path)
-    return TileEmbeddings(
+    return TileEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
@@ -1136,13 +1142,13 @@ def _load_tile_artifact(sample_id: str, *, output_dir: Path, output_format: str)
     )
 
 
-def _load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> SlideEmbeddings:
+def _load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> SlideEmbeddingArtifact:
     artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
     metadata_path = output_dir / "slide_embeddings" / f"{sample_id}.meta.json"
     metadata = load_metadata(metadata_path)
     latent_suffix = "pt" if output_format == "pt" else "npz"
     latent_path = output_dir / "slide_latents" / f"{sample_id}.{latent_suffix}"
-    return SlideEmbeddings(
+    return SlideEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
@@ -1156,9 +1162,10 @@ def _update_process_list_after_embedding(
     process_list_path: Path,
     *,
     successful_slides: Sequence[SlideRecord],
+    persist_tile_embeddings: bool,
     include_slide_embeddings: bool,
-    tile_artifacts: Sequence[TileEmbeddings],
-    slide_artifacts: Sequence[SlideEmbeddings],
+    tile_artifacts: Sequence[TileEmbeddingArtifact],
+    slide_artifacts: Sequence[SlideEmbeddingArtifact],
 ) -> None:
     import pandas as pd
 
@@ -1171,7 +1178,11 @@ def _update_process_list_after_embedding(
     slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
     for slide in successful_slides:
         mask = df["sample_id"].astype(str) == slide.sample_id
-        df.loc[mask, "feature_status"] = "success" if slide.sample_id in tile_success_ids else "error"
+        df.loc[mask, "feature_status"] = (
+            "success"
+            if not persist_tile_embeddings or slide.sample_id in tile_success_ids
+            else "error"
+        )
         if include_slide_embeddings:
             df.loc[mask, "aggregation_status"] = (
                 "success" if slide.sample_id in slide_success_ids else "error"

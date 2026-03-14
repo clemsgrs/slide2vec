@@ -118,7 +118,7 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 
 Set `ExecutionOptions(num_gpus=4, output_dir="outputs/demo")` to shard manifest-driven feature extraction across multiple GPUs. The direct `embed_slide(...)` / `embed_slides(...)` APIs also support multi-GPU execution now: `embed_slide(...)` shards one slide's tiles, and `embed_slides(...)` balances whole slides across GPUs while still returning in-memory `EmbeddedSlide` objects.
 
-Most preprocessing settings use sensible defaults. For the full `PreprocessingConfig` surface, more `embed_slide(...)` examples, and additional `Pipeline(...)` details, see [`docs/python-api.md`](/Users/clems/Code/slide2vec/docs/python-api.md).
+Most preprocessing settings use sensible defaults. For the full `PreprocessingConfig` surface, more `embed_slide(...)` examples, and additional `Pipeline(...)` details, see [`docs/python-api.md`](docs/python-api.md).
 
 ## Artifact Layout
 

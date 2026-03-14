@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import importlib
 import sys
 from pathlib import Path
@@ -7,13 +5,18 @@ from types import SimpleNamespace
 
 import pytest
 
+from slide2vec.resources import load_config
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_package_root_exports_api_without_importing_wandb():
-    sys.modules.pop("slide2vec", None)
-    sys.modules.pop("wandb", None)
+    for name in list(sys.modules):
+        if name == "slide2vec" or name.startswith("slide2vec."):
+            sys.modules.pop(name, None)
+        if name == "wandb" or name.startswith("wandb."):
+            sys.modules.pop(name, None)
 
     package = importlib.import_module("slide2vec")
 
@@ -22,8 +25,8 @@ def test_package_root_exports_api_without_importing_wandb():
     assert hasattr(package, "PreprocessingConfig")
     assert hasattr(package, "ExecutionOptions")
     assert hasattr(package, "EmbeddedSlide")
-    assert hasattr(package, "TileEmbeddings")
-    assert hasattr(package, "SlideEmbeddings")
+    assert hasattr(package, "TileEmbeddingArtifact")
+    assert hasattr(package, "SlideEmbeddingArtifact")
     assert "wandb" not in sys.modules
 
 
@@ -110,3 +113,10 @@ def test_model_from_pretrained_uses_public_factory(monkeypatch):
     assert model.level == "tile"
     assert model.feature_dim == 1280
     assert captured["name"] == "virchow2"
+
+
+def test_load_config_returns_omegaconf_object():
+    pytest.importorskip("omegaconf")
+    cfg = load_config("models", "default")
+
+    assert "model" in cfg

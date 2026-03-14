@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -69,30 +67,6 @@ def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
             mask_series.tolist(),
         )
     ]
-
-
-def build_tiling_configs(cfg) -> tuple["TilingConfig", "SegmentationConfig", "FilterConfig", "QCConfig"]:
-    hs2p = _hs2p_exports()
-    tiling = hs2p["TilingConfig"](
-        backend=cfg.tiling.backend,
-        target_spacing_um=cfg.tiling.params.target_spacing_um,
-        target_tile_size_px=cfg.tiling.params.target_tile_size_px,
-        tolerance=cfg.tiling.params.tolerance,
-        overlap=cfg.tiling.params.overlap,
-        tissue_threshold=cfg.tiling.params.tissue_threshold,
-        drop_holes=cfg.tiling.params.drop_holes,
-        use_padding=cfg.tiling.params.use_padding,
-    )
-    segmentation = hs2p["SegmentationConfig"](**dict(cfg.tiling.seg_params))
-    filtering = hs2p["FilterConfig"](**dict(cfg.tiling.filter_params))
-    qc = hs2p["QCConfig"](
-        save_mask_preview=bool(cfg.visualize),
-        save_tiling_preview=bool(cfg.visualize),
-        downsample=cfg.tiling.visu_params.downsample,
-    )
-    return tiling, segmentation, filtering, qc
-
-
 def load_process_df(
     process_list_path: str | Path,
     *,

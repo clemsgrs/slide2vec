@@ -159,8 +159,8 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     assert meta["target_tile_size_px"] == 224
 
     # 5. Assert embeddings are within tolerance
-    gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu")
-    emb = torch.load(tmp_path / "slide_embeddings" / "test-wsi.pt", map_location="cpu")
+    gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu", weights_only=True)
+    emb = torch.load(tmp_path / "slide_embeddings" / "test-wsi.pt", map_location="cpu", weights_only=True)
     assert emb.shape == gt_emb.shape, f"Shape mismatch: {emb.shape} vs {gt_emb.shape}"
 
     cos = torch.nn.functional.cosine_similarity(emb, gt_emb, dim=-1)

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -9,7 +7,7 @@ import numpy as np
 
 
 @dataclass(frozen=True)
-class TileEmbeddings:
+class TileEmbeddingArtifact:
     sample_id: str
     path: Path
     metadata_path: Path
@@ -23,7 +21,7 @@ class TileEmbeddings:
 
 
 @dataclass(frozen=True)
-class SlideEmbeddings:
+class SlideEmbeddingArtifact:
     sample_id: str
     path: Path
     metadata_path: Path
@@ -79,7 +77,7 @@ def load_array(path: str | Path):
     if artifact_path.suffix == ".pt":
         import torch
 
-        return torch.load(artifact_path, map_location="cpu")
+        return torch.load(artifact_path, map_location="cpu", weights_only=True)
     if artifact_path.suffix == ".npz":
         with np.load(artifact_path, allow_pickle=False) as payload:
             if "features" in payload:
@@ -96,7 +94,7 @@ def write_tile_embeddings(
     output_format: str = "pt",
     metadata: dict[str, Any] | None = None,
     tile_index: Any | None = None,
-) -> TileEmbeddings:
+) -> TileEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
     base_dir = Path(output_dir) / "tile_embeddings"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -125,7 +123,7 @@ def write_tile_embeddings(
     if metadata:
         tile_metadata.update(metadata)
     _write_metadata(metadata_path, tile_metadata)
-    return TileEmbeddings(
+    return TileEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
@@ -143,7 +141,7 @@ def write_slide_embeddings(
     output_format: str = "pt",
     metadata: dict[str, Any] | None = None,
     latents: Any | None = None,
-) -> SlideEmbeddings:
+) -> SlideEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
     base_dir = Path(output_dir) / "slide_embeddings"
     base_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +149,7 @@ def write_slide_embeddings(
     metadata_path = base_dir / f"{sample_id}.meta.json"
 
     embedding_array = _ensure_array(embedding)
+    latent_path = None
     if output_format == "pt":
         import torch
 
@@ -163,7 +162,6 @@ def write_slide_embeddings(
     else:
         payload = {"features": embedding_array}
         np.savez_compressed(artifact_path, **payload)
-        latent_path = None
         if latents is not None:
             latents_dir = Path(output_dir) / "slide_latents"
             latents_dir.mkdir(parents=True, exist_ok=True)
@@ -179,11 +177,11 @@ def write_slide_embeddings(
     if metadata:
         slide_metadata.update(metadata)
     _write_metadata(metadata_path, slide_metadata)
-    return SlideEmbeddings(
+    return SlideEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
         format=output_format,
         feature_dim=slide_metadata["feature_dim"],
-        latent_path=locals().get("latent_path"),
+        latent_path=latent_path,
     )

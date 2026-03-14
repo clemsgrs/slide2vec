@@ -30,3 +30,12 @@
 - When the repository supports two primary workflows (interactive in-memory use and batch/pipeline use), show both in the README rather than forcing readers to infer the second one from deeper docs.
 - For multi-GPU restore work in this repository, prefer sharding manifest slides across ranks and reusing the normal per-slide embedding path over reintroducing cross-rank collectives inside the core embedding loop.
 - For direct multi-GPU embedding in this repository, keep the strategies explicit and simple: shard tiles for `embed_slide(...)`, and balance whole slides by tile count for `embed_slides(...)` instead of inventing a hybrid scheduler.
+- For single slide-level embeddings in this repository, prefer the natural public shape `(D)` over a fake batch shape `(1, D)`; let callers `unsqueeze(0)` themselves if they want batching.
+- Name regression tests after the behavior they actually prove, and remove permanent no-op checks once the deleted/stale code is gone.
+- When a structural regression test must inspect source, prefer resilient AST- or structure-based assertions over exact string matches that break on harmless formatting changes.
+- For public typing in this repository, prefer a small number of high-signal aliases and protocols over near-duplicate “accepted input shape” types that mostly restate the same contract.
+- For Python-facing execution knobs in this repository, prefer explicit API defaults over inferred “model defaults” when the value is really hardware/user dependent; batch size should default to `1` unless the caller sets it.
+- When persistence is mandatory in this repository, validate required paths at the top of the public or inference helper before loading models or building datasets; fail-fast beats loop-local errors.
+- When multi-GPU execution is requested in this repository, validate device/runtime feasibility before expensive tiling or artifact preparation so impossible runs fail immediately.
+- For tile-to-slide embedding steps in this repository, prefer `aggregate_tiles(...)` over names like `aggregate_slides(...)`; the input is tile artifacts/features and the output is a slide embedding.
+- Remove `from __future__ import annotations` when it is no longer buying us anything; keep it only when a module truly needs postponed evaluation rather than as leftover boilerplate.

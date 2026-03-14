@@ -37,41 +37,6 @@ def get_sha():
         pass
     message = f"sha: {sha}, status: {diff}, branch: {branch}"
     return message
-
-
-def write_dictconfig(d, f, child: bool = False, ntab=0):
-    for k, v in d.items():
-        if isinstance(v, dict):
-            if not child:
-                f.write(f"{k}:\n")
-            else:
-                for _ in range(ntab):
-                    f.write("\t")
-                f.write(f"- {k}:\n")
-            write_dictconfig(v, f, True, ntab=ntab + 1)
-        else:
-            if isinstance(v, list):
-                if not child:
-                    f.write(f"{k}:\n")
-                    for e in v:
-                        f.write(f"\t- {e}\n")
-                else:
-                    for _ in range(ntab):
-                        f.write("\t")
-                    f.write(f"{k}:\n")
-                    for e in v:
-                        for _ in range(ntab):
-                            f.write("\t")
-                        f.write(f"\t- {e}\n")
-            else:
-                if not child:
-                    f.write(f"{k}: {v}\n")
-                else:
-                    for _ in range(ntab):
-                        f.write("\t")
-                    f.write(f"- {k}: {v}\n")
-
-
 def initialize_wandb(
     cfg: Any,
     key: Optional[str] = "",

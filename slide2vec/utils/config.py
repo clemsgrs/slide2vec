@@ -28,17 +28,6 @@ def write_config(cfg, output_dir, name="config.yaml"):
     return saved_cfg_path
 
 
-def get_cfg_from_file(config_file):
-    default_preprocessing_cfg = OmegaConf.create(default_preprocessing_config)
-    default_model_cfg = OmegaConf.create(default_model_config)
-    default_cfg = OmegaConf.merge(default_preprocessing_cfg, default_model_cfg)
-    cfg = OmegaConf.load(config_file)
-    cfg = OmegaConf.merge(default_cfg, cfg)
-    OmegaConf.resolve(cfg)
-    validate_removed_options(cfg)
-    return cfg
-
-
 def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
@@ -89,21 +78,6 @@ def setup(args):
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
     return cfg, cfg_path
-
-
-def setup_distributed():
-    """
-    Distributed/GPU setup. This function handles:
-      - Enabling distributed mode.
-      - Distributed logging, seeding adjustments based on rank
-    """
-    distributed.enable(overwrite=True)
-
-    # update random seed using rank
-    rank = distributed.get_global_rank()
-    fix_random_seeds(rank)
-
-
 def hf_login():
     from huggingface_hub import login
 
