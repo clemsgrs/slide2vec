@@ -33,6 +33,7 @@ def test_resource_loading_uses_packaged_configs():
 
 def test_tile_dataset_scales_coordinates_and_returns_transformed_tiles(monkeypatch):
     pytest.importorskip("torch")
+    pytest.importorskip("wholeslidedata")
     from slide2vec.data.dataset import TileDataset
 
     tiling_result = SimpleNamespace(
@@ -92,6 +93,7 @@ def test_tile_dataset_scales_coordinates_and_returns_transformed_tiles(monkeypat
 
 def test_tile_dataset_requires_coordinate_arrays():
     pytest.importorskip("torch")
+    pytest.importorskip("wholeslidedata")
     from slide2vec.data.dataset import TileDataset
 
     tiling_result = SimpleNamespace(
@@ -117,6 +119,7 @@ def test_tile_dataset_requires_coordinate_arrays():
 
 def test_tile_dataset_load_coordinates_delegates_to_shared_helpers(monkeypatch):
     pytest.importorskip("torch")
+    pytest.importorskip("wholeslidedata")
     from slide2vec.data.dataset import TileDataset
 
     captured = {}
@@ -237,7 +240,7 @@ def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
 
     monkeypatch.setattr(api, "_default_num_gpus", lambda: 4)
 
-    assert ExecutionOptions().num_gpus == 4
+    assert api.ExecutionOptions().num_gpus == 4
 
 
 def test_execution_options_default_batch_size_is_one():
@@ -291,7 +294,7 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
         ),
     )
 
-    execution = ExecutionOptions.from_config(cfg)
+    execution = api.ExecutionOptions.from_config(cfg)
 
     assert execution.num_gpus == 6
 
@@ -315,7 +318,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
         ),
     )
 
-    execution = ExecutionOptions.from_config(cfg, run_on_cpu=True)
+    execution = api.ExecutionOptions.from_config(cfg, run_on_cpu=True)
 
     assert execution.mixed_precision is False
     assert execution.num_gpus == 1
