@@ -1,46 +1,90 @@
 # slide2vec
 
 [![PyPI version](https://img.shields.io/pypi/v/slide2vec?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/slide2vec/)
+
+`slide2vec` is a Python package for efficient encoding of whole-slide images using publicly available foundation models. It builds on [`hs2p`](https://pypi.org/project/hs2p/) for fast preprocessing and exposes a focused surface around `Model`, `Pipeline`, and `ExecutionOptions`.
+
+## Installation
+
+```shell
+pip install slide2vec
+```
+
+## Python API
+
+```python
+from slide2vec import Model, PreprocessingConfig
+
+model = Model.from_pretrained("virchow2", level="region")
+preprocessing = PreprocessingConfig(
+    target_spacing_um=0.5,
+    target_tile_size_px=224,
+    tissue_threshold=0.1,
+)
+embedded = model.embed_slide(
+    "/path/to/slide.svs",
+    preprocessing=preprocessing,
+)
+
+tile_embeddings = embedded.tile_embeddings
+coordinates = embedded.coordinates
+```
+
+Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:
+
+```python
+from slide2vec import ExecutionOptions, Pipeline
+
+pipeline = Pipeline(
+    model=model,
+    preprocessing=preprocessing,
+    execution=ExecutionOptions(output_dir="outputs/demo"),
+)
+result = pipeline.run(manifest_path="/path/to/slides.csv")
+```
+
+### Input Manifest
+
+Manifest-driven runs use the schema below. `mask_path` is optional.
+
+```csv
+sample_id,image_path,mask_path
+slide-1,/path/to/slide-1.svs,/path/to/mask-1.png
+slide-2,/path/to/slide-2.svs,
+...
+```
+
+### Outputs
+
+The package writes explicit artifact directories:
+
+- `tile_embeddings/<sample_id>.pt` or `.npz`
+- `tile_embeddings/<sample_id>.meta.json`
+- `slide_embeddings/<sample_id>.pt` or `.npz`
+- `slide_embeddings/<sample_id>.meta.json`
+- optional `slide_latents/<sample_id>.pt`
+
+`.pt` remains the default format. `.npz` is available through `ExecutionOptions(output_format="npz")`.
+
+### Supported Models
+
+`slide2vec` currently ships preset configs for 10 tile-level models and 3 slide-level models.  
+For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
+
+## CLI
+
+The CLI is a thin wrapper over the package API.  
+Bundled configs live under `slide2vec/configs/preprocessing/` and `slide2vec/configs/models/`.
+
+```shell
+python -m slide2vec --config-file /path/to/config.yaml
+```
+
+## Docker
+
 [![Docker Version](https://img.shields.io/docker/v/waticlems/slide2vec?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/slide2vec)
 
-
-## Supported Models
-
-### Tile-level models
-
-| **Model** | **Architecture** | **Parameters** |
-|:---------:|:----------------:|:--------------:|
-| [CONCH](https://huggingface.co/MahmoodLab/conch) | ViT-B/16 | 86M |
-| [H0-mini](https://huggingface.co/bioptimus/H0-mini) | ViT-B/16 | 86M |
-| [Hibou-B](https://huggingface.co/histai/hibou-b) | ViT-B/16 | 86M |
-| [Hibou-L](https://huggingface.co/histai/hibou-L) | ViT-L/16 | 307M |
-| [MUSK](https://huggingface.co/xiangjx/musk) | ViT-L/16 | 307M |
-| [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | ViT-L/16 | 307M |
-| [UNI](https://huggingface.co/MahmoodLab/UNI) | ViT-L/16 | 307M |
-| [Virchow](https://huggingface.co/paige-ai/Virchow) | ViT-H/14 | 632M |
-| [Virchow2](https://huggingface.co/paige-ai/Virchow2) | ViT-H/14 | 632M |
-| [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | ViT-G/14 | 1.1B |
-| [UNI2](https://huggingface.co/MahmoodLab/UNI2-h) | ViT-G/14 | 1.1B |
-| [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | ViT-G/14 | 1.1B |
-| [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | ViT-G/14 | 1.1B |
-| [H-optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | ViT-G/14 | 1.1B |
-| [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | Various | 86M - 307M |
-| PathoJEPA (`model.name: "pathojepa"`) | ViT-S/16 (default) | 22M |
-
-### Slide-level models
-
-| **Model** | **Architecture** | **Parameters** |
-|:---------:|:----------------:|:--------------:|
-| [TITAN](https://huggingface.co/MahmoodLab/TITAN) | Transformer | 49M |
-| [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | Transformer (LongNet) | 87M |
-| [PRISM](https://huggingface.co/paige-ai/PRISM) | Perceiver Resampler | 99M |
-
-
-## 🛠️ Installation
-
-System requirements: Linux-based OS (e.g., Ubuntu 22.04) with Python 3.10+ and Docker installed.
-
-We recommend running the script inside a container using the latest `slide2vec` image from Docker Hub:
+Docker remains available when you prefer a containerized runtime:
 
 ```shell
 docker pull waticlems/slide2vec:latest
@@ -50,38 +94,7 @@ docker run --rm -it \
     waticlems/slide2vec:latest
 ```
 
-Replace `/path/to/your/data` with your local data directory.
+## Documentation
 
-Alternatively, you can install `slide2vec` via pip:
-
-```shell
-pip install slide2vec
-```
-
-`slide2vec` now consumes released `hs2p` packages as a normal dependency; there is no vendored HS2P submodule in the runtime path.
-
-## 🚀 Extract features
-
-1. Create a `.csv` file with slide identifiers and paths. Optionally, you can provide paths to pre-computed tissue masks.
-
-    ```csv
-    sample_id,image_path,mask_path
-    slide-1,/path/to/slide1.tif,/path/to/mask1.tif
-    slide-2,/path/to/slide2.tif,/path/to/mask2.tif
-    ...
-    ```
-
-2. Create a configuration file
-
-   A good starting point are the default configuration files where parameters are documented:<br>
-   - for preprocessing options: `slide2vec/configs/preprocessing/default.yaml`
-   - for model options: `slide2vec/configs/models/default.yaml`
-
-   We've also added model presets under `slide2vec/configs/models/` for each of the foundation models currently supported (see above).
-
-
-3. Kick off distributed feature extraction
-
-    ```shell
-    python3 -m slide2vec.main --config-file </path/to/config.yaml>
-    ```
+- [`docs/python-api.md`](docs/python-api.md) for the detailed API reference
+- [`docs/models.md`](docs/models.md) for the full supported-model catalog
