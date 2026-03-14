@@ -166,3 +166,5 @@ output/
 outputs/
 archive/
 tasks/
+docs/documentation.md
+docs/20*-*.md
