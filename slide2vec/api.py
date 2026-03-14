@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence, TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
 
@@ -75,21 +75,7 @@ class PreprocessingConfig:
         )
 
     def with_backend(self, backend: str) -> "PreprocessingConfig":
-        return PreprocessingConfig(
-            backend=backend,
-            target_spacing_um=self.target_spacing_um,
-            target_tile_size_px=self.target_tile_size_px,
-            tolerance=self.tolerance,
-            overlap=self.overlap,
-            tissue_threshold=self.tissue_threshold,
-            drop_holes=self.drop_holes,
-            use_padding=self.use_padding,
-            read_tiles_from=self.read_tiles_from,
-            resume=self.resume,
-            segmentation=dict(self.segmentation),
-            filtering=dict(self.filtering),
-            qc=dict(self.qc),
-        )
+        return replace(self, backend=backend)
 
 
 @dataclass(frozen=True)
@@ -103,6 +89,19 @@ class ExecutionOptions:
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
+    @classmethod
+    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
+        return cls(
+            output_dir=Path(cfg.output_dir),
+            output_format="pt",
+            batch_size=int(getattr(cfg.model, "batch_size", 1)),
+            num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
+            num_gpus=int(getattr(cfg.speed, "num_gpus", 1)),
+            mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
+            save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
+            save_latents=bool(getattr(cfg.model, "save_latents", False)),
+        )
+
     def __post_init__(self) -> None:
         if self.num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
@@ -110,16 +109,7 @@ class ExecutionOptions:
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
             return self
-        return ExecutionOptions(
-            output_dir=Path(output_dir),
-            output_format=self.output_format,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            num_gpus=self.num_gpus,
-            mixed_precision=self.mixed_precision,
-            save_tile_embeddings=self.save_tile_embeddings,
-            save_latents=self.save_latents,
-        )
+        return replace(self, output_dir=Path(output_dir))
 
 
 @dataclass(frozen=True)

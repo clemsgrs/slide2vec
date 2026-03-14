@@ -1,11 +1,13 @@
-import torch
-import numpy as np
-import wholeslidedata as wsd
-
-from transformers.image_processing_utils import BaseImageProcessor
-from PIL import Image
 from pathlib import Path
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
+
+import numpy as np
+import torch
+import wholeslidedata as wsd
+from PIL import Image
+from transformers.image_processing_utils import BaseImageProcessor
+
+from slide2vec.utils.coordinates import coordinate_arrays, coordinate_matrix
 
 if TYPE_CHECKING:
     from hs2p import TilingResult
@@ -36,11 +38,8 @@ class TileDataset(torch.utils.data.Dataset):
         self.transforms = transforms
 
     def load_coordinates(self):
-        self.x = getattr(self.tiling_result, "x", None)
-        self.y = getattr(self.tiling_result, "y", None)
-        if self.x is None or self.y is None:
-            raise ValueError("Tiling result must expose x/y coordinates")
-        self.coordinates = (np.array([self.x, self.y]).T).astype(int)
+        self.x, self.y = coordinate_arrays(self.tiling_result)
+        self.coordinates = coordinate_matrix(self.tiling_result)
         self.scaled_coordinates = self.scale_coordinates()
         self.tile_size_lv0 = int(self.tiling_result.tile_size_lv0)
 

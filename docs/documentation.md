@@ -2,9 +2,7 @@
 
 ## 2026-03-12
 
-- `slide2vec` now integrates with packaged `hs2p` through its public Python API instead of the in-repo submodule.
-- Input manifests must use the HS2P schema: `sample_id,image_path,mask_path`.
-- Tiling artifacts are now consumed from `.tiles.npz` / `.tiles.meta.json`, and downstream feature files are keyed by `sample_id`.
+- `embed_slides(...)` routing now delegates to `_select_embedding_path(...)`, making distributed-vs-local execution flow explicit and easier to read while preserving strategy behavior.
 - Tiling config keys now follow HS2P naming: `read_tiles_from`, `target_spacing_um`, `target_tile_size_px`, and `tissue_threshold`.
 - Config files are now organized by responsibility: preprocessing defaults live under `slide2vec/configs/preprocessing/`, and model defaults/presets live under `slide2vec/configs/models/`.
 - `model.restrict_to_tissue` has been removed; legacy configs that still set it now fail fast during config loading.
@@ -47,3 +45,23 @@
 - The Python API now uses an explicit `ExecutionOptions.batch_size=1` default instead of inferring batch size from model internals.
 - `inference.embed_tiles(...)` now fails fast on missing `ExecutionOptions.output_dir` before loading models or constructing dataloaders, matching the API-boundary validation already present on `Model.embed_tiles(...)`.
 - Applied the same fail-fast pattern more broadly in `inference.py`: `aggregate_tiles(...)` now checks `output_dir` before loading the model, and both `embed_slides(...)` and `run_pipeline(...)` validate multi-GPU feasibility before tiling work begins.
+- Added maintainability Phase 0 characterization coverage for dataset and inference coordinate behavior: `TileDataset` coordinate loading/scaling and tile retrieval semantics are now explicitly tested, and inference coordinate-array extraction is covered with validation-path assertions.
+- `inference.py` now centralizes coordinate matrix assembly via a small `_coordinate_matrix(...)` helper to remove repeated `np.column_stack(...)` logic in aggregation and embedded-slide construction paths.
+- Fixed distributed single-slide embedding to reuse `_aggregate_tile_embeddings_for_slide(...)` instead of calling a missing helper; added a regression test to lock this path.
+- Batch 2 cleanup extracted shared coordinate utilities into `slide2vec.utils.coordinates`, and both `TileDataset` and inference coordinate helpers now delegate to this single validation/parsing path.
+- Added `ExecutionOptions.from_config(...)` as the canonical CLI-to-execution mapping path, and updated `cli.build_model_and_pipeline(...)` to use it so execution defaults live in one place.
+- Simplified dataclass copy helpers in the public API by using `dataclasses.replace` for `PreprocessingConfig.with_backend(...)` and `ExecutionOptions.with_output_dir(...)`, reducing boilerplate while preserving behavior.
+- Batch 2 model cleanup introduced shared checkpoint helpers in `models/models.py` (`_load_checkpoint_state_dict(...)` and `_normalize_checkpoint_state_dict(...)`) and refactored repeated `load_weights(...)` prefix-cleanup logic across PandaViT, DINOViT, CustomViT, and PathoJEPA.
+- Model weight-loading diagnostics in `models/models.py` now use a shared `_log_main_process_info(...)` helper (with logger-backed output) instead of repeated rank-gated `print(...)` blocks.
+- `ModelFactory` dispatch is now split into level-specific helper builders (`_build_tile_model`, `_build_region_tile_encoder`, `_build_slide_model`) so `ModelFactory.__init__` reads as a compact level dispatcher while preserving existing model/error behavior.
+- Tile/region helper builders were further deduplicated with shared constructor helpers (`_build_dino_vit`, `_build_pathojepa`, `_build_custom_vit_small`, `_build_panda_vit_small`) to reduce repeated branch logic while keeping the same validation/error contracts.
+- Inference persistence flow now uses shared helper builders/writers for artifact metadata (`_build_tile_embedding_metadata`, `_build_slide_embedding_metadata`) and artifact writes (`_write_tile_embedding_artifact`, `_write_slide_embedding_artifact`), reducing duplicate serialization logic in `embed_tiles(...)`, `aggregate_tiles(...)`, and `_persist_embedded_slide(...)`.
+- Distributed inference orchestration now reuses `_run_torchrun_worker(...)` for both pipeline and direct-embedding worker launches, consolidating duplicated `torch.distributed.run` command/error handling.
+- `run_pipeline(...)` local execution now delegates artifact collection to `_collect_local_pipeline_artifacts(...)`, reducing inline orchestration complexity while preserving persistence behavior.
+- `run_pipeline(...)` distributed execution now delegates stage-run plus artifact collection/process-list updates to `_collect_distributed_pipeline_artifacts(...)`, making the orchestration branch shorter and easier to follow without changing behavior.
+- Distributed request-file assembly is now centralized via `_build_pipeline_worker_request_payload(...)` and `_build_direct_embed_worker_request_payload(...)`, reducing inline JSON construction in stage launch helpers.
+- Model checkpoint application now reuses `_apply_loaded_state_dict(...)` in PandaViT, DINOViT, PathoJEPA, and CustomViT, removing repeated update/log/load boilerplate while preserving loading semantics.
+- Model transform builders now share `_compose_with_normalization(...)` for composing preprocessing pipelines that end in normalization, reducing repeated `transforms.Compose([... make_normalize_transform()])` code.
+- Model forward paths now share `_embedding_output(...)` for constructing embedding result dictionaries (and optional extras like PRISM latents), reducing repeated inline `{"embedding": ...}` boilerplate.
+- Model wrappers that support cls/full output modes now share `_select_mode_embedding(...)`, removing duplicated branch logic in Virchow, Virchow2, and Hoptimus0Mini.
+- Repeated `timm.create_model(..., pretrained=True, ...)` hub constructor patterns are now centralized behind `_build_timm_hub_encoder(...)`, reducing boilerplate in multiple `build_encoder(...)` implementations.

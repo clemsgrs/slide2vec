@@ -1,5 +1,4 @@
 import argparse
-from pathlib import Path
 
 from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
@@ -36,16 +35,7 @@ def build_model_and_pipeline(args):
         device="cpu" if args.run_on_cpu else "auto",
     )
     preprocessing = PreprocessingConfig.from_config(cfg)
-    execution = ExecutionOptions(
-        output_dir=Path(cfg.output_dir),
-        output_format="pt",
-        batch_size=int(getattr(cfg.model, "batch_size", 1)),
-        num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
-        num_gpus=int(getattr(cfg.speed, "num_gpus", 1)),
-        mixed_precision=bool(cfg.speed.fp16 and not args.run_on_cpu),
-        save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
-        save_latents=bool(getattr(cfg.model, "save_latents", False)),
-    )
+    execution = ExecutionOptions.from_config(cfg, run_on_cpu=bool(args.run_on_cpu))
     pipeline = Pipeline(model, preprocessing, execution=execution)
     return pipeline, cfg
 

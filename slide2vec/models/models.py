@@ -1,27 +1,193 @@
+import logging
+
 import timm
 import torch
-import logging
 import torch.nn as nn
 import torch.nn.functional as F
-
 from einops import rearrange
 from omegaconf import DictConfig
-from transformers import AutoModel, AutoImageProcessor
-from torchvision import transforms
-from torchvision.transforms import v2
 from timm.data import resolve_data_config
 from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
+from torchvision import transforms
+from torchvision.transforms import v2
+from transformers import AutoImageProcessor, AutoModel
 
 import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer_dino as vits_dino
 import slide2vec.models.vision_transformer_dinov2 as vits_dinov2
 import slide2vec.models.vision_transformer_pathojepa as vits_pathojepa
-
+from slide2vec.data.augmentations import MaybeToTensor, make_normalize_transform
 from slide2vec.utils import update_state_dict
-from slide2vec.data.augmentations import make_normalize_transform, MaybeToTensor
 
 logger = logging.getLogger("slide2vec")
+
+
+def _log_main_process_info(message: str) -> None:
+    if distributed.is_main_process():
+        logger.info(message)
+
+
+def _normalize_checkpoint_state_dict(state_dict: dict, *, strip_backbone_prefix: bool = True) -> dict:
+    nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, prefix="module.")
+    if strip_backbone_prefix:
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, prefix="backbone.")
+    return state_dict
+
+
+def _load_checkpoint_state_dict(
+    checkpoint_path: str,
+    *,
+    ckpt_key: str | None = None,
+    strip_backbone_prefix: bool = True,
+):
+    state_dict = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if ckpt_key:
+        state_dict = state_dict[ckpt_key]
+    if isinstance(state_dict, dict):
+        state_dict = _normalize_checkpoint_state_dict(
+            state_dict,
+            strip_backbone_prefix=strip_backbone_prefix,
+        )
+    return state_dict
+
+
+def _apply_loaded_state_dict(encoder: nn.Module, state_dict: dict) -> None:
+    state_dict, msg = update_state_dict(
+        model_dict=encoder.state_dict(),
+        state_dict=state_dict,
+    )
+    _log_main_process_info(msg)
+    encoder.load_state_dict(state_dict, strict=False)
+
+
+def _compose_with_normalization(*steps) -> transforms.Compose:
+    return transforms.Compose([*steps, make_normalize_transform()])
+
+
+def _embedding_output(embedding, **extra_fields) -> dict:
+    return {"embedding": embedding, **extra_fields}
+
+
+def _select_mode_embedding(cls_embedding, patch_embeddings, *, mode: str):
+    if mode == "full":
+        return torch.cat([cls_embedding, patch_embeddings.mean(1)], dim=-1)
+    return cls_embedding
+
+
+def _build_timm_hub_encoder(model_name: str, **kwargs):
+    return timm.create_model(model_name, pretrained=True, **kwargs)
+
+
+def _build_tile_model(options: DictConfig):
+    tile_factories = {
+        "virchow": lambda: Virchow(mode=options.mode),
+        "virchow2": lambda: Virchow2(mode=options.mode),
+        "uni": UNI,
+        "uni2": UNI2,
+        "prov-gigapath": ProvGigaPath,
+        "h-optimus-0": Hoptimus0,
+        "h-optimus-1": Hoptimus1,
+        "conch": CONCH,
+        "musk": MUSK,
+        "phikonv2": PhikonV2,
+    }
+    if options.name in tile_factories:
+        return tile_factories[options.name]()
+    if options.name == "h-optimus-0-mini" or options.name == "h0-mini":
+        return Hoptimus0Mini(mode=options.mode)
+    if options.name == "hibou":
+        return Hibou(arch=options.arch)
+    if options.name == "kaiko":
+        return Kaiko(arch=options.arch)
+    if options.name == "pathojepa":
+        return _build_pathojepa(options)
+    if options.name == "rumc-vit-s-50k":
+        return _build_custom_vit_small(options)
+    if options.name == "panda-vit-s":
+        return _build_panda_vit_small(options)
+    if options.name == "dino":
+        return _build_dino_vit(options, level_label="tile")
+    raise ValueError(f"Unsupported model name '{options.name}' for tile-level encoding")
+
+
+def _build_region_tile_encoder(options: DictConfig):
+    region_factories = {
+        "virchow": Virchow,
+        "virchow2": Virchow2,
+        "uni": UNI,
+        "uni2": UNI2,
+        "prov-gigapath": ProvGigaPath,
+        "h-optimus-0": Hoptimus0,
+        "h-optimus-1": Hoptimus1,
+        "conch": CONCH,
+        "musk": MUSK,
+        "phikonv2": PhikonV2,
+    }
+    if options.name in region_factories:
+        return region_factories[options.name]()
+    if options.name == "hibou":
+        return Hibou()
+    if options.name == "kaiko":
+        return Kaiko(arch=options.arch)
+    if options.name == "kaiko-midnight":
+        return Midnight12k()
+    if options.name == "pathojepa":
+        return _build_pathojepa(options)
+    if options.name == "rumc-vit-s-50k":
+        return _build_custom_vit_small(options)
+    if options.name == "panda-vit-s":
+        return _build_panda_vit_small(options)
+    if options.name == "dino":
+        return _build_dino_vit(options, level_label="region")
+    raise ValueError(f"Unsupported model name '{options.name}' for region-level encoding")
+
+
+def _build_slide_model(options: DictConfig):
+    if options.name == "prov-gigapath":
+        return ProvGigaPathSlide()
+    if options.name == "titan":
+        return TITAN()
+    if options.name == "prism":
+        return PRISM()
+    raise ValueError(f"{options.name} doesn't support slide-level encoding")
+
+
+def _build_dino_vit(options: DictConfig, *, level_label: str):
+    if not options.arch:
+        raise ValueError(f"Model 'dino' requires 'arch' for {level_label}-level encoding")
+    return DINOViT(
+        arch=options.arch,
+        pretrained_weights=options.pretrained_weights,
+        input_size=options.input_size,
+        patch_size=options.token_size,
+    )
+
+
+def _build_pathojepa(options: DictConfig):
+    return PathoJEPA(
+        pretrained_weights=options.pretrained_weights,
+        arch=options.arch,
+        input_size=options.input_size,
+        patch_size=options.token_size,
+        normalize_embeddings=options.normalize_embeddings,
+    )
+
+
+def _build_custom_vit_small(options: DictConfig):
+    return CustomViT(
+        arch="vit_small",
+        pretrained_weights=options.pretrained_weights,
+        num_register_tokens=0,
+    )
+
+
+def _build_panda_vit_small(options: DictConfig):
+    return PandaViT(
+        arch="vit_small",
+        pretrained_weights=options.pretrained_weights,
+        input_size=options.input_size,
+    )
 
 
 class ModelFactory:
@@ -30,131 +196,12 @@ class ModelFactory:
         options: DictConfig,
     ):
         if options.level == "tile":
-            if options.name == "virchow":
-                model = Virchow(mode=options.mode)
-            elif options.name == "virchow2":
-                model = Virchow2(mode=options.mode)
-            elif options.name == "uni":
-                model = UNI()
-            elif options.name == "uni2":
-                model = UNI2()
-            elif options.name == "prov-gigapath":
-                model = ProvGigaPath()
-            elif options.name == "h-optimus-0":
-                model = Hoptimus0()
-            elif options.name == "h-optimus-1":
-                model = Hoptimus1()
-            elif options.name == "h-optimus-0-mini" or options.name == "h0-mini":
-                model = Hoptimus0Mini(mode=options.mode)
-            elif options.name == "conch":
-                model = CONCH()
-            elif options.name == "musk":
-                model = MUSK()
-            elif options.name == "phikonv2":
-                model = PhikonV2()
-            elif options.name == "hibou":
-                model = Hibou(arch=options.arch)
-            elif options.name == "kaiko":
-                model = Kaiko(arch=options.arch)
-            elif options.name == "pathojepa":
-                model = PathoJEPA(
-                    pretrained_weights=options.pretrained_weights,
-                    arch=options.arch,
-                    input_size=options.input_size,
-                    patch_size=options.token_size,
-                    normalize_embeddings=options.normalize_embeddings,
-                )
-            elif options.name == "rumc-vit-s-50k":
-                model = CustomViT(
-                    arch="vit_small",
-                    pretrained_weights=options.pretrained_weights,
-                    num_register_tokens=0,
-                )
-            elif options.name == "panda-vit-s":
-                model = PandaViT(
-                    arch="vit_small",
-                    pretrained_weights=options.pretrained_weights,
-                    input_size=options.input_size,
-                )
-            elif options.name == "dino":
-                if not options.arch:
-                    raise ValueError("Model 'dino' requires 'arch' for tile-level encoding")
-                model = DINOViT(
-                    arch=options.arch,
-                    pretrained_weights=options.pretrained_weights,
-                    input_size=options.input_size,
-                    patch_size=options.token_size,
-                )
-            else:
-                raise ValueError(f"Unsupported model name '{options.name}' for tile-level encoding")
+            model = _build_tile_model(options)
         elif options.level == "region":
-            if options.name == "virchow":
-                tile_encoder = Virchow()
-            elif options.name == "virchow2":
-                tile_encoder = Virchow2()
-            elif options.name == "uni":
-                tile_encoder = UNI()
-            elif options.name == "uni2":
-                tile_encoder = UNI2()
-            elif options.name == "prov-gigapath":
-                tile_encoder = ProvGigaPath()
-            elif options.name == "h-optimus-0":
-                tile_encoder = Hoptimus0()
-            elif options.name == "h-optimus-1":
-                tile_encoder = Hoptimus1()
-            elif options.name == "conch":
-                tile_encoder = CONCH()
-            elif options.name == "musk":
-                tile_encoder = MUSK()
-            elif options.name == "phikonv2":
-                tile_encoder = PhikonV2()
-            elif options.name == "hibou":
-                tile_encoder = Hibou()
-            elif options.name == "kaiko":
-                tile_encoder = Kaiko(arch=options.arch)
-            elif options.name == "kaiko-midnight":
-                tile_encoder = Midnight12k()
-            elif options.name == "pathojepa":
-                tile_encoder = PathoJEPA(
-                    pretrained_weights=options.pretrained_weights,
-                    arch=options.arch,
-                    input_size=options.input_size,
-                    patch_size=options.token_size,
-                    normalize_embeddings=options.normalize_embeddings,
-                )
-            elif options.name == "rumc-vit-s-50k":
-                tile_encoder = CustomViT(
-                    arch="vit_small",
-                    pretrained_weights=options.pretrained_weights,
-                    num_register_tokens=0,
-                )
-            elif options.name == "panda-vit-s":
-                tile_encoder = PandaViT(
-                    arch="vit_small",
-                    pretrained_weights=options.pretrained_weights,
-                    input_size=options.input_size,
-                )
-            elif options.name == "dino":
-                if not options.arch:
-                    raise ValueError("Model 'dino' requires 'arch' for region-level encoding")
-                tile_encoder = DINOViT(
-                    arch=options.arch,
-                    pretrained_weights=options.pretrained_weights,
-                    input_size=options.input_size,
-                    patch_size=options.token_size,
-                )
-            else:
-                raise ValueError(f"Unsupported model name '{options.name}' for region-level encoding")
+            tile_encoder = _build_region_tile_encoder(options)
             model = RegionFeatureExtractor(tile_encoder, tile_size=options.patch_size)
         elif options.level == "slide":
-            if options.name == "prov-gigapath":
-                model = ProvGigaPathSlide()
-            elif options.name == "titan":
-                model = TITAN()
-            elif options.name == "prism":
-                model = PRISM()
-            else:
-                raise ValueError(f"{options.name} doesn't support slide-level encoding")
+            model = _build_slide_model(options)
         else:
             raise ValueError(f"Unsupported encoding level '{options.level}'")
 
@@ -205,9 +252,7 @@ class PandaViT(FeatureExtractor):
         self.arch = arch
         self.pretrained_weights = pretrained_weights
         if input_size != 224:
-            print(
-                f"Warning: PandaViT will center-crop input images to 224x224"
-            )
+            logger.warning("PandaViT will center-crop input images to 224x224")
         self.input_size = input_size
         self.ckpt_key = ckpt_key
         self.features_dim = 384
@@ -215,23 +260,12 @@ class PandaViT(FeatureExtractor):
         self.load_weights()
 
     def load_weights(self):
-        if distributed.is_main_process():
-            print(f"Loading pretrained weights from: {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
-        if self.ckpt_key:
-            state_dict = state_dict[self.ckpt_key]
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="module."
+        _log_main_process_info(f"Loading pretrained weights from: {self.pretrained_weights}")
+        state_dict = _load_checkpoint_state_dict(
+            self.pretrained_weights,
+            ckpt_key=self.ckpt_key,
         )
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="backbone."
-        )
-        state_dict, msg = update_state_dict(
-            model_dict=self.encoder.state_dict(), state_dict=state_dict
-        )
-        if distributed.is_main_process():
-            print(msg)
-        self.encoder.load_state_dict(state_dict, strict=False)
+        _apply_loaded_state_dict(self.encoder, state_dict)
 
     def build_encoder(self):
         encoder = vits_dino.__dict__[self.arch](
@@ -241,26 +275,17 @@ class PandaViT(FeatureExtractor):
 
     def get_transforms(self):
         if self.input_size == 224:
-            transform = transforms.Compose(
-                [
-                    MaybeToTensor(),
-                    make_normalize_transform(),
-                ]
-            )
+            transform = _compose_with_normalization(MaybeToTensor())
         else:
-            transform = transforms.Compose(
-                [
-                    transforms.CenterCrop(224),
-                    MaybeToTensor(),
-                    make_normalize_transform(),
-                ]
+            transform = _compose_with_normalization(
+                transforms.CenterCrop(224),
+                MaybeToTensor(),
             )
         return transform
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class DINOViT(FeatureExtractor):
@@ -283,33 +308,23 @@ class DINOViT(FeatureExtractor):
         self.load_weights()
 
     def load_weights(self):
-        if distributed.is_main_process():
-            print(f"Loading pretrained weights from: {self.pretrained_weights}")
+        _log_main_process_info(f"Loading pretrained weights from: {self.pretrained_weights}")
 
         # Fix for loading checkpoints saved with numpy 2.0+ in an environment with numpy < 2.0
         try:
             import numpy._core
         except ImportError:
-            import numpy as np
             import sys
+
+            import numpy as np
             sys.modules["numpy._core"] = np.core
             sys.modules["numpy._core.multiarray"] = np.core.multiarray
 
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
-        if self.ckpt_key:
-            state_dict = state_dict[self.ckpt_key]
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="module."
+        state_dict = _load_checkpoint_state_dict(
+            self.pretrained_weights,
+            ckpt_key=self.ckpt_key,
         )
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="backbone."
-        )
-        state_dict, msg = update_state_dict(
-            model_dict=self.encoder.state_dict(), state_dict=state_dict
-        )
-        if distributed.is_main_process():
-            print(msg)
-        self.encoder.load_state_dict(state_dict, strict=False)
+        _apply_loaded_state_dict(self.encoder, state_dict)
 
     def build_encoder(self):
         encoder = vits_dino.__dict__[self.arch](
@@ -318,19 +333,15 @@ class DINOViT(FeatureExtractor):
         return encoder
 
     def get_transforms(self):
-        transform = transforms.Compose(
-            [
-                MaybeToTensor(),
-                transforms.CenterCrop(self.input_size),
-                make_normalize_transform(),
-            ]
+        transform = _compose_with_normalization(
+            MaybeToTensor(),
+            transforms.CenterCrop(self.input_size),
         )
         return transform
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class PathoJEPA(FeatureExtractor):
@@ -366,8 +377,7 @@ class PathoJEPA(FeatureExtractor):
             raise ValueError(
                 "model.pretrained_weights must be provided for model.name=pathojepa"
             )
-        if distributed.is_main_process():
-            print(f"Loading pretrained weights from: {self.pretrained_weights}")
+        _log_main_process_info(f"Loading pretrained weights from: {self.pretrained_weights}")
         checkpoint = torch.load(
             self.pretrained_weights, map_location="cpu", weights_only=False
         )
@@ -376,15 +386,11 @@ class PathoJEPA(FeatureExtractor):
             raise ValueError(
                 "Unsupported PathoJEPA checkpoint format: expected a state_dict-like mapping"
             )
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="module."
+        state_dict = _normalize_checkpoint_state_dict(
+            state_dict,
+            strip_backbone_prefix=False,
         )
-        state_dict, msg = update_state_dict(
-            model_dict=self.encoder.state_dict(), state_dict=state_dict
-        )
-        if distributed.is_main_process():
-            print(msg)
-        self.encoder.load_state_dict(state_dict, strict=False)
+        _apply_loaded_state_dict(self.encoder, state_dict)
 
     def build_encoder(self):
         return vits_pathojepa.__dict__[self.arch](
@@ -410,8 +416,7 @@ class PathoJEPA(FeatureExtractor):
         embedding = tokens.mean(dim=1)
         if self.normalize_embeddings:
             embedding = F.normalize(embedding, p=2, dim=-1)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class CustomViT(FeatureExtractor):
@@ -451,43 +456,28 @@ class CustomViT(FeatureExtractor):
         self.load_weights()
 
     def load_weights(self):
-        if distributed.is_main_process():
-            print(f"Loading pretrained weights from: {self.pretrained_weights}")
-        state_dict = torch.load(self.pretrained_weights, map_location="cpu", weights_only=False)
-        if self.ckpt_key:
-            state_dict = state_dict[self.ckpt_key]
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="module."
+        _log_main_process_info(f"Loading pretrained weights from: {self.pretrained_weights}")
+        state_dict = _load_checkpoint_state_dict(
+            self.pretrained_weights,
+            ckpt_key=self.ckpt_key,
         )
-        nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            state_dict, prefix="backbone."
-        )
-        state_dict, msg = update_state_dict(
-            model_dict=self.encoder.state_dict(), state_dict=state_dict
-        )
-        if distributed.is_main_process():
-            print(msg)
-        self.encoder.load_state_dict(state_dict, strict=False)
+        _apply_loaded_state_dict(self.encoder, state_dict)
 
     def build_encoder(self):
         encoder = vits_dinov2.__dict__[self.arch](**self.vit_kwargs)
         return encoder
 
     def get_transforms(self):
-        transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Resize(224),
-                transforms.CenterCrop(224),
-                make_normalize_transform(),
-            ]
+        transform = _compose_with_normalization(
+            transforms.ToTensor(),
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
         )
         return transform
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class UNI(FeatureExtractor):
@@ -506,8 +496,7 @@ class UNI(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class UNI2(FeatureExtractor):
@@ -538,8 +527,7 @@ class UNI2(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Virchow(FeatureExtractor):
@@ -551,28 +539,21 @@ class Virchow(FeatureExtractor):
         super(Virchow, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf-hub:paige-ai/Virchow",
-            pretrained=True,
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
         return encoder
 
     def forward(self, x):
-        output = self.encoder(x)
-        class_token = output[:, 0]  # size: 1 x 1280
-        patch_tokens = output[
+        encoded = self.encoder(x)
+        class_token = encoded[:, 0]  # size: 1 x 1280
+        patch_tokens = encoded[
             :, 1:
         ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
-        if self.mode == "cls":
-            output = {"embedding": class_token}
-        elif self.mode == "full":
-            embedding = torch.cat(
-                [class_token, patch_tokens.mean(1)], dim=-1
-            )  # size: 1 x 2560
-            output = {"embedding": embedding}
-        return output
+        embedding = _select_mode_embedding(class_token, patch_tokens, mode=self.mode)
+        return _embedding_output(embedding)
 
 
 class Virchow2(FeatureExtractor):
@@ -584,28 +565,21 @@ class Virchow2(FeatureExtractor):
         super(Virchow2, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf-hub:paige-ai/Virchow2",
-            pretrained=True,
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
         return encoder
 
     def forward(self, x):
-        output = self.encoder(x)
-        class_token = output[:, 0]  # size: 1 x 1280
-        patch_tokens = output[
+        encoded = self.encoder(x)
+        class_token = encoded[:, 0]  # size: 1 x 1280
+        patch_tokens = encoded[
             :, 5:
         ]  # size: 1 x 256 x 1280, tokens 1-4 are register tokens so we ignore those
-        if self.mode == "cls":
-            output = {"embedding": class_token}
-        elif self.mode == "full":
-            embedding = torch.cat(
-                [class_token, patch_tokens.mean(1)], dim=-1
-            )  # size: 1 x 2560
-            output = {"embedding": embedding}
-        return output
+        embedding = _select_mode_embedding(class_token, patch_tokens, mode=self.mode)
+        return _embedding_output(embedding)
 
 
 class ProvGigaPath(FeatureExtractor):
@@ -614,16 +588,14 @@ class ProvGigaPath(FeatureExtractor):
         super(ProvGigaPath, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf_hub:prov-gigapath/prov-gigapath",
-            pretrained=True,
         )
         return encoder
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Hoptimus0(FeatureExtractor):
@@ -632,9 +604,8 @@ class Hoptimus0(FeatureExtractor):
         super(Hoptimus0, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf-hub:bioptimus/H-optimus-0",
-            pretrained=True,
             init_values=1e-5,
             dynamic_img_size=False,
         )
@@ -642,8 +613,7 @@ class Hoptimus0(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Hoptimus1(FeatureExtractor):
@@ -652,9 +622,8 @@ class Hoptimus1(FeatureExtractor):
         super(Hoptimus1, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf-hub:bioptimus/H-optimus-1",
-            pretrained=True,
             init_values=1e-5,
             dynamic_img_size=False,
         )
@@ -662,8 +631,7 @@ class Hoptimus1(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Hoptimus0Mini(FeatureExtractor):
@@ -675,28 +643,21 @@ class Hoptimus0Mini(FeatureExtractor):
         super(Hoptimus0Mini, self).__init__()
 
     def build_encoder(self):
-        encoder = timm.create_model(
+        encoder = _build_timm_hub_encoder(
             "hf-hub:bioptimus/H0-mini",
-            pretrained=True,
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
         return encoder
 
     def forward(self, x):
-        output = self.encoder(x)
-        cls_features = output[:, 0]  # size: 1 x 768
-        patch_token_features = output[
+        encoded = self.encoder(x)
+        cls_features = encoded[:, 0]  # size: 1 x 768
+        patch_token_features = encoded[
             :, self.encoder.num_prefix_tokens :
         ]  # size: 1 x 256 x 768
-        if self.mode == "cls":
-            output = {"embedding": cls_features}
-        elif self.mode == "full":
-            embedding = torch.cat(
-                [cls_features, patch_token_features.mean(1)], dim=-1
-            )  # size: 1 x 1536
-            output = {"embedding": embedding}
-        return output
+        embedding = _select_mode_embedding(cls_features, patch_token_features, mode=self.mode)
+        return _embedding_output(embedding)
 
 
 class CONCH(FeatureExtractor):
@@ -719,8 +680,7 @@ class CONCH(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder.encode_image(x, proj_contrast=False, normalize=False)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class MUSK(FeatureExtractor):
@@ -757,8 +717,7 @@ class MUSK(FeatureExtractor):
             ms_aug=True,
             return_global=True,
         )[0]
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class PhikonV2(FeatureExtractor):
@@ -774,8 +733,7 @@ class PhikonV2(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x).last_hidden_state[:, 0, :]
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Kaiko(FeatureExtractor):
@@ -814,8 +772,7 @@ class Kaiko(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Midnight12k(FeatureExtractor):
@@ -840,8 +797,7 @@ class Midnight12k(FeatureExtractor):
         tensor = self.encoder(x).last_hidden_state
         cls_embedding, patch_embeddings = tensor[:, 0, :], tensor[:, 1:, :]
         embedding = torch.cat([cls_embedding, patch_embeddings.mean(1)], dim=-1)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class Hibou(FeatureExtractor):
@@ -863,8 +819,7 @@ class Hibou(FeatureExtractor):
 
     def forward(self, x):
         embedding = self.encoder(x).last_hidden_state[:, 0, :]
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class RegionFeatureExtractor(nn.Module):
@@ -890,8 +845,7 @@ class RegionFeatureExtractor(nn.Module):
         embedding = rearrange(
             tile_embedding, "(b p) f -> b p f", b=B
         )  # [B, num_tiles, features_dim]
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class SlideFeatureExtractor(nn.Module):
@@ -944,8 +898,7 @@ class ProvGigaPathSlide(SlideFeatureExtractor):
         tile_features = tile_features.unsqueeze(0)
         output = self.slide_encoder(tile_features, tile_coordinates)
         embedding = output[0].squeeze()
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
 
 class TITAN(SlideFeatureExtractor):
@@ -964,8 +917,7 @@ class TITAN(SlideFeatureExtractor):
 
     def forward(self, x):
         embedding = self.tile_encoder(x)
-        output = {"embedding": embedding}
-        return output
+        return _embedding_output(embedding)
 
     def forward_slide(self, tile_features, tile_coordinates, tile_size_lv0, **kwargs):
         tile_features = tile_features.unsqueeze(0)
@@ -973,8 +925,7 @@ class TITAN(SlideFeatureExtractor):
         embedding = self.slide_encoder.encode_slide_from_patch_features(
             tile_features, tile_coordinates.long(), tile_size_lv0
         )
-        output = {"embedding": embedding.squeeze(0)}
-        return output
+        return _embedding_output(embedding.squeeze(0))
 
 
 class PRISM(SlideFeatureExtractor):
@@ -995,7 +946,6 @@ class PRISM(SlideFeatureExtractor):
         embedding = reprs["image_embedding"].squeeze(0)  # [1280]
         if self.return_latents:
             latents = reprs["image_latents"].squeeze(0)  # [512, 1280]
-            output = {"embedding": embedding, "latents": latents}
+            return _embedding_output(embedding, latents=latents)
         else:
-            output = {"embedding": embedding}
-        return output
+            return _embedding_output(embedding)
