@@ -68,6 +68,29 @@ def test_load_slide_manifest_requires_hs2p_schema(monkeypatch, tmp_path: Path):
         helper.load_slide_manifest(legacy_manifest)
 
 
+def test_load_slide_manifest_preserves_optional_spacing_at_level_0(monkeypatch, tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+    monkeypatch.setattr(
+        helper,
+        "_hs2p_exports",
+        lambda: {"SlideSpec": SimpleNamespace},
+    )
+
+    manifest = tmp_path / "slides.csv"
+    manifest.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,0.25\n"
+        "slide-2,/data/slide-2.svs,,\n",
+        encoding="utf-8",
+    )
+
+    slides = helper.load_slide_manifest(manifest)
+
+    assert [slide.sample_id for slide in slides] == ["slide-1", "slide-2"]
+    assert slides[0].spacing_at_level_0 == pytest.approx(0.25)
+    assert slides[1].spacing_at_level_0 is None
+
+
 def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 
@@ -86,6 +109,7 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
         "sample_id",
         "image_path",
         "mask_path",
+        "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
         "tiles_npz_path",

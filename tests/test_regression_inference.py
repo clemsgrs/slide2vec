@@ -1,8 +1,10 @@
 import ast
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from slide2vec.api import (
@@ -22,6 +24,21 @@ from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
+def make_slide(
+    sample_id: str,
+    *,
+    image_path: Path | None = None,
+    mask_path: Path | None = None,
+    spacing_at_level_0: float | None = None,
+):
+    return SimpleNamespace(
+        sample_id=sample_id,
+        image_path=image_path or Path(f"/tmp/{sample_id}.svs"),
+        mask_path=mask_path,
+        spacing_at_level_0=spacing_at_level_0,
+    )
+
 def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
     monkeypatch,
     tmp_path: Path,
@@ -29,7 +46,7 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     import slide2vec.inference as inference
 
     model = Model.from_pretrained("virchow2")
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -70,7 +87,7 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
 def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_helper(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
 
     monkeypatch.setattr(
@@ -112,7 +129,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
     import slide2vec.inference as inference
 
     model = Model.from_pretrained("virchow2", level="slide")
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="npz", save_tile_embeddings=True)
 
@@ -233,7 +250,7 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
 def test_run_pipeline_local_branch_uses_collect_local_pipeline_artifacts(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide_record = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide_record = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0]),
         y=np.array([1]),
@@ -284,12 +301,91 @@ def test_run_pipeline_local_branch_uses_collect_local_pipeline_artifacts(monkeyp
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
 
+
+def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["slides"] = list(slides)
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setitem(sys.modules, "hs2p", SimpleNamespace(tile_slides=fake_tile_slides))
+    monkeypatch.setattr(
+        inference,
+        "_build_hs2p_configs",
+        lambda preprocessing: ("tiling", "segmentation", "filtering", "qc", None, False),
+    )
+
+    slide = inference._coerce_slide_spec(
+        {
+            "sample_id": "slide-a",
+            "image_path": "/tmp/slide-a.svs",
+            "spacing_at_level_0": 0.25,
+        }
+    )
+
+    inference._tile_slides(
+        [slide],
+        PreprocessingConfig(),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["slides"][0].spacing_at_level_0 == pytest.approx(0.25)
+
+
+def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+
+    slide = make_slide("slide-a", spacing_at_level_0=0.25)
+
+    inference._prepare_tiled_slides(
+        [slide],
+        PreprocessingConfig(),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    recorded = pd.read_csv(process_list_path)
+    assert recorded.loc[0, "spacing_at_level_0"] == pytest.approx(0.25)
+
+
+def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+
+    slide_records, tiling_results = inference.load_successful_tiled_slides(tmp_path)
+
+    assert len(slide_records) == 1
+    assert slide_records[0].spacing_at_level_0 == pytest.approx(0.25)
+    assert len(tiling_results) == 1
+
 def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(monkeypatch, tmp_path: Path):
     from contextlib import contextmanager
 
     import slide2vec.inference as inference
 
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -350,7 +446,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
 def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
     import slide2vec.inference as inference
 
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
     expected = [
         EmbeddedSlide(
@@ -390,7 +486,7 @@ def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
 def test_select_embedding_path_uses_single_slide_distributed_when_one_slide(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
     expected = EmbeddedSlide(
         sample_id="slide-a",
@@ -429,8 +525,8 @@ def test_select_embedding_path_uses_multi_slide_distributed_when_multiple_slides
     import slide2vec.inference as inference
 
     slides = [
-        inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs")),
-        inference.SlideRecord(sample_id="slide-b", image_path=Path("/tmp/slide-b.svs")),
+        make_slide("slide-a"),
+        make_slide("slide-b"),
     ]
     tiling_results = [
         SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224),
@@ -477,7 +573,7 @@ def test_inference_embed_tiles_requires_output_dir_before_loading_runtime(monkey
 def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_outputs():
     import slide2vec.inference as inference
 
-    slide = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -557,7 +653,7 @@ def test_setup_distributed_helper_has_been_removed():
 def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide_record = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide_record = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -614,7 +710,7 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
 def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_false(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide_record = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide_record = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -659,7 +755,7 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
 def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    slide_record = inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs"))
+    slide_record = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
         y=np.array([2, 3]),
@@ -707,8 +803,8 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
     import slide2vec.inference as inference
 
     slides = [
-        inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs")),
-        inference.SlideRecord(sample_id="slide-b", image_path=Path("/tmp/slide-b.svs")),
+        make_slide("slide-a"),
+        make_slide("slide-b"),
     ]
     tiling_results = [
         SimpleNamespace(x=np.array([0, 1, 2]), y=np.array([0, 1, 2]), tile_size_lv0=224),
@@ -767,10 +863,10 @@ def test_assign_slides_to_ranks_balances_by_tile_count():
     import slide2vec.inference as inference
 
     slides = [
-        inference.SlideRecord(sample_id="slide-a", image_path=Path("/tmp/slide-a.svs")),
-        inference.SlideRecord(sample_id="slide-b", image_path=Path("/tmp/slide-b.svs")),
-        inference.SlideRecord(sample_id="slide-c", image_path=Path("/tmp/slide-c.svs")),
-        inference.SlideRecord(sample_id="slide-d", image_path=Path("/tmp/slide-d.svs")),
+        make_slide("slide-a"),
+        make_slide("slide-b"),
+        make_slide("slide-c"),
+        make_slide("slide-d"),
     ]
     tiling_results = [
         SimpleNamespace(x=np.arange(9), y=np.arange(9), tile_size_lv0=224),

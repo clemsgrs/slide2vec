@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
 
 if TYPE_CHECKING:
-    from slide2vec.inference import LoadedModel, SlideRecord
+    from hs2p import SlideSpec
+    from slide2vec.inference import LoadedModel
 else:
     LoadedModel = Any
-    SlideRecord = Any
+    SlideSpec = Any
 
 
 DEFAULT_LEVEL_BY_NAME = {
@@ -29,9 +30,10 @@ class SlideLike(Protocol):
     sample_id: str
     image_path: PathLike
     mask_path: PathLike | None
+    spacing_at_level_0: float | None
 
 
-SlideInput = PathLike | Mapping[str, object] | SlideLike | SlideRecord
+SlideInput = PathLike | Mapping[str, object] | SlideLike | SlideSpec
 SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
@@ -237,18 +239,20 @@ class Model:
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
         mask_path: PathLike | None = None,
+        spacing_at_level_0: float | None = None,
     ) -> EmbeddedSlide:
         ...
 
     @overload
     def embed_slide(
         self,
-        slide: Mapping[str, object] | SlideLike | SlideRecord,
+        slide: Mapping[str, object] | SlideLike | SlideSpec,
         *,
         preprocessing: PreprocessingConfig,
         execution: ExecutionOptions | None = None,
         sample_id: None = None,
         mask_path: None = None,
+        spacing_at_level_0: None = None,
     ) -> EmbeddedSlide:
         ...
 
@@ -260,15 +264,19 @@ class Model:
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
         mask_path: PathLike | None = None,
+        spacing_at_level_0: float | None = None,
     ) -> EmbeddedSlide:
         if isinstance(slide, (str, Path)):
             slide = {
                 "sample_id": sample_id or Path(slide).stem,
                 "image_path": Path(slide),
                 "mask_path": Path(mask_path) if mask_path is not None else None,
+                "spacing_at_level_0": spacing_at_level_0,
             }
-        elif sample_id is not None or mask_path is not None:
-            raise ValueError("sample_id and mask_path overrides are only supported when slide is a path-like input")
+        elif sample_id is not None or mask_path is not None or spacing_at_level_0 is not None:
+            raise ValueError(
+                "sample_id, mask_path, and spacing_at_level_0 overrides are only supported when slide is a path-like input"
+            )
         return self.embed_slides(
             [slide],
             preprocessing=preprocessing,

@@ -21,6 +21,18 @@ BASE_PROCESS_COLUMNS = (
 )
 
 
+def _optional_path(value: Any) -> Path | None:
+    if value is None or pd.isna(value):
+        return None
+    return Path(value)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
 def _hs2p_exports() -> dict[str, Any]:
     from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
 
@@ -53,20 +65,29 @@ def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
         if "mask_path" in df.columns
         else pd.Series([None] * len(df), index=df.index)
     )
+    spacing_series = (
+        df["spacing_at_level_0"]
+        if "spacing_at_level_0" in df.columns
+        else pd.Series([None] * len(df), index=df.index)
+    )
     hs2p = _hs2p_exports()
     slide_spec = hs2p["SlideSpec"]
     return [
         slide_spec(
             sample_id=str(sample_id),
             image_path=Path(image_path),
-            mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
+            mask_path=_optional_path(mask_path),
+            spacing_at_level_0=_optional_float(spacing_at_level_0),
         )
-        for sample_id, image_path, mask_path in zip(
+        for sample_id, image_path, mask_path, spacing_at_level_0 in zip(
             sample_ids.tolist(),
             df["image_path"].tolist(),
             mask_series.tolist(),
+            spacing_series.tolist(),
         )
     ]
+
+
 def load_process_df(
     process_list_path: str | Path,
     *,
@@ -82,6 +103,8 @@ def load_process_df(
             f"{process_list_path}; missing required columns: {', '.join(missing)}"
         )
     needs_feature_status = include_feature_status or include_aggregation_status
+    if "spacing_at_level_0" not in df.columns:
+        df["spacing_at_level_0"] = [None] * len(df)
     if needs_feature_status and "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
     if include_aggregation_status and "aggregation_status" not in df.columns:
@@ -90,6 +113,7 @@ def load_process_df(
         "sample_id",
         "image_path",
         "mask_path",
+        "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
         "tiles_npz_path",

@@ -47,14 +47,17 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 
 ### Input Manifest
 
-Manifest-driven runs use the schema below. `mask_path` is optional.
+Manifest-driven runs use the schema below. `mask_path` and `spacing_at_level_0` are optional.
 
 ```csv
-sample_id,image_path,mask_path
-slide-1,/path/to/slide-1.svs,/path/to/mask-1.png
-slide-2,/path/to/slide-2.svs,
+sample_id,image_path,mask_path,spacing_at_level_0
+slide-1,/path/to/slide-1.svs,/path/to/mask-1.png,0.25
+slide-2,/path/to/slide-2.svs,,
 ...
 ```
+
+Use `spacing_at_level_0` when the slide file reports a missing or incorrect level-0 spacing and you want to override it.
+
 
 ### Outputs
 

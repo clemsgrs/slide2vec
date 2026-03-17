@@ -34,13 +34,15 @@ This command:
 
 ## Input Manifest
 
-The manifest must use the HS2P schema. `mask_path` is optional.
+The manifest must use the hs2p schema. `mask_path` and `spacing_at_level_0` are optional.
 
 ```csv
-sample_id,image_path,mask_path
-slide-1,/path/to/slide-1.svs,/path/to/mask-1.png
-slide-2,/path/to/slide-2.svs,
+sample_id,image_path,mask_path,spacing_at_level_0
+slide-1,/path/to/slide-1.svs,/path/to/mask-1.png,0.25
+slide-2,/path/to/slide-2.svs,,
 ```
+
+Use `spacing_at_level_0` when you need to override the slide's native level-0 spacing metadata for tiling.
 
 Set `csv:` in your config file to point to this manifest.
 
@@ -115,6 +117,18 @@ The CLI writes explicit artifact directories under the run output directory:
 - optional `slide_latents/<sample_id>.pt` or `.npz`
 - `process_list.csv`
 - the resolved saved config file for the run
+- `logs/` with the main log plus distributed worker stdout/stderr captures when multi-GPU workers are used
+
+## Progress UX
+
+When stdout is an interactive terminal, the CLI shows live `rich` progress for:
+
+- tiling discovery and completion
+- overall slide embedding progress
+- current-slide tile or region progress
+- slide-level aggregation when the model pools tile features into slide embeddings
+
+When stdout is not interactive, the CLI falls back to plain text stage updates and summaries.
 
 ## Typical Workflows
 
