@@ -1,10 +1,11 @@
 import os
+import logging
 from typing import Callable, Optional
-import warnings
 
 from torch import Tensor, nn
 import torch.nn.functional as F
 
+logger = logging.getLogger("slide2vec")
 
 class SwiGLUFFN(nn.Module):
     def __init__(
@@ -35,15 +36,15 @@ try:
         from xformers.ops import SwiGLU
 
         XFORMERS_AVAILABLE = True
-        warnings.warn("xFormers is available (SwiGLU)")
+        logger.debug("xFormers is available (SwiGLU)")
     else:
-        warnings.warn("xFormers is disabled (SwiGLU)")
+        logger.debug("xFormers is disabled (SwiGLU)")
         raise ImportError
 except ImportError:
     SwiGLU = SwiGLUFFN
     XFORMERS_AVAILABLE = False
 
-    warnings.warn("xFormers is not available (SwiGLU)")
+    logger.debug("xFormers is not available (SwiGLU)")
 
 
 class SwiGLUFFNFused(SwiGLU):

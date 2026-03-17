@@ -4,6 +4,7 @@ huggingface-hub>=0.30.0,<1.0
 numpy<2
 pandas
 pillow
+rich
 tqdm
 wandb
 torch>=2.3,<2.8

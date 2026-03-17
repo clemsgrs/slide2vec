@@ -1,6 +1,7 @@
 import argparse
 
 from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+import slide2vec.progress as progress
 
 
 def get_args_parser(add_help: bool = True):
@@ -44,10 +45,12 @@ def main(argv=None):
     parser = get_args_parser(add_help=True)
     args = parser.parse_args(argv)
     pipeline, cfg = build_model_and_pipeline(args)
-    return pipeline.run(
-        manifest_path=cfg.csv,
-        tiling_only=args.tiling_only,
-    )
+    reporter = progress.create_cli_progress_reporter(output_dir=getattr(cfg, "output_dir", None))
+    with progress.activate_progress_reporter(reporter):
+        return pipeline.run(
+            manifest_path=cfg.csv,
+            tiling_only=args.tiling_only,
+        )
 
 
 def _setup_cli_config(args):
