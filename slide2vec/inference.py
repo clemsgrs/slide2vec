@@ -42,6 +42,7 @@ class SlideRecord:
     sample_id: str
     image_path: Path
     mask_path: Path | None = None
+    spacing_at_level_0: float | None = None
 
 
 def load_model(
