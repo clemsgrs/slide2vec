@@ -5,6 +5,20 @@ import sys
 from typing import Optional
 
 import slide2vec.distributed as distributed
+from slide2vec.progress import emit_progress_log
+
+
+class _ProgressAwareStreamHandler(logging.Handler):
+    def __init__(self, *, stream) -> None:
+        super().__init__()
+        self.stream = stream
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            emit_progress_log(message, stream=self.stream)
+        except Exception:
+            self.handleError(record)
 
 
 # So that calling _configure_logger multiple times won't add many handlers
@@ -49,7 +63,7 @@ def _configure_logger(
 
     # stdout logging for main worker only
     if distributed.is_main_process():
-        handler = logging.StreamHandler(stream=sys.stdout)
+        handler = _ProgressAwareStreamHandler(stream=sys.stdout)
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(formatter)
         logger.addHandler(handler)

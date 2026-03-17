@@ -12,12 +12,16 @@ import pytest
 class RecordingReporter:
     def __init__(self):
         self.events = []
+        self.log_lines = []
 
     def emit(self, event):
         self.events.append(event)
 
     def close(self):
         return None
+
+    def write_log(self, message, *, stream=None):
+        self.log_lines.append(message)
 
 
 def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatch, tmp_path: Path):
@@ -253,3 +257,43 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
         )
 
     assert [event.kind for event in reporter.events] == ["embedding.slide.started"]
+
+
+def test_progress_aware_log_handler_routes_logs_through_active_reporter():
+    import logging
+
+    import slide2vec.progress as progress
+    import slide2vec.utils.log_utils as log_utils
+
+    reporter = RecordingReporter()
+    handler = log_utils._ProgressAwareStreamHandler(stream=io.StringIO())
+    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+    logger = logging.getLogger("slide2vec.progress-test")
+    logger.handlers = []
+    logger.propagate = False
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+    with progress.activate_progress_reporter(reporter):
+        logger.info("hello from logger")
+
+    assert reporter.log_lines == ["INFO hello from logger"]
+
+
+def test_embedding_summary_rows_match_tiling_style():
+    import slide2vec.progress as progress
+
+    rows = progress._embedding_summary_rows(
+        {
+            "slide_count": 20,
+            "slides_completed": 20,
+            "tile_artifacts": 20,
+            "slide_artifacts": 0,
+        }
+    )
+
+    assert rows == [
+        ("Slides", "20"),
+        ("Completed", "20"),
+        ("Failed", "0"),
+    ]

@@ -34,6 +34,10 @@ class NullProgressReporter:
     def close(self) -> None:
         return None
 
+    def write_log(self, message: str, *, stream=None) -> None:
+        target = stream or sys.stdout
+        print(message, file=target, flush=True)
+
 
 class JsonlProgressReporter:
     def __init__(self, path: str | Path, *, rank: int | None = None) -> None:
@@ -53,6 +57,10 @@ class JsonlProgressReporter:
 
     def close(self) -> None:
         self._handle.close()
+
+    def write_log(self, message: str, *, stream=None) -> None:
+        target = stream or sys.stdout
+        print(message, file=target, flush=True)
 
 
 class PlainTextCliProgressReporter:
@@ -76,6 +84,9 @@ class PlainTextCliProgressReporter:
 
     def close(self) -> None:
         return None
+
+    def write_log(self, message: str, *, stream=None) -> None:
+        print(message, file=stream or self.stream, flush=True)
 
     def _format_line(self, kind: str, payload: dict[str, Any]) -> str | None:
         if kind == "run.started":
@@ -232,11 +243,7 @@ class RichCliProgressReporter:
         if kind == "embedding.finished":
             self._print_summary(
                 "Embedding Summary",
-                [
-                    ("Slides", f"{payload['slides_completed']}/{payload['slide_count']}"),
-                    ("Tile artifacts", str(payload["tile_artifacts"])),
-                    ("Slide artifacts", str(payload["slide_artifacts"])),
-                ],
+                _embedding_summary_rows(payload),
             )
             return
         if kind == "run.finished":
@@ -271,6 +278,9 @@ class RichCliProgressReporter:
         for key, value in rows:
             table.add_row(key, value)
         self.console.print(Panel.fit(table, title=title, border_style="blue"))
+
+    def write_log(self, message: str, *, stream=None) -> None:
+        self.console.print(message, markup=False, highlight=False, soft_wrap=True)
 
 
 _NULL_REPORTER = NullProgressReporter()
@@ -312,9 +322,29 @@ def emit_progress_event(event: ProgressEvent) -> None:
     get_progress_reporter().emit(event)
 
 
+def emit_progress_log(message: str, *, stream=None) -> None:
+    reporter = get_progress_reporter()
+    if hasattr(reporter, "write_log"):
+        reporter.write_log(message, stream=stream)
+        return
+    target = stream or sys.stdout
+    print(message, file=target, flush=True)
+
+
 def ranked_progress_events_path(base_path: str | Path, rank: int) -> Path:
     path = Path(base_path)
     return path.with_name(f"{path.stem}.rank{rank}{path.suffix}")
+
+
+def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
+    slide_count = int(payload["slide_count"])
+    completed = int(payload["slides_completed"])
+    failed = max(0, slide_count - completed)
+    return [
+        ("Slides", str(slide_count)),
+        ("Completed", str(completed)),
+        ("Failed", str(failed)),
+    ]
 
 
 def read_progress_events(
