@@ -3,10 +3,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
@@ -24,7 +27,18 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
+from slide2vec.progress import (
+    emit_progress,
+    emit_progress_event,
+    read_progress_events,
+    read_tiling_progress_snapshot,
+)
 from slide2vec.utils.coordinates import coordinate_arrays, coordinate_matrix
+
+if TYPE_CHECKING:
+    from hs2p import SlideSpec
+else:
+    SlideSpec = Any
 
 
 @dataclass
@@ -36,12 +50,39 @@ class LoadedModel:
     feature_dim: int
     device: Any
 
+def _slide_spec_cls():
+    try:
+        from hs2p import SlideSpec
+    except ImportError:
+        return SimpleNamespace
+    return SlideSpec
 
-@dataclass(frozen=True)
-class SlideRecord:
-    sample_id: str
-    image_path: Path
-    mask_path: Path | None = None
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        if np.isnan(value):
+            return None
+    except TypeError:
+        pass
+    return float(value)
+
+
+def _make_slide_spec(
+    *,
+    sample_id: str,
+    image_path: Path | str,
+    mask_path: Path | str | None = None,
+    spacing_at_level_0: float | None = None,
+):
+    slide_spec_cls = _slide_spec_cls()
+    return slide_spec_cls(
+        sample_id=str(sample_id),
+        image_path=Path(image_path),
+        mask_path=Path(mask_path) if mask_path is not None else None,
+        spacing_at_level_0=_optional_float(spacing_at_level_0),
+    )
 
 
 def load_model(
@@ -103,42 +144,74 @@ def embed_slides(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
 ) -> list[EmbeddedSlide]:
-    slide_records = [_coerce_slide_record(slide) for slide in slides]
+    slide_records = [_coerce_slide_spec(slide) for slide in slides]
     if not slide_records:
         raise ValueError("At least one slide is required")
     if execution.num_gpus > 1:
         _validate_multi_gpu_execution(model, execution)
+    emit_progress(
+        "run.started",
+        model_name=model.name,
+        level=model.level,
+        device_mode=_describe_device_mode(model, execution),
+        slide_count=len(slide_records),
+        output_dir=str(execution.output_dir or ""),
+    )
     with _embedding_work_dir(execution.output_dir) as work_dir:
-        prepared_slides, tiling_results, _process_list_path = _prepare_tiled_slides(
-            slide_records,
-            preprocessing,
-            output_dir=work_dir,
-            num_workers=execution.num_workers,
-        )
-        embedded_slides = _select_embedding_path(
-            model=model,
-            slide_records=prepared_slides,
-            tiling_results=tiling_results,
-            preprocessing=preprocessing,
-            execution=execution,
-            work_dir=work_dir,
-        )
-        if execution.output_dir is not None:
-            for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
-                _persist_embedded_slide(
-                    model,
-                    embedded_slide,
-                    tiling_result,
-                    preprocessing=preprocessing,
-                    execution=execution,
-                )
-        return embedded_slides
+        try:
+            emit_progress("tiling.started", slide_count=len(slide_records))
+            prepared_slides, tiling_results, process_list_path = _prepare_tiled_slides(
+                slide_records,
+                preprocessing,
+                output_dir=work_dir,
+                num_workers=execution.num_workers,
+            )
+            _emit_tiling_finished(
+                process_list_path,
+                expected_total=len(slide_records),
+                successful_slides=prepared_slides,
+                tiling_results=tiling_results,
+            )
+            emit_progress("embedding.started", slide_count=len(prepared_slides))
+            embedded_slides = _select_embedding_path(
+                model=model,
+                slide_records=prepared_slides,
+                tiling_results=tiling_results,
+                preprocessing=preprocessing,
+                execution=execution,
+                work_dir=work_dir,
+            )
+            if execution.output_dir is not None:
+                for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
+                    _persist_embedded_slide(
+                        model,
+                        embedded_slide,
+                        tiling_result,
+                        preprocessing=preprocessing,
+                        execution=execution,
+                    )
+            emit_progress(
+                "embedding.finished",
+                slide_count=len(prepared_slides),
+                slides_completed=len(embedded_slides),
+                tile_artifacts=0,
+                slide_artifacts=sum(1 for slide in embedded_slides if slide.slide_embedding is not None),
+            )
+            emit_progress(
+                "run.finished",
+                output_dir=str(work_dir),
+                logs_dir=str(work_dir / "logs"),
+            )
+            return embedded_slides
+        except Exception as exc:
+            emit_progress("run.failed", stage="embedding", error=str(exc))
+            raise
 
 
 def _select_embedding_path(
     *,
     model,
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     tiling_results,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
@@ -185,7 +258,7 @@ def embed_tiles(
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
 
     loaded = model._load_backend()
-    slide_records = [_coerce_slide_record(slide) for slide in slides]
+    slide_records = [_coerce_slide_spec(slide) for slide in slides]
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
     torch = _import_torch()
     from slide2vec.data import TileDataset
@@ -213,7 +286,14 @@ def embed_tiles(
             num_workers=execution.num_workers,
             pin_memory=str(loaded.device).startswith("cuda"),
         )
-        features = _run_forward_pass(dataloader, loaded, autocast_context)
+        features = _run_forward_pass(
+            dataloader,
+            loaded,
+            autocast_context,
+            sample_id=slide.sample_id,
+            total_items=len(dataset),
+            unit_label="tile",
+        )
         metadata = _build_tile_embedding_metadata(
             model,
             tiling_result=tiling_result,
@@ -307,50 +387,100 @@ def run_pipeline(
 
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    successful_slides, tiling_results, process_list_path = _prepare_tiled_slides(
-        slide_records,
-        preprocessing,
-        output_dir=output_dir,
-        num_workers=execution.num_workers,
+    emit_progress(
+        "run.started",
+        model_name=model.name,
+        level=model.level,
+        device_mode=_describe_device_mode(model, execution),
+        slide_count=len(slide_records),
+        output_dir=str(output_dir),
     )
-
-    if tiling_only:
-        return RunResult(tile_artifacts=[], slide_artifacts=[], process_list_path=process_list_path)
-
-    if execution.num_gpus > 1:
-        tile_artifacts, slide_artifacts = _collect_distributed_pipeline_artifacts(
-            model=model,
+    try:
+        emit_progress("tiling.started", slide_count=len(slide_records))
+        successful_slides, tiling_results, process_list_path = _prepare_tiled_slides(
+            slide_records,
+            preprocessing,
+            output_dir=output_dir,
+            num_workers=execution.num_workers,
+        )
+        _emit_tiling_finished(
+            process_list_path,
+            expected_total=len(slide_records),
             successful_slides=successful_slides,
-            process_list_path=process_list_path,
+            tiling_results=tiling_results,
+        )
+
+        if tiling_only:
+            emit_progress(
+                "run.finished",
+                output_dir=str(output_dir),
+                logs_dir=str(output_dir / "logs"),
+            )
+            return RunResult(tile_artifacts=[], slide_artifacts=[], process_list_path=process_list_path)
+
+        emit_progress("embedding.started", slide_count=len(successful_slides))
+
+        if execution.num_gpus > 1:
+            tile_artifacts, slide_artifacts = _collect_distributed_pipeline_artifacts(
+                model=model,
+                successful_slides=successful_slides,
+                process_list_path=process_list_path,
+                preprocessing=preprocessing,
+                execution=execution,
+                output_dir=output_dir,
+            )
+            emit_progress(
+                "embedding.finished",
+                slide_count=len(successful_slides),
+                slides_completed=len(successful_slides),
+                tile_artifacts=len(tile_artifacts),
+                slide_artifacts=len(slide_artifacts),
+            )
+            emit_progress(
+                "run.finished",
+                output_dir=str(output_dir),
+                logs_dir=str(output_dir / "logs"),
+            )
+            return RunResult(
+                tile_artifacts=tile_artifacts,
+                slide_artifacts=slide_artifacts,
+                process_list_path=process_list_path,
+            )
+
+        embedded_slides = _compute_embedded_slides(
+            model,
+            successful_slides,
+            tiling_results,
             preprocessing=preprocessing,
             execution=execution,
-            output_dir=output_dir,
+        )
+        tile_artifacts, slide_artifacts = _collect_local_pipeline_artifacts(
+            model=model,
+            embedded_slides=embedded_slides,
+            tiling_results=tiling_results,
+            preprocessing=preprocessing,
+            execution=execution,
+        )
+        emit_progress(
+            "embedding.finished",
+            slide_count=len(successful_slides),
+            slides_completed=len(embedded_slides),
+            tile_artifacts=len(tile_artifacts),
+            slide_artifacts=len(slide_artifacts),
+        )
+        emit_progress(
+            "run.finished",
+            output_dir=str(output_dir),
+            logs_dir=str(output_dir / "logs"),
         )
         return RunResult(
             tile_artifacts=tile_artifacts,
             slide_artifacts=slide_artifacts,
             process_list_path=process_list_path,
         )
-
-    embedded_slides = _compute_embedded_slides(
-        model,
-        successful_slides,
-        tiling_results,
-        preprocessing=preprocessing,
-        execution=execution,
-    )
-    tile_artifacts, slide_artifacts = _collect_local_pipeline_artifacts(
-        model=model,
-        embedded_slides=embedded_slides,
-        tiling_results=tiling_results,
-        preprocessing=preprocessing,
-        execution=execution,
-    )
-    return RunResult(
-        tile_artifacts=tile_artifacts,
-        slide_artifacts=slide_artifacts,
-        process_list_path=process_list_path,
-    )
+    except Exception as exc:
+        emit_progress("run.failed", stage="pipeline", error=str(exc))
+        raise
 
 
 def _collect_local_pipeline_artifacts(
@@ -381,7 +511,7 @@ def _collect_local_pipeline_artifacts(
 def _collect_distributed_pipeline_artifacts(
     *,
     model,
-    successful_slides: Sequence[SlideRecord],
+    successful_slides: Sequence[SlideSpec],
     process_list_path: Path,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
@@ -416,7 +546,7 @@ def _collect_distributed_pipeline_artifacts(
 
 def _compute_embedded_slides(
     model,
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     tiling_results,
     *,
     preprocessing: PreprocessingConfig,
@@ -425,6 +555,11 @@ def _compute_embedded_slides(
     loaded = model._load_backend()
     embedded_slides: list[EmbeddedSlide] = []
     for slide, tiling_result in zip(slide_records, tiling_results):
+        emit_progress(
+            "embedding.slide.started",
+            sample_id=slide.sample_id,
+            total_tiles=_num_tiles(tiling_result),
+        )
         tile_embeddings = _compute_tile_embeddings_for_slide(
             loaded,
             model,
@@ -433,6 +568,12 @@ def _compute_embedded_slides(
             preprocessing=preprocessing,
             execution=execution,
         )
+        if model.level == "slide":
+            emit_progress(
+                "aggregation.started",
+                sample_id=slide.sample_id,
+                total_tiles=_num_tiles(tiling_result),
+            )
         slide_embedding, latents = _aggregate_tile_embeddings_for_slide(
             loaded,
             model,
@@ -442,6 +583,12 @@ def _compute_embedded_slides(
             preprocessing=preprocessing,
             execution=execution,
         )
+        if model.level == "slide":
+            emit_progress(
+                "aggregation.finished",
+                sample_id=slide.sample_id,
+                has_latents=latents is not None,
+            )
         embedded_slides.append(
             _make_embedded_slide(
                 slide=slide,
@@ -451,13 +598,18 @@ def _compute_embedded_slides(
                 latents=latents,
             )
         )
+        emit_progress(
+            "embedding.slide.finished",
+            sample_id=slide.sample_id,
+            num_tiles=_num_tiles(tiling_result),
+        )
     return embedded_slides
 
 
 def _compute_tile_embeddings_for_slide(
     loaded: LoadedModel,
     model,
-    slide: SlideRecord,
+    slide: SlideSpec,
     tiling_result,
     *,
     preprocessing: PreprocessingConfig,
@@ -493,13 +645,20 @@ def _compute_tile_embeddings_for_slide(
         num_workers=execution.num_workers,
         pin_memory=str(loaded.device).startswith("cuda"),
     )
-    return _run_forward_pass(dataloader, loaded, autocast_context)
+    return _run_forward_pass(
+        dataloader,
+        loaded,
+        autocast_context,
+        sample_id=slide.sample_id,
+        total_items=len(dataset),
+        unit_label="region" if model.level == "region" else "tile",
+    )
 
 
 def _aggregate_tile_embeddings_for_slide(
     loaded: LoadedModel,
     model,
-    slide: SlideRecord,
+    slide: SlideSpec,
     tiling_result,
     tile_embeddings,
     *,
@@ -536,7 +695,7 @@ def _aggregate_tile_embeddings_for_slide(
 
 def _make_embedded_slide(
     *,
-    slide: SlideRecord,
+    slide: SlideSpec,
     tiling_result,
     tile_embeddings,
     slide_embedding=None,
@@ -681,13 +840,32 @@ def _create_region_transforms(base_transforms, backend_model):
         ]
     )
 
-def _run_forward_pass(dataloader, loaded: LoadedModel, autocast_context):
+def _run_forward_pass(
+    dataloader,
+    loaded: LoadedModel,
+    autocast_context,
+    *,
+    sample_id: str | None = None,
+    total_items: int | None = None,
+    unit_label: str = "tile",
+):
     torch = _import_torch()
     outputs = []
+    processed = 0
     with torch.inference_mode(), autocast_context:
         for _, image in dataloader:
             image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
-            outputs.append(loaded.model(image)["embedding"].detach().cpu())
+            embedding = loaded.model(image)["embedding"].detach().cpu()
+            outputs.append(embedding)
+            processed += int(embedding.shape[0])
+            if sample_id is not None:
+                emit_progress(
+                    "embedding.tile.progress",
+                    sample_id=sample_id,
+                    processed=processed,
+                    total=int(total_items or processed),
+                    unit=unit_label,
+                )
     if not outputs:
         return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
     return torch.cat(outputs, dim=0)
@@ -710,43 +888,55 @@ def _resolve_device(device: str, default_device):
     return torch.device(device)
 
 
-def _resolve_slides(*, slides=None, manifest_path: str | Path | None = None) -> list[SlideRecord]:
+def _describe_device_mode(model, execution: ExecutionOptions) -> str:
+    if getattr(model, "_requested_device", None) == "cpu":
+        return "cpu"
+    if execution.num_gpus and execution.num_gpus > 1:
+        return f"{execution.num_gpus} gpus"
+    return "gpu"
+
+
+def _resolve_slides(*, slides=None, manifest_path: str | Path | None = None) -> list[SlideSpec]:
     if slides is not None:
-        return [_coerce_slide_record(slide) for slide in slides]
+        return [_coerce_slide_spec(slide) for slide in slides]
     if manifest_path is None:
         return []
     from slide2vec.utils.tiling_io import load_slide_manifest
 
-    return [_coerce_slide_record(slide) for slide in load_slide_manifest(manifest_path)]
+    return [_coerce_slide_spec(slide) for slide in load_slide_manifest(manifest_path)]
 
 
-def _coerce_slide_record(slide) -> SlideRecord:
-    if isinstance(slide, SlideRecord):
+def _coerce_slide_spec(slide) -> SlideSpec:
+    slide_spec_cls = _slide_spec_cls()
+    if isinstance(slide, slide_spec_cls):
         return slide
     if isinstance(slide, (str, Path)):
         image_path = Path(slide)
-        return SlideRecord(
+        return _make_slide_spec(
             sample_id=image_path.stem,
             image_path=image_path,
             mask_path=None,
         )
     if isinstance(slide, dict):
-        return SlideRecord(
+        return _make_slide_spec(
             sample_id=str(slide["sample_id"]),
             image_path=Path(slide["image_path"]),
             mask_path=Path(slide["mask_path"]) if slide.get("mask_path") else None,
+            spacing_at_level_0=slide.get("spacing_at_level_0"),
         )
     sample_id = getattr(slide, "sample_id")
     image_path = getattr(slide, "image_path")
     mask_path = getattr(slide, "mask_path", None)
-    return SlideRecord(
+    spacing_at_level_0 = getattr(slide, "spacing_at_level_0", None)
+    return _make_slide_spec(
         sample_id=str(sample_id),
         image_path=Path(image_path),
         mask_path=Path(mask_path) if mask_path is not None else None,
+        spacing_at_level_0=spacing_at_level_0,
     )
 
 
-def _normalize_tiling_results(tiling_results, slides: Sequence[SlideRecord]):
+def _normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
     if isinstance(tiling_results, dict):
         return [tiling_results[slide.sample_id] for slide in slides]
     return list(tiling_results)
@@ -773,6 +963,33 @@ def _num_rows(data) -> int:
     return len(data)
 
 
+def _emit_tiling_finished(
+    process_list_path: Path,
+    *,
+    expected_total: int,
+    successful_slides: Sequence[SlideSpec],
+    tiling_results,
+) -> None:
+    snapshot = read_tiling_progress_snapshot(process_list_path, expected_total=expected_total)
+    if snapshot is None:
+        discovered_tiles = sum(_num_tiles(tiling_result) for tiling_result in tiling_results)
+        snapshot = SimpleNamespace(
+            total=expected_total,
+            completed=len(successful_slides),
+            failed=max(0, expected_total - len(successful_slides)),
+            pending=0,
+            discovered_tiles=discovered_tiles,
+        )
+    emit_progress(
+        "tiling.finished",
+        total=int(snapshot.total),
+        completed=int(snapshot.completed),
+        failed=int(snapshot.failed),
+        pending=int(snapshot.pending),
+        discovered_tiles=int(snapshot.discovered_tiles),
+    )
+
+
 def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
     if model.level == "slide":
         return bool(execution.save_tile_embeddings)
@@ -780,14 +997,21 @@ def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
 
 
 def _prepare_tiled_slides(
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     preprocessing: PreprocessingConfig,
     *,
     output_dir: Path,
     num_workers: int,
-) -> tuple[list[SlideRecord], list[Any], Path]:
-    _tile_slides(slide_records, preprocessing, output_dir=output_dir, num_workers=num_workers)
+) -> tuple[list[SlideSpec], list[Any], Path]:
     process_list_path = output_dir / "process_list.csv"
+    _tile_slides_with_progress(
+        slide_records,
+        preprocessing,
+        output_dir=output_dir,
+        num_workers=num_workers,
+        process_list_path=process_list_path,
+    )
+    _record_slide_metadata_in_process_list(process_list_path, slide_records)
     process_df = _load_process_df(process_list_path)
     tiling_results = []
     successful_slides = []
@@ -803,6 +1027,45 @@ def _prepare_tiled_slides(
     return successful_slides, tiling_results, process_list_path
 
 
+def _tile_slides_with_progress(
+    slide_records: Sequence[SlideSpec],
+    preprocessing: PreprocessingConfig,
+    *,
+    output_dir: Path,
+    num_workers: int,
+    process_list_path: Path,
+) -> None:
+    stop_event = threading.Event()
+    monitor = threading.Thread(
+        target=_monitor_tiling_progress,
+        args=(process_list_path, len(slide_records), stop_event),
+        daemon=True,
+    )
+    monitor.start()
+    try:
+        _tile_slides(slide_records, preprocessing, output_dir=output_dir, num_workers=num_workers)
+    finally:
+        stop_event.set()
+        monitor.join(timeout=1.0)
+
+
+def _monitor_tiling_progress(process_list_path: Path, expected_total: int, stop_event: threading.Event) -> None:
+    last_snapshot = None
+    while not stop_event.wait(0.25):
+        snapshot = read_tiling_progress_snapshot(process_list_path, expected_total=expected_total)
+        if snapshot is None or snapshot == last_snapshot:
+            continue
+        emit_progress(
+            "tiling.progress",
+            total=snapshot.total,
+            completed=snapshot.completed,
+            failed=snapshot.failed,
+            pending=snapshot.pending,
+            discovered_tiles=snapshot.discovered_tiles,
+        )
+        last_snapshot = snapshot
+
+
 @contextmanager
 def _embedding_work_dir(output_dir: Path | None):
     if output_dir is not None:
@@ -814,7 +1077,7 @@ def _embedding_work_dir(output_dir: Path | None):
         yield Path(tmp_dir)
 
 
-def _tile_slides(slides: Sequence[SlideRecord], preprocessing: PreprocessingConfig, *, output_dir: Path, num_workers: int):
+def _tile_slides(slides: Sequence[SlideSpec], preprocessing: PreprocessingConfig, *, output_dir: Path, num_workers: int):
     from hs2p import tile_slides
 
     tiling_cfg, segmentation_cfg, filtering_cfg, qc_cfg, read_tiles_from, resume = _build_hs2p_configs(preprocessing)
@@ -829,6 +1092,26 @@ def _tile_slides(slides: Sequence[SlideRecord], preprocessing: PreprocessingConf
         read_tiles_from=read_tiles_from,
         resume=resume,
     )
+
+
+def _record_slide_metadata_in_process_list(process_list_path: Path, slide_records: Sequence[SlideSpec]) -> None:
+    import pandas as pd
+
+    spacing_by_sample_id = {
+        slide.sample_id: slide.spacing_at_level_0
+        for slide in slide_records
+        if getattr(slide, "spacing_at_level_0", None) is not None
+    }
+    process_df = pd.read_csv(process_list_path)
+    if "spacing_at_level_0" not in process_df.columns:
+        process_df["spacing_at_level_0"] = [None] * len(process_df)
+    if spacing_by_sample_id:
+        mapped_spacing = process_df["sample_id"].astype(str).map(spacing_by_sample_id)
+        process_df["spacing_at_level_0"] = process_df["spacing_at_level_0"].where(
+            process_df["spacing_at_level_0"].notna(),
+            mapped_spacing,
+        )
+    process_df.to_csv(process_list_path, index=False)
 
 
 def _build_hs2p_configs(preprocessing: PreprocessingConfig):
@@ -923,7 +1206,7 @@ def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
 def _run_distributed_embedding_stage(
     model,
     *,
-    successful_slides: Sequence[SlideRecord],
+    successful_slides: Sequence[SlideSpec],
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     output_dir: Path,
@@ -931,10 +1214,13 @@ def _run_distributed_embedding_stage(
     if not successful_slides:
         return
     request_path = output_dir / "distributed_embedding_request.json"
+    progress_events_path = output_dir / "logs" / "pipeline_worker.progress.jsonl"
+    _reset_progress_event_logs(progress_events_path)
     request_payload = _build_pipeline_worker_request_payload(
         model,
         preprocessing,
         execution,
+        progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
     _run_torchrun_worker(
@@ -943,13 +1229,14 @@ def _run_distributed_embedding_stage(
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
+        progress_events_path=progress_events_path,
     )
 
 
 def _embed_single_slide_distributed(
     model,
     *,
-    slide: SlideRecord,
+    slide: SlideSpec,
     tiling_result,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
@@ -989,7 +1276,7 @@ def _embed_single_slide_distributed(
 def _embed_multi_slides_distributed(
     model,
     *,
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     tiling_results,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
@@ -1042,6 +1329,8 @@ def _run_distributed_direct_embedding_stage(
     assignments: dict[int, list[str]] | None = None,
 ) -> None:
     request_path = coordination_dir / "direct_embedding_request.json"
+    progress_events_path = output_dir / "logs" / "direct_embed_worker.progress.jsonl"
+    _reset_progress_event_logs(progress_events_path)
     request_payload = _build_direct_embed_worker_request_payload(
         model=model,
         preprocessing=preprocessing,
@@ -1050,6 +1339,7 @@ def _run_distributed_direct_embedding_stage(
         strategy=strategy,
         sample_id=sample_id,
         assignments=assignments,
+        progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
     _run_torchrun_worker(
@@ -1058,6 +1348,7 @@ def _run_distributed_direct_embedding_stage(
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed direct embedding failed",
+        progress_events_path=progress_events_path,
     )
 
 
@@ -1068,6 +1359,7 @@ def _run_torchrun_worker(
     output_dir: Path,
     request_path: Path,
     failure_title: str,
+    progress_events_path: Path | None = None,
 ) -> None:
     command = [
         sys.executable,
@@ -1081,18 +1373,45 @@ def _run_torchrun_worker(
         "--request-path",
         str(request_path),
     ]
-    completed = subprocess.run(
+    process = subprocess.Popen(
         command,
-        check=False,
         cwd=str(Path(__file__).resolve().parents[1]),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        bufsize=1,
     )
-    if completed.returncode != 0:
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    stdout_thread = threading.Thread(target=_drain_stream_to_buffer, args=(process.stdout, stdout_chunks), daemon=True)
+    stderr_thread = threading.Thread(target=_drain_stream_to_buffer, args=(process.stderr, stderr_chunks), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+    offsets: dict[Path, int] = {}
+    while process.poll() is None:
+        if progress_events_path is not None:
+            events, offsets = read_progress_events(progress_events_path, offsets)
+            for event in events:
+                emit_progress_event(event)
+        time.sleep(0.1)
+    if progress_events_path is not None:
+        events, offsets = read_progress_events(progress_events_path, offsets)
+        for event in events:
+            emit_progress_event(event)
+    returncode = process.wait()
+    stdout_thread.join(timeout=1.0)
+    stderr_thread.join(timeout=1.0)
+    stdout_text = "".join(stdout_chunks)
+    stderr_text = "".join(stderr_chunks)
+    stdout_log_path, stderr_log_path = _write_worker_logs(module, output_dir, stdout_text, stderr_text)
+    if returncode != 0:
         raise RuntimeError(
             f"{failure_title}.\n"
-            f"stdout:\n{completed.stdout}\n"
-            f"stderr:\n{completed.stderr}"
+            f"See logs:\n"
+            f"stdout: {stdout_log_path}\n"
+            f"stderr: {stderr_log_path}\n"
+            f"stdout:\n{stdout_text}\n"
+            f"stderr:\n{stderr_text}"
         )
 
 
@@ -1100,11 +1419,14 @@ def _build_pipeline_worker_request_payload(
     model,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
+    *,
+    progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
         "model": _serialize_model(model),
         "preprocessing": _serialize_preprocessing(preprocessing),
         "execution": _serialize_execution(execution),
+        "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
 
@@ -1117,6 +1439,7 @@ def _build_direct_embed_worker_request_payload(
     strategy: str,
     sample_id: str | None,
     assignments: dict[int, list[str]] | None,
+    progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
         "strategy": strategy,
@@ -1126,11 +1449,42 @@ def _build_direct_embed_worker_request_payload(
         "coordination_dir": str(coordination_dir),
         "sample_id": sample_id,
         "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
+        "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
 
+def _reset_progress_event_logs(progress_events_path: Path) -> None:
+    progress_events_path.parent.mkdir(parents=True, exist_ok=True)
+    for path in [progress_events_path, *progress_events_path.parent.glob(f"{progress_events_path.stem}.rank*{progress_events_path.suffix}")]:
+        if path.exists():
+            path.unlink()
+
+
+def _drain_stream_to_buffer(stream, chunks: list[str]) -> None:
+    if stream is None:
+        return
+    try:
+        for line in iter(stream.readline, ""):
+            if line == "":
+                break
+            chunks.append(line)
+    finally:
+        stream.close()
+
+
+def _write_worker_logs(module: str, output_dir: Path, stdout_text: str, stderr_text: str) -> tuple[Path, Path]:
+    logs_dir = output_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    module_name = module.rsplit(".", 1)[-1]
+    stdout_log_path = logs_dir / f"{module_name}.stdout.log"
+    stderr_log_path = logs_dir / f"{module_name}.stderr.log"
+    stdout_log_path.write_text(stdout_text, encoding="utf-8")
+    stderr_log_path.write_text(stderr_text, encoding="utf-8")
+    return stdout_log_path, stderr_log_path
+
+
 def _assign_slides_to_ranks(
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     tiling_results,
     *,
     num_gpus: int,
@@ -1251,7 +1605,7 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
 
 
 def _collect_pipeline_artifacts(
-    slide_records: Sequence[SlideRecord],
+    slide_records: Sequence[SlideSpec],
     *,
     output_dir: Path,
     output_format: str,
@@ -1303,7 +1657,7 @@ def _load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str
 def _update_process_list_after_embedding(
     process_list_path: Path,
     *,
-    successful_slides: Sequence[SlideRecord],
+    successful_slides: Sequence[SlideSpec],
     persist_tile_embeddings: bool,
     include_slide_embeddings: bool,
     tile_artifacts: Sequence[TileEmbeddingArtifact],
@@ -1332,21 +1686,22 @@ def _update_process_list_after_embedding(
     df.to_csv(process_list_path, index=False)
 
 
-def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideRecord], list[Any]]:
+def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:
     import pandas as pd
 
     base_dir = Path(output_dir)
     process_df = _load_process_df(base_dir / "process_list.csv")
     successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
-    slide_records: list[SlideRecord] = []
+    slide_records: list[SlideSpec] = []
     tiling_results: list[Any] = []
     for row in successful_rows.to_dict("records"):
         mask_path = row.get("mask_path")
         slide_records.append(
-            SlideRecord(
+            _make_slide_spec(
                 sample_id=str(row["sample_id"]),
                 image_path=Path(row["image_path"]),
                 mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
+                spacing_at_level_0=row.get("spacing_at_level_0"),
             )
         )
         tiling_results.append(_load_tiling_result_from_row(row))

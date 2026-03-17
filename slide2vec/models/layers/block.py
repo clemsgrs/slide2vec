@@ -1,6 +1,6 @@
 import os
 from typing import Callable, List, Any, Tuple, Dict
-import warnings
+import logging
 
 import torch
 from torch import nn, Tensor
@@ -10,6 +10,7 @@ from .drop_path import DropPath
 from .layer_scale import LayerScale
 from .mlp import Mlp
 
+logger = logging.getLogger("slide2vec")
 
 XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
 try:
@@ -41,13 +42,13 @@ try:
                 )
 
         XFORMERS_AVAILABLE = True
-        warnings.warn("xFormers is available (Block)")
+        logger.debug("xFormers is available (Block)")
     else:
-        warnings.warn("xFormers is disabled (Block)")
+        logger.debug("xFormers is disabled (Block)")
         raise ImportError
 except ImportError:
     XFORMERS_AVAILABLE = False
-    warnings.warn("xFormers is not available (Block)")
+    logger.debug("xFormers is not available (Block)")
 
 
 class Block(nn.Module):

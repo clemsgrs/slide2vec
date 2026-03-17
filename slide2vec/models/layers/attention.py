@@ -1,9 +1,10 @@
 import os
-import warnings
+import logging
 
 from torch import Tensor
 from torch import nn
 
+logger = logging.getLogger("slide2vec")
 
 XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
 try:
@@ -11,13 +12,13 @@ try:
         from xformers.ops import memory_efficient_attention, unbind
 
         XFORMERS_AVAILABLE = True
-        warnings.warn("xFormers is available (Attention)")
+        logger.debug("xFormers is available (Attention)")
     else:
-        warnings.warn("xFormers is disabled (Attention)")
+        logger.debug("xFormers is disabled (Attention)")
         raise ImportError
 except ImportError:
     XFORMERS_AVAILABLE = False
-    warnings.warn("xFormers is not available (Attention)")
+    logger.debug("xFormers is not available (Attention)")
 
 
 class Attention(nn.Module):

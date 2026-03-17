@@ -1,4 +1,5 @@
 import argparse
+from contextlib import nullcontext
 import json
 from pathlib import Path
 
@@ -22,6 +23,7 @@ def main(argv=None) -> int:
         deserialize_preprocessing,
         load_successful_tiled_slides,
     )
+    from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
 
     parser = get_args_parser(add_help=True)
     args = parser.parse_args(argv)
@@ -49,21 +51,25 @@ def main(argv=None) -> int:
             return 0
         assigned_slides = [slide for slide, _ in assigned_pairs]
         assigned_tiling_results = [tiling_result for _, tiling_result in assigned_pairs]
-        embedded_slides = _compute_embedded_slides(
-            model,
-            assigned_slides,
-            assigned_tiling_results,
-            preprocessing=preprocessing,
-            execution=execution,
-        )
-        for embedded_slide, tiling_result in zip(embedded_slides, assigned_tiling_results):
-            _persist_embedded_slide(
+        progress_events_path = request.get("progress_events_path")
+        reporter = JsonlProgressReporter(progress_events_path, rank=global_rank) if progress_events_path else None
+        context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
+        with context:
+            embedded_slides = _compute_embedded_slides(
                 model,
-                embedded_slide,
-                tiling_result,
+                assigned_slides,
+                assigned_tiling_results,
                 preprocessing=preprocessing,
                 execution=execution,
             )
+            for embedded_slide, tiling_result in zip(embedded_slides, assigned_tiling_results):
+                _persist_embedded_slide(
+                    model,
+                    embedded_slide,
+                    tiling_result,
+                    preprocessing=preprocessing,
+                    execution=execution,
+                )
         return 0
     finally:
         if dist.is_available() and dist.is_initialized():

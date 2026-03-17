@@ -43,6 +43,8 @@ Shape conventions:
 
 Use `embed_slides(...)` for ordered multi-slide in-memory extraction.
 
+If a slide reports the wrong native spacing, pass a `SlideSpec`-like object or mapping with `spacing_at_level_0`, or use `Model.embed_slide(..., spacing_at_level_0=...)` for path-like inputs.
+
 When `ExecutionOptions(num_gpus=2)` or another value greater than `1` is used:
 
 - `embed_slide(...)` shards one slide's tiles across GPUs
@@ -145,3 +147,5 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 - `tile_artifacts`
 - `slide_artifacts`
 - `process_list_path`
+
+The manifest schema matches HS2P and accepts optional `mask_path` and `spacing_at_level_0` columns.
