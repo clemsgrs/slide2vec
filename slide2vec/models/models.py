@@ -9,9 +9,9 @@ from omegaconf import DictConfig
 from timm.data import resolve_data_config
 from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
+from transformers import AutoImageProcessor, AutoModel
 from torchvision import transforms
 from torchvision.transforms import v2
-from transformers import AutoImageProcessor, AutoModel
 
 import slide2vec.distributed as distributed
 import slide2vec.models.vision_transformer_dino as vits_dino
@@ -231,9 +231,7 @@ class FeatureExtractor(nn.Module):
         raise NotImplementedError
 
     def get_transforms(self):
-        data_config = resolve_data_config(
-            self.encoder.pretrained_cfg, model=self.encoder
-        )
+        data_config = resolve_data_config(self.encoder.pretrained_cfg, model=self.encoder)
         transform = create_transform(**data_config)
         return transform
 

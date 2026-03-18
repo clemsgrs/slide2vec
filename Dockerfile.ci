@@ -48,10 +48,11 @@ RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /root/.cache/pip
 
 COPY --chown=user:user requirements.in /opt/app/requirements.in
+COPY --chown=user:user requirements-models.in /opt/app/requirements-models.in
 RUN python -m pip install \
       --no-cache-dir \
       --no-color \
-      --requirement /opt/app/requirements.in \
+      --requirement /opt/app/requirements-models.in \
     && rm -rf /root/.cache/pip
 
 COPY --chown=user:user slide2vec /opt/app/slide2vec
