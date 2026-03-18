@@ -91,9 +91,15 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         inference,
-        "_collect_local_pipeline_artifacts",
-        lambda **kwargs: (["tile-artifact"], ["slide-artifact"]),
+        "_build_incremental_persist_callback",
+        lambda **kwargs: (None, [], []),
     )
+    monkeypatch.setattr(
+        inference,
+        "_collect_pipeline_artifacts",
+        lambda *args, **kwargs: (["tile-artifact"], ["slide-artifact"]),
+    )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     model = SimpleNamespace(
         name="prov-gigapath",
