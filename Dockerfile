@@ -42,17 +42,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/app/
 
-# core deps live in requirements.in; model runtime extras live in requirements-foundation.in
+# core deps live in requirements.in; model runtime extras live in requirements-models.in
 RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /home/user/.cache/pip
 
 # install slide2vec
 COPY --chown=user:user requirements.in /opt/app/requirements.in
-COPY --chown=user:user requirements-foundation.in /opt/app/requirements-foundation.in
+COPY --chown=user:user requirements-models.in /opt/app/requirements-models.in
 RUN python -m pip install \
     --no-cache-dir \
     --no-color \
-    --requirement /opt/app/requirements-foundation.in \
+    --requirement /opt/app/requirements-models.in \
     && rm -rf /home/user/.cache/pip
 
 COPY --chown=user:user slide2vec /opt/app/slide2vec

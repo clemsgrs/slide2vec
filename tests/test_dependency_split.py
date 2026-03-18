@@ -8,7 +8,7 @@ SETUP_CFG = ROOT / "setup.cfg"
 README = ROOT / "README.md"
 CORE_REQUIREMENTS = ROOT / "requirements.in"
 CORE_REQUIREMENTS_TXT = ROOT / "requirements.txt"
-FOUNDATION_REQUIREMENTS = ROOT / "requirements-foundation.in"
+MODELS_REQUIREMENTS = ROOT / "requirements-models.in"
 
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
@@ -89,7 +89,7 @@ def test_setup_cfg_moves_model_runtime_deps_into_models_extra():
 
 def test_requirements_files_split_core_from_foundation_runtime():
     core_requirements_text = CORE_REQUIREMENTS.read_text(encoding="utf-8")
-    foundation_requirements_text = FOUNDATION_REQUIREMENTS.read_text(encoding="utf-8")
+    foundation_requirements_text = MODELS_REQUIREMENTS.read_text(encoding="utf-8")
     core_requirements = _requirement_names(core_requirements_text)
     foundation_requirements = _requirement_names(foundation_requirements_text)
     core_requirement_lines = _requirement_lines(core_requirements_text)
