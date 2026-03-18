@@ -2,7 +2,7 @@ csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
 
-visualize: true
+save_previews: true
 
 tiling:
   params:

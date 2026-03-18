@@ -49,8 +49,8 @@ TILING_FILTER_PARAMS = dict(
     fraction_threshold=0.9,
 )
 
-# -- tiling.visu_params --
-TILING_VISU_PARAMS = dict(downsample=32)
+# -- tiling.preview --
+TILING_PREVIEW = dict(downsample=32)
 
 # -- model --
 MODEL_PARAMS = dict(
@@ -119,7 +119,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "output_dir": str(tmp_path),
         "resume": False,
         "resume_dirname": None,
-        "visualize": False,  # override (default: true)
+        "save_previews": False,  # override (default: true)
         "seed": 0,
         "tiling": {
             "read_tiles_from": None,
@@ -127,7 +127,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,
             "filter_params": TILING_FILTER_PARAMS,
-            "visu_params": TILING_VISU_PARAMS,
+            "preview": TILING_PREVIEW,
         },
         "model": MODEL_PARAMS,
         "speed": SPEED_PARAMS,

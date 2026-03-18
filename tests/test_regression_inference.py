@@ -504,7 +504,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
     monkeypatch.setattr(
         inference,
         "_build_hs2p_configs",
-        lambda preprocessing: ("tiling", "segmentation", "filtering", "qc", None, False),
+        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
     )
 
     slide = inference._coerce_slide_spec(
@@ -523,6 +523,67 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
     )
 
     assert captured["slides"][0].spacing_at_level_0 == pytest.approx(0.25)
+    assert captured["kwargs"]["preview"] == "preview"
+
+
+def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
+    import slide2vec.inference as inference
+
+    class FakeTilingConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeSegmentationConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeFilterConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakePreviewConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    monkeypatch.setitem(
+        sys.modules,
+        "hs2p",
+        SimpleNamespace(
+            TilingConfig=FakeTilingConfig,
+            SegmentationConfig=FakeSegmentationConfig,
+            FilterConfig=FakeFilterConfig,
+            PreviewConfig=FakePreviewConfig,
+        ),
+    )
+
+    preprocessing = PreprocessingConfig(
+        backend="asap",
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        tolerance=0.05,
+        overlap=0.0,
+        tissue_threshold=0.1,
+        drop_holes=False,
+        use_padding=True,
+        segmentation={"downsample": 64},
+        filtering={"ref_tile_size": 224},
+        preview={"save_mask_preview": True, "save_tiling_preview": False, "downsample": 32},
+    )
+
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_tiles_from, resume = (
+        inference._build_hs2p_configs(preprocessing)
+    )
+
+    assert tiling_cfg.kwargs["backend"] == "asap"
+    assert segmentation_cfg.kwargs == {"downsample": 64}
+    assert filtering_cfg.kwargs == {"ref_tile_size": 224}
+    assert preview_cfg.kwargs == {
+        "save_mask_preview": True,
+        "save_tiling_preview": False,
+        "downsample": 32,
+    }
+    assert read_tiles_from is None
+    assert resume is False
 
 
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):

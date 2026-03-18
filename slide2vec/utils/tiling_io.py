@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 if TYPE_CHECKING:
-    from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig
+    from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, SlideSpec, TilingConfig
 
 
 REQUIRED_MANIFEST_COLUMNS = ("sample_id", "image_path")
@@ -34,11 +34,11 @@ def _optional_float(value: Any) -> float | None:
 
 
 def _hs2p_exports() -> dict[str, Any]:
-    from hs2p import FilterConfig, QCConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
+    from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
 
     return {
         "FilterConfig": FilterConfig,
-        "QCConfig": QCConfig,
+        "PreviewConfig": PreviewConfig,
         "SegmentationConfig": SegmentationConfig,
         "SlideSpec": SlideSpec,
         "TilingConfig": TilingConfig,

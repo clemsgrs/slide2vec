@@ -4,7 +4,7 @@ csv: "/data/temporary/clement/dataset/tcga-brca/mutations/tcga-brca-tp53-slide2v
 
 output_dir: "output"
 
-visualize: true
+save_previews: true
 
 tiling:
   read_tiles_from:

@@ -1,6 +1,6 @@
 csv: ""
 
-visualize: true
+save_previews: true
 
 output_dir: "output" # output directory
 

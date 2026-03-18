@@ -51,7 +51,7 @@ class PreprocessingConfig:
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
-    qc: dict[str, Any] = field(default_factory=dict)
+    preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
@@ -69,10 +69,10 @@ class PreprocessingConfig:
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
-            qc={
-                "save_mask_preview": bool(cfg.visualize),
-                "save_tiling_preview": bool(cfg.visualize),
-                "downsample": int(tiling.visu_params.downsample),
+            preview={
+                "save_mask_preview": bool(cfg.save_previews),
+                "save_tiling_preview": bool(cfg.save_previews),
+                "downsample": int(tiling.preview.downsample),
             },
         )
 

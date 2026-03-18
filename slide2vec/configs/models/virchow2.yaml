@@ -5,7 +5,7 @@ csv: "/data/temporary/clement/leopard/csvs/brazil-slide2vec-august-2025-revision
 
 output_dir: "/data/temporary/clement/code/slide2vec/output"
 
-visualize: true
+save_previews: true
 
 tiling:
   # read_tiles_from: "/data/temporary/clement/code/slide2vec/output/vjh3hrr6/coordinates"

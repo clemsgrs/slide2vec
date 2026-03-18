@@ -1263,13 +1263,13 @@ def _embedding_work_dir(output_dir: Path | None):
 def _tile_slides(slides: Sequence[SlideSpec], preprocessing: PreprocessingConfig, *, output_dir: Path, num_workers: int):
     from hs2p import tile_slides
 
-    tiling_cfg, segmentation_cfg, filtering_cfg, qc_cfg, read_tiles_from, resume = _build_hs2p_configs(preprocessing)
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_tiles_from, resume = _build_hs2p_configs(preprocessing)
     tile_slides(
         slides,
         tiling=tiling_cfg,
         segmentation=segmentation_cfg,
         filtering=filtering_cfg,
-        qc=qc_cfg,
+        preview=preview_cfg,
         output_dir=output_dir,
         num_workers=num_workers,
         read_tiles_from=read_tiles_from,
@@ -1298,7 +1298,7 @@ def _record_slide_metadata_in_process_list(process_list_path: Path, slide_record
 
 
 def _build_hs2p_configs(preprocessing: PreprocessingConfig):
-    from hs2p import FilterConfig, QCConfig, SegmentationConfig, TilingConfig
+    from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
     tiling_cfg = TilingConfig(
         backend=preprocessing.backend,
@@ -1312,12 +1312,12 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
     )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
-    qc_cfg = QCConfig(**dict(preprocessing.qc))
+    preview_cfg = PreviewConfig(**dict(preprocessing.preview))
     return (
         tiling_cfg,
         segmentation_cfg,
         filtering_cfg,
-        qc_cfg,
+        preview_cfg,
         preprocessing.read_tiles_from,
         preprocessing.resume,
     )
@@ -1747,7 +1747,7 @@ def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, An
         "resume": preprocessing.resume,
         "segmentation": dict(preprocessing.segmentation),
         "filtering": dict(preprocessing.filtering),
-        "qc": dict(preprocessing.qc),
+        "preview": dict(preprocessing.preview),
     }
 
 
@@ -1778,7 +1778,7 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         resume=bool(payload.get("resume", False)),
         segmentation=dict(payload.get("segmentation", {})),
         filtering=dict(payload.get("filtering", {})),
-        qc=dict(payload.get("qc", {})),
+        preview=dict(payload.get("preview", {})),
     )
 
 

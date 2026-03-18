@@ -322,7 +322,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
         resume=True,
         segmentation={"downsample": 32},
         filtering={"a_t": 3},
-        qc={"save_mask_preview": True},
+        preview={"save_mask_preview": True},
     )
 
     updated = base.with_backend("openslide")
@@ -332,7 +332,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.target_tile_size_px == base.target_tile_size_px
     assert updated.segmentation == base.segmentation
     assert updated.filtering == base.filtering
-    assert updated.qc == base.qc
+    assert updated.preview == base.preview
     assert updated is not base
 
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
@@ -366,7 +366,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     cfg = SimpleNamespace(
         csv="/tmp/slides.csv",
         output_dir=str(tmp_path),
-        visualize=False,
+        save_previews=False,
         model=SimpleNamespace(
             name="virchow2",
             level="tile",
@@ -394,7 +394,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            visu_params=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(downsample=32),
         ),
     )
 
@@ -429,7 +429,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
 def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fields():
     cfg = SimpleNamespace(
         resume=True,
-        visualize=False,
+        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             read_tiles_from="/tmp/precomputed",
@@ -444,7 +444,7 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            visu_params=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(downsample=32),
         ),
     )
 
@@ -456,11 +456,42 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
-    assert preprocessing.qc == {
+    assert preprocessing.preview == {
         "save_mask_preview": False,
         "save_tiling_preview": False,
         "downsample": 32,
     }
+
+def test_validate_removed_options_rejects_legacy_preview_keys():
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from slide2vec.utils.config import validate_removed_options
+
+    with pytest.raises(ValueError, match="save_previews"):
+        validate_removed_options(
+            OmegaConf.create(
+                {
+                    "visualize": True,
+                    "model": {},
+                    "tiling": {"preview": {"downsample": 32}},
+                }
+            )
+        )
+
+    with pytest.raises(ValueError, match="tiling.preview"):
+        validate_removed_options(
+            OmegaConf.create(
+                {
+                    "save_previews": True,
+                    "model": {},
+                    "tiling": {
+                        "visu_params": {"downsample": 32},
+                        "preview": {"downsample": 32},
+                    },
+                }
+            )
+        )
 
 def test_artifact_writers_use_explicit_embedding_directories(tmp_path: Path):
     tile_artifact = write_tile_embeddings(

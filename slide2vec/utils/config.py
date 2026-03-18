@@ -18,6 +18,14 @@ def validate_removed_options(cfg) -> None:
         raise ValueError(
             "model.restrict_to_tissue is no longer supported in slide2vec."
         )
+    if "visualize" in cfg:
+        raise ValueError(
+            "visualize is no longer supported in slide2vec; use save_previews instead."
+        )
+    if "visu_params" in cfg.tiling:
+        raise ValueError(
+            "tiling.visu_params is no longer supported in slide2vec; use tiling.preview instead."
+        )
 
 
 def write_config(cfg, output_dir, name="config.yaml"):
