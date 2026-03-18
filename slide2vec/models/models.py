@@ -1,10 +1,14 @@
 import logging
 
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from omegaconf import DictConfig
+from timm.data import resolve_data_config
+from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
+from timm.data.transforms_factory import create_transform
 from torchvision import transforms
 from torchvision.transforms import v2
 
@@ -23,31 +27,6 @@ def _optional_dependency_error(package: str) -> ImportError:
         f"Optional model dependency '{package}' is required for the selected model backend. "
         "Install slide2vec[models] or preinstall the backend-specific dependency in your image."
     )
-
-
-def _import_timm():
-    try:
-        import timm
-    except ImportError as exc:
-        raise _optional_dependency_error("timm") from exc
-    return timm
-
-
-def _import_timm_data_helpers():
-    try:
-        from timm.data import resolve_data_config
-        from timm.data.transforms_factory import create_transform
-    except ImportError as exc:
-        raise _optional_dependency_error("timm") from exc
-    return resolve_data_config, create_transform
-
-
-def _import_timm_inception_stats():
-    try:
-        from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
-    except ImportError as exc:
-        raise _optional_dependency_error("timm") from exc
-    return IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 
 
 def _transformers_auto_model():
@@ -119,7 +98,6 @@ def _select_mode_embedding(cls_embedding, patch_embeddings, *, mode: str):
 
 
 def _build_timm_hub_encoder(model_name: str, **kwargs):
-    timm = _import_timm()
     return timm.create_model(model_name, pretrained=True, **kwargs)
 
 
@@ -275,7 +253,6 @@ class FeatureExtractor(nn.Module):
         raise NotImplementedError
 
     def get_transforms(self):
-        resolve_data_config, create_transform = _import_timm_data_helpers()
         data_config = resolve_data_config(self.encoder.pretrained_cfg, model=self.encoder)
         transform = create_transform(**data_config)
         return transform
@@ -548,7 +525,6 @@ class UNI2(FeatureExtractor):
         super(UNI2, self).__init__()
 
     def build_encoder(self):
-        timm = _import_timm()
         timm_kwargs = {
             "img_size": 224,
             "patch_size": 14,
@@ -583,7 +559,6 @@ class Virchow(FeatureExtractor):
         super(Virchow, self).__init__()
 
     def build_encoder(self):
-        timm = _import_timm()
         encoder = _build_timm_hub_encoder(
             "hf-hub:paige-ai/Virchow",
             mlp_layer=timm.layers.SwiGLUPacked,
@@ -610,7 +585,6 @@ class Virchow2(FeatureExtractor):
         super(Virchow2, self).__init__()
 
     def build_encoder(self):
-        timm = _import_timm()
         encoder = _build_timm_hub_encoder(
             "hf-hub:paige-ai/Virchow2",
             mlp_layer=timm.layers.SwiGLUPacked,
@@ -689,7 +663,6 @@ class Hoptimus0Mini(FeatureExtractor):
         super(Hoptimus0Mini, self).__init__()
 
     def build_encoder(self):
-        timm = _import_timm()
         encoder = _build_timm_hub_encoder(
             "hf-hub:bioptimus/H0-mini",
             mlp_layer=timm.layers.SwiGLUPacked,
@@ -738,7 +711,6 @@ class MUSK(FeatureExtractor):
     def build_encoder(self):
         from musk import utils as musk_utils
 
-        timm = _import_timm()
         encoder = timm.create_model("musk_large_patch16_384")
         musk_utils.load_model_and_may_interpolate(
             "hf_hub:xiangjx/musk", encoder, "model|module", ""
@@ -746,7 +718,6 @@ class MUSK(FeatureExtractor):
         return encoder
 
     def get_transforms(self):
-        IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD = _import_timm_inception_stats()
         return transforms.Compose(
             [
                 transforms.Resize(384, interpolation=3, antialias=True),
