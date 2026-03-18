@@ -23,7 +23,7 @@ pip install "slide2vec[models]"
 ```python
 from slide2vec import Model, PreprocessingConfig
 
-model = Model.from_pretrained("virchow2", level="region")
+model = Model.from_pretrained("virchow2", level="tile")
 preprocessing = PreprocessingConfig(
     target_spacing_um=0.5,
     target_tile_size_px=224,
