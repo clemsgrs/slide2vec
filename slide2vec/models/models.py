@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from timm.data import resolve_data_config
 from timm.data.constants import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from timm.data.transforms_factory import create_transform
+from transformers import AutoImageProcessor, AutoModel
 from torchvision import transforms
 from torchvision.transforms import v2
 
@@ -20,29 +21,6 @@ from slide2vec.data.augmentations import MaybeToTensor, make_normalize_transform
 from slide2vec.utils import update_state_dict
 
 logger = logging.getLogger("slide2vec")
-
-
-def _optional_dependency_error(package: str) -> ImportError:
-    return ImportError(
-        f"Optional model dependency '{package}' is required for the selected model backend. "
-        "Install slide2vec[models] or preinstall the backend-specific dependency in your image."
-    )
-
-
-def _transformers_auto_model():
-    try:
-        from transformers import AutoModel
-    except ImportError as exc:
-        raise _optional_dependency_error("transformers") from exc
-    return AutoModel
-
-
-def _transformers_auto_image_processor():
-    try:
-        from transformers import AutoImageProcessor
-    except ImportError as exc:
-        raise _optional_dependency_error("transformers") from exc
-    return AutoImageProcessor
 
 
 def _log_main_process_info(message: str) -> None:
@@ -746,10 +724,10 @@ class PhikonV2(FeatureExtractor):
         super(PhikonV2, self).__init__()
 
     def build_encoder(self):
-        return _transformers_auto_model().from_pretrained("owkin/phikon-v2", trust_remote_code=True)
+        return AutoModel.from_pretrained("owkin/phikon-v2", trust_remote_code=True)
 
     def get_transforms(self):
-        return _transformers_auto_image_processor().from_pretrained("owkin/phikon-v2", trust_remote_code=True)
+        return AutoImageProcessor.from_pretrained("owkin/phikon-v2", trust_remote_code=True)
 
     def forward(self, x):
         embedding = self.encoder(x).last_hidden_state[:, 0, :]
@@ -801,7 +779,7 @@ class Midnight12k(FeatureExtractor):
         super(Midnight12k, self).__init__()
 
     def build_encoder(self):
-        return _transformers_auto_model().from_pretrained('kaiko-ai/midnight')
+        return AutoModel.from_pretrained('kaiko-ai/midnight')
 
     def get_transforms(self):
         return v2.Compose(
@@ -830,10 +808,10 @@ class Hibou(FeatureExtractor):
 
     def build_encoder(self):
         model = f"histai/{self.arch}"
-        return _transformers_auto_model().from_pretrained(model, trust_remote_code=True)
+        return AutoModel.from_pretrained(model, trust_remote_code=True)
 
     def get_transforms(self):
-        return _transformers_auto_image_processor().from_pretrained(
+        return AutoImageProcessor.from_pretrained(
             f"histai/{self.arch}", trust_remote_code=True
         )
 
@@ -927,7 +905,7 @@ class TITAN(SlideFeatureExtractor):
         self.features_dim = 768
 
     def build_encoders(self):
-        self.slide_encoder = _transformers_auto_model().from_pretrained(
+        self.slide_encoder = AutoModel.from_pretrained(
             "MahmoodLab/TITAN", trust_remote_code=True
         )
         self.tile_encoder, self.eval_transform = self.slide_encoder.return_conch()
@@ -955,7 +933,7 @@ class PRISM(SlideFeatureExtractor):
         self.return_latents = return_latents
 
     def build_encoders(self):
-        self.slide_encoder = _transformers_auto_model().from_pretrained(
+        self.slide_encoder = AutoModel.from_pretrained(
             "paige-ai/PRISM", trust_remote_code=True
         )
         self.tile_encoder = Virchow(mode="full")

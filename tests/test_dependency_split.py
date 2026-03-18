@@ -1,14 +1,7 @@
 import ast
-import builtins
-import importlib
 import configparser
 import re
-import sys
 from pathlib import Path
-from types import ModuleType
-
-import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_CFG = ROOT / "setup.cfg"
@@ -20,7 +13,6 @@ FOUNDATION_REQUIREMENTS = ROOT / "requirements-foundation.in"
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
     "sacremoses",
-    "transformers",
     "xformers",
 }
 
@@ -35,6 +27,7 @@ CORE_RUNTIME_REQUIREMENT_NAMES = {
     "rich",
     "torch",
     "torchvision",
+    "transformers",
     "tqdm",
     "timm",
     "wandb",
@@ -110,10 +103,12 @@ def test_requirements_files_split_core_from_foundation_runtime():
     assert core_requirement_lines["torchvision"] == "torchvision"
     assert core_requirement_lines["einops"] == "einops"
     assert core_requirement_lines["timm"] == "timm"
+    assert core_requirement_lines["transformers"] == "transformers"
     assert foundation_requirement_lines["torch"] == "torch>=2.3,<2.8"
     assert foundation_requirement_lines["torchvision"] == "torchvision>=0.18.0"
     assert foundation_requirement_lines["einops"] == "einops>=0.8.0"
     assert foundation_requirement_lines["timm"] == "timm>=1.0.3"
+    assert foundation_requirement_lines["transformers"] == "transformers>=4.53"
 
 
 def test_requirements_txt_matches_generic_core_runtime_requirements():
@@ -123,6 +118,7 @@ def test_requirements_txt_matches_generic_core_runtime_requirements():
     assert requirement_lines["torchvision"] == "torchvision"
     assert requirement_lines["einops"] == "einops"
     assert requirement_lines["timm"] == "timm"
+    assert requirement_lines["transformers"] == "transformers"
 
 
 def test_readme_documents_core_and_models_installs():
@@ -132,45 +128,10 @@ def test_readme_documents_core_and_models_installs():
     assert 'pip install "slide2vec[models]"' in readme
 
 
-def test_tile_dataset_avoids_runtime_transformers_import_for_type_checks():
+def test_tile_dataset_uses_direct_transformers_type_check():
     source = (ROOT / "slide2vec" / "data" / "dataset.py").read_text(encoding="utf-8")
 
-    assert "if TYPE_CHECKING:" in source
     assert "from transformers.image_processing_utils import BaseImageProcessor" in source
-    assert "isinstance(self.transforms, BaseImageProcessor)" not in source
-
-
-def test_models_module_defers_transformers_top_level_imports():
+    assert "isinstance(self.transforms, BaseImageProcessor)" in source
     imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
-
-    assert "transformers" not in imported_modules
-
-
-def test_models_module_imports_without_transformers(monkeypatch):
-    original_import = builtins.__import__
-
-    for name in list(sys.modules):
-        if name == "slide2vec.models" or name.startswith("slide2vec.models."):
-            sys.modules.pop(name, None)
-
-    fake_einops = ModuleType("einops")
-    fake_einops.rearrange = lambda *args, **kwargs: None
-    monkeypatch.setitem(sys.modules, "einops", fake_einops)
-    fake_omegaconf = ModuleType("omegaconf")
-    fake_omegaconf.DictConfig = object
-    monkeypatch.setitem(sys.modules, "omegaconf", fake_omegaconf)
-
-    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.split(".")[0] == "transformers":
-            raise AssertionError(f"unexpected eager import: {name}")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-
-    try:
-        module = importlib.import_module("slide2vec.models.models")
-    except ModuleNotFoundError as exc:
-        assert exc.name != "transformers"
-        pytest.skip(f"core dependency {exc.name} is not installed in this test environment")
-
-    assert hasattr(module, "ModelFactory")
+    assert "transformers" in imported_modules

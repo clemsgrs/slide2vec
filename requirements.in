@@ -9,6 +9,7 @@ tqdm
 hs2p>=2.0,<3
 torch
 torchvision
+transformers
 wandb
 wholeslidedata<0.0.16
 einops
