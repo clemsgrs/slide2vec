@@ -4,7 +4,7 @@ output_dir: "output" # output directory
 resume: false # resume from a previous run
 resume_dirname: # directory name to resume from
 
-visualize: true # save a visualization of slide tiling in a .jpg
+save_previews: true # save preview images of slide tiling and mask overlays
 
 seed: 0 # seed for reproducibility
 
@@ -37,8 +37,8 @@ tiling:
     white_threshold: 220 # threshold for white pixels (0-255)
     black_threshold: 25 # threshold for black pixels (0-255)
     fraction_threshold: 0.9 # fraction of pixels that must be white/black to filter out the tile
-  visu_params:
-    downsample: 32 # downsample to use for tiling visualization
+  preview:
+    downsample: 32 # downsample to use for preview rendering
 
 speed:
   num_workers: 8 # number of workers for tiling slides

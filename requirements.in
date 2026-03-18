@@ -6,7 +6,7 @@ pandas
 pillow
 rich
 tqdm
-hs2p>=2.0,<3
+hs2p>=2.3.0,<3
 torch
 torchvision
 transformers

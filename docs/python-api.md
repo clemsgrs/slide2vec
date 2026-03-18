@@ -52,7 +52,7 @@ When `ExecutionOptions(num_gpus=2)` or another value greater than `1` is used:
 
 ## `PreprocessingConfig`
 
-The public preprocessing API combines tiling, segmentation, filtering, and QC into a single user-facing object.
+The public preprocessing API combines tiling, segmentation, filtering, and preview settings into a single user-facing object.
 
 Commonly overridden fields:
 
@@ -69,7 +69,7 @@ Defaults that most users can leave alone:
 - `use_padding=True`
 - `segmentation={}`
 - `filtering={}`
-- `qc={}`
+- `preview={}`
 - `read_tiles_from=None`
 - `resume=False`
 
@@ -83,7 +83,7 @@ preprocessing = PreprocessingConfig(
     tissue_threshold=0.1,
     segmentation={"downsample": 64},
     filtering={"ref_tile_size": 224},
-    qc={
+    preview={
         "save_mask_preview": False,
         "save_tiling_preview": False,
         "downsample": 32,

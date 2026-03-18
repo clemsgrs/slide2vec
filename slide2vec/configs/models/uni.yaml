@@ -9,7 +9,7 @@ csv: "/data/temporary/clement/code/slide2vec/tmp.csv"
 
 output_dir: "output/debug"
 
-visualize: true
+save_previews: true
 
 tiling:
   params:

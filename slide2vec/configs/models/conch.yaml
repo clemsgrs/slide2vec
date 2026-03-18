@@ -3,7 +3,7 @@ csv: "/data/pathology/projects/clement/discern/multi-center-prostate-no-mask.csv
 
 output_dir: "/data/pathology/projects/clement/discern/hs2p" # output directory
 
-visualize: true
+save_previews: true
 
 tiling:
   params:

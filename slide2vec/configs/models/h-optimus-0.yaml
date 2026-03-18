@@ -9,7 +9,7 @@ output_dir: "output"
 resume: true
 resume_dirname: "48juvldi"
 
-visualize: false
+save_previews: false
 
 tiling:
   params:
