@@ -1,16 +1,18 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 import torch
 import wholeslidedata as wsd
 from PIL import Image
-from transformers.image_processing_utils import BaseImageProcessor
 
 from slide2vec.utils.coordinates import coordinate_arrays, coordinate_matrix
 
 if TYPE_CHECKING:
     from hs2p import TilingResult
+    from transformers.image_processing_utils import BaseImageProcessor
+else:
+    BaseImageProcessor = Any
 
 
 class TileDataset(torch.utils.data.Dataset):
@@ -72,8 +74,12 @@ class TileDataset(torch.utils.data.Dataset):
         if self.target_tile_size != self.read_tile_size:
             tile = tile.resize((self.target_tile_size, self.target_tile_size))
         if self.transforms:
-            if isinstance(self.transforms, BaseImageProcessor):  # Hugging Face (`transformer`)
+            if _is_huggingface_processor(self.transforms):
                 tile = self.transforms(tile, return_tensors="pt")["pixel_values"].squeeze(0)
             else:  # general callable such as torchvision transforms
                 tile = self.transforms(tile)
         return idx, tile
+
+
+def _is_huggingface_processor(transforms: Any) -> bool:
+    return callable(transforms) and hasattr(transforms, "preprocess")
