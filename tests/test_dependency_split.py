@@ -20,7 +20,6 @@ FOUNDATION_REQUIREMENTS = ROOT / "requirements-foundation.in"
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
     "sacremoses",
-    "timm",
     "transformers",
     "xformers",
 }
@@ -37,6 +36,7 @@ CORE_RUNTIME_REQUIREMENT_NAMES = {
     "torch",
     "torchvision",
     "tqdm",
+    "timm",
     "wandb",
     "wholeslidedata",
 }
@@ -120,6 +120,7 @@ def test_requirements_txt_matches_generic_core_runtime_requirements():
     assert requirement_lines["torch"] == "torch"
     assert requirement_lines["torchvision"] == "torchvision"
     assert requirement_lines["einops"] == "einops"
+    assert requirement_lines["timm"] == "timm"
 
 
 def test_readme_documents_core_and_models_installs():
@@ -137,14 +138,13 @@ def test_tile_dataset_avoids_runtime_transformers_import_for_type_checks():
     assert "isinstance(self.transforms, BaseImageProcessor)" not in source
 
 
-def test_models_module_defers_timm_and_transformers_top_level_imports():
+def test_models_module_defers_transformers_top_level_imports():
     imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
 
-    assert "timm" not in imported_modules
     assert "transformers" not in imported_modules
 
 
-def test_models_module_imports_without_timm_or_transformers(monkeypatch):
+def test_models_module_imports_without_transformers(monkeypatch):
     original_import = builtins.__import__
 
     for name in list(sys.modules):
@@ -159,7 +159,7 @@ def test_models_module_imports_without_timm_or_transformers(monkeypatch):
     monkeypatch.setitem(sys.modules, "omegaconf", fake_omegaconf)
 
     def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name.split(".")[0] in {"timm", "transformers"}:
+        if name.split(".")[0] == "transformers":
             raise AssertionError(f"unexpected eager import: {name}")
         return original_import(name, globals, locals, fromlist, level)
 
@@ -168,7 +168,7 @@ def test_models_module_imports_without_timm_or_transformers(monkeypatch):
     try:
         module = importlib.import_module("slide2vec.models.models")
     except ModuleNotFoundError as exc:
-        assert exc.name not in {"timm", "transformers"}
+        assert exc.name != "transformers"
         pytest.skip(f"core dependency {exc.name} is not installed in this test environment")
 
     assert hasattr(module, "ModelFactory")

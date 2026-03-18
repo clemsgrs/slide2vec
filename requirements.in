@@ -12,3 +12,4 @@ torchvision
 wandb
 wholeslidedata<0.0.16
 einops
+timm
