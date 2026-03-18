@@ -106,6 +106,10 @@ class PlainTextCliProgressReporter:
                 f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
             )
+        if kind == "model.loading":
+            return f"Loading model {payload['model_name']}..."
+        if kind == "model.ready":
+            return f"Model {payload['model_name']} ready on {payload['device']}"
         if kind == "embedding.started":
             return f"Embedding slides ({payload['slide_count']} total)..."
         if kind == "embedding.slide.started":
@@ -191,6 +195,19 @@ class RichCliProgressReporter:
                     ("Failed", str(payload["failed"])),
                     ("Tiles", str(payload["discovered_tiles"])),
                 ],
+            )
+            return
+        if kind == "model.loading":
+            self._task_ids["model_loading"] = self.progress.add_task(
+                f"Loading model [bold]{payload['model_name']}[/bold]...", total=None
+            )
+            return
+        if kind == "model.ready":
+            task_id = self._task_ids.pop("model_loading", None)
+            if task_id is not None:
+                self.progress.remove_task(task_id)
+            self.console.print(
+                f"[green]Model [bold]{payload['model_name']}[/bold] ready[/green] on {payload['device']}"
             )
             return
         if kind == "embedding.started":

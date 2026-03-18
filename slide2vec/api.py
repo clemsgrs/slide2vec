@@ -303,13 +303,16 @@ class Model:
     def _load_backend(self) -> "LoadedModel":
         if self._backend is None:
             from slide2vec.inference import load_model
+            from slide2vec.progress import emit_progress
 
+            emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
                 level=self.level,
                 device=self._requested_device,
                 **self._model_kwargs,
             )
+            emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 
 

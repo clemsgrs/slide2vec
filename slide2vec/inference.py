@@ -103,10 +103,13 @@ def load_model(
     from slide2vec.models import ModelFactory
     from slide2vec.resources import load_config
 
-    model_cfg = OmegaConf.create(load_config("models", "default"))
+    cfg = OmegaConf.merge(
+        OmegaConf.create(load_config("preprocessing", "default")),
+        OmegaConf.create(load_config("models", "default")),
+    )
     preset_name = _preset_name(name, level)
     if preset_name is not None:
-        model_cfg = OmegaConf.merge(model_cfg, load_config("models", preset_name))
+        cfg = OmegaConf.merge(cfg, load_config("models", preset_name))
 
     overrides = {
         "name": name,
@@ -121,7 +124,10 @@ def load_model(
     }
     for key, value in overrides.items():
         if value is not None:
-            model_cfg[key] = value
+            cfg.model[key] = value
+
+    OmegaConf.resolve(cfg)
+    model_cfg = cfg.model
 
     backend_model = ModelFactory(model_cfg).get_model()
     target_device = _resolve_device(device, backend_model.device)

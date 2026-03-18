@@ -2,6 +2,7 @@ import ast
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import types
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,128 @@ def make_slide(
         mask_path=mask_path,
         spacing_at_level_0=spacing_at_level_0,
     )
+
+
+def test_load_model_merges_preprocessing_defaults_for_cross_file_interpolations(monkeypatch):
+    import slide2vec.inference as inference
+
+    class AttrDict(dict):
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError as exc:
+                raise AttributeError(name) from exc
+
+        def __setattr__(self, name, value):
+            self[name] = value
+
+    def convert(value):
+        if isinstance(value, dict):
+            return AttrDict({key: convert(item) for key, item in value.items()})
+        if isinstance(value, list):
+            return [convert(item) for item in value]
+        return value
+
+    def merge_values(left, right):
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = AttrDict({key: convert(value) for key, value in left.items()})
+            for key, value in right.items():
+                if key in merged:
+                    merged[key] = merge_values(merged[key], value)
+                else:
+                    merged[key] = convert(value)
+            return merged
+        return convert(right)
+
+    def lookup(root, path):
+        current = root
+        for segment in path.split("."):
+            current = current[segment]
+        return current
+
+    def resolve_value(root, value):
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                value[key] = resolve_value(root, item)
+            return value
+        if isinstance(value, list):
+            for index, item in enumerate(list(value)):
+                value[index] = resolve_value(root, item)
+            return value
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            return resolve_value(root, lookup(root, value[2:-1]))
+        return value
+
+    class FakeOmegaConf:
+        @staticmethod
+        def create(value):
+            return convert(value)
+
+        @staticmethod
+        def merge(*values):
+            merged = AttrDict()
+            for value in values:
+                merged = merge_values(merged, convert(value))
+            return merged
+
+        @staticmethod
+        def resolve(value):
+            resolve_value(value, value)
+
+    captured: dict[str, object] = {}
+
+    class FakeBackend:
+        device = "cpu"
+        features_dim = 128
+
+        def to(self, _device):
+            return self
+
+        def get_transforms(self):
+            return "TRANSFORMS"
+
+    class FakeModelFactory:
+        def __init__(self, options):
+            captured["options"] = options
+
+        def get_model(self):
+            return FakeBackend()
+
+    def fake_load_config(*parts):
+        if parts == ("preprocessing", "default"):
+            return {
+                "tiling": {
+                    "params": {
+                        "target_tile_size_px": 256,
+                    }
+                }
+            }
+        if parts == ("models", "default"):
+            return {
+                "model": {
+                    "mode": "cls",
+                    "input_size": "${tiling.params.target_tile_size_px}",
+                    "patch_size": 256,
+                    "token_size": 16,
+                    "normalize_embeddings": False,
+                }
+            }
+        if parts == ("models", "h0-mini"):
+            return {"model": {}}
+        raise AssertionError(parts)
+
+    monkeypatch.setitem(sys.modules, "omegaconf", types.SimpleNamespace(OmegaConf=FakeOmegaConf))
+    monkeypatch.setitem(sys.modules, "slide2vec.models", types.SimpleNamespace(ModelFactory=FakeModelFactory))
+    monkeypatch.setitem(sys.modules, "slide2vec.resources", types.SimpleNamespace(load_config=fake_load_config))
+    monkeypatch.setattr(inference, "_resolve_device", lambda requested, device: device)
+
+    loaded = inference.load_model(name="h0-mini", level="tile")
+
+    assert captured["options"].name == "h0-mini"
+    assert captured["options"].level == "tile"
+    assert captured["options"].mode == "cls"
+    assert captured["options"].input_size == 256
+    assert loaded.feature_dim == 128
 
 def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
     monkeypatch,
