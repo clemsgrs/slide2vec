@@ -247,7 +247,7 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
     assert tile_artifacts == ["tile-a"]
     assert slide_artifacts == ["slide-a", "slide-b"]
 
-def test_run_pipeline_local_branch_uses_collect_local_pipeline_artifacts(monkeypatch, tmp_path: Path):
+def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
     slide_record = make_slide("slide-a")
@@ -279,15 +279,20 @@ def test_run_pipeline_local_branch_uses_collect_local_pipeline_artifacts(monkeyp
 
     captured = {}
 
-    def fake_collect(*, model, embedded_slides, tiling_results, preprocessing, execution):
+    def fake_build_callback(*, model, preprocessing, execution, process_list_path):
         captured["model"] = model
-        captured["embedded_slides"] = embedded_slides
-        captured["tiling_results"] = tiling_results
         captured["preprocessing"] = preprocessing
         captured["execution"] = execution
-        return ["tile-artifact"], ["slide-artifact"]
+        captured["process_list_path"] = process_list_path
+        return None, [], []
 
-    monkeypatch.setattr(inference, "_collect_local_pipeline_artifacts", fake_collect)
+    monkeypatch.setattr(inference, "_build_incremental_persist_callback", fake_build_callback)
+    monkeypatch.setattr(
+        inference,
+        "_collect_pipeline_artifacts",
+        lambda *args, **kwargs: (["tile-artifact"], ["slide-artifact"]),
+    )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         Model.from_pretrained("virchow2"),
@@ -296,10 +301,194 @@ def test_run_pipeline_local_branch_uses_collect_local_pipeline_artifacts(monkeyp
         execution=ExecutionOptions(output_dir=tmp_path),
     )
 
-    assert captured["embedded_slides"] == [embedded]
-    assert captured["tiling_results"] == [tiling_result]
+    assert captured["process_list_path"] == tmp_path / "process_list.csv"
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
+
+
+def test_run_pipeline_local_branch_persists_completed_slides_before_later_failure(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224),
+        SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224),
+    ]
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,tbp,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: (slides, tiling_results, process_list_path),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_compute_tile_embeddings_for_slide",
+        lambda _loaded, _model, slide, _tiling_result, **_kwargs: (
+            np.array([[1.0, 2.0]], dtype=np.float32)
+            if slide.sample_id == "slide-a"
+            else (_ for _ in ()).throw(RuntimeError("boom"))
+        ),
+    )
+
+    model = SimpleNamespace(
+        name="virchow2",
+        level="tile",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        inference.run_pipeline(
+            model,
+            slides=slides,
+            preprocessing=PreprocessingConfig(),
+            execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
+        )
+
+    persisted = load_array(tmp_path / "tile_embeddings" / "slide-a.npz")
+    np.testing.assert_array_equal(persisted, np.array([[1.0, 2.0]], dtype=np.float32))
+    assert not (tmp_path / "tile_embeddings" / "slide-b.npz").exists()
+
+
+def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224),
+        SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224),
+    ]
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,success,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        encoding="utf-8",
+    )
+    write_tile_embeddings(
+        "slide-a",
+        np.array([[9.0, 9.0]], dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={"image_path": "/tmp/slide-a.svs"},
+        tile_index=np.array([0], dtype=np.int64),
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: (slides, tiling_results, process_list_path),
+    )
+
+    computed_sample_ids = []
+
+    def fake_compute_tile_embeddings(_loaded, _model, slide, _tiling_result, **_kwargs):
+        computed_sample_ids.append(slide.sample_id)
+        return np.array([[1.0, 2.0]], dtype=np.float32)
+
+    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+
+    model = SimpleNamespace(
+        name="virchow2",
+        level="tile",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
+    )
+
+    result = inference.run_pipeline(
+        model,
+        slides=slides,
+        preprocessing=PreprocessingConfig(resume=True),
+        execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
+    )
+
+    assert computed_sample_ids == ["slide-b"]
+    assert [artifact.sample_id for artifact in result.tile_artifacts] == ["slide-a", "slide-b"]
+    assert result.slide_artifacts == []
+
+
+def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_failure(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(
+            x=np.array([0, 1]),
+            y=np.array([2, 3]),
+            tile_size_lv0=224,
+            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
+            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        ),
+        SimpleNamespace(
+            x=np.array([4, 5]),
+            y=np.array([6, 7]),
+            tile_size_lv0=224,
+            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
+            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+        ),
+    ]
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "slide-b,/tmp/slide-b.svs,,,"
+        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: (slides, tiling_results, process_list_path),
+    )
+
+    def fake_compute_tile_embeddings(loaded, model, slide, tiling_result, *, preprocessing, execution, tile_indices=None):
+        if slide.sample_id == "slide-b":
+            raise RuntimeError("embedding boom")
+        return np.zeros((2, 4), dtype=np.float32)
+
+    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+    monkeypatch.setattr(
+        inference,
+        "_aggregate_tile_embeddings_for_slide",
+        lambda *args, **kwargs: (np.zeros((8,), dtype=np.float32), None),
+    )
+
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(),
+    )
+
+    with pytest.raises(RuntimeError, match="embedding boom"):
+        inference.run_pipeline(
+            model,
+            slides=slides,
+            preprocessing=PreprocessingConfig(),
+            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+        )
+
+    assert (tmp_path / "tile_embeddings" / "slide-a.pt").is_file()
+    assert (tmp_path / "tile_embeddings" / "slide-a.meta.json").is_file()
+    assert (tmp_path / "slide_embeddings" / "slide-a.pt").is_file()
+    assert (tmp_path / "slide_embeddings" / "slide-a.meta.json").is_file()
+    assert not (tmp_path / "slide_embeddings" / "slide-b.pt").exists()
+
+    process_df = pd.read_csv(process_list_path)
+    recorded = process_df.set_index("sample_id")
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "aggregation_status"] == "success"
+    assert recorded.loc["slide-b", "feature_status"] == "tbp"
+    assert recorded.loc["slide-b", "aggregation_status"] == "tbp"
 
 
 def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: Path):
@@ -677,13 +866,21 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         "_prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
-        lambda model, slide_records, tiling_results, preprocessing, execution: [embedded],
-    )
+    def fake_compute_embedded_slides(*args, **kwargs):
+        on_embedded_slide = kwargs.get("on_embedded_slide")
+        if on_embedded_slide is not None:
+            on_embedded_slide(slide_record, tiling_result, embedded)
+        return [embedded]
 
-    model = Model.from_pretrained("prism", level="slide")
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(),
+    )
     in_memory = inference.embed_slides(
         model,
         [slide_record],
@@ -706,6 +903,83 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
     assert persisted == [embedded]
     assert (tmp_path / "tile_embeddings" / "slide-a.npz").is_file()
     assert (tmp_path / "slide_embeddings" / "slide-a.npz").is_file()
+
+
+def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_failure(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(
+            x=np.array([0, 1]),
+            y=np.array([2, 3]),
+            tile_size_lv0=224,
+            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
+            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        ),
+        SimpleNamespace(
+            x=np.array([4, 5]),
+            y=np.array([6, 7]),
+            tile_size_lv0=224,
+            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
+            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+        ),
+    ]
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "slide-b,/tmp/slide-b.svs,,,"
+        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda slide_records, preprocessing, output_dir, num_workers: (slides, tiling_results, process_list_path),
+    )
+
+    def fake_compute_tile_embeddings(loaded, model, slide, tiling_result, *, preprocessing, execution, tile_indices=None):
+        if slide.sample_id == "slide-b":
+            raise RuntimeError("embedding boom")
+        return np.zeros((2, 4), dtype=np.float32)
+
+    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+    monkeypatch.setattr(
+        inference,
+        "_aggregate_tile_embeddings_for_slide",
+        lambda *args, **kwargs: (np.zeros((8,), dtype=np.float32), None),
+    )
+
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(),
+    )
+
+    with pytest.raises(RuntimeError, match="embedding boom"):
+        inference.embed_slides(
+            model,
+            slides,
+            preprocessing=PreprocessingConfig(),
+            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+        )
+
+    assert (tmp_path / "tile_embeddings" / "slide-a.pt").is_file()
+    assert (tmp_path / "tile_embeddings" / "slide-a.meta.json").is_file()
+    assert (tmp_path / "slide_embeddings" / "slide-a.pt").is_file()
+    assert (tmp_path / "slide_embeddings" / "slide-a.meta.json").is_file()
+    assert not (tmp_path / "slide_embeddings" / "slide-b.pt").exists()
+
+    process_df = pd.read_csv(process_list_path)
+    recorded = process_df.set_index("sample_id")
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "aggregation_status"] == "success"
+    assert recorded.loc["slide-b", "feature_status"] == "tbp"
+    assert recorded.loc["slide-b", "aggregation_status"] == "tbp"
 
 def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_false(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
@@ -734,11 +1008,14 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
         "_prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
-        lambda model, slide_records, tiling_results, preprocessing, execution: [embedded],
-    )
+    def fake_compute_embedded_slides(*args, **kwargs):
+        on_embedded_slide = kwargs.get("on_embedded_slide")
+        if on_embedded_slide is not None:
+            on_embedded_slide(slide_record, tiling_result, embedded)
+        return [embedded]
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         Model.from_pretrained("prism", level="slide"),
