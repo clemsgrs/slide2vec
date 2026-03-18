@@ -1,6 +1,13 @@
+import ast
+import builtins
+import importlib
 import configparser
 import re
+import sys
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +72,17 @@ def _requirement_lines(raw_block: str) -> dict[str, str]:
     return lines
 
 
+def _top_level_imported_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    modules: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            modules.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.add(node.module.split(".")[0])
+    return modules
+
+
 def test_setup_cfg_moves_model_runtime_deps_into_models_extra():
     parser = _load_setup_cfg()
 
@@ -117,3 +135,40 @@ def test_tile_dataset_avoids_runtime_transformers_import_for_type_checks():
     assert "if TYPE_CHECKING:" in source
     assert "from transformers.image_processing_utils import BaseImageProcessor" in source
     assert "isinstance(self.transforms, BaseImageProcessor)" not in source
+
+
+def test_models_module_defers_timm_and_transformers_top_level_imports():
+    imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
+
+    assert "timm" not in imported_modules
+    assert "transformers" not in imported_modules
+
+
+def test_models_module_imports_without_timm_or_transformers(monkeypatch):
+    original_import = builtins.__import__
+
+    for name in list(sys.modules):
+        if name == "slide2vec.models" or name.startswith("slide2vec.models."):
+            sys.modules.pop(name, None)
+
+    fake_einops = ModuleType("einops")
+    fake_einops.rearrange = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "einops", fake_einops)
+    fake_omegaconf = ModuleType("omegaconf")
+    fake_omegaconf.DictConfig = object
+    monkeypatch.setitem(sys.modules, "omegaconf", fake_omegaconf)
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name.split(".")[0] in {"timm", "transformers"}:
+            raise AssertionError(f"unexpected eager import: {name}")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    try:
+        module = importlib.import_module("slide2vec.models.models")
+    except ModuleNotFoundError as exc:
+        assert exc.name not in {"timm", "transformers"}
+        pytest.skip(f"core dependency {exc.name} is not installed in this test environment")
+
+    assert hasattr(module, "ModelFactory")
