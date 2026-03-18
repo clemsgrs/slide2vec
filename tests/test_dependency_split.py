@@ -109,9 +109,11 @@ def test_requirements_files_split_core_from_foundation_runtime():
     assert core_requirement_lines["torch"] == "torch"
     assert core_requirement_lines["torchvision"] == "torchvision"
     assert core_requirement_lines["einops"] == "einops"
+    assert core_requirement_lines["timm"] == "timm"
     assert foundation_requirement_lines["torch"] == "torch>=2.3,<2.8"
     assert foundation_requirement_lines["torchvision"] == "torchvision>=0.18.0"
     assert foundation_requirement_lines["einops"] == "einops>=0.8.0"
+    assert foundation_requirement_lines["timm"] == "timm>=1.0.3"
 
 
 def test_requirements_txt_matches_generic_core_runtime_requirements():
