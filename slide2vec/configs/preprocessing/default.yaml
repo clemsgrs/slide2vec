@@ -42,6 +42,7 @@ tiling:
 
 speed:
   num_workers: 8 # number of workers for tiling slides
+  embedding_backend: # optional embedding-time slide reader override; leave empty to reuse tiling.backend
 
 wandb:
   enable: false

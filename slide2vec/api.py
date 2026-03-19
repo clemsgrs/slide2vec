@@ -91,6 +91,7 @@ class ExecutionOptions:
     prefetch_factor: int = 4
     persistent_workers: bool = True
     gpu_batch_preprocessing: bool = True
+    embedding_backend: str | None = None
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
@@ -107,6 +108,7 @@ class ExecutionOptions:
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
             persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
             gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
+            embedding_backend=getattr(cfg.speed, "embedding_backend", None),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )

@@ -709,6 +709,24 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
     assert resume is False
 
 
+def test_resolve_embedding_backend_prefers_execution_override():
+    import slide2vec.inference as inference
+
+    preprocessing = PreprocessingConfig(backend="asap")
+    execution = ExecutionOptions(embedding_backend="cucim")
+
+    assert inference._resolve_embedding_backend(preprocessing, execution) == "cucim"
+
+
+def test_resolve_embedding_backend_falls_back_to_preprocessing_backend():
+    import slide2vec.inference as inference
+
+    preprocessing = PreprocessingConfig(backend="openslide")
+    execution = ExecutionOptions()
+
+    assert inference._resolve_embedding_backend(preprocessing, execution) == "openslide"
+
+
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -1608,6 +1626,7 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         prefetch_factor=7,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
+        embedding_backend="cucim",
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -1618,9 +1637,11 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     assert payload["prefetch_factor"] == 7
     assert payload["persistent_workers"] is False
     assert payload["gpu_batch_preprocessing"] is False
+    assert payload["embedding_backend"] == "cucim"
     assert restored.prefetch_factor == 7
     assert restored.persistent_workers is False
     assert restored.gpu_batch_preprocessing is False
+    assert restored.embedding_backend == "cucim"
 
 
 def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):

@@ -60,8 +60,7 @@ Commonly overridden fields:
 - `target_tile_size_px`
 - `tissue_threshold`
 - `backend`
-  `backend` may be `"asap"`, `"openslide"`, or `"cucim"` depending on the slide reader you want to use.
-  When `backend="cucim"` is used for embedding, the batch reader resolves pyramid levels from `CuImage.spacing()` and `resolutions["level_downsamples"]`, so slides need valid cuCIM spacing metadata.
+  `backend` is the tiling / HS2P slide-reader backend. It may be `"asap"` or `"openslide"` depending on the reader you want HS2P to use.
 
 Defaults that most users can leave alone:
 
@@ -107,6 +106,8 @@ preprocessing = PreprocessingConfig(
 - `prefetch_factor`
 - `persistent_workers`
 - `gpu_batch_preprocessing`
+- `embedding_backend`
+  Optional embedding-time slide reader override such as `"cucim"`. If unset, embedding reuses `PreprocessingConfig.backend`.
 - `save_tile_embeddings`
 - `save_latents`
 

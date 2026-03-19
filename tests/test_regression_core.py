@@ -250,6 +250,7 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             prefetch_factor_embedding=5,
             persistent_workers_embedding=False,
             gpu_batch_preprocessing=False,
+            embedding_backend="cucim",
         ),
     )
 
@@ -264,6 +265,7 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.prefetch_factor == 5
     assert execution.persistent_workers is False
     assert execution.gpu_batch_preprocessing is False
+    assert execution.embedding_backend == "cucim"
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -286,6 +288,7 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             prefetch_factor_embedding=3,
             persistent_workers_embedding=True,
             gpu_batch_preprocessing=True,
+            embedding_backend=None,
         ),
     )
 
@@ -295,6 +298,7 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     assert execution.prefetch_factor == 3
     assert execution.persistent_workers is True
     assert execution.gpu_batch_preprocessing is True
+    assert execution.embedding_backend is None
 
 def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -315,6 +319,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
             prefetch_factor_embedding=4,
             persistent_workers_embedding=True,
             gpu_batch_preprocessing=True,
+            embedding_backend="cucim",
         ),
     )
 
@@ -322,6 +327,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
 
     assert execution.mixed_precision is False
     assert execution.num_gpus == 1
+    assert execution.embedding_backend == "cucim"
 
 def test_preprocessing_with_backend_preserves_other_fields():
     base = PreprocessingConfig(
@@ -361,6 +367,7 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         prefetch_factor=6,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
+        embedding_backend="cucim",
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -376,6 +383,7 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.prefetch_factor == base.prefetch_factor
     assert updated.persistent_workers == base.persistent_workers
     assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
+    assert updated.embedding_backend == base.embedding_backend
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base

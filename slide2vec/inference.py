@@ -313,7 +313,7 @@ def embed_tiles(
             image_path=slide.image_path,
             mask_path=slide.mask_path,
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
-            backend=_resolve_backend(preprocessing),
+            backend=_resolve_embedding_backend(preprocessing, execution),
         )
         artifact = _write_tile_embedding_artifact(
             slide.sample_id,
@@ -355,7 +355,7 @@ def aggregate_tiles(
                 image_path,
                 coordinates,
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_backend(preprocessing)),
+                metadata.get("backend", _resolve_embedding_backend(preprocessing, execution)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -815,7 +815,7 @@ def _compute_tile_embeddings_for_slide(
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
-    backend = _resolve_backend(preprocessing)
+    backend = _resolve_embedding_backend(preprocessing, execution)
     batch_preprocessor = None
     if _can_use_batched_tile_loader(loaded, model):
         dataset = TileIndexDataset(resolved_indices)
@@ -883,7 +883,7 @@ def _aggregate_tile_embeddings_for_slide(
             slide.image_path,
             coordinates,
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_backend(preprocessing),
+            _resolve_embedding_backend(preprocessing, execution),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -949,7 +949,7 @@ def _persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_backend(preprocessing),
+                backend=_resolve_embedding_backend(preprocessing, execution),
             ),
         )
     slide_artifact = None
@@ -1691,7 +1691,7 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
     from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
     tiling_cfg = TilingConfig(
-        backend=preprocessing.backend,
+        backend=_resolve_tiling_backend(preprocessing),
         target_spacing_um=preprocessing.target_spacing_um,
         target_tile_size_px=preprocessing.target_tile_size_px,
         tolerance=preprocessing.tolerance,
@@ -1763,10 +1763,19 @@ def _maybe_import_torch():
     return torch
 
 
-def _resolve_backend(preprocessing: PreprocessingConfig | None) -> str:
+def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
     if preprocessing is None:
         return "asap"
     return preprocessing.backend
+
+
+def _resolve_embedding_backend(
+    preprocessing: PreprocessingConfig | None,
+    execution: ExecutionOptions | None,
+) -> str:
+    if execution is not None and execution.embedding_backend is not None:
+        return execution.embedding_backend
+    return _resolve_tiling_backend(preprocessing)
 
 
 def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
@@ -2152,6 +2161,7 @@ def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
         "prefetch_factor": execution.prefetch_factor,
         "persistent_workers": execution.persistent_workers,
         "gpu_batch_preprocessing": execution.gpu_batch_preprocessing,
+        "embedding_backend": execution.embedding_backend,
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_latents": execution.save_latents,
     }
@@ -2187,6 +2197,7 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         prefetch_factor=int(payload.get("prefetch_factor", 4)),
         persistent_workers=bool(payload.get("persistent_workers", True)),
         gpu_batch_preprocessing=bool(payload.get("gpu_batch_preprocessing", True)),
+        embedding_backend=payload.get("embedding_backend"),
         save_tile_embeddings=bool(payload.get("save_tile_embeddings", False)),
         save_latents=bool(payload.get("save_latents", False)),
     )
