@@ -40,16 +40,23 @@ class NullProgressReporter:
 
 
 class JsonlProgressReporter:
-    def __init__(self, path: str | Path, *, rank: int | None = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        rank: int | None = None,
+        progress_label: str | None = None,
+    ) -> None:
         base_path = Path(path)
         self.path = ranked_progress_events_path(base_path, rank) if rank is not None else base_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = self.path.open("a", encoding="utf-8", buffering=1)
+        self.progress_label = progress_label
 
     def emit(self, event: ProgressEvent) -> None:
         payload = {
             "kind": event.kind,
-            "payload": event.payload,
+            "payload": _with_progress_label(event.payload, self.progress_label),
             "timestamp": time.time(),
         }
         self._handle.write(json.dumps(payload, sort_keys=True) + "\n")
@@ -113,13 +120,16 @@ class PlainTextCliProgressReporter:
         if kind == "embedding.started":
             return f"Embedding slides ({payload['slide_count']} total)..."
         if kind == "embedding.slide.started":
-            return f"Embedding {payload['sample_id']} ({payload['total_tiles']} tiles)..."
+            return f"Embedding {_progress_subject(payload)} ({payload['total_tiles']} tiles)..."
         if kind == "embedding.tile.progress":
-            return f"Embedding {payload['sample_id']}: {payload['processed']}/{payload['total']} {payload['unit']}s"
+            return (
+                f"Embedding {_progress_subject(payload)}: "
+                f"{payload['processed']}/{payload['total']} {payload['unit']}s"
+            )
         if kind == "aggregation.started":
-            return f"Aggregating slide embedding for {payload['sample_id']}..."
+            return f"Aggregating slide embedding for {_progress_subject(payload)}..."
         if kind == "embedding.slide.finished":
-            return f"Completed {payload['sample_id']} ({payload['num_tiles']} tiles)"
+            return f"Completed {_progress_subject(payload)} ({payload['num_tiles']} tiles)"
         if kind == "embedding.finished":
             return (
                 f"Embedding finished: {payload['slides_completed']}/{payload['slide_count']} slides, "
@@ -161,6 +171,8 @@ class RichCliProgressReporter:
         )
         self.progress.start()
         self._task_ids: dict[str, int] = {}
+        self._model_loading_counts: dict[str, int] = {}
+        self._model_loading_devices: dict[str, set[str]] = {}
 
     def emit(self, event: ProgressEvent) -> None:
         kind = event.kind
@@ -198,62 +210,102 @@ class RichCliProgressReporter:
             )
             return
         if kind == "model.loading":
-            self._task_ids["model_loading"] = self.progress.add_task(
-                f"Loading model [bold]{payload['model_name']}[/bold]...", total=None
-            )
+            model_name = str(payload["model_name"])
+            count = self._model_loading_counts.get(model_name, 0) + 1
+            self._model_loading_counts[model_name] = count
+            task_id = self._task_ids.get("model_loading")
+            description = _model_loading_description(model_name, count)
+            if task_id is None:
+                self._task_ids["model_loading"] = self.progress.add_task(
+                    description,
+                    total=None,
+                )
+            else:
+                self.progress.update(task_id, description=description)
             return
         if kind == "model.ready":
+            model_name = str(payload["model_name"])
+            device = str(payload["device"])
+            remaining = self._model_loading_counts.get(model_name, 0)
+            if remaining <= 0:
+                self.console.print(
+                    f"[green]Model [bold]{model_name}[/bold] ready[/green] on {device}"
+                )
+                return
+            devices = self._model_loading_devices.setdefault(model_name, set())
+            devices.add(device)
+            remaining -= 1
+            if remaining > 0:
+                self._model_loading_counts[model_name] = remaining
+                task_id = self._task_ids.get("model_loading")
+                if task_id is not None:
+                    self.progress.update(
+                        task_id,
+                        description=_model_loading_description(model_name, remaining),
+                    )
+                return
+            self._model_loading_counts.pop(model_name, None)
+            devices = self._model_loading_devices.pop(model_name, set())
             task_id = self._task_ids.pop("model_loading", None)
             if task_id is not None:
                 self.progress.remove_task(task_id)
-            self.console.print(
-                f"[green]Model [bold]{payload['model_name']}[/bold] ready[/green] on {payload['device']}"
-            )
+            if len(devices) > 1:
+                self.console.print(
+                    f"[green]Model [bold]{model_name}[/bold] ready[/green] on {len(devices)} GPUs"
+                )
+            else:
+                self.console.print(
+                    f"[green]Model [bold]{model_name}[/bold] ready[/green] on {device}"
+                )
             return
         if kind == "embedding.started":
             self._task_ids["embedding"] = self.progress.add_task("Embedding slides", total=payload["slide_count"])
             return
         if kind == "embedding.slide.started":
-            tile_task = self._task_ids.get("tiles")
+            tile_task_key = _progress_task_key("tiles", payload)
+            tile_task = self._task_ids.get(tile_task_key)
+            description = _progress_subject(payload)
             if tile_task is None:
-                self._task_ids["tiles"] = self.progress.add_task(
-                    f"{payload['sample_id']}",
+                self._task_ids[tile_task_key] = self.progress.add_task(
+                    description,
                     total=payload["total_tiles"],
                 )
             else:
                 self.progress.update(
                     tile_task,
-                    description=payload["sample_id"],
+                    description=description,
                     total=payload["total_tiles"],
                     completed=0,
                     visible=True,
                 )
             return
         if kind == "embedding.tile.progress":
-            task_id = self._task_ids.get("tiles")
+            task_id = self._task_ids.get(_progress_task_key("tiles", payload))
             if task_id is not None:
                 self.progress.update(task_id, completed=payload["processed"], total=payload["total"])
             return
         if kind == "aggregation.started":
-            if "aggregation" not in self._task_ids:
-                self._task_ids["aggregation"] = self.progress.add_task(
-                    f"Aggregating {payload['sample_id']}",
+            aggregation_task_key = _progress_task_key("aggregation", payload)
+            description = f"Aggregating {_progress_subject(payload)}"
+            if aggregation_task_key not in self._task_ids:
+                self._task_ids[aggregation_task_key] = self.progress.add_task(
+                    description,
                     total=None,
                 )
             else:
-                self.progress.update(self._task_ids["aggregation"], description=f"Aggregating {payload['sample_id']}")
+                self.progress.update(self._task_ids[aggregation_task_key], description=description)
             return
         if kind == "aggregation.finished":
-            task_id = self._task_ids.get("aggregation")
+            task_id = self._task_ids.get(_progress_task_key("aggregation", payload))
             if task_id is not None:
                 self.progress.remove_task(task_id)
-                self._task_ids.pop("aggregation", None)
+                self._task_ids.pop(_progress_task_key("aggregation", payload), None)
             return
         if kind == "embedding.slide.finished":
             embed_task = self._task_ids.get("embedding")
             if embed_task is not None:
                 self.progress.advance(embed_task, 1)
-            tile_task = self._task_ids.get("tiles")
+            tile_task = self._task_ids.get(_progress_task_key("tiles", payload))
             if tile_task is not None:
                 self.progress.update(tile_task, completed=payload["num_tiles"])
             return
@@ -351,6 +403,42 @@ def emit_progress_log(message: str, *, stream=None) -> None:
 def ranked_progress_events_path(base_path: str | Path, rank: int) -> Path:
     path = Path(base_path)
     return path.with_name(f"{path.stem}.rank{rank}{path.suffix}")
+
+
+def _model_loading_description(model_name: str, worker_count: int) -> str:
+    if worker_count <= 1:
+        return f"Loading model [bold]{model_name}[/bold]..."
+    return f"Loading model [bold]{model_name}[/bold] on {worker_count} GPUs..."
+
+
+def _with_progress_label(payload: dict[str, Any], progress_label: str | None) -> dict[str, Any]:
+    if progress_label is None or "progress_label" in payload:
+        return dict(payload)
+    tagged_payload = dict(payload)
+    tagged_payload["progress_label"] = progress_label
+    return tagged_payload
+
+
+def _progress_label(payload: dict[str, Any]) -> str | None:
+    label = payload.get("progress_label")
+    if label is None or label == "":
+        return None
+    return str(label)
+
+
+def _progress_subject(payload: dict[str, Any]) -> str:
+    sample_id = str(payload["sample_id"])
+    label = _progress_label(payload)
+    if label is None:
+        return sample_id
+    return f"{label}: {sample_id}"
+
+
+def _progress_task_key(base: str, payload: dict[str, Any]) -> str:
+    label = _progress_label(payload)
+    if label is None:
+        return base
+    return f"{base}:{label}"
 
 
 def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:

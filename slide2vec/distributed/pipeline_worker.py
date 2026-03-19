@@ -52,7 +52,15 @@ def main(argv=None) -> int:
         assigned_slides = [slide for slide, _ in assigned_pairs]
         assigned_tiling_results = [tiling_result for _, tiling_result in assigned_pairs]
         progress_events_path = request.get("progress_events_path")
-        reporter = JsonlProgressReporter(progress_events_path, rank=global_rank) if progress_events_path else None
+        reporter = (
+            JsonlProgressReporter(
+                progress_events_path,
+                rank=global_rank,
+                progress_label=f"cuda:{local_rank}",
+            )
+            if progress_events_path
+            else None
+        )
         context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
         with context:
             embedded_slides = _compute_embedded_slides(

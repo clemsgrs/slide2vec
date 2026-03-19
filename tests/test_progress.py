@@ -1,5 +1,7 @@
 import io
 import json
+import sys
+import types
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +24,68 @@ class RecordingReporter:
 
     def write_log(self, message, *, stream=None):
         self.log_lines.append(message)
+
+
+def _install_fake_rich_runtime(monkeypatch):
+    fake_rich = types.ModuleType("rich")
+    fake_console = types.ModuleType("rich.console")
+    fake_progress = types.ModuleType("rich.progress")
+
+    class FakeConsole:
+        def __init__(self, file=None):
+            self.file = file
+            self.is_terminal = True
+            self.lines = []
+
+        def print(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
+    class FakeProgress:
+        def __init__(self, *args, **kwargs):
+            self.tasks = {}
+            self.next_task_id = 1
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def add_task(self, description, total=None, completed=0, visible=True):
+            task_id = self.next_task_id
+            self.next_task_id += 1
+            self.tasks[task_id] = {
+                "description": description,
+                "total": total,
+                "completed": completed,
+                "visible": visible,
+            }
+            return task_id
+
+        def update(self, task_id, **kwargs):
+            self.tasks[task_id].update(kwargs)
+
+        def remove_task(self, task_id):
+            self.tasks.pop(task_id, None)
+
+        def advance(self, task_id, advance=1):
+            self.tasks[task_id]["completed"] = self.tasks[task_id].get("completed", 0) + advance
+
+    fake_console.Console = FakeConsole
+    fake_progress.Progress = FakeProgress
+    fake_progress.BarColumn = lambda *args, **kwargs: None
+    fake_progress.MofNCompleteColumn = lambda *args, **kwargs: None
+    fake_progress.SpinnerColumn = lambda *args, **kwargs: None
+    fake_progress.TaskProgressColumn = lambda *args, **kwargs: None
+    fake_progress.TextColumn = lambda *args, **kwargs: None
+    fake_progress.TimeElapsedColumn = lambda *args, **kwargs: None
+    fake_progress.TimeRemainingColumn = lambda *args, **kwargs: None
+    fake_rich.console = fake_console
+    fake_rich.progress = fake_progress
+    monkeypatch.setitem(sys.modules, "rich", fake_rich)
+    monkeypatch.setitem(sys.modules, "rich.console", fake_console)
+    monkeypatch.setitem(sys.modules, "rich.progress", fake_progress)
+    return FakeConsole, FakeProgress
 
 
 def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatch, tmp_path: Path):
@@ -301,6 +365,103 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
         )
 
     assert [event.kind for event in reporter.events] == ["embedding.slide.started"]
+
+
+def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="model.loading", payload={"model_name": "h0-mini"}))
+    reporter.emit(progress.ProgressEvent(kind="model.loading", payload={"model_name": "h0-mini"}))
+
+    assert len(reporter.progress.tasks) == 1
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="model.ready",
+            payload={"model_name": "h0-mini", "device": "cuda:0"},
+        )
+    )
+
+    assert len(reporter.progress.tasks) == 1
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="model.ready",
+            payload={"model_name": "h0-mini", "device": "cuda:1"},
+        )
+    )
+
+    assert reporter.progress.tasks == {}
+    assert len(console.lines) == 1
+
+
+def test_jsonl_progress_reporter_tags_worker_events_with_gpu_label(tmp_path: Path):
+    import slide2vec.progress as progress
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    reporter = progress.JsonlProgressReporter(
+        progress_path,
+        rank=1,
+        progress_label="cuda:1",
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="embedding.slide.started",
+            payload={"sample_id": "slide-b", "total_tiles": 8},
+        )
+    )
+    reporter.close()
+
+    events, _offsets = progress.read_progress_events(progress_path)
+
+    assert [event.kind for event in events] == ["embedding.slide.started"]
+    assert events[0].payload["progress_label"] == "cuda:1"
+
+
+def test_rich_reporter_tracks_multi_gpu_embedding_rows_separately(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    reporter = progress.RichCliProgressReporter(console=FakeConsole())
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="embedding.slide.started",
+            payload={"sample_id": "slide-a", "total_tiles": 5, "progress_label": "cuda:0"},
+        )
+    )
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="embedding.slide.started",
+            payload={"sample_id": "slide-b", "total_tiles": 7, "progress_label": "cuda:1"},
+        )
+    )
+
+    descriptions = sorted(task["description"] for task in reporter.progress.tasks.values())
+    assert descriptions == ["cuda:0: slide-a", "cuda:1: slide-b"]
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="embedding.tile.progress",
+            payload={
+                "sample_id": "slide-a",
+                "processed": 3,
+                "total": 5,
+                "unit": "tile",
+                "progress_label": "cuda:0",
+            },
+        )
+    )
+
+    task_by_description = {
+        task["description"]: task for task in reporter.progress.tasks.values()
+    }
+    assert task_by_description["cuda:0: slide-a"]["completed"] == 3
+    assert task_by_description["cuda:1: slide-b"]["completed"] == 0
 
 
 def test_progress_aware_log_handler_routes_logs_through_active_reporter():
