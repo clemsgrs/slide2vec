@@ -170,6 +170,44 @@ def test_run_forward_pass_reports_processed_tile_counts():
     assert all(payload["sample_id"] == "slide-a" for payload in payloads)
 
 
+def test_run_forward_pass_emits_batch_timing_events():
+    torch = pytest.importorskip("torch")
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+
+    reporter = RecordingReporter()
+
+    class FakeModel:
+        def __call__(self, image):
+            batch_size = image.shape[0]
+            return {"embedding": torch.ones((batch_size, 3), dtype=torch.float32)}
+
+    dataloader = [
+        (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
+        (torch.tensor([2]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
+    ]
+    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel())
+
+    with progress.activate_progress_reporter(reporter):
+        inference._run_forward_pass(
+            dataloader,
+            loaded,
+            nullcontext(),
+            sample_id="slide-a",
+            total_items=3,
+            unit_label="tile",
+        )
+
+    timing_payloads = [event.payload for event in reporter.events if event.kind == "embedding.batch.timing"]
+    assert len(timing_payloads) == 2
+    assert [payload["batch_size"] for payload in timing_payloads] == [2, 1]
+    assert all(payload["sample_id"] == "slide-a" for payload in timing_payloads)
+    assert all(payload["loader_wait_ms"] >= 0.0 for payload in timing_payloads)
+    assert all(payload["ready_wait_ms"] >= 0.0 for payload in timing_payloads)
+    assert all(payload["forward_ms"] >= 0.0 for payload in timing_payloads)
+    assert all(payload["preprocess_ms"] >= 0.0 for payload in timing_payloads)
+
+
 def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):
     import slide2vec.progress as progress
 

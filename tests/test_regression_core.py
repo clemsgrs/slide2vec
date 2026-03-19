@@ -247,6 +247,9 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=3,
+            prefetch_factor_embedding=5,
+            persistent_workers_embedding=False,
+            gpu_batch_preprocessing=False,
         ),
     )
 
@@ -258,6 +261,9 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.num_workers == 2
     assert execution.num_gpus == 3
     assert execution.mixed_precision is True
+    assert execution.prefetch_factor == 5
+    assert execution.persistent_workers is False
+    assert execution.gpu_batch_preprocessing is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -277,12 +283,18 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=None,
+            prefetch_factor_embedding=3,
+            persistent_workers_embedding=True,
+            gpu_batch_preprocessing=True,
         ),
     )
 
     execution = api.ExecutionOptions.from_config(cfg)
 
     assert execution.num_gpus == 6
+    assert execution.prefetch_factor == 3
+    assert execution.persistent_workers is True
+    assert execution.gpu_batch_preprocessing is True
 
 def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -300,6 +312,9 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
             num_workers=4,
             num_workers_embedding=4,
             num_gpus=1,
+            prefetch_factor_embedding=4,
+            persistent_workers_embedding=True,
+            gpu_batch_preprocessing=True,
         ),
     )
 
@@ -343,6 +358,9 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         num_workers=3,
         num_gpus=2,
         mixed_precision=True,
+        prefetch_factor=6,
+        persistent_workers=False,
+        gpu_batch_preprocessing=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -355,9 +373,165 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.num_workers == base.num_workers
     assert updated.num_gpus == base.num_gpus
     assert updated.mixed_precision == base.mixed_precision
+    assert updated.prefetch_factor == base.prefetch_factor
+    assert updated.persistent_workers == base.persistent_workers
+    assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base
+
+def test_batch_tile_collator_reuses_one_slide_handle_across_batches(monkeypatch):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("wholeslidedata")
+    from slide2vec.data.dataset import BatchTileCollator
+
+    tiling_result = SimpleNamespace(
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+        x=np.array([10, 30, 50]),
+        y=np.array([20, 40, 60]),
+    )
+
+    class FakeWholeSlideImage:
+        constructor_calls = []
+        patch_calls = []
+
+        def __init__(self, path, backend):
+            self.path = Path(path)
+            self.backend = backend
+            type(self).constructor_calls.append((self.path, backend))
+
+        def get_patch(self, x, y, width, height, spacing, center):
+            type(self).patch_calls.append((x, y, width, height, spacing, center))
+            return np.full((height, width, 3), fill_value=x + y, dtype=np.uint8)
+
+    monkeypatch.setattr("slide2vec.data.dataset.wsd.WholeSlideImage", FakeWholeSlideImage)
+
+    collator = BatchTileCollator(
+        wsi_path=Path("/tmp/slide-a.svs"),
+        tiling_result=tiling_result,
+        backend="asap",
+    )
+
+    first_indices, first_batch = collator([0, 2])
+    second_indices, second_batch = collator([1])
+
+    np.testing.assert_array_equal(first_indices.numpy(), np.array([0, 2], dtype=np.int64))
+    np.testing.assert_array_equal(second_indices.numpy(), np.array([1], dtype=np.int64))
+    assert first_batch.shape == (2, 3, 4, 4)
+    assert second_batch.shape == (1, 3, 4, 4)
+    assert first_batch.dtype == torch.uint8
+    assert second_batch.dtype == torch.uint8
+    assert len(FakeWholeSlideImage.constructor_calls) == 1
+    assert FakeWholeSlideImage.patch_calls == [
+        (10, 20, 4, 4, 0.5, False),
+        (50, 60, 4, 4, 0.5, False),
+        (30, 40, 4, 4, 0.5, False),
+    ]
+
+
+def test_cucim_batch_reader_maps_spacing_to_closest_pyramid_level(monkeypatch):
+    torch = pytest.importorskip("torch")
+    from slide2vec.data.dataset import CuCIMBatchReader
+
+    tiling_result = SimpleNamespace(
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        x=np.array([10, 30]),
+        y=np.array([20, 40]),
+    )
+    observed = {}
+
+    class FakeCuImage:
+        def __init__(self, path):
+            observed["path"] = str(path)
+            self.resolutions = {"level_downsamples": [1.0, 2.0, 4.0]}
+
+        def spacing(self):
+            return (0.25, 0.25)
+
+        def read_region(self, *, location, size, level):
+            observed.setdefault("calls", []).append((location, size, level))
+            value = location[0] + location[1] + level
+            return np.full((size[1], size[0], 3), fill_value=value, dtype=np.uint8)
+
+    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
+
+    reader = CuCIMBatchReader(
+        wsi_path=Path("/tmp/slide-a.svs"),
+        tiling_result=tiling_result,
+    )
+
+    batch = reader.read_batch(np.array([0, 1], dtype=np.int64))
+
+    assert batch.shape == (2, 3, 4, 4)
+    assert batch.dtype == torch.uint8
+    assert observed["path"] == "/tmp/slide-a.svs"
+    assert observed["calls"] == [
+        ((10, 20), (4, 4), 1),
+        ((30, 40), (4, 4), 1),
+    ]
+
+
+def test_cucim_batch_reader_requires_level_downsamples_metadata(monkeypatch):
+    from slide2vec.data.dataset import CuCIMBatchReader
+
+    tiling_result = SimpleNamespace(
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        x=np.array([10]),
+        y=np.array([20]),
+    )
+
+    class FakeCuImage:
+        def __init__(self, path):
+            self.path = path
+            self.resolutions = {}
+
+        def spacing(self):
+            return (0.25, 0.25)
+
+    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
+
+    reader = CuCIMBatchReader(
+        wsi_path=Path("/tmp/slide-a.svs"),
+        tiling_result=tiling_result,
+    )
+
+    with pytest.raises(RuntimeError, match="level_downsamples"):
+        reader._resolve_level()
+
+
+def test_cucim_batch_reader_requires_usable_spacing_metadata(monkeypatch):
+    from slide2vec.data.dataset import CuCIMBatchReader
+
+    tiling_result = SimpleNamespace(
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        x=np.array([10]),
+        y=np.array([20]),
+    )
+
+    class FakeCuImage:
+        def __init__(self, path):
+            self.path = path
+            self.resolutions = {"level_downsamples": [1.0, 2.0]}
+
+        def spacing(self):
+            return {}
+
+    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
+
+    reader = CuCIMBatchReader(
+        wsi_path=Path("/tmp/slide-a.svs"),
+        tiling_result=tiling_result,
+    )
+
+    with pytest.raises(RuntimeError, match="spacing\\(\\)"):
+        reader._resolve_level()
 
 def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
     import slide2vec.cli as cli

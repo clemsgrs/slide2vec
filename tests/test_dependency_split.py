@@ -17,6 +17,7 @@ FOUNDATION_REQUIREMENT_NAMES = {
 }
 
 CORE_RUNTIME_REQUIREMENT_NAMES = {
+    "cucim",
     "einops",
     "hs2p",
     "matplotlib",
@@ -101,6 +102,7 @@ def test_requirements_files_split_core_from_foundation_runtime():
     assert "-r requirements.in" in foundation_requirements_text
     assert core_requirement_lines["torch"] == "torch"
     assert core_requirement_lines["torchvision"] == "torchvision"
+    assert core_requirement_lines["cucim"] == "cucim"
     assert core_requirement_lines["einops"] == "einops"
     assert core_requirement_lines["timm"] == "timm"
     assert core_requirement_lines["transformers"] == "transformers"
@@ -116,6 +118,7 @@ def test_requirements_txt_matches_generic_core_runtime_requirements():
 
     assert requirement_lines["torch"] == "torch"
     assert requirement_lines["torchvision"] == "torchvision"
+    assert requirement_lines["cucim"] == "cucim"
     assert requirement_lines["einops"] == "einops"
     assert requirement_lines["timm"] == "timm"
     assert requirement_lines["transformers"] == "transformers"

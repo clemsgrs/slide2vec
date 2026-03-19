@@ -1401,3 +1401,417 @@ def test_run_forward_pass_handles_empty_dataloader():
 
     assert result.shape == (0, 5)
     assert result.dtype == torch.float32
+
+
+def test_region_batch_preprocessor_resizes_whole_region_before_unfolding():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=SimpleNamespace(transforms=[]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=4,
+        read_tile_size_px=2,
+    )
+    execution = ExecutionOptions(gpu_batch_preprocessing=False)
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=execution,
+    )
+
+    batch = torch.full((1, 3, 2, 2), 255, dtype=torch.uint8)
+    processed = preprocess(batch)
+
+    assert processed.shape == (1, 4, 3, 2, 2)
+    assert processed.dtype == torch.float32
+    assert torch.allclose(processed, torch.ones_like(processed))
+
+
+def test_region_batch_preprocessor_unfolds_then_applies_tile_transforms():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Resize:
+        def __init__(self, size):
+            self.size = size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=SimpleNamespace(transforms=[Resize(1)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=4,
+        read_tile_size_px=4,
+    )
+    execution = ExecutionOptions(gpu_batch_preprocessing=False)
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=execution,
+    )
+
+    quadrant_values = torch.tensor(
+        [
+            [
+                [0, 0, 85, 85],
+                [0, 0, 85, 85],
+                [170, 170, 255, 255],
+                [170, 170, 255, 255],
+            ]
+        ],
+        dtype=torch.uint8,
+    )
+    batch = quadrant_values.unsqueeze(0).repeat(1, 3, 1, 1)
+    processed = preprocess(batch)
+
+    expected = torch.tensor([0.0, 85.0 / 255.0, 170.0 / 255.0, 1.0], dtype=torch.float32)
+
+    assert processed.shape == (1, 4, 3, 1, 1)
+    assert torch.allclose(processed[0, :, 0, 0, 0], expected, atol=1e-5)
+    assert torch.allclose(processed[0, :, 1, 0, 0], expected, atol=1e-5)
+    assert torch.allclose(processed[0, :, 2, 0, 0], expected, atol=1e-5)
+
+
+def test_build_batch_transform_spec_supports_nested_region_unfolding_transform():
+    import slide2vec.inference as inference
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    class Normalize:
+        def __init__(self, mean, std):
+            self.mean = mean
+            self.std = std
+
+    transforms = Compose(
+        [
+            Compose(
+                [
+                    RegionUnfolding(8),
+                    Normalize((0.5, 0.4, 0.3), (0.2, 0.3, 0.4)),
+                ]
+            )
+        ]
+    )
+
+    spec = inference._build_batch_transform_spec(transforms)
+
+    assert spec is not None
+    assert spec.region_unfold_tile_size == 8
+    assert spec.mean == (0.5, 0.4, 0.3)
+    assert spec.std == (0.2, 0.3, 0.4)
+
+
+def test_region_batch_preprocessor_uses_region_unfolding_from_transform_stack():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=4),
+        transforms=Compose([RegionUnfolding(4)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=8,
+        read_tile_size_px=8,
+    )
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=ExecutionOptions(gpu_batch_preprocessing=False),
+    )
+
+    batch = torch.ones((1, 3, 8, 8), dtype=torch.uint8)
+    processed = preprocess(batch)
+
+    assert processed.shape == (1, 4, 3, 4, 4)
+
+
+def test_region_batch_preprocessor_rejects_mismatched_region_unfolding_tile_size():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=Compose([RegionUnfolding(4)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=8,
+        read_tile_size_px=8,
+    )
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=ExecutionOptions(gpu_batch_preprocessing=False),
+    )
+
+    with pytest.raises(ValueError, match="tile_size"):
+        preprocess(torch.ones((1, 3, 8, 8), dtype=torch.uint8))
+
+
+def test_serialize_execution_preserves_loader_optimization_fields():
+    import slide2vec.inference as inference
+
+    execution = ExecutionOptions(
+        output_dir=Path("/tmp/output"),
+        batch_size=64,
+        num_workers=8,
+        num_gpus=2,
+        mixed_precision=True,
+        prefetch_factor=7,
+        persistent_workers=False,
+        gpu_batch_preprocessing=False,
+        save_tile_embeddings=True,
+        save_latents=True,
+    )
+
+    payload = inference._serialize_execution(execution)
+    restored = inference.deserialize_execution(payload)
+
+    assert payload["prefetch_factor"] == 7
+    assert payload["persistent_workers"] is False
+    assert payload["gpu_batch_preprocessing"] is False
+    assert restored.prefetch_factor == 7
+    assert restored.persistent_workers is False
+    assert restored.gpu_batch_preprocessing is False
+
+
+def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.zeros((2, 3, 4, 4), dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def __call__(self, image):
+            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileDataset=object,
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    fake_data_package = types.ModuleType("slide2vec.data")
+    fake_data_package.__path__ = []
+    fake_data_package.dataset = fake_dataset_module
+
+    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_can_use_batched_tile_loader", lambda *args, **kwargs: True)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=3,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+        gpu_batch_preprocessing=True,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 3
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+    assert captured["kwargs"]["collate_fn"] == (
+        "collator",
+        {
+            "wsi_path": Path("/tmp/slide-a.svs"),
+            "tiling_result": tiling_result,
+            "backend": "asap",
+        },
+    )
+
+
+def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.full((2, 3, 4, 4), 255, dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class TileDatasetSentinel:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("TileDataset fallback should not be used for region batching")
+
+    class DummyRegionModel:
+        tile_size = 2
+
+        def __call__(self, image):
+            assert image.ndim == 5
+            assert image.shape[1:] == (4, 3, 2, 2)
+            return {"embedding": torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)}
+
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileDataset=TileDatasetSentinel,
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    fake_data_package = types.ModuleType("slide2vec.data")
+    fake_data_package.__path__ = []
+    fake_data_package.dataset = fake_dataset_module
+
+    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+
+    class Normalize:
+        def __init__(self, mean, std):
+            self.mean = mean
+            self.std = std
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=DummyRegionModel(),
+        transforms=SimpleNamespace(transforms=[Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=3,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+        gpu_batch_preprocessing=False,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="region"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 4, 3)
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+    assert captured["kwargs"]["collate_fn"] == (
+        "collator",
+        {
+            "wsi_path": Path("/tmp/slide-a.svs"),
+            "tiling_result": tiling_result,
+            "backend": "asap",
+        },
+    )

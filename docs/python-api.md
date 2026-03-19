@@ -60,6 +60,8 @@ Commonly overridden fields:
 - `target_tile_size_px`
 - `tissue_threshold`
 - `backend`
+  `backend` may be `"asap"`, `"openslide"`, or `"cucim"` depending on the slide reader you want to use.
+  When `backend="cucim"` is used for embedding, the batch reader resolves pyramid levels from `CuImage.spacing()` and `resolutions["level_downsamples"]`, so slides need valid cuCIM spacing metadata.
 
 Defaults that most users can leave alone:
 
@@ -102,6 +104,9 @@ preprocessing = PreprocessingConfig(
 - `num_workers`
 - `num_gpus`
 - `mixed_precision`
+- `prefetch_factor`
+- `persistent_workers`
+- `gpu_batch_preprocessing`
 - `save_tile_embeddings`
 - `save_latents`
 

@@ -88,6 +88,9 @@ class ExecutionOptions:
     num_workers: int = 0
     num_gpus: int | None = None
     mixed_precision: bool = False
+    prefetch_factor: int = 4
+    persistent_workers: bool = True
+    gpu_batch_preprocessing: bool = True
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
@@ -101,6 +104,9 @@ class ExecutionOptions:
             num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
+            prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
+            persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
+            gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )
@@ -110,6 +116,8 @@ class ExecutionOptions:
         object.__setattr__(self, "num_gpus", resolved_num_gpus)
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
+        if self.prefetch_factor < 1:
+            raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

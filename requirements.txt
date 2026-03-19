@@ -5,6 +5,7 @@ matplotlib
 numpy<2
 pandas
 pillow
+cucim
 rich
 torch
 torchvision

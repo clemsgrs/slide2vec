@@ -4,6 +4,7 @@ matplotlib
 numpy<2
 pandas
 pillow
+cucim
 rich
 tqdm
 hs2p>=2.3.0,<3
