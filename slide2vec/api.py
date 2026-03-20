@@ -59,6 +59,7 @@ class PreprocessingConfig:
         tiling = cfg.tiling
         default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
+        read_tiles_from = getattr(tiling, "read_tiles_from", None)
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -72,7 +73,7 @@ class PreprocessingConfig:
                 Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
             ),
             read_tiles_from=(
-                Path(tiling.read_tiles_from) if getattr(tiling, "read_tiles_from", None) else None
+                Path(read_tiles_from) if read_tiles_from else None
             ),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
@@ -99,7 +100,6 @@ class ExecutionOptions:
     prefetch_factor: int = 4
     persistent_workers: bool = True
     gpu_batch_preprocessing: bool = True
-    embedding_backend: str | None = None
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
@@ -116,7 +116,6 @@ class ExecutionOptions:
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
             persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
             gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
-            embedding_backend=getattr(cfg.speed, "embedding_backend", None),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )

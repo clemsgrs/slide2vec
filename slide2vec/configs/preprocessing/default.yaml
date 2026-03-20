@@ -10,7 +10,7 @@ seed: 0 # seed for reproducibility
 
 tiling:
   read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
-  read_tiles_from: # path to a directory containing HS2P `.tiles.tar` tile stores; slide2vec will also look for <output_dir>/tiles/<sample_id>.tiles.tar when left empty
+  read_tiles_from: # path to an existing directory containing HS2P `.tiles.tar` tile stores to reuse instead of writing new stores during tiling
   backend: "asap" # backend to use for slide reading
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
@@ -43,7 +43,6 @@ tiling:
 
 speed:
   num_workers: 8 # number of workers for tiling slides
-  embedding_backend: # optional embedding-time slide reader override; leave empty to reuse tiling.backend
 
 wandb:
   enable: false

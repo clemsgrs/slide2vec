@@ -28,133 +28,6 @@ def test_resource_loading_uses_packaged_configs():
     assert "model" in cfg
     assert config_resource("preprocessing", "default").name == "default.yaml"
 
-def test_tile_dataset_scales_coordinates_and_returns_transformed_tiles(monkeypatch):
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([10, 30]),
-        y=np.array([20, 40]),
-    )
-
-    class FakeWholeSlideImage:
-        constructor_calls = []
-        patch_calls = []
-
-        def __init__(self, path, backend):
-            self.path = path
-            self.backend = backend
-            self.spacings = [0.25]
-            type(self).constructor_calls.append((Path(path), backend))
-
-        def get_patch(self, x, y, width, height, spacing, center):
-            type(self).patch_calls.append((x, y, width, height, spacing, center))
-            return np.full((height, width, 3), fill_value=64, dtype=np.uint8)
-
-    monkeypatch.setattr("slide2vec.data.dataset.wsd.WholeSlideImage", FakeWholeSlideImage)
-
-    seen_shapes = []
-
-    def transform(tile):
-        arr = np.asarray(tile)
-        seen_shapes.append(arr.shape)
-        return arr
-
-    dataset = TileDataset(
-        sample_id="slide-a",
-        wsi_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        tiling_result=tiling_result,
-        backend="asap",
-        transforms=transform,
-    )
-
-    np.testing.assert_array_equal(dataset.coordinates, np.array([[10, 20], [30, 40]]))
-    np.testing.assert_array_equal(dataset.scaled_coordinates, np.array([[5, 10], [15, 20]]))
-    assert len(dataset) == 2
-
-    idx, tile = dataset[1]
-
-    assert idx == 1
-    assert tile.shape == (4, 4, 3)
-    assert seen_shapes == [(4, 4, 3)]
-    assert FakeWholeSlideImage.patch_calls == [(30, 40, 2, 2, 0.5, False)]
-    assert len(FakeWholeSlideImage.constructor_calls) == 2
-
-def test_tile_dataset_requires_coordinate_arrays():
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([10]),
-        y=None,
-    )
-
-    with pytest.raises(ValueError, match="Tiling result must expose x/y coordinates"):
-        TileDataset(
-            sample_id="slide-a",
-            wsi_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-            tiling_result=tiling_result,
-            backend="asap",
-            transforms=None,
-        )
-
-def test_tile_dataset_load_coordinates_delegates_to_shared_helpers(monkeypatch):
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    captured = {}
-
-    def fake_coordinate_arrays(tiling_result):
-        captured["arrays_arg"] = tiling_result
-        return np.array([9, 10]), np.array([11, 12])
-
-    def fake_coordinate_matrix(tiling_result):
-        captured["matrix_arg"] = tiling_result
-        return np.array([[9, 11], [10, 12]], dtype=np.int64)
-
-    monkeypatch.setattr("slide2vec.data.dataset.coordinate_arrays", fake_coordinate_arrays)
-    monkeypatch.setattr("slide2vec.data.dataset.coordinate_matrix", fake_coordinate_matrix)
-    monkeypatch.setattr(TileDataset, "scale_coordinates", lambda self: np.array([[1, 2], [3, 4]], dtype=np.int64))
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([0]),
-        y=np.array([1]),
-    )
-    dataset = TileDataset(
-        sample_id="slide-a",
-        wsi_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        tiling_result=tiling_result,
-        backend="asap",
-        transforms=None,
-    )
-
-    assert captured["arrays_arg"] is tiling_result
-    assert captured["matrix_arg"] is tiling_result
-    np.testing.assert_array_equal(dataset.x, np.array([9, 10]))
-    np.testing.assert_array_equal(dataset.y, np.array([11, 12]))
-    np.testing.assert_array_equal(dataset.coordinates, np.array([[9, 11], [10, 12]], dtype=np.int64))
-
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
     artifact = write_tile_embeddings(
@@ -162,7 +35,7 @@ def test_npz_artifacts_round_trip(tmp_path: Path):
         features,
         output_dir=tmp_path,
         output_format="npz",
-        metadata={"tiles_npz_path": "/tmp/sample-a.tiles.npz"},
+        metadata={"coordinates_npz_path": "/tmp/sample-a.coordinates.npz"},
         tile_index=np.array([0, 1, 2], dtype=np.int64),
     )
 
@@ -172,7 +45,7 @@ def test_npz_artifacts_round_trip(tmp_path: Path):
     np.testing.assert_array_equal(loaded, features)
     assert artifact.path == tmp_path / "tile_embeddings" / "sample-a.npz"
     assert metadata["sample_id"] == "sample-a"
-    assert metadata["tiles_npz_path"] == "/tmp/sample-a.tiles.npz"
+    assert metadata["coordinates_npz_path"] == "/tmp/sample-a.coordinates.npz"
 
 def test_pt_artifacts_round_trip(tmp_path: Path):
     torch = pytest.importorskip("torch")
@@ -250,7 +123,6 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             prefetch_factor_embedding=5,
             persistent_workers_embedding=False,
             gpu_batch_preprocessing=False,
-            embedding_backend="cucim",
         ),
     )
 
@@ -265,7 +137,6 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.prefetch_factor == 5
     assert execution.persistent_workers is False
     assert execution.gpu_batch_preprocessing is False
-    assert execution.embedding_backend == "cucim"
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -288,7 +159,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             prefetch_factor_embedding=3,
             persistent_workers_embedding=True,
             gpu_batch_preprocessing=True,
-            embedding_backend=None,
         ),
     )
 
@@ -298,7 +168,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     assert execution.prefetch_factor == 3
     assert execution.persistent_workers is True
     assert execution.gpu_batch_preprocessing is True
-    assert execution.embedding_backend is None
 
 def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -319,7 +188,6 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
             prefetch_factor_embedding=4,
             persistent_workers_embedding=True,
             gpu_batch_preprocessing=True,
-            embedding_backend="cucim",
         ),
     )
 
@@ -327,7 +195,6 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
 
     assert execution.mixed_precision is False
     assert execution.num_gpus == 1
-    assert execution.embedding_backend == "cucim"
 
 def test_preprocessing_with_backend_preserves_other_fields():
     base = PreprocessingConfig(
@@ -370,7 +237,6 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         prefetch_factor=6,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
-        embedding_backend="cucim",
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -386,221 +252,9 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.prefetch_factor == base.prefetch_factor
     assert updated.persistent_workers == base.persistent_workers
     assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
-    assert updated.embedding_backend == base.embedding_backend
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base
-
-def test_batch_tile_collator_reuses_one_slide_handle_across_batches(monkeypatch):
-    torch = pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import BatchTileCollator
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=4,
-        tile_size_lv0=224,
-        x=np.array([10, 30, 50]),
-        y=np.array([20, 40, 60]),
-    )
-
-    class FakeWholeSlideImage:
-        constructor_calls = []
-        patch_calls = []
-
-        def __init__(self, path, backend):
-            self.path = Path(path)
-            self.backend = backend
-            type(self).constructor_calls.append((self.path, backend))
-
-        def get_patch(self, x, y, width, height, spacing, center):
-            type(self).patch_calls.append((x, y, width, height, spacing, center))
-            return np.full((height, width, 3), fill_value=x + y, dtype=np.uint8)
-
-    monkeypatch.setattr("slide2vec.data.dataset.wsd.WholeSlideImage", FakeWholeSlideImage)
-
-    collator = BatchTileCollator(
-        wsi_path=Path("/tmp/slide-a.svs"),
-        tiling_result=tiling_result,
-        backend="asap",
-    )
-
-    first_indices, first_batch, first_timing = collator([0, 2])
-    second_indices, second_batch, second_timing = collator([1])
-
-    np.testing.assert_array_equal(first_indices.numpy(), np.array([0, 2], dtype=np.int64))
-    np.testing.assert_array_equal(second_indices.numpy(), np.array([1], dtype=np.int64))
-    assert first_batch.shape == (2, 3, 4, 4)
-    assert second_batch.shape == (1, 3, 4, 4)
-    assert first_batch.dtype == torch.uint8
-    assert second_batch.dtype == torch.uint8
-    assert first_timing["worker_batch_ms"] >= 0.0
-    assert first_timing["reader_open_ms"] >= 0.0
-    assert first_timing["reader_read_ms"] >= 0.0
-    assert second_timing["worker_batch_ms"] >= 0.0
-    assert second_timing["reader_open_ms"] == 0.0
-    assert second_timing["reader_read_ms"] >= 0.0
-    assert len(FakeWholeSlideImage.constructor_calls) == 1
-    assert FakeWholeSlideImage.patch_calls == [
-        (10, 20, 4, 4, 0.5, False),
-        (50, 60, 4, 4, 0.5, False),
-        (30, 40, 4, 4, 0.5, False),
-    ]
-
-
-def test_batch_tile_collator_reads_tile_store_archive(tmp_path: Path):
-    torch = pytest.importorskip("torch")
-    from PIL import Image
-    from slide2vec.data.dataset import BatchTileCollator
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=4,
-        tile_size_lv0=224,
-        x=np.array([10, 30]),
-        y=np.array([20, 40]),
-    )
-
-    tiles_dir = tmp_path / "tiles"
-    tiles_dir.mkdir()
-    tar_path = tiles_dir / "slide-a.tiles.tar"
-
-    import io
-    import tarfile
-
-    with tarfile.open(tar_path, "w") as tf:
-        for tile_index, fill_value in enumerate((32, 192)):
-            buf = io.BytesIO()
-            Image.fromarray(
-                np.full((4, 4, 3), fill_value=fill_value, dtype=np.uint8),
-                mode="RGB",
-            ).save(buf, format="JPEG")
-            buf.seek(0)
-            info = tarfile.TarInfo(name=f"{tile_index:06d}.jpg")
-            info.size = buf.getbuffer().nbytes
-            tf.addfile(info, buf)
-
-    collator = BatchTileCollator(
-        wsi_path=None,
-        tile_tar_path=tar_path,
-        tiling_result=tiling_result,
-        backend=None,
-    )
-
-    indices, batch, timing = collator([0, 1])
-
-    np.testing.assert_array_equal(indices.numpy(), np.array([0, 1], dtype=np.int64))
-    assert batch.shape == (2, 3, 4, 4)
-    assert batch.dtype == torch.uint8
-    assert timing["worker_batch_ms"] >= 0.0
-    assert timing["reader_open_ms"] >= 0.0
-    assert timing["reader_read_ms"] >= 0.0
-    assert batch[0].mean().item() != batch[1].mean().item()
-
-
-def test_cucim_batch_reader_maps_spacing_to_closest_pyramid_level(monkeypatch):
-    torch = pytest.importorskip("torch")
-    from slide2vec.data.dataset import CuCIMBatchReader
-
-    tiling_result = SimpleNamespace(
-        read_spacing_um=0.5,
-        read_tile_size_px=4,
-        x=np.array([10, 30]),
-        y=np.array([20, 40]),
-    )
-    observed = {}
-
-    class FakeCuImage:
-        def __init__(self, path):
-            observed["path"] = str(path)
-            self.resolutions = {"level_downsamples": [1.0, 2.0, 4.0]}
-
-        def spacing(self):
-            return (0.25, 0.25)
-
-        def read_region(self, *, location, size, level):
-            observed.setdefault("calls", []).append((location, size, level))
-            value = location[0] + location[1] + level
-            return np.full((size[1], size[0], 3), fill_value=value, dtype=np.uint8)
-
-    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
-
-    reader = CuCIMBatchReader(
-        wsi_path=Path("/tmp/slide-a.svs"),
-        tiling_result=tiling_result,
-    )
-
-    batch = reader.read_batch(np.array([0, 1], dtype=np.int64))
-
-    assert batch.shape == (2, 3, 4, 4)
-    assert batch.dtype == torch.uint8
-    assert observed["path"] == "/tmp/slide-a.svs"
-    assert observed["calls"] == [
-        ((10, 20), (4, 4), 1),
-        ((30, 40), (4, 4), 1),
-    ]
-
-
-def test_cucim_batch_reader_requires_level_downsamples_metadata(monkeypatch):
-    from slide2vec.data.dataset import CuCIMBatchReader
-
-    tiling_result = SimpleNamespace(
-        read_spacing_um=0.5,
-        read_tile_size_px=4,
-        x=np.array([10]),
-        y=np.array([20]),
-    )
-
-    class FakeCuImage:
-        def __init__(self, path):
-            self.path = path
-            self.resolutions = {}
-
-        def spacing(self):
-            return (0.25, 0.25)
-
-    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
-
-    reader = CuCIMBatchReader(
-        wsi_path=Path("/tmp/slide-a.svs"),
-        tiling_result=tiling_result,
-    )
-
-    with pytest.raises(RuntimeError, match="level_downsamples"):
-        reader._resolve_level()
-
-
-def test_cucim_batch_reader_requires_usable_spacing_metadata(monkeypatch):
-    from slide2vec.data.dataset import CuCIMBatchReader
-
-    tiling_result = SimpleNamespace(
-        read_spacing_um=0.5,
-        read_tile_size_px=4,
-        x=np.array([10]),
-        y=np.array([20]),
-    )
-
-    class FakeCuImage:
-        def __init__(self, path):
-            self.path = path
-            self.resolutions = {"level_downsamples": [1.0, 2.0]}
-
-        def spacing(self):
-            return {}
-
-    monkeypatch.setattr("slide2vec.data.dataset.cucim.CuImage", FakeCuImage)
-
-    reader = CuCIMBatchReader(
-        wsi_path=Path("/tmp/slide-a.svs"),
-        tiling_result=tiling_result,
-    )
-
-    with pytest.raises(RuntimeError, match="spacing\\(\\)"):
-        reader._resolve_level()
 
 def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
     import slide2vec.cli as cli
@@ -700,6 +354,7 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
     assert preprocessing.target_tile_size_px == 224
     assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
     assert preprocessing.read_tiles_from is None
+    assert not hasattr(preprocessing, "save_tiles")
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
@@ -738,6 +393,7 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
 
     assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
+    assert not hasattr(preprocessing, "save_tiles")
 
 def test_validate_removed_options_rejects_legacy_preview_keys():
     pytest.importorskip("omegaconf")

@@ -150,11 +150,11 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     )
 
     # 4. Assert coordinates match exactly (tiling is deterministic)
-    gt_coords = np.load(GT_DIR / "test-wsi.tiles.npz", allow_pickle=False)
-    coords = np.load(tmp_path / "coordinates" / "test-wsi.tiles.npz", allow_pickle=False)
+    gt_coords = np.load(GT_DIR / "test-wsi.coordinates.npz", allow_pickle=False)
+    coords = np.load(tmp_path / "tiles" / "test-wsi.coordinates.npz", allow_pickle=False)
     np.testing.assert_array_equal(coords, gt_coords)
 
-    meta = json.loads((tmp_path / "coordinates" / "test-wsi.tiles.meta.json").read_text())
+    meta = json.loads((tmp_path / "tiles" / "test-wsi.coordinates.meta.json").read_text())
     assert meta["sample_id"] == "test-wsi"
     assert meta["target_spacing_um"] == pytest.approx(0.5)
     assert meta["target_tile_size_px"] == 224

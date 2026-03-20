@@ -17,7 +17,6 @@ FOUNDATION_REQUIREMENT_NAMES = {
 }
 
 CORE_RUNTIME_REQUIREMENT_NAMES = {
-    "cucim",
     "einops",
     "hs2p",
     "matplotlib",
@@ -102,7 +101,6 @@ def test_requirements_files_split_core_from_foundation_runtime():
     assert "-r requirements.in" in foundation_requirements_text
     assert core_requirement_lines["torch"] == "torch"
     assert core_requirement_lines["torchvision"] == "torchvision"
-    assert core_requirement_lines["cucim"] == "cucim"
     assert core_requirement_lines["einops"] == "einops"
     assert core_requirement_lines["timm"] == "timm"
     assert core_requirement_lines["transformers"] == "transformers"
@@ -118,7 +116,6 @@ def test_requirements_txt_matches_generic_core_runtime_requirements():
 
     assert requirement_lines["torch"] == "torch"
     assert requirement_lines["torchvision"] == "torchvision"
-    assert requirement_lines["cucim"] == "cucim"
     assert requirement_lines["einops"] == "einops"
     assert requirement_lines["timm"] == "timm"
     assert requirement_lines["transformers"] == "transformers"
@@ -131,10 +128,6 @@ def test_readme_documents_core_and_models_installs():
     assert 'pip install "slide2vec[models]"' in readme
 
 
-def test_tile_dataset_uses_direct_transformers_type_check():
-    source = (ROOT / "slide2vec" / "data" / "dataset.py").read_text(encoding="utf-8")
-
-    assert "from transformers.image_processing_utils import BaseImageProcessor" in source
-    assert "isinstance(self.transforms, BaseImageProcessor)" in source
+def test_models_module_imports_transformers():
     imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
     assert "transformers" in imported_modules

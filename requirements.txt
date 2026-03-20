@@ -1,11 +1,10 @@
-hs2p>=2.3.0,<3
+hs2p>=2.4.0,<3
 omegaconf>=2.3.0
 h5py
 matplotlib
 numpy<2
 pandas
 pillow
-cucim
 rich
 torch
 torchvision

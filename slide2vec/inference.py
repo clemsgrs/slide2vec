@@ -316,7 +316,7 @@ def embed_tiles(
             image_path=slide.image_path,
             mask_path=slide.mask_path,
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
-            backend=_resolve_embedding_backend(preprocessing, execution),
+            backend=_resolve_tiling_backend(preprocessing),
         )
         artifact = _write_tile_embedding_artifact(
             slide.sample_id,
@@ -343,13 +343,13 @@ def aggregate_tiles(
     outputs: list[SlideEmbeddingArtifact] = []
     for artifact in tile_artifacts:
         metadata = artifact.metadata
-        if not metadata.get("tiles_npz_path") or not metadata.get("tiles_meta_path"):
+        if not metadata.get("coordinates_npz_path") or not metadata.get("coordinates_meta_path"):
             raise ValueError(
                 f"Tile artifact for {artifact.sample_id} is missing tiling metadata paths required for slide aggregation"
             )
         tiling_result = _load_tiling_result(
-            Path(metadata["tiles_npz_path"]),
-            Path(metadata["tiles_meta_path"]),
+            Path(metadata["coordinates_npz_path"]),
+            Path(metadata["coordinates_meta_path"]),
         )
         coordinates = _coordinate_matrix(tiling_result)
         image_path = Path(metadata["image_path"])
@@ -358,7 +358,7 @@ def aggregate_tiles(
                 image_path,
                 coordinates,
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_embedding_backend(preprocessing, execution)),
+                metadata.get("backend", _resolve_tiling_backend(preprocessing)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -805,71 +805,45 @@ def _compute_tile_embeddings_for_slide(
     tile_indices=None,
 ):
     torch = _import_torch()
-    from slide2vec.data.dataset import BatchTileCollator, TileDataset, TileIndexDataset, TileStoreDataset
+    from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
         if execution.mixed_precision and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    transforms = _create_transforms(loaded)
     resolved_indices = np.arange(_num_tiles(tiling_result), dtype=np.int64)
     if tile_indices is not None:
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
-    backend = _resolve_embedding_backend(preprocessing, execution)
-    tile_tar_path = _resolve_tile_store_archive_for_slide(
+    tar_path = _resolve_tile_store_archive_for_slide(
         slide=slide,
+        tiling_result=tiling_result,
         preprocessing=preprocessing,
+    )
+    if tar_path is None:
+        raise ValueError(
+            f"Slide {slide.sample_id} is missing tiles_tar_path — "
+            "pre-extracted tile archives are required for embedding"
+        )
+    dataset = TileIndexDataset(resolved_indices)
+    batch_preprocessor = _build_batch_preprocessor(
+        loaded,
+        model,
+        tiling_result,
         execution=execution,
     )
-    batch_preprocessor = None
-    if _can_use_batched_tile_loader(loaded, model):
-        dataset = TileIndexDataset(resolved_indices)
-        batch_preprocessor = _build_batch_preprocessor(
-            loaded,
-            model,
-            tiling_result,
-            execution=execution,
-        )
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=execution.batch_size,
-            shuffle=False,
-            collate_fn=BatchTileCollator(
-                wsi_path=None if tile_tar_path is not None else slide.image_path,
-                tile_tar_path=tile_tar_path,
-                tiling_result=tiling_result,
-                backend=None if tile_tar_path is not None else backend,
-            ),
-            **_embedding_dataloader_kwargs(loaded, execution),
-        )
-    else:
-        if tile_tar_path is not None:
-            dataset = TileStoreDataset(
-                sample_id=slide.sample_id,
-                tile_tar_path=tile_tar_path,
-                tiling_result=tiling_result,
-                transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
-            )
-        else:
-            dataset = TileDataset(
-                sample_id=slide.sample_id,
-                wsi_path=slide.image_path,
-                mask_path=slide.mask_path,
-                tiling_result=tiling_result,
-                backend=backend,
-                transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
-            )
-        if tile_indices is not None:
-            dataset = torch.utils.data.Subset(dataset, resolved_indices.tolist())
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=execution.batch_size,
-            shuffle=False,
-            **_embedding_dataloader_kwargs(loaded, execution),
-        )
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=execution.batch_size,
+        shuffle=False,
+        collate_fn=BatchTileCollator(
+            tar_path=tar_path,
+            tiling_result=tiling_result,
+        ),
+        **_embedding_dataloader_kwargs(loaded, execution),
+    )
     return _run_forward_pass(
         dataloader,
         loaded,
@@ -900,7 +874,7 @@ def _aggregate_tile_embeddings_for_slide(
             slide.image_path,
             coordinates,
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_embedding_backend(preprocessing, execution),
+            _resolve_tiling_backend(preprocessing),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -966,7 +940,7 @@ def _persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_embedding_backend(preprocessing, execution),
+                backend=_resolve_tiling_backend(preprocessing),
             ),
         )
     slide_artifact = None
@@ -993,8 +967,9 @@ def _build_tile_embedding_metadata(
     return {
         "encoder_name": model.name,
         "encoder_level": model.level,
-        "tiles_npz_path": str(_require_attr(tiling_result, "tiles_npz_path", allow_missing=True) or ""),
-        "tiles_meta_path": str(_require_attr(tiling_result, "tiles_meta_path", allow_missing=True) or ""),
+        "coordinates_npz_path": str(_require_attr(tiling_result, "coordinates_npz_path", allow_missing=True) or ""),
+        "coordinates_meta_path": str(_require_attr(tiling_result, "coordinates_meta_path", allow_missing=True) or ""),
+        "tiles_tar_path": str(_require_attr(tiling_result, "tiles_tar_path", allow_missing=True) or ""),
         "image_path": str(image_path),
         "mask_path": str(mask_path) if mask_path is not None else None,
         "tile_size_lv0": int(tile_size_lv0),
@@ -1077,13 +1052,6 @@ def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOption
         kwargs["prefetch_factor"] = int(execution.prefetch_factor)
     return kwargs
 
-
-def _can_use_batched_tile_loader(loaded: LoadedModel, model) -> bool:
-    if _build_batch_transform_spec(loaded.transforms) is None:
-        return False
-    if model.level != "region":
-        return True
-    return getattr(loaded.model, "tile_size", None) is not None
 
 
 def _build_batch_preprocessor(
@@ -1705,6 +1673,7 @@ def _tile_slides(
         num_workers=num_workers,
         read_coordinates_from=read_coordinates_from,
         resume=resume,
+        save_tiles=preprocessing.read_tiles_from is None,
     )
 
 
@@ -1757,8 +1726,8 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
 def _resolve_tile_store_archive_for_slide(
     *,
     slide: SlideSpec,
+    tiling_result,
     preprocessing: PreprocessingConfig,
-    execution: ExecutionOptions,
 ) -> Path | None:
     if preprocessing.read_tiles_from is not None:
         candidate = _tile_store_archive_path(preprocessing.read_tiles_from, slide.sample_id)
@@ -1767,10 +1736,7 @@ def _resolve_tile_store_archive_for_slide(
         raise FileNotFoundError(
             f"Missing tile store archive for sample_id={slide.sample_id} in {preprocessing.read_tiles_from}"
         )
-    if execution.output_dir is None:
-        return None
-    candidate = _tile_store_archive_path(Path(execution.output_dir) / "tiles", slide.sample_id)
-    return candidate if candidate.is_file() else None
+    return getattr(tiling_result, "tiles_tar_path", None)
 
 
 def _tile_store_archive_path(tile_store_root: Path, sample_id: str) -> Path:
@@ -1803,10 +1769,10 @@ def _load_tiling_result_from_row(row):
     return load_tiling_result_from_row(row)
 
 
-def _load_tiling_result(tiles_npz_path: Path, tiles_meta_path: Path):
+def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path):
     from hs2p import load_tiling_result
 
-    return load_tiling_result(tiles_npz_path=tiles_npz_path, tiles_meta_path=tiles_meta_path)
+    return load_tiling_result(coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path)
 
 
 def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
@@ -1836,15 +1802,6 @@ def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
     if preprocessing is None:
         return "asap"
     return preprocessing.backend
-
-
-def _resolve_embedding_backend(
-    preprocessing: PreprocessingConfig | None,
-    execution: ExecutionOptions | None,
-) -> str:
-    if execution is not None and execution.embedding_backend is not None:
-        return execution.embedding_backend
-    return _resolve_tiling_backend(preprocessing)
 
 
 def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
@@ -2231,7 +2188,6 @@ def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
         "prefetch_factor": execution.prefetch_factor,
         "persistent_workers": execution.persistent_workers,
         "gpu_batch_preprocessing": execution.gpu_batch_preprocessing,
-        "embedding_backend": execution.embedding_backend,
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_latents": execution.save_latents,
     }
@@ -2268,7 +2224,6 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         prefetch_factor=int(payload.get("prefetch_factor", 4)),
         persistent_workers=bool(payload.get("persistent_workers", True)),
         gpu_batch_preprocessing=bool(payload.get("gpu_batch_preprocessing", True)),
-        embedding_backend=payload.get("embedding_backend"),
         save_tile_embeddings=bool(payload.get("save_tile_embeddings", False)),
         save_latents=bool(payload.get("save_latents", False)),
     )

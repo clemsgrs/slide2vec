@@ -72,8 +72,10 @@ Defaults that most users can leave alone:
 - `filtering={}`
 - `preview={}`
 - `read_coordinates_from=<output_dir>/coordinates` when omitted
-- `read_tiles_from=None` unless you want slide2vec to consume existing `.tiles.tar` stores; when unset, slide2vec looks for `<output_dir>/tiles/<sample_id>.tiles.tar`
+- `read_tiles_from=None` unless you want slide2vec to reuse an explicitly linked external `.tiles.tar` store root
 - `resume=False`
+
+`slide2vec` writes `.tiles.tar` stores during tiling by default. Set `read_tiles_from` only when you want embedding to consume an existing external tile-store root instead of the stores generated in the current run.
 
 Advanced example:
 
@@ -107,8 +109,6 @@ preprocessing = PreprocessingConfig(
 - `prefetch_factor`
 - `persistent_workers`
 - `gpu_batch_preprocessing`
-- `embedding_backend`
-  Optional embedding-time slide reader override such as `"cucim"`. If unset, embedding reuses `PreprocessingConfig.backend`.
 - `save_tile_embeddings`
 - `save_latents`
 
