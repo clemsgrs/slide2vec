@@ -439,9 +439,9 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,tbp,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
 
@@ -490,9 +490,9 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,success,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     write_tile_embeddings(
@@ -546,24 +546,24 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
             x=np.array([0, 1]),
             y=np.array([2, 3]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
         ),
         SimpleNamespace(
             x=np.array([4, 5]),
             y=np.array([6, 7]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-b.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-b.coordinates.meta.json"),
         ),
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
         "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
-        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
         "slide-b,/tmp/slide-b.svs,,,"
-        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -709,31 +709,13 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
     assert resume is False
 
 
-def test_resolve_embedding_backend_prefers_execution_override():
-    import slide2vec.inference as inference
-
-    preprocessing = PreprocessingConfig(backend="asap")
-    execution = ExecutionOptions(embedding_backend="cucim")
-
-    assert inference._resolve_embedding_backend(preprocessing, execution) == "cucim"
-
-
-def test_resolve_embedding_backend_falls_back_to_preprocessing_backend():
-    import slide2vec.inference as inference
-
-    preprocessing = PreprocessingConfig(backend="openslide")
-    execution = ExecutionOptions()
-
-    assert inference._resolve_embedding_backend(preprocessing, execution) == "openslide"
-
-
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -758,8 +740,8 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1049,8 +1031,8 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-        tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
     )
     embedded = EmbeddedSlide(
         sample_id="slide-a",
@@ -1116,24 +1098,24 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
             x=np.array([0, 1]),
             y=np.array([2, 3]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
         ),
         SimpleNamespace(
             x=np.array([4, 5]),
             y=np.array([6, 7]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-b.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-b.coordinates.meta.json"),
         ),
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
         "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
-        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
         "slide-b,/tmp/slide-b.svs,,,"
-        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1191,8 +1173,8 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-        tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
     )
     embedded = EmbeddedSlide(
         sample_id="slide-a",
@@ -1626,7 +1608,6 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         prefetch_factor=7,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
-        embedding_backend="cucim",
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -1637,11 +1618,9 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     assert payload["prefetch_factor"] == 7
     assert payload["persistent_workers"] is False
     assert payload["gpu_batch_preprocessing"] is False
-    assert payload["embedding_backend"] == "cucim"
     assert restored.prefetch_factor == 7
     assert restored.persistent_workers is False
     assert restored.gpu_batch_preprocessing is False
-    assert restored.embedding_backend == "cucim"
 
 
 def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):
@@ -1675,7 +1654,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileDataset=object,
         TileIndexDataset=lambda tile_indices: list(tile_indices),
     )
     fake_data_package = types.ModuleType("slide2vec.data")
@@ -1686,7 +1664,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
 
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_can_use_batched_tile_loader", lambda *args, **kwargs: True)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
     loaded = inference.LoadedModel(
@@ -1706,6 +1683,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         read_spacing_um=0.5,
         read_tile_size_px=4,
         tile_size_lv0=224,
+        tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
     )
     execution = ExecutionOptions(
         batch_size=2,
@@ -1732,9 +1710,8 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     assert captured["kwargs"]["collate_fn"] == (
         "collator",
         {
-            "wsi_path": Path("/tmp/slide-a.svs"),
+            "tar_path": Path("/tmp/slide-a.tiles.tar"),
             "tiling_result": tiling_result,
-            "backend": "asap",
         },
     )
 
@@ -1759,10 +1736,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         def __len__(self):
             return 1
 
-    class TileDatasetSentinel:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("TileDataset fallback should not be used for region batching")
-
     class DummyRegionModel:
         tile_size = 2
 
@@ -1773,7 +1746,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileDataset=TileDatasetSentinel,
         TileIndexDataset=lambda tile_indices: list(tile_indices),
     )
     fake_data_package = types.ModuleType("slide2vec.data")
@@ -1806,6 +1778,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         read_spacing_um=0.5,
         read_tile_size_px=4,
         tile_size_lv0=224,
+        tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
     )
     execution = ExecutionOptions(
         batch_size=2,
@@ -1831,8 +1804,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
     assert captured["kwargs"]["collate_fn"] == (
         "collator",
         {
-            "wsi_path": Path("/tmp/slide-a.svs"),
+            "tar_path": Path("/tmp/slide-a.tiles.tar"),
             "tiling_result": tiling_result,
-            "backend": "asap",
         },
     )

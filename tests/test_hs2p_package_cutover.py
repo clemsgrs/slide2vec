@@ -96,8 +96,8 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
-        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.tiles.npz,/tmp/slide-1.tiles.meta.json,,\n",
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_process_df(
@@ -112,8 +112,9 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
-        "tiles_npz_path",
-        "tiles_meta_path",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
         "feature_status",
         "aggregation_status",
         "error",

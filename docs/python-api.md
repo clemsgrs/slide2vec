@@ -106,8 +106,6 @@ preprocessing = PreprocessingConfig(
 - `prefetch_factor`
 - `persistent_workers`
 - `gpu_batch_preprocessing`
-- `embedding_backend`
-  Optional embedding-time slide reader override such as `"cucim"`. If unset, embedding reuses `PreprocessingConfig.backend`.
 - `save_tile_embeddings`
 - `save_latents`
 

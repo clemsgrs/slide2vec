@@ -48,6 +48,7 @@ class PreprocessingConfig:
     drop_holes: bool = False
     use_padding: bool = True
     read_tiles_from: Path | None = None
+    save_tiles: bool = False
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
@@ -66,6 +67,7 @@ class PreprocessingConfig:
             drop_holes=bool(tiling.params.drop_holes),
             use_padding=bool(tiling.params.use_padding),
             read_tiles_from=Path(tiling.read_tiles_from) if tiling.read_tiles_from else None,
+            save_tiles=bool(getattr(tiling, "save_tiles", False)),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
@@ -91,7 +93,6 @@ class ExecutionOptions:
     prefetch_factor: int = 4
     persistent_workers: bool = True
     gpu_batch_preprocessing: bool = True
-    embedding_backend: str | None = None
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
@@ -108,7 +109,6 @@ class ExecutionOptions:
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
             persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
             gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
-            embedding_backend=getattr(cfg.speed, "embedding_backend", None),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )

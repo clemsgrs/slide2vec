@@ -9,7 +9,8 @@ save_previews: true # save preview images of slide tiling and mask overlays
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_tiles_from: # path to a directory containing HS2P `.tiles.npz` / `.tiles.meta.json` artifacts (leave empty to compute the coordinates)
+  read_tiles_from: # path to a directory containing HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts (leave empty to compute the coordinates)
+  save_tiles: false # when true, extract tile images as JPEG tar archives alongside coordinates
   backend: "asap" # backend to use for slide reading
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
@@ -42,7 +43,6 @@ tiling:
 
 speed:
   num_workers: 8 # number of workers for tiling slides
-  embedding_backend: # optional embedding-time slide reader override; leave empty to reuse tiling.backend
 
 wandb:
   enable: false
