@@ -460,6 +460,9 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
             "max_loader_wait_ms": 0.0,
             "mean_ready_wait_ms": 0.0,
             "mean_preprocess_ms": 0.0,
+            "mean_worker_batch_ms": 0.0,
+            "mean_reader_open_ms": 0.0,
+            "mean_reader_read_ms": 0.0,
             "mean_forward_ms": 0.0,
             "loader_wait_fraction": 0.0,
         }
@@ -467,6 +470,9 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
     loader_wait_ms = [float(payload.get("loader_wait_ms", 0.0)) for payload in batch_payloads]
     ready_wait_ms = [float(payload.get("ready_wait_ms", 0.0)) for payload in batch_payloads]
     preprocess_ms = [float(payload.get("preprocess_ms", 0.0)) for payload in batch_payloads]
+    worker_batch_ms = [float(payload.get("worker_batch_ms", 0.0)) for payload in batch_payloads]
+    reader_open_ms = [float(payload.get("reader_open_ms", 0.0)) for payload in batch_payloads]
+    reader_read_ms = [float(payload.get("reader_read_ms", 0.0)) for payload in batch_payloads]
     forward_ms = [float(payload.get("forward_ms", 0.0)) for payload in batch_payloads]
     total_ms = sum(loader_wait_ms) + sum(ready_wait_ms) + sum(preprocess_ms) + sum(forward_ms)
     return {
@@ -475,6 +481,9 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
         "max_loader_wait_ms": round(max(loader_wait_ms), 4),
         "mean_ready_wait_ms": round(statistics.mean(ready_wait_ms), 4),
         "mean_preprocess_ms": round(statistics.mean(preprocess_ms), 4),
+        "mean_worker_batch_ms": round(statistics.mean(worker_batch_ms), 4),
+        "mean_reader_open_ms": round(statistics.mean(reader_open_ms), 4),
+        "mean_reader_read_ms": round(statistics.mean(reader_read_ms), 4),
         "mean_forward_ms": round(statistics.mean(forward_ms), 4),
         "loader_wait_fraction": round((sum(loader_wait_ms) + sum(ready_wait_ms)) / total_ms, 4) if total_ms > 0 else 0.0,
     }
@@ -528,6 +537,9 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
         "max_loader_wait_ms",
         "mean_ready_wait_ms",
         "mean_preprocess_ms",
+        "mean_worker_batch_ms",
+        "mean_reader_open_ms",
+        "mean_reader_read_ms",
         "mean_forward_ms",
         "loader_wait_fraction",
         "mean_tiles_per_second",
@@ -538,6 +550,9 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
         "mean_max_loader_wait_ms",
         "mean_mean_ready_wait_ms",
         "mean_mean_preprocess_ms",
+        "mean_mean_worker_batch_ms",
+        "mean_mean_reader_open_ms",
+        "mean_mean_reader_read_ms",
         "mean_mean_forward_ms",
         "mean_loader_wait_fraction",
     }
@@ -588,6 +603,9 @@ def aggregate_trial_results(trial_rows: list[dict[str, Any]]) -> list[dict[str, 
         max_loader_wait_ms = [float(row.get("max_loader_wait_ms", 0.0)) for row in rows]
         mean_ready_wait_ms = [float(row.get("mean_ready_wait_ms", 0.0)) for row in rows]
         mean_preprocess_ms = [float(row.get("mean_preprocess_ms", 0.0)) for row in rows]
+        mean_worker_batch_ms = [float(row.get("mean_worker_batch_ms", 0.0)) for row in rows]
+        mean_reader_open_ms = [float(row.get("mean_reader_open_ms", 0.0)) for row in rows]
+        mean_reader_read_ms = [float(row.get("mean_reader_read_ms", 0.0)) for row in rows]
         mean_forward_ms = [float(row.get("mean_forward_ms", 0.0)) for row in rows]
         loader_wait_fraction = [float(row.get("loader_wait_fraction", 0.0)) for row in rows]
         timed_batches = [int(row.get("timed_batches", 0)) for row in rows]
@@ -613,6 +631,9 @@ def aggregate_trial_results(trial_rows: list[dict[str, Any]]) -> list[dict[str, 
                 "max_loader_wait_ms": round(max(max_loader_wait_ms), 4),
                 "mean_ready_wait_ms": round(statistics.mean(mean_ready_wait_ms), 4),
                 "mean_preprocess_ms": round(statistics.mean(mean_preprocess_ms), 4),
+                "mean_worker_batch_ms": round(statistics.mean(mean_worker_batch_ms), 4),
+                "mean_reader_open_ms": round(statistics.mean(mean_reader_open_ms), 4),
+                "mean_reader_read_ms": round(statistics.mean(mean_reader_read_ms), 4),
                 "mean_forward_ms": round(statistics.mean(mean_forward_ms), 4),
                 "loader_wait_fraction": round(statistics.mean(loader_wait_fraction), 4),
             }
@@ -668,6 +689,9 @@ def select_best_results(aggregated_rows: list[dict[str, Any]]) -> list[dict[str,
                 "max_loader_wait_ms": float(row.get("max_loader_wait_ms", 0.0)),
                 "mean_ready_wait_ms": float(row.get("mean_ready_wait_ms", 0.0)),
                 "mean_preprocess_ms": float(row.get("mean_preprocess_ms", 0.0)),
+                "mean_worker_batch_ms": float(row.get("mean_worker_batch_ms", 0.0)),
+                "mean_reader_open_ms": float(row.get("mean_reader_open_ms", 0.0)),
+                "mean_reader_read_ms": float(row.get("mean_reader_read_ms", 0.0)),
                 "mean_forward_ms": float(row.get("mean_forward_ms", 0.0)),
                 "loader_wait_fraction": float(row.get("loader_wait_fraction", 0.0)),
             }
@@ -761,6 +785,11 @@ def _build_model_pipeline_from_config(config: dict[str, Any]):
         tissue_threshold=float(params.get("tissue_threshold", 0.01)),
         drop_holes=bool(params.get("drop_holes", False)),
         use_padding=bool(params.get("use_padding", True)),
+        read_coordinates_from=(
+            Path(tiling_cfg["read_coordinates_from"])
+            if tiling_cfg.get("read_coordinates_from")
+            else Path(config["output_dir"]) / "coordinates"
+        ),
         read_tiles_from=Path(tiling_cfg["read_tiles_from"]) if tiling_cfg.get("read_tiles_from") else None,
         resume=bool(config.get("resume", False)),
         segmentation=dict(tiling_cfg.get("seg_params", {})),
@@ -966,6 +995,9 @@ def run_trial(
         "max_loader_wait_ms": float(metrics.get("max_loader_wait_ms", 0.0)),
         "mean_ready_wait_ms": float(metrics.get("mean_ready_wait_ms", 0.0)),
         "mean_preprocess_ms": float(metrics.get("mean_preprocess_ms", 0.0)),
+        "mean_worker_batch_ms": float(metrics.get("mean_worker_batch_ms", 0.0)),
+        "mean_reader_open_ms": float(metrics.get("mean_reader_open_ms", 0.0)),
+        "mean_reader_read_ms": float(metrics.get("mean_reader_read_ms", 0.0)),
         "mean_forward_ms": float(metrics.get("mean_forward_ms", 0.0)),
         "loader_wait_fraction": float(metrics.get("loader_wait_fraction", 0.0)),
         "error": metrics.get("error", ""),

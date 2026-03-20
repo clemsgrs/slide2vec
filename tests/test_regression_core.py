@@ -339,6 +339,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
         tissue_threshold=0.4,
         drop_holes=True,
         use_padding=False,
+        read_coordinates_from=Path("/tmp/coordinates"),
         read_tiles_from=Path("/tmp/tiles"),
         resume=True,
         segmentation={"downsample": 32},
@@ -354,6 +355,8 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.segmentation == base.segmentation
     assert updated.filtering == base.filtering
     assert updated.preview == base.preview
+    assert updated.read_coordinates_from == base.read_coordinates_from
+    assert updated.read_tiles_from == base.read_tiles_from
     assert updated is not base
 
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
@@ -424,8 +427,8 @@ def test_batch_tile_collator_reuses_one_slide_handle_across_batches(monkeypatch)
         backend="asap",
     )
 
-    first_indices, first_batch = collator([0, 2])
-    second_indices, second_batch = collator([1])
+    first_indices, first_batch, first_timing = collator([0, 2])
+    second_indices, second_batch, second_timing = collator([1])
 
     np.testing.assert_array_equal(first_indices.numpy(), np.array([0, 2], dtype=np.int64))
     np.testing.assert_array_equal(second_indices.numpy(), np.array([1], dtype=np.int64))
@@ -433,12 +436,70 @@ def test_batch_tile_collator_reuses_one_slide_handle_across_batches(monkeypatch)
     assert second_batch.shape == (1, 3, 4, 4)
     assert first_batch.dtype == torch.uint8
     assert second_batch.dtype == torch.uint8
+    assert first_timing["worker_batch_ms"] >= 0.0
+    assert first_timing["reader_open_ms"] >= 0.0
+    assert first_timing["reader_read_ms"] >= 0.0
+    assert second_timing["worker_batch_ms"] >= 0.0
+    assert second_timing["reader_open_ms"] == 0.0
+    assert second_timing["reader_read_ms"] >= 0.0
     assert len(FakeWholeSlideImage.constructor_calls) == 1
     assert FakeWholeSlideImage.patch_calls == [
         (10, 20, 4, 4, 0.5, False),
         (50, 60, 4, 4, 0.5, False),
         (30, 40, 4, 4, 0.5, False),
     ]
+
+
+def test_batch_tile_collator_reads_tile_store_archive(tmp_path: Path):
+    torch = pytest.importorskip("torch")
+    from PIL import Image
+    from slide2vec.data.dataset import BatchTileCollator
+
+    tiling_result = SimpleNamespace(
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+        x=np.array([10, 30]),
+        y=np.array([20, 40]),
+    )
+
+    tiles_dir = tmp_path / "tiles"
+    tiles_dir.mkdir()
+    tar_path = tiles_dir / "slide-a.tiles.tar"
+
+    import io
+    import tarfile
+
+    with tarfile.open(tar_path, "w") as tf:
+        for tile_index, fill_value in enumerate((32, 192)):
+            buf = io.BytesIO()
+            Image.fromarray(
+                np.full((4, 4, 3), fill_value=fill_value, dtype=np.uint8),
+                mode="RGB",
+            ).save(buf, format="JPEG")
+            buf.seek(0)
+            info = tarfile.TarInfo(name=f"{tile_index:06d}.jpg")
+            info.size = buf.getbuffer().nbytes
+            tf.addfile(info, buf)
+
+    collator = BatchTileCollator(
+        wsi_path=None,
+        tile_tar_path=tar_path,
+        tiling_result=tiling_result,
+        backend=None,
+    )
+
+    indices, batch, timing = collator([0, 1])
+
+    np.testing.assert_array_equal(indices.numpy(), np.array([0, 1], dtype=np.int64))
+    assert batch.shape == (2, 3, 4, 4)
+    assert batch.dtype == torch.uint8
+    assert timing["worker_batch_ms"] >= 0.0
+    assert timing["reader_open_ms"] >= 0.0
+    assert timing["reader_read_ms"] >= 0.0
+    assert batch[0].mean().item() != batch[1].mean().item()
 
 
 def test_cucim_batch_reader_maps_spacing_to_closest_pyramid_level(monkeypatch):
@@ -564,7 +625,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3, num_gpus=2),
         tiling=SimpleNamespace(
             backend="asap",
-            read_tiles_from=None,
+            read_coordinates_from=None,
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -608,13 +669,16 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert captured["execution"].output_dir == tmp_path
     assert captured["execution"].num_gpus == 1
 
-def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fields():
+
+def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():
     cfg = SimpleNamespace(
         resume=True,
+        output_dir="/tmp/run-001",
         save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
-            read_tiles_from="/tmp/precomputed",
+            read_coordinates_from=None,
+            read_tiles_from=None,
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -634,7 +698,8 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
 
     assert preprocessing.backend == "asap"
     assert preprocessing.target_tile_size_px == 224
-    assert preprocessing.read_tiles_from == Path("/tmp/precomputed")
+    assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
+    assert preprocessing.read_tiles_from is None
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
@@ -643,6 +708,36 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
         "save_tiling_preview": False,
         "downsample": 32,
     }
+
+
+def test_preprocessing_config_from_config_preserves_tile_store_dir():
+    cfg = SimpleNamespace(
+        output_dir="/tmp/run-002",
+        resume=False,
+        save_previews=True,
+        tiling=SimpleNamespace(
+            backend="asap",
+            read_coordinates_from=None,
+            read_tiles_from="/tmp/tile-store",
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                tolerance=0.07,
+                overlap=0.0,
+                tissue_threshold=0.1,
+                drop_holes=False,
+                use_padding=True,
+            ),
+            seg_params={"downsample": 64},
+            filter_params={"ref_tile_size": 224},
+            preview=SimpleNamespace(downsample=32),
+        ),
+    )
+
+    preprocessing = PreprocessingConfig.from_config(cfg)
+
+    assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
+    assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
 
 def test_validate_removed_options_rejects_legacy_preview_keys():
     pytest.importorskip("omegaconf")

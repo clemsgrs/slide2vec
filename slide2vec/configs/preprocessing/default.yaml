@@ -9,7 +9,8 @@ save_previews: true # save preview images of slide tiling and mask overlays
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_tiles_from: # path to a directory containing HS2P `.tiles.npz` / `.tiles.meta.json` artifacts (leave empty to compute the coordinates)
+  read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
+  read_tiles_from: # path to a directory containing HS2P `.tiles.tar` tile stores; slide2vec will also look for <output_dir>/tiles/<sample_id>.tiles.tar when left empty
   backend: "asap" # backend to use for slide reading
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel

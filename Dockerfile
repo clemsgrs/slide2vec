@@ -1,11 +1,10 @@
 ARG UBUNTU_VERSION=22.04
-ARG CUDA_MAJOR_VERSION=11.8.0
-ARG CUDNN_MAJOR_VERSION=8
+ARG CUDA_MAJOR_VERSION=12.8.1
 
 ########################
 # Stage 1: build stage #
 ########################
-FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS build
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS build
 
 ARG USER_UID=1001
 ARG USER_GID=1001
@@ -70,7 +69,7 @@ RUN python -m pip install 'flash-attn>=2.7.1,<=2.8.0' --no-build-isolation
 ##########################
 # Stage 2: runtime stage #
 ##########################
-FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn${CUDNN_MAJOR_VERSION}-runtime-ubuntu${UBUNTU_VERSION}
+FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn-runtime-ubuntu${UBUNTU_VERSION}
 
 ARG USER_UID=1001
 ARG USER_GID=1001

@@ -71,7 +71,8 @@ Defaults that most users can leave alone:
 - `segmentation={}`
 - `filtering={}`
 - `preview={}`
-- `read_tiles_from=None`
+- `read_coordinates_from=<output_dir>/coordinates` when omitted
+- `read_tiles_from=None` unless you want slide2vec to consume existing `.tiles.tar` stores; when unset, slide2vec looks for `<output_dir>/tiles/<sample_id>.tiles.tar`
 - `resume=False`
 
 Advanced example:

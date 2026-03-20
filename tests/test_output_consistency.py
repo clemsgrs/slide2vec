@@ -122,6 +122,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "save_previews": False,  # override (default: true)
         "seed": 0,
         "tiling": {
+            "read_coordinates_from": None,
             "read_tiles_from": None,
             "backend": "asap",
             "params": TILING_PARAMS,

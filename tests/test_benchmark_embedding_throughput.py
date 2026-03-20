@@ -216,6 +216,9 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
                 "ready_wait_ms": 2.0,
                 "preprocess_ms": 6.0,
                 "forward_ms": 20.0,
+                "worker_batch_ms": 9.0,
+                "reader_open_ms": 1.0,
+                "reader_read_ms": 8.0,
             },
             "timestamp": 1.0,
         },
@@ -227,6 +230,9 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
                 "ready_wait_ms": 1.0,
                 "preprocess_ms": 8.0,
                 "forward_ms": 18.0,
+                "worker_batch_ms": 13.0,
+                "reader_open_ms": 0.0,
+                "reader_read_ms": 12.0,
             },
             "timestamp": 2.0,
         },
@@ -242,6 +248,9 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
         "mean_ready_wait_ms": 1.5,
         "mean_preprocess_ms": 7.0,
         "mean_forward_ms": 19.0,
+        "mean_worker_batch_ms": 11.0,
+        "mean_reader_open_ms": 0.5,
+        "mean_reader_read_ms": 10.0,
         "loader_wait_fraction": 0.3418,
     }
 
@@ -264,6 +273,9 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_ready_wait_ms": 1.5,
             "mean_preprocess_ms": 7.0,
             "mean_forward_ms": 19.0,
+            "mean_worker_batch_ms": 11.0,
+            "mean_reader_open_ms": 0.5,
+            "mean_reader_read_ms": 10.0,
             "loader_wait_fraction": 0.4286,
         },
         {
@@ -282,6 +294,9 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_ready_wait_ms": 1.0,
             "mean_preprocess_ms": 6.0,
             "mean_forward_ms": 20.0,
+            "mean_worker_batch_ms": 10.0,
+            "mean_reader_open_ms": 0.0,
+            "mean_reader_read_ms": 9.0,
             "loader_wait_fraction": 0.3846,
         },
         {
@@ -300,6 +315,9 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_ready_wait_ms": 0.5,
             "mean_preprocess_ms": 5.0,
             "mean_forward_ms": 21.0,
+            "mean_worker_batch_ms": 8.0,
+            "mean_reader_open_ms": 0.0,
+            "mean_reader_read_ms": 7.0,
             "loader_wait_fraction": 0.3214,
         },
         {
@@ -318,6 +336,9 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_ready_wait_ms": 0.5,
             "mean_preprocess_ms": 5.0,
             "mean_forward_ms": 20.0,
+            "mean_worker_batch_ms": 7.0,
+            "mean_reader_open_ms": 0.0,
+            "mean_reader_read_ms": 6.0,
             "loader_wait_fraction": 0.2963,
         },
     ]
@@ -345,6 +366,9 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_ready_wait_ms": 0.5,
             "mean_preprocess_ms": 5.0,
             "mean_forward_ms": 20.5,
+            "mean_worker_batch_ms": 7.5,
+            "mean_reader_open_ms": 0.0,
+            "mean_reader_read_ms": 6.5,
             "loader_wait_fraction": 0.3089,
         }
     ]

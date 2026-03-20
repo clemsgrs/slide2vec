@@ -47,6 +47,7 @@ class PreprocessingConfig:
     tissue_threshold: float = 0.01
     drop_holes: bool = False
     use_padding: bool = True
+    read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
@@ -56,6 +57,8 @@ class PreprocessingConfig:
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
+        default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
+        read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -65,7 +68,12 @@ class PreprocessingConfig:
             tissue_threshold=float(tiling.params.tissue_threshold),
             drop_holes=bool(tiling.params.drop_holes),
             use_padding=bool(tiling.params.use_padding),
-            read_tiles_from=Path(tiling.read_tiles_from) if tiling.read_tiles_from else None,
+            read_coordinates_from=(
+                Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
+            ),
+            read_tiles_from=(
+                Path(tiling.read_tiles_from) if getattr(tiling, "read_tiles_from", None) else None
+            ),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),

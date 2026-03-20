@@ -1,34 +1,19 @@
-# csv: "/data/temporary/clement/dataset/tcga-prad/mutations/tcga-prad-tp53-slide2vec.csv"
-# csv: "/data/temporary/clement/dataset/tcga-blca/mutations/tcga-blca-tp53-slide2vec.csv"
-csv: "/data/temporary/clement/dataset/tcga-brca/mutations/tcga-brca-tp53-slide2vec.csv"
+csv:
 
 output_dir: "output"
-
-save_previews: true
+save_previews: false
 
 tiling:
-  read_tiles_from:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.07 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    target_tile_size_px: 4096 # size of the tiles to extract, in pixels
+    tolerance: 0.1 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
+    target_tile_size_px: 224 # size of the tiles to extract, in pixels
     tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
-  filter_params:
-    ref_tile_size: 224
 
 model:
-  level: "region"
+  level: "tile"
   name: "virchow"
   batch_size: 1
 
 speed:
   fp16: true
-
-wandb:
-  enable: true
-  project: "mut-pred"
-  username: "clemsg"
-  exp_name: "features"
-  # tags: ["features", "tcga-prad", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "tcga-blca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  tags: ["features", "tcga-brca", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
