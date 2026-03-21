@@ -119,6 +119,9 @@ COPY --from=build /usr/local/lib/libjpeg* /usr/local/lib/
 COPY --from=build /usr/local/lib/libturbojpeg* /usr/local/lib/
 RUN ldconfig
 
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs
+
 # install ASAP
 ARG ASAP_URL=https://github.com/computationalpathologygroup/ASAP/releases/download/ASAP-2.2-(Nightly)/ASAP-2.2-Ubuntu2204.deb
 RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --assume-yes /tmp/ASAP.deb && \
@@ -126,6 +129,12 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth" && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# install codex
+RUN npm i -g @openai/codex
+
+# install claude
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
 COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
