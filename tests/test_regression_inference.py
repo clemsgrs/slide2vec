@@ -2,6 +2,7 @@ import ast
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import types
 
 import numpy as np
 import pandas as pd
@@ -38,6 +39,128 @@ def make_slide(
         mask_path=mask_path,
         spacing_at_level_0=spacing_at_level_0,
     )
+
+
+def test_load_model_merges_preprocessing_defaults_for_cross_file_interpolations(monkeypatch):
+    import slide2vec.inference as inference
+
+    class AttrDict(dict):
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError as exc:
+                raise AttributeError(name) from exc
+
+        def __setattr__(self, name, value):
+            self[name] = value
+
+    def convert(value):
+        if isinstance(value, dict):
+            return AttrDict({key: convert(item) for key, item in value.items()})
+        if isinstance(value, list):
+            return [convert(item) for item in value]
+        return value
+
+    def merge_values(left, right):
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = AttrDict({key: convert(value) for key, value in left.items()})
+            for key, value in right.items():
+                if key in merged:
+                    merged[key] = merge_values(merged[key], value)
+                else:
+                    merged[key] = convert(value)
+            return merged
+        return convert(right)
+
+    def lookup(root, path):
+        current = root
+        for segment in path.split("."):
+            current = current[segment]
+        return current
+
+    def resolve_value(root, value):
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                value[key] = resolve_value(root, item)
+            return value
+        if isinstance(value, list):
+            for index, item in enumerate(list(value)):
+                value[index] = resolve_value(root, item)
+            return value
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            return resolve_value(root, lookup(root, value[2:-1]))
+        return value
+
+    class FakeOmegaConf:
+        @staticmethod
+        def create(value):
+            return convert(value)
+
+        @staticmethod
+        def merge(*values):
+            merged = AttrDict()
+            for value in values:
+                merged = merge_values(merged, convert(value))
+            return merged
+
+        @staticmethod
+        def resolve(value):
+            resolve_value(value, value)
+
+    captured: dict[str, object] = {}
+
+    class FakeBackend:
+        device = "cpu"
+        features_dim = 128
+
+        def to(self, _device):
+            return self
+
+        def get_transforms(self):
+            return "TRANSFORMS"
+
+    class FakeModelFactory:
+        def __init__(self, options):
+            captured["options"] = options
+
+        def get_model(self):
+            return FakeBackend()
+
+    def fake_load_config(*parts):
+        if parts == ("preprocessing", "default"):
+            return {
+                "tiling": {
+                    "params": {
+                        "target_tile_size_px": 256,
+                    }
+                }
+            }
+        if parts == ("models", "default"):
+            return {
+                "model": {
+                    "mode": "cls",
+                    "input_size": "${tiling.params.target_tile_size_px}",
+                    "patch_size": 256,
+                    "token_size": 16,
+                    "normalize_embeddings": False,
+                }
+            }
+        if parts == ("models", "h0-mini"):
+            return {"model": {}}
+        raise AssertionError(parts)
+
+    monkeypatch.setitem(sys.modules, "omegaconf", types.SimpleNamespace(OmegaConf=FakeOmegaConf))
+    monkeypatch.setitem(sys.modules, "slide2vec.models", types.SimpleNamespace(ModelFactory=FakeModelFactory))
+    monkeypatch.setitem(sys.modules, "slide2vec.resources", types.SimpleNamespace(load_config=fake_load_config))
+    monkeypatch.setattr(inference, "_resolve_device", lambda requested, device: device)
+
+    loaded = inference.load_model(name="h0-mini", level="tile")
+
+    assert captured["options"].name == "h0-mini"
+    assert captured["options"].level == "tile"
+    assert captured["options"].mode == "cls"
+    assert captured["options"].input_size == 256
+    assert loaded.feature_dim == 128
 
 def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
     monkeypatch,
@@ -316,9 +439,9 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,tbp,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
 
@@ -367,9 +490,9 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,success,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
+        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     write_tile_embeddings(
@@ -423,24 +546,24 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
             x=np.array([0, 1]),
             y=np.array([2, 3]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
         ),
         SimpleNamespace(
             x=np.array([4, 5]),
             y=np.array([6, 7]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-b.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-b.coordinates.meta.json"),
         ),
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
         "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
-        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
         "slide-b,/tmp/slide-b.svs,,,"
-        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -517,13 +640,40 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
 
     inference._tile_slides(
         [slide],
-        PreprocessingConfig(),
+        PreprocessingConfig(on_the_fly=False),
         output_dir=tmp_path,
         num_workers=0,
     )
 
     assert captured["slides"][0].spacing_at_level_0 == pytest.approx(0.25)
     assert captured["kwargs"]["preview"] == "preview"
+    assert captured["kwargs"]["save_tiles"] is True
+
+
+def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["slides"] = list(slides)
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setitem(sys.modules, "hs2p", SimpleNamespace(tile_slides=fake_tile_slides))
+    monkeypatch.setattr(
+        inference,
+        "_build_hs2p_configs",
+        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
+    )
+
+    inference._tile_slides(
+        [make_slide("slide-a")],
+        PreprocessingConfig(read_tiles_from=Path("/tmp/existing-tiles")),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["kwargs"]["save_tiles"] is False
 
 
 def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
@@ -570,7 +720,7 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         preview={"save_mask_preview": True, "save_tiling_preview": False, "downsample": 32},
     )
 
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_tiles_from, resume = (
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = (
         inference._build_hs2p_configs(preprocessing)
     )
 
@@ -582,7 +732,7 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         "save_tiling_preview": False,
         "downsample": 32,
     }
-    assert read_tiles_from is None
+    assert read_coordinates_from is None
     assert resume is False
 
 
@@ -591,8 +741,8 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -617,8 +767,8 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n",
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -908,8 +1058,8 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-        tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
     )
     embedded = EmbeddedSlide(
         sample_id="slide-a",
@@ -975,24 +1125,24 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
             x=np.array([0, 1]),
             y=np.array([2, 3]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
         ),
         SimpleNamespace(
             x=np.array([4, 5]),
             y=np.array([6, 7]),
             tile_size_lv0=224,
-            tiles_npz_path=Path("/tmp/slide-b.tiles.npz"),
-            tiles_meta_path=Path("/tmp/slide-b.tiles.meta.json"),
+            coordinates_npz_path=Path("/tmp/slide-b.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-b.coordinates.meta.json"),
         ),
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,tiles_npz_path,tiles_meta_path,error,traceback\n"
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
         "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
-        "success,2,/tmp/slide-a.tiles.npz,/tmp/slide-a.tiles.meta.json,,\n"
+        "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
         "slide-b,/tmp/slide-b.svs,,,"
-        "success,2,/tmp/slide-b.tiles.npz,/tmp/slide-b.tiles.meta.json,,\n",
+        "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1050,8 +1200,8 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        tiles_npz_path=Path("/tmp/slide-a.tiles.npz"),
-        tiles_meta_path=Path("/tmp/slide-a.tiles.meta.json"),
+        coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
     )
     embedded = EmbeddedSlide(
         sample_id="slide-a",
@@ -1278,3 +1428,524 @@ def test_run_forward_pass_handles_empty_dataloader():
 
     assert result.shape == (0, 5)
     assert result.dtype == torch.float32
+
+
+def test_region_batch_preprocessor_resizes_whole_region_before_unfolding():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=SimpleNamespace(transforms=[]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=4,
+        read_tile_size_px=2,
+    )
+    execution = ExecutionOptions(gpu_batch_preprocessing=False)
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=execution,
+    )
+
+    batch = torch.full((1, 3, 2, 2), 255, dtype=torch.uint8)
+    processed = preprocess(batch)
+
+    assert processed.shape == (1, 4, 3, 2, 2)
+    assert processed.dtype == torch.float32
+    assert torch.allclose(processed, torch.ones_like(processed))
+
+
+def test_region_batch_preprocessor_unfolds_then_applies_tile_transforms():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Resize:
+        def __init__(self, size):
+            self.size = size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=SimpleNamespace(transforms=[Resize(1)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=4,
+        read_tile_size_px=4,
+    )
+    execution = ExecutionOptions(gpu_batch_preprocessing=False)
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=execution,
+    )
+
+    quadrant_values = torch.tensor(
+        [
+            [
+                [0, 0, 85, 85],
+                [0, 0, 85, 85],
+                [170, 170, 255, 255],
+                [170, 170, 255, 255],
+            ]
+        ],
+        dtype=torch.uint8,
+    )
+    batch = quadrant_values.unsqueeze(0).repeat(1, 3, 1, 1)
+    processed = preprocess(batch)
+
+    expected = torch.tensor([0.0, 85.0 / 255.0, 170.0 / 255.0, 1.0], dtype=torch.float32)
+
+    assert processed.shape == (1, 4, 3, 1, 1)
+    assert torch.allclose(processed[0, :, 0, 0, 0], expected, atol=1e-5)
+    assert torch.allclose(processed[0, :, 1, 0, 0], expected, atol=1e-5)
+    assert torch.allclose(processed[0, :, 2, 0, 0], expected, atol=1e-5)
+
+
+def test_build_batch_transform_spec_supports_nested_region_unfolding_transform():
+    import slide2vec.inference as inference
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    class Normalize:
+        def __init__(self, mean, std):
+            self.mean = mean
+            self.std = std
+
+    transforms = Compose(
+        [
+            Compose(
+                [
+                    RegionUnfolding(8),
+                    Normalize((0.5, 0.4, 0.3), (0.2, 0.3, 0.4)),
+                ]
+            )
+        ]
+    )
+
+    spec = inference._build_batch_transform_spec(transforms)
+
+    assert spec is not None
+    assert spec.region_unfold_tile_size == 8
+    assert spec.mean == (0.5, 0.4, 0.3)
+    assert spec.std == (0.2, 0.3, 0.4)
+
+
+def test_region_batch_preprocessor_uses_region_unfolding_from_transform_stack():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=4),
+        transforms=Compose([RegionUnfolding(4)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=8,
+        read_tile_size_px=8,
+    )
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=ExecutionOptions(gpu_batch_preprocessing=False),
+    )
+
+    batch = torch.ones((1, 3, 8, 8), dtype=torch.uint8)
+    processed = preprocess(batch)
+
+    assert processed.shape == (1, 4, 3, 4, 4)
+
+
+def test_region_batch_preprocessor_rejects_mismatched_region_unfolding_tile_size():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms
+
+    class RegionUnfolding:
+        def __init__(self, tile_size):
+            self.tile_size = tile_size
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=SimpleNamespace(tile_size=2),
+        transforms=Compose([RegionUnfolding(4)]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(
+        target_tile_size_px=8,
+        read_tile_size_px=8,
+    )
+
+    preprocess = inference._build_batch_preprocessor(
+        loaded,
+        SimpleNamespace(level="region"),
+        tiling_result,
+        execution=ExecutionOptions(gpu_batch_preprocessing=False),
+    )
+
+    with pytest.raises(ValueError, match="tile_size"):
+        preprocess(torch.ones((1, 3, 8, 8), dtype=torch.uint8))
+
+
+def test_serialize_execution_preserves_loader_optimization_fields():
+    import slide2vec.inference as inference
+
+    execution = ExecutionOptions(
+        output_dir=Path("/tmp/output"),
+        batch_size=64,
+        num_workers=8,
+        num_gpus=2,
+        mixed_precision=True,
+        prefetch_factor=7,
+        persistent_workers=False,
+        gpu_batch_preprocessing=False,
+        save_tile_embeddings=True,
+        save_latents=True,
+    )
+
+    payload = inference._serialize_execution(execution)
+    restored = inference.deserialize_execution(payload)
+
+    assert payload["prefetch_factor"] == 7
+    assert payload["persistent_workers"] is False
+    assert payload["gpu_batch_preprocessing"] is False
+    assert restored.prefetch_factor == 7
+    assert restored.persistent_workers is False
+    assert restored.gpu_batch_preprocessing is False
+
+
+def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.zeros((2, 3, 4, 4), dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def __call__(self, image):
+            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    fake_data_package = types.ModuleType("slide2vec.data")
+    fake_data_package.__path__ = []
+    fake_data_package.dataset = fake_dataset_module
+
+    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+        tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=3,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+        gpu_batch_preprocessing=True,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(on_the_fly=False),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 3
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+    assert captured["kwargs"]["collate_fn"] == (
+        "collator",
+        {
+            "tar_path": Path("/tmp/slide-a.tiles.tar"),
+            "tiling_result": tiling_result,
+        },
+    )
+
+
+def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0], dtype=torch.long),
+                torch.zeros((1, 3, 4, 4), dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def __call__(self, image):
+            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    fake_data_package = types.ModuleType("slide2vec.data")
+    fake_data_package.__path__ = []
+    fake_data_package.dataset = fake_dataset_module
+
+    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0]),
+        y=np.array([5]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+        tiles_tar_path=Path("/tmp/current-run.tiles.tar"),
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(read_tiles_from=Path("/tmp/external-tiles")),
+        execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
+    )
+
+    assert result.shape == (1, 3)
+    assert captured["kwargs"]["collate_fn"] == (
+        "collator",
+        {
+            "tar_path": Path("/tmp/external-tiles/slide-a.tiles.tar"),
+            "tiling_result": tiling_result,
+        },
+    )
+
+
+def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_without_explicit_override():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=object(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+
+    with pytest.raises(ValueError, match="missing tiles_tar_path"):
+        inference._compute_tile_embeddings_for_slide(
+            loaded,
+            SimpleNamespace(level="tile"),
+            make_slide("slide-a"),
+            SimpleNamespace(
+                x=np.array([0]),
+                y=np.array([1]),
+                target_spacing_um=0.5,
+                target_tile_size_px=4,
+                read_spacing_um=0.5,
+                read_tile_size_px=4,
+                tile_size_lv0=224,
+                tiles_tar_path=None,
+            ),
+            preprocessing=PreprocessingConfig(on_the_fly=False),
+            execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
+        )
+
+
+def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.full((2, 3, 4, 4), 255, dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyRegionModel:
+        tile_size = 2
+
+        def __call__(self, image):
+            assert image.ndim == 5
+            assert image.shape[1:] == (4, 3, 2, 2)
+            return {"embedding": torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)}
+
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    fake_data_package = types.ModuleType("slide2vec.data")
+    fake_data_package.__path__ = []
+    fake_data_package.dataset = fake_dataset_module
+
+    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+
+    class Normalize:
+        def __init__(self, mean, std):
+            self.mean = mean
+            self.std = std
+
+    loaded = inference.LoadedModel(
+        name="region-model",
+        level="region",
+        model=DummyRegionModel(),
+        transforms=SimpleNamespace(transforms=[Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+        tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=3,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+        gpu_batch_preprocessing=False,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="region"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(on_the_fly=False),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 4, 3)
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+    assert captured["kwargs"]["collate_fn"] == (
+        "collator",
+        {
+            "tar_path": Path("/tmp/slide-a.tiles.tar"),
+            "tiling_result": tiling_result,
+        },
+    )

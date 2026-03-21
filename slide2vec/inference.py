@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 import numpy as np
+from transformers.image_processing_utils import BaseImageProcessor
 
 from slide2vec.api import (
     EmbeddedSlide,
@@ -49,6 +50,28 @@ class LoadedModel:
     transforms: Any
     feature_dim: int
     device: Any
+
+
+@dataclass(frozen=True)
+class BatchTransformSpec:
+    resize_size: tuple[int, int] | None
+    center_crop_size: tuple[int, int] | None
+    mean: tuple[float, ...] | None
+    std: tuple[float, ...] | None
+    region_unfold_tile_size: int | None = None
+
+
+@dataclass
+class PreparedBatch:
+    indices: Any
+    image: Any
+    loader_wait_ms: float
+    preprocess_ms: float
+    ready_wait_ms: float = 0.0
+    worker_batch_ms: float = 0.0
+    reader_open_ms: float = 0.0
+    reader_read_ms: float = 0.0
+
 
 def _slide_spec_cls():
     try:
@@ -103,10 +126,13 @@ def load_model(
     from slide2vec.models import ModelFactory
     from slide2vec.resources import load_config
 
-    model_cfg = OmegaConf.create(load_config("models", "default"))
+    cfg = OmegaConf.merge(
+        OmegaConf.create(load_config("preprocessing", "default")),
+        OmegaConf.create(load_config("models", "default")),
+    )
     preset_name = _preset_name(name, level)
     if preset_name is not None:
-        model_cfg = OmegaConf.merge(model_cfg, load_config("models", preset_name))
+        cfg = OmegaConf.merge(cfg, load_config("models", preset_name))
 
     overrides = {
         "name": name,
@@ -121,7 +147,10 @@ def load_model(
     }
     for key, value in overrides.items():
         if value is not None:
-            model_cfg[key] = value
+            cfg.model[key] = value
+
+    OmegaConf.resolve(cfg)
+    model_cfg = cfg.model
 
     backend_model = ModelFactory(model_cfg).get_model()
     target_device = _resolve_device(device, backend_model.device)
@@ -271,39 +300,15 @@ def embed_tiles(
     loaded = model._load_backend()
     slide_records = [_coerce_slide_spec(slide) for slide in slides]
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
-    torch = _import_torch()
-    from slide2vec.data import TileDataset
-
-    autocast_context = (
-        torch.autocast(device_type="cuda", dtype=torch.float16)
-        if execution.mixed_precision and str(loaded.device).startswith("cuda")
-        else nullcontext()
-    )
     artifacts: list[TileEmbeddingArtifact] = []
     for slide, tiling_result in zip(slide_records, resolved_tiling_results):
-        transforms = _create_transforms(loaded)
-        dataset = TileDataset(
-            sample_id=slide.sample_id,
-            wsi_path=slide.image_path,
-            mask_path=slide.mask_path,
-            tiling_result=tiling_result,
-            backend=_resolve_backend(preprocessing),
-            transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
-        )
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=execution.batch_size,
-            shuffle=False,
-            num_workers=execution.num_workers,
-            pin_memory=str(loaded.device).startswith("cuda"),
-        )
-        features = _run_forward_pass(
-            dataloader,
+        features = _compute_tile_embeddings_for_slide(
             loaded,
-            autocast_context,
-            sample_id=slide.sample_id,
-            total_items=len(dataset),
-            unit_label="tile",
+            model,
+            slide,
+            tiling_result,
+            preprocessing=preprocessing or PreprocessingConfig(),
+            execution=execution,
         )
         metadata = _build_tile_embedding_metadata(
             model,
@@ -311,7 +316,7 @@ def embed_tiles(
             image_path=slide.image_path,
             mask_path=slide.mask_path,
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
-            backend=_resolve_backend(preprocessing),
+            backend=_resolve_tiling_backend(preprocessing),
         )
         artifact = _write_tile_embedding_artifact(
             slide.sample_id,
@@ -338,13 +343,13 @@ def aggregate_tiles(
     outputs: list[SlideEmbeddingArtifact] = []
     for artifact in tile_artifacts:
         metadata = artifact.metadata
-        if not metadata.get("tiles_npz_path") or not metadata.get("tiles_meta_path"):
+        if not metadata.get("coordinates_npz_path") or not metadata.get("coordinates_meta_path"):
             raise ValueError(
                 f"Tile artifact for {artifact.sample_id} is missing tiling metadata paths required for slide aggregation"
             )
         tiling_result = _load_tiling_result(
-            Path(metadata["tiles_npz_path"]),
-            Path(metadata["tiles_meta_path"]),
+            Path(metadata["coordinates_npz_path"]),
+            Path(metadata["coordinates_meta_path"]),
         )
         coordinates = _coordinate_matrix(tiling_result)
         image_path = Path(metadata["image_path"])
@@ -353,7 +358,7 @@ def aggregate_tiles(
                 image_path,
                 coordinates,
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_backend(preprocessing)),
+                metadata.get("backend", _resolve_tiling_backend(preprocessing)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -800,38 +805,82 @@ def _compute_tile_embeddings_for_slide(
     tile_indices=None,
 ):
     torch = _import_torch()
-    from slide2vec.data import TileDataset
+    from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=torch.float16)
         if execution.mixed_precision and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    transforms = _create_transforms(loaded)
-    dataset = TileDataset(
-        sample_id=slide.sample_id,
-        wsi_path=slide.image_path,
-        mask_path=slide.mask_path,
-        tiling_result=tiling_result,
-        backend=_resolve_backend(preprocessing),
-        transforms=transforms if model.level != "region" else _create_region_transforms(transforms, loaded.model),
-    )
+    resolved_indices = np.arange(_num_tiles(tiling_result), dtype=np.int64)
     if tile_indices is not None:
-        tile_indices = np.asarray(tile_indices, dtype=np.int64)
-        if tile_indices.size == 0:
+        resolved_indices = np.asarray(tile_indices, dtype=np.int64)
+        if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
-        dataset = torch.utils.data.Subset(dataset, tile_indices.tolist())
+    if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+        from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
+
+        collate_fn = OnTheFlyBatchTileCollator(
+            image_path=slide.image_path,
+            tiling_result=tiling_result,
+            num_cucim_workers=max(1, execution.num_workers),
+            gpu_decode=preprocessing.gpu_decode,
+        )
+        if collate_fn.ordered_indices is not None:
+            reorder = collate_fn.ordered_indices
+            if tile_indices is not None:
+                mask = np.isin(reorder, resolved_indices)
+                resolved_indices = reorder[mask]
+            else:
+                resolved_indices = reorder
+        if preprocessing.adaptive_batching:
+            batch_sampler = collate_fn.build_batch_sampler(execution.batch_size, resolved_indices)
+        else:
+            batch_sampler = None
+    else:
+        batch_sampler = None
+        if preprocessing.on_the_fly and preprocessing.read_tiles_from is not None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "read_tiles_from is set; ignoring on_the_fly=True and reading tiles from tar archives"
+            )
+        tar_path = _resolve_tile_store_archive_for_slide(
+            slide=slide,
+            tiling_result=tiling_result,
+            preprocessing=preprocessing,
+        )
+        if tar_path is None:
+            raise ValueError(
+                f"Slide {slide.sample_id} is missing tiles_tar_path — "
+                "pre-extracted tile archives are required for embedding"
+            )
+        collate_fn = BatchTileCollator(
+            tar_path=tar_path,
+            tiling_result=tiling_result,
+        )
+    dataset = TileIndexDataset(resolved_indices)
+    batch_preprocessor = _build_batch_preprocessor(
+        loaded,
+        model,
+        tiling_result,
+        execution=execution,
+    )
+    loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
+    if batch_sampler is not None:
+        loader_kwargs["batch_sampler"] = batch_sampler
+    else:
+        loader_kwargs["batch_size"] = execution.batch_size
+        loader_kwargs["shuffle"] = False
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=execution.batch_size,
-        shuffle=False,
-        num_workers=execution.num_workers,
-        pin_memory=str(loaded.device).startswith("cuda"),
+        collate_fn=collate_fn,
+        **loader_kwargs,
     )
     return _run_forward_pass(
         dataloader,
         loaded,
         autocast_context,
+        batch_preprocessor=batch_preprocessor,
         sample_id=slide.sample_id,
         total_items=len(dataset),
         unit_label="region" if model.level == "region" else "tile",
@@ -857,7 +906,7 @@ def _aggregate_tile_embeddings_for_slide(
             slide.image_path,
             coordinates,
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_backend(preprocessing),
+            _resolve_tiling_backend(preprocessing),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -923,7 +972,7 @@ def _persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_backend(preprocessing),
+                backend=_resolve_tiling_backend(preprocessing),
             ),
         )
     slide_artifact = None
@@ -950,8 +999,9 @@ def _build_tile_embedding_metadata(
     return {
         "encoder_name": model.name,
         "encoder_level": model.level,
-        "tiles_npz_path": str(_require_attr(tiling_result, "tiles_npz_path", allow_missing=True) or ""),
-        "tiles_meta_path": str(_require_attr(tiling_result, "tiles_meta_path", allow_missing=True) or ""),
+        "coordinates_npz_path": str(_require_attr(tiling_result, "coordinates_npz_path", allow_missing=True) or ""),
+        "coordinates_meta_path": str(_require_attr(tiling_result, "coordinates_meta_path", allow_missing=True) or ""),
+        "tiles_tar_path": str(_require_attr(tiling_result, "tiles_tar_path", allow_missing=True) or ""),
         "image_path": str(image_path),
         "mask_path": str(mask_path) if mask_path is not None else None,
         "tile_size_lv0": int(tile_size_lv0),
@@ -1023,11 +1073,366 @@ def _create_region_transforms(base_transforms, backend_model):
         ]
     )
 
+
+def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOptions) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "num_workers": execution.num_workers,
+        "pin_memory": str(loaded.device).startswith("cuda"),
+    }
+    if execution.num_workers > 0:
+        kwargs["persistent_workers"] = bool(execution.persistent_workers)
+        kwargs["prefetch_factor"] = int(execution.prefetch_factor)
+    return kwargs
+
+
+
+def _build_batch_preprocessor(
+    loaded: LoadedModel,
+    model,
+    tiling_result,
+    *,
+    execution: ExecutionOptions,
+):
+    torch = _import_torch()
+    spec = _build_batch_transform_spec(loaded.transforms)
+    if spec is None:
+        raise ValueError("Batched preprocessing is only available for supported deterministic transform stacks")
+
+    preprocess_device = loaded.device if execution.gpu_batch_preprocessing else torch.device("cpu")
+
+    def preprocess(batch):
+        image = batch
+        image = _prepare_batch_tensor(image, preprocess_device=preprocess_device)
+        image = _resize_image_batch(
+            image,
+            (int(tiling_result.target_tile_size_px), int(tiling_result.target_tile_size_px)),
+        )
+        if model.level == "region":
+            image = _apply_region_batch_transform_spec(
+                image,
+                spec,
+                tile_size=int(getattr(loaded.model, "tile_size")),
+            )
+        else:
+            image = _apply_batch_transform_spec(image, spec)
+        if image.device != loaded.device:
+            image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
+        return image.contiguous()
+
+    return preprocess
+
+
+def _build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
+    if isinstance(transforms, BaseImageProcessor):
+        resize_size = _normalize_hw(
+            getattr(transforms, "crop_size", None) or getattr(transforms, "size", None)
+        )
+        if resize_size is None:
+            return None
+        mean = getattr(transforms, "image_mean", None)
+        std = getattr(transforms, "image_std", None)
+        return BatchTransformSpec(
+            resize_size=resize_size,
+            center_crop_size=None,
+            mean=tuple(float(value) for value in mean) if mean is not None else None,
+            std=tuple(float(value) for value in std) if std is not None else None,
+            region_unfold_tile_size=None,
+        )
+
+    transform_steps = _iter_transform_steps(transforms)
+    if transform_steps is None:
+        return None
+
+    resize_size = None
+    center_crop_size = None
+    mean = None
+    std = None
+    region_unfold_tile_size = None
+    supported_step_names = {
+        "Resize",
+        "CenterCrop",
+        "Normalize",
+        "ToTensor",
+        "MaybeToTensor",
+        "ToImage",
+        "ConvertImageDtype",
+    }
+    for step in transform_steps:
+        if _is_region_unfolding_transform(step):
+            step_tile_size = int(getattr(step, "tile_size"))
+            if region_unfold_tile_size is not None and region_unfold_tile_size != step_tile_size:
+                return None
+            region_unfold_tile_size = step_tile_size
+            continue
+        step_name = type(step).__name__
+        if step_name not in supported_step_names:
+            return None
+        if step_name == "Resize":
+            resize_size = _normalize_hw(getattr(step, "size", None))
+        elif step_name == "CenterCrop":
+            center_crop_size = _normalize_hw(getattr(step, "size", None))
+        elif step_name == "Normalize":
+            mean = tuple(float(value) for value in getattr(step, "mean"))
+            std = tuple(float(value) for value in getattr(step, "std"))
+    return BatchTransformSpec(
+        resize_size=resize_size,
+        center_crop_size=center_crop_size,
+        mean=mean,
+        std=std,
+        region_unfold_tile_size=region_unfold_tile_size,
+    )
+
+
+def _iter_transform_steps(transforms):
+    transform_steps = getattr(transforms, "transforms", None)
+    if transform_steps is None:
+        return None
+    flattened = []
+    for step in transform_steps:
+        nested = _iter_transform_steps(step)
+        if nested is not None:
+            flattened.extend(nested)
+        else:
+            flattened.append(step)
+    return flattened
+
+
+def _is_region_unfolding_transform(step) -> bool:
+    return type(step).__name__ == "RegionUnfolding" and hasattr(step, "tile_size")
+
+
+def _prepare_batch_tensor(image, *, preprocess_device):
+    torch = _import_torch()
+    if image.device != preprocess_device:
+        image = image.to(preprocess_device, non_blocking=str(preprocess_device).startswith("cuda"))
+    if image.dtype == torch.uint8:
+        return image.float().div(255.0)
+    return image.float()
+
+
+def _resize_image_batch(image, size: tuple[int, int]):
+    if tuple(int(dim) for dim in image.shape[-2:]) == size:
+        return image
+    torch = _import_torch()
+    return torch.nn.functional.interpolate(
+        image,
+        size=size,
+        mode="bilinear",
+        align_corners=False,
+        antialias=True,
+    )
+
+
+def _apply_batch_transform_spec(image, spec: BatchTransformSpec):
+    torch = _import_torch()
+    if spec.resize_size is not None:
+        image = _resize_image_batch(image, spec.resize_size)
+    if spec.center_crop_size is not None:
+        image = _center_crop_batch(image, spec.center_crop_size)
+    if spec.mean is not None and spec.std is not None:
+        mean = torch.tensor(spec.mean, dtype=image.dtype, device=image.device).view(1, -1, 1, 1)
+        std = torch.tensor(spec.std, dtype=image.dtype, device=image.device).view(1, -1, 1, 1)
+        image = (image - mean) / std
+    return image
+
+
+def _apply_region_batch_transform_spec(image, spec: BatchTransformSpec, *, tile_size: int):
+    if spec.region_unfold_tile_size is not None and spec.region_unfold_tile_size != tile_size:
+        raise ValueError(
+            "Region transform stack RegionUnfolding tile_size does not match the region model tile_size"
+        )
+    region_tile_size = spec.region_unfold_tile_size or tile_size
+    batch_size = int(image.shape[0])
+    unfolded = _unfold_region_batch(image, region_tile_size)
+    num_tiles = int(unfolded.shape[1])
+    flattened = unfolded.reshape(batch_size * num_tiles, *unfolded.shape[-3:])
+    transformed = _apply_batch_transform_spec(flattened, spec)
+    return transformed.reshape(batch_size, num_tiles, *transformed.shape[-3:])
+
+
+def _unfold_region_batch(image, tile_size: int):
+    torch = _import_torch()
+    height, width = (int(image.shape[-2]), int(image.shape[-1]))
+    if height % tile_size != 0 or width % tile_size != 0:
+        raise ValueError(
+            f"Region batch with shape {height}x{width} is not divisible by tile_size={tile_size}"
+        )
+    unfolded = torch.nn.functional.unfold(image, kernel_size=tile_size, stride=tile_size)
+    unfolded = unfolded.transpose(1, 2)
+    return unfolded.reshape(image.shape[0], -1, image.shape[1], tile_size, tile_size)
+
+
+def _normalize_hw(value) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return (int(value), int(value))
+    if isinstance(value, (tuple, list)):
+        if len(value) == 1:
+            return (int(value[0]), int(value[0]))
+        if len(value) >= 2:
+            return (int(value[0]), int(value[1]))
+        return None
+    if isinstance(value, dict):
+        if "height" in value and "width" in value:
+            return (int(value["height"]), int(value["width"]))
+        if "shortest_edge" in value:
+            edge = int(value["shortest_edge"])
+            return (edge, edge)
+    return None
+
+
+def _center_crop_batch(image, size: tuple[int, int]):
+    target_h, target_w = size
+    height, width = int(image.shape[-2]), int(image.shape[-1])
+    crop_h = min(target_h, height)
+    crop_w = min(target_w, width)
+    top = max((height - crop_h) // 2, 0)
+    left = max((width - crop_w) // 2, 0)
+    return image[..., top : top + crop_h, left : left + crop_w]
+
+
+@contextmanager
+def _maybe_nvtx_range(torch, label: str):
+    nvtx = getattr(getattr(torch, "cuda", None), "nvtx", None)
+    if nvtx is None:
+        yield
+        return
+    pushed = False
+    try:
+        nvtx.range_push(label)
+        pushed = True
+    except Exception:
+        yield
+        return
+    try:
+        yield
+    finally:
+        if pushed:
+            try:
+                nvtx.range_pop()
+            except Exception:
+                return
+
+
+class _BatchPrefetcher:
+    def __init__(self, dataloader, loaded: LoadedModel, batch_preprocessor):
+        self.torch = _import_torch()
+        self.iterator = iter(dataloader)
+        self.loaded = loaded
+        self.batch_preprocessor = batch_preprocessor
+        self.copy_stream = self._make_copy_stream()
+        self._pinned_host_buffer = None
+        self._next_batch: PreparedBatch | None = None
+        self._preload()
+
+    def _unpack_loader_batch(self, batch):
+        if isinstance(batch, (tuple, list)):
+            if len(batch) == 3 and isinstance(batch[2], dict):
+                return batch[0], batch[1], batch[2]
+            if len(batch) == 2:
+                return batch[0], batch[1], {}
+        raise ValueError("Expected the embedding dataloader to yield (indices, image) or (indices, image, timing)")
+
+    def _make_copy_stream(self):
+        if not str(self.loaded.device).startswith("cuda"):
+            return None
+        return self.torch.cuda.Stream(device=self.loaded.device)
+
+    def _stage_host_batch(self, image):
+        if self.copy_stream is None or not self.torch.is_tensor(image):
+            return image
+        if image.device.type != "cpu" or image.is_pinned():
+            return image
+        if (
+            self._pinned_host_buffer is None
+            or tuple(self._pinned_host_buffer.shape) != tuple(image.shape)
+            or self._pinned_host_buffer.dtype != image.dtype
+        ):
+            self._pinned_host_buffer = self.torch.empty(
+                image.shape,
+                dtype=image.dtype,
+                pin_memory=True,
+            )
+        self._pinned_host_buffer.copy_(image)
+        return self._pinned_host_buffer
+
+    def _prepare_batch(self, image):
+        preprocess_start = time.perf_counter()
+        if self.batch_preprocessor is not None:
+            with _maybe_nvtx_range(self.torch, "slide2vec.batch_preprocess"):
+                prepared = self.batch_preprocessor(image)
+        else:
+            with _maybe_nvtx_range(self.torch, "slide2vec.batch_h2d"):
+                prepared = image.to(
+                    self.loaded.device,
+                    non_blocking=str(self.loaded.device).startswith("cuda"),
+                )
+        preprocess_ms = (time.perf_counter() - preprocess_start) * 1000.0
+        return prepared, preprocess_ms
+
+    def _preload(self) -> None:
+        wait_start = time.perf_counter()
+        try:
+            batch = next(self.iterator)
+        except StopIteration:
+            self._next_batch = None
+            return
+        loader_wait_ms = (time.perf_counter() - wait_start) * 1000.0
+        indices, image, timing = self._unpack_loader_batch(batch)
+        if self.copy_stream is None:
+            prepared, preprocess_ms = self._prepare_batch(image)
+            self._next_batch = PreparedBatch(
+                indices=indices,
+                image=prepared,
+                loader_wait_ms=loader_wait_ms,
+                preprocess_ms=preprocess_ms,
+                worker_batch_ms=float(timing.get("worker_batch_ms", 0.0)),
+                reader_open_ms=float(timing.get("reader_open_ms", 0.0)),
+                reader_read_ms=float(timing.get("reader_read_ms", 0.0)),
+            )
+            return
+
+        staged = self._stage_host_batch(image)
+        preprocess_start = time.perf_counter()
+        with self.torch.cuda.stream(self.copy_stream):
+            prepared = self.batch_preprocessor(staged) if self.batch_preprocessor is not None else staged.to(
+                self.loaded.device,
+                non_blocking=True,
+            )
+        preprocess_ms = (time.perf_counter() - preprocess_start) * 1000.0
+        self._next_batch = PreparedBatch(
+            indices=indices,
+            image=prepared,
+            loader_wait_ms=loader_wait_ms,
+            preprocess_ms=preprocess_ms,
+            worker_batch_ms=float(timing.get("worker_batch_ms", 0.0)),
+            reader_open_ms=float(timing.get("reader_open_ms", 0.0)),
+            reader_read_ms=float(timing.get("reader_read_ms", 0.0)),
+        )
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> PreparedBatch:
+        if self._next_batch is None:
+            raise StopIteration
+        current = self._next_batch
+        if self.copy_stream is not None:
+            ready_start = time.perf_counter()
+            current_stream = self.torch.cuda.current_stream(device=self.loaded.device)
+            current_stream.wait_stream(self.copy_stream)
+            current.ready_wait_ms = (time.perf_counter() - ready_start) * 1000.0
+        self._preload()
+        return current
+
+
 def _run_forward_pass(
     dataloader,
     loaded: LoadedModel,
     autocast_context,
     *,
+    batch_preprocessor=None,
     sample_id: str | None = None,
     total_items: int | None = None,
     unit_label: str = "tile",
@@ -1035,12 +1440,32 @@ def _run_forward_pass(
     torch = _import_torch()
     outputs = []
     processed = 0
+    batch_index = 0
+    prefetcher = _BatchPrefetcher(dataloader, loaded, batch_preprocessor)
     with torch.inference_mode(), autocast_context:
-        for _, image in dataloader:
-            image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
-            embedding = loaded.model(image)["embedding"].detach().cpu()
+        for prepared_batch in prefetcher:
+            image = prepared_batch.image
+            forward_start = time.perf_counter()
+            with _maybe_nvtx_range(torch, "slide2vec.batch_forward"):
+                embedding = loaded.model(image)["embedding"].detach().cpu()
+            forward_ms = (time.perf_counter() - forward_start) * 1000.0
             outputs.append(embedding)
             processed += int(embedding.shape[0])
+            batch_index += 1
+            emit_progress(
+                "embedding.batch.timing",
+                sample_id=sample_id,
+                batch_index=batch_index,
+                batch_size=int(embedding.shape[0]),
+                loader_wait_ms=round(prepared_batch.loader_wait_ms, 4),
+                ready_wait_ms=round(prepared_batch.ready_wait_ms, 4),
+                preprocess_ms=round(prepared_batch.preprocess_ms, 4),
+                worker_batch_ms=round(prepared_batch.worker_batch_ms, 4),
+                reader_open_ms=round(prepared_batch.reader_open_ms, 4),
+                reader_read_ms=round(prepared_batch.reader_read_ms, 4),
+                forward_ms=round(forward_ms, 4),
+                unit=unit_label,
+            )
             if sample_id is not None:
                 emit_progress(
                     "embedding.tile.progress",
@@ -1260,10 +1685,16 @@ def _embedding_work_dir(output_dir: Path | None):
         yield Path(tmp_dir)
 
 
-def _tile_slides(slides: Sequence[SlideSpec], preprocessing: PreprocessingConfig, *, output_dir: Path, num_workers: int):
+def _tile_slides(
+    slides: Sequence[SlideSpec],
+    preprocessing: PreprocessingConfig,
+    *,
+    output_dir: Path,
+    num_workers: int,
+):
     from hs2p import tile_slides
 
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_tiles_from, resume = _build_hs2p_configs(preprocessing)
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
     tile_slides(
         slides,
         tiling=tiling_cfg,
@@ -1272,8 +1703,9 @@ def _tile_slides(slides: Sequence[SlideSpec], preprocessing: PreprocessingConfig
         preview=preview_cfg,
         output_dir=output_dir,
         num_workers=num_workers,
-        read_tiles_from=read_tiles_from,
+        read_coordinates_from=read_coordinates_from,
         resume=resume,
+        save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
     )
 
 
@@ -1301,7 +1733,7 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
     from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig
 
     tiling_cfg = TilingConfig(
-        backend=preprocessing.backend,
+        backend=_resolve_tiling_backend(preprocessing),
         target_spacing_um=preprocessing.target_spacing_um,
         target_tile_size_px=preprocessing.target_tile_size_px,
         tolerance=preprocessing.tolerance,
@@ -1318,9 +1750,29 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
         segmentation_cfg,
         filtering_cfg,
         preview_cfg,
-        preprocessing.read_tiles_from,
+        preprocessing.read_coordinates_from,
         preprocessing.resume,
     )
+
+
+def _resolve_tile_store_archive_for_slide(
+    *,
+    slide: SlideSpec,
+    tiling_result,
+    preprocessing: PreprocessingConfig,
+) -> Path | None:
+    if preprocessing.read_tiles_from is not None:
+        return _tile_store_archive_path(preprocessing.read_tiles_from, slide.sample_id)
+    return getattr(tiling_result, "tiles_tar_path", None)
+
+
+def _tile_store_archive_path(tile_store_root: Path, sample_id: str) -> Path:
+    root = Path(tile_store_root)
+    if root.is_file():
+        return root
+    if root.suffix == ".tar" and root.exists():
+        return root
+    return root / f"{sample_id}.tiles.tar"
 
 
 def _load_process_df(
@@ -1344,10 +1796,10 @@ def _load_tiling_result_from_row(row):
     return load_tiling_result_from_row(row)
 
 
-def _load_tiling_result(tiles_npz_path: Path, tiles_meta_path: Path):
+def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path):
     from hs2p import load_tiling_result
 
-    return load_tiling_result(tiles_npz_path=tiles_npz_path, tiles_meta_path=tiles_meta_path)
+    return load_tiling_result(coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path)
 
 
 def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
@@ -1373,7 +1825,7 @@ def _maybe_import_torch():
     return torch
 
 
-def _resolve_backend(preprocessing: PreprocessingConfig | None) -> str:
+def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
     if preprocessing is None:
         return "asap"
     return preprocessing.backend
@@ -1743,6 +2195,7 @@ def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, An
         "tissue_threshold": preprocessing.tissue_threshold,
         "drop_holes": preprocessing.drop_holes,
         "use_padding": preprocessing.use_padding,
+        "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
         "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
         "resume": preprocessing.resume,
         "segmentation": dict(preprocessing.segmentation),
@@ -1759,6 +2212,9 @@ def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
         "num_workers": execution.num_workers,
         "num_gpus": execution.num_gpus,
         "mixed_precision": execution.mixed_precision,
+        "prefetch_factor": execution.prefetch_factor,
+        "persistent_workers": execution.persistent_workers,
+        "gpu_batch_preprocessing": execution.gpu_batch_preprocessing,
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_latents": execution.save_latents,
     }
@@ -1774,6 +2230,7 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         tissue_threshold=float(payload["tissue_threshold"]),
         drop_holes=bool(payload["drop_holes"]),
         use_padding=bool(payload["use_padding"]),
+        read_coordinates_from=Path(payload["read_coordinates_from"]) if payload.get("read_coordinates_from") else None,
         read_tiles_from=Path(payload["read_tiles_from"]) if payload.get("read_tiles_from") else None,
         resume=bool(payload.get("resume", False)),
         segmentation=dict(payload.get("segmentation", {})),
@@ -1791,6 +2248,9 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         num_workers=int(payload.get("num_workers", 0)),
         num_gpus=int(payload.get("num_gpus", 1)),
         mixed_precision=bool(payload.get("mixed_precision", False)),
+        prefetch_factor=int(payload.get("prefetch_factor", 4)),
+        persistent_workers=bool(payload.get("persistent_workers", True)),
+        gpu_batch_preprocessing=bool(payload.get("gpu_batch_preprocessing", True)),
         save_tile_embeddings=bool(payload.get("save_tile_embeddings", False)),
         save_latents=bool(payload.get("save_latents", False)),
     )

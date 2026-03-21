@@ -128,10 +128,6 @@ def test_readme_documents_core_and_models_installs():
     assert 'pip install "slide2vec[models]"' in readme
 
 
-def test_tile_dataset_uses_direct_transformers_type_check():
-    source = (ROOT / "slide2vec" / "data" / "dataset.py").read_text(encoding="utf-8")
-
-    assert "from transformers.image_processing_utils import BaseImageProcessor" in source
-    assert "isinstance(self.transforms, BaseImageProcessor)" in source
+def test_models_module_imports_transformers():
     imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
     assert "transformers" in imported_modules

@@ -1,20 +1,23 @@
 csv: # path to csv containing slide paths
 
 output_dir: "output"
+save_previews: false
 
 tiling:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
+    tolerance: 0.1 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     target_tile_size_px: 224 # size of the tiles to extract, in pixels
     tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
-  filter_params:
-    ref_tile_size: 224
 
 model:
   level: "tile"
   name: "h0-mini"
-  batch_size: 1
+  batch_size: 64
 
 speed:
   fp16: true
+  num_workers: 32 # number of workers for tiling slides
+  num_workers_embedding: 32 # number of workers for embedding-time tile loading
+  prefetch_factor_embedding: 8 # batches prefetched per embedding worker
+  persistent_workers_embedding: true # keep embedding workers alive across slides

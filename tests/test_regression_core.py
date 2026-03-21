@@ -28,133 +28,6 @@ def test_resource_loading_uses_packaged_configs():
     assert "model" in cfg
     assert config_resource("preprocessing", "default").name == "default.yaml"
 
-def test_tile_dataset_scales_coordinates_and_returns_transformed_tiles(monkeypatch):
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([10, 30]),
-        y=np.array([20, 40]),
-    )
-
-    class FakeWholeSlideImage:
-        constructor_calls = []
-        patch_calls = []
-
-        def __init__(self, path, backend):
-            self.path = path
-            self.backend = backend
-            self.spacings = [0.25]
-            type(self).constructor_calls.append((Path(path), backend))
-
-        def get_patch(self, x, y, width, height, spacing, center):
-            type(self).patch_calls.append((x, y, width, height, spacing, center))
-            return np.full((height, width, 3), fill_value=64, dtype=np.uint8)
-
-    monkeypatch.setattr("slide2vec.data.dataset.wsd.WholeSlideImage", FakeWholeSlideImage)
-
-    seen_shapes = []
-
-    def transform(tile):
-        arr = np.asarray(tile)
-        seen_shapes.append(arr.shape)
-        return arr
-
-    dataset = TileDataset(
-        sample_id="slide-a",
-        wsi_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        tiling_result=tiling_result,
-        backend="asap",
-        transforms=transform,
-    )
-
-    np.testing.assert_array_equal(dataset.coordinates, np.array([[10, 20], [30, 40]]))
-    np.testing.assert_array_equal(dataset.scaled_coordinates, np.array([[5, 10], [15, 20]]))
-    assert len(dataset) == 2
-
-    idx, tile = dataset[1]
-
-    assert idx == 1
-    assert tile.shape == (4, 4, 3)
-    assert seen_shapes == [(4, 4, 3)]
-    assert FakeWholeSlideImage.patch_calls == [(30, 40, 2, 2, 0.5, False)]
-    assert len(FakeWholeSlideImage.constructor_calls) == 2
-
-def test_tile_dataset_requires_coordinate_arrays():
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([10]),
-        y=None,
-    )
-
-    with pytest.raises(ValueError, match="Tiling result must expose x/y coordinates"):
-        TileDataset(
-            sample_id="slide-a",
-            wsi_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-            tiling_result=tiling_result,
-            backend="asap",
-            transforms=None,
-        )
-
-def test_tile_dataset_load_coordinates_delegates_to_shared_helpers(monkeypatch):
-    pytest.importorskip("torch")
-    pytest.importorskip("wholeslidedata")
-    from slide2vec.data.dataset import TileDataset
-
-    captured = {}
-
-    def fake_coordinate_arrays(tiling_result):
-        captured["arrays_arg"] = tiling_result
-        return np.array([9, 10]), np.array([11, 12])
-
-    def fake_coordinate_matrix(tiling_result):
-        captured["matrix_arg"] = tiling_result
-        return np.array([[9, 11], [10, 12]], dtype=np.int64)
-
-    monkeypatch.setattr("slide2vec.data.dataset.coordinate_arrays", fake_coordinate_arrays)
-    monkeypatch.setattr("slide2vec.data.dataset.coordinate_matrix", fake_coordinate_matrix)
-    monkeypatch.setattr(TileDataset, "scale_coordinates", lambda self: np.array([[1, 2], [3, 4]], dtype=np.int64))
-
-    tiling_result = SimpleNamespace(
-        target_spacing_um=0.5,
-        target_tile_size_px=4,
-        read_spacing_um=0.5,
-        read_tile_size_px=2,
-        tile_size_lv0=224,
-        x=np.array([0]),
-        y=np.array([1]),
-    )
-    dataset = TileDataset(
-        sample_id="slide-a",
-        wsi_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        tiling_result=tiling_result,
-        backend="asap",
-        transforms=None,
-    )
-
-    assert captured["arrays_arg"] is tiling_result
-    assert captured["matrix_arg"] is tiling_result
-    np.testing.assert_array_equal(dataset.x, np.array([9, 10]))
-    np.testing.assert_array_equal(dataset.y, np.array([11, 12]))
-    np.testing.assert_array_equal(dataset.coordinates, np.array([[9, 11], [10, 12]], dtype=np.int64))
-
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
     artifact = write_tile_embeddings(
@@ -162,7 +35,7 @@ def test_npz_artifacts_round_trip(tmp_path: Path):
         features,
         output_dir=tmp_path,
         output_format="npz",
-        metadata={"tiles_npz_path": "/tmp/sample-a.tiles.npz"},
+        metadata={"coordinates_npz_path": "/tmp/sample-a.coordinates.npz"},
         tile_index=np.array([0, 1, 2], dtype=np.int64),
     )
 
@@ -172,7 +45,7 @@ def test_npz_artifacts_round_trip(tmp_path: Path):
     np.testing.assert_array_equal(loaded, features)
     assert artifact.path == tmp_path / "tile_embeddings" / "sample-a.npz"
     assert metadata["sample_id"] == "sample-a"
-    assert metadata["tiles_npz_path"] == "/tmp/sample-a.tiles.npz"
+    assert metadata["coordinates_npz_path"] == "/tmp/sample-a.coordinates.npz"
 
 def test_pt_artifacts_round_trip(tmp_path: Path):
     torch = pytest.importorskip("torch")
@@ -247,6 +120,9 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=3,
+            prefetch_factor_embedding=5,
+            persistent_workers_embedding=False,
+            gpu_batch_preprocessing=False,
         ),
     )
 
@@ -258,6 +134,9 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.num_workers == 2
     assert execution.num_gpus == 3
     assert execution.mixed_precision is True
+    assert execution.prefetch_factor == 5
+    assert execution.persistent_workers is False
+    assert execution.gpu_batch_preprocessing is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -277,12 +156,18 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=None,
+            prefetch_factor_embedding=3,
+            persistent_workers_embedding=True,
+            gpu_batch_preprocessing=True,
         ),
     )
 
     execution = api.ExecutionOptions.from_config(cfg)
 
     assert execution.num_gpus == 6
+    assert execution.prefetch_factor == 3
+    assert execution.persistent_workers is True
+    assert execution.gpu_batch_preprocessing is True
 
 def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -300,6 +185,9 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
             num_workers=4,
             num_workers_embedding=4,
             num_gpus=1,
+            prefetch_factor_embedding=4,
+            persistent_workers_embedding=True,
+            gpu_batch_preprocessing=True,
         ),
     )
 
@@ -318,6 +206,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
         tissue_threshold=0.4,
         drop_holes=True,
         use_padding=False,
+        read_coordinates_from=Path("/tmp/coordinates"),
         read_tiles_from=Path("/tmp/tiles"),
         resume=True,
         segmentation={"downsample": 32},
@@ -333,6 +222,8 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.segmentation == base.segmentation
     assert updated.filtering == base.filtering
     assert updated.preview == base.preview
+    assert updated.read_coordinates_from == base.read_coordinates_from
+    assert updated.read_tiles_from == base.read_tiles_from
     assert updated is not base
 
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
@@ -343,6 +234,9 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         num_workers=3,
         num_gpus=2,
         mixed_precision=True,
+        prefetch_factor=6,
+        persistent_workers=False,
+        gpu_batch_preprocessing=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -355,6 +249,9 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.num_workers == base.num_workers
     assert updated.num_gpus == base.num_gpus
     assert updated.mixed_precision == base.mixed_precision
+    assert updated.prefetch_factor == base.prefetch_factor
+    assert updated.persistent_workers == base.persistent_workers
+    assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base
@@ -382,7 +279,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3, num_gpus=2),
         tiling=SimpleNamespace(
             backend="asap",
-            read_tiles_from=None,
+            read_coordinates_from=None,
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -426,13 +323,16 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert captured["execution"].output_dir == tmp_path
     assert captured["execution"].num_gpus == 1
 
-def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fields():
+
+def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():
     cfg = SimpleNamespace(
         resume=True,
+        output_dir="/tmp/run-001",
         save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
-            read_tiles_from="/tmp/precomputed",
+            read_coordinates_from=None,
+            read_tiles_from=None,
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -452,7 +352,9 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
 
     assert preprocessing.backend == "asap"
     assert preprocessing.target_tile_size_px == 224
-    assert preprocessing.read_tiles_from == Path("/tmp/precomputed")
+    assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
+    assert preprocessing.read_tiles_from is None
+    assert not hasattr(preprocessing, "save_tiles")
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
@@ -461,6 +363,37 @@ def test_preprocessing_config_from_config_combines_user_facing_preprocessing_fie
         "save_tiling_preview": False,
         "downsample": 32,
     }
+
+
+def test_preprocessing_config_from_config_preserves_tile_store_dir():
+    cfg = SimpleNamespace(
+        output_dir="/tmp/run-002",
+        resume=False,
+        save_previews=True,
+        tiling=SimpleNamespace(
+            backend="asap",
+            read_coordinates_from=None,
+            read_tiles_from="/tmp/tile-store",
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                tolerance=0.07,
+                overlap=0.0,
+                tissue_threshold=0.1,
+                drop_holes=False,
+                use_padding=True,
+            ),
+            seg_params={"downsample": 64},
+            filter_params={"ref_tile_size": 224},
+            preview=SimpleNamespace(downsample=32),
+        ),
+    )
+
+    preprocessing = PreprocessingConfig.from_config(cfg)
+
+    assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
+    assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
+    assert not hasattr(preprocessing, "save_tiles")
 
 def test_validate_removed_options_rejects_legacy_preview_keys():
     pytest.importorskip("omegaconf")

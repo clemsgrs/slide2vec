@@ -47,7 +47,11 @@ class PreprocessingConfig:
     tissue_threshold: float = 0.01
     drop_holes: bool = False
     use_padding: bool = True
+    read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
+    on_the_fly: bool = True
+    gpu_decode: bool = False
+    adaptive_batching: bool = False
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
@@ -56,6 +60,12 @@ class PreprocessingConfig:
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
+        default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
+        read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
+        read_tiles_from = getattr(tiling, "read_tiles_from", None)
+        on_the_fly = bool(getattr(tiling, "on_the_fly", True))
+        gpu_decode = bool(getattr(tiling, "gpu_decode", False))
+        adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -65,7 +75,15 @@ class PreprocessingConfig:
             tissue_threshold=float(tiling.params.tissue_threshold),
             drop_holes=bool(tiling.params.drop_holes),
             use_padding=bool(tiling.params.use_padding),
-            read_tiles_from=Path(tiling.read_tiles_from) if tiling.read_tiles_from else None,
+            read_coordinates_from=(
+                Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
+            ),
+            read_tiles_from=(
+                Path(read_tiles_from) if read_tiles_from else None
+            ),
+            on_the_fly=on_the_fly,
+            gpu_decode=gpu_decode,
+            adaptive_batching=adaptive_batching,
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
@@ -88,6 +106,9 @@ class ExecutionOptions:
     num_workers: int = 0
     num_gpus: int | None = None
     mixed_precision: bool = False
+    prefetch_factor: int = 4
+    persistent_workers: bool = True
+    gpu_batch_preprocessing: bool = True
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
@@ -101,6 +122,9 @@ class ExecutionOptions:
             num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
+            prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
+            persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
+            gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
             save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
             save_latents=bool(getattr(cfg.model, "save_latents", False)),
         )
@@ -110,6 +134,8 @@ class ExecutionOptions:
         object.__setattr__(self, "num_gpus", resolved_num_gpus)
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
+        if self.prefetch_factor < 1:
+            raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
@@ -303,13 +329,16 @@ class Model:
     def _load_backend(self) -> "LoadedModel":
         if self._backend is None:
             from slide2vec.inference import load_model
+            from slide2vec.progress import emit_progress
 
+            emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
                 level=self.level,
                 device=self._requested_device,
                 **self._model_kwargs,
             )
+            emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 
 

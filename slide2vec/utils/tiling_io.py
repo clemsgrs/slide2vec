@@ -14,8 +14,8 @@ BASE_PROCESS_COLUMNS = (
     "mask_path",
     "tiling_status",
     "num_tiles",
-    "tiles_npz_path",
-    "tiles_meta_path",
+    "coordinates_npz_path",
+    "coordinates_meta_path",
     "error",
     "traceback",
 )
@@ -105,6 +105,8 @@ def load_process_df(
     needs_feature_status = include_feature_status or include_aggregation_status
     if "spacing_at_level_0" not in df.columns:
         df["spacing_at_level_0"] = [None] * len(df)
+    if "tiles_tar_path" not in df.columns:
+        df["tiles_tar_path"] = [None] * len(df)
     if needs_feature_status and "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
     if include_aggregation_status and "aggregation_status" not in df.columns:
@@ -116,9 +118,10 @@ def load_process_df(
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
-        "tiles_npz_path",
-        "tiles_meta_path",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
     ]
+    ordered_columns.append("tiles_tar_path")
     if needs_feature_status:
         ordered_columns.append("feature_status")
     if include_aggregation_status:
@@ -130,9 +133,10 @@ def load_process_df(
 def load_tiling_result_from_row(row):
     hs2p = _hs2p_exports()
     tiling_result = hs2p["load_tiling_result"](
-        tiles_npz_path=Path(row["tiles_npz_path"]),
-        tiles_meta_path=Path(row["tiles_meta_path"]),
+        coordinates_npz_path=Path(row["coordinates_npz_path"]),
+        coordinates_meta_path=Path(row["coordinates_meta_path"]),
     )
-    setattr(tiling_result, "tiles_npz_path", Path(row["tiles_npz_path"]))
-    setattr(tiling_result, "tiles_meta_path", Path(row["tiles_meta_path"]))
+    setattr(tiling_result, "coordinates_npz_path", Path(row["coordinates_npz_path"]))
+    setattr(tiling_result, "coordinates_meta_path", Path(row["coordinates_meta_path"]))
+    setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
     return tiling_result
