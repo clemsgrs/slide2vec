@@ -19,6 +19,7 @@ WORKDIR /opt/app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
+    libturbojpeg0-dev \
     zlib1g-dev \
     curl \
     vim screen \
@@ -64,6 +65,10 @@ COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
 
 RUN python -m pip install /opt/app
+
+# register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
+RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+    ldconfig
 
 USER user
 WORKDIR /opt/app

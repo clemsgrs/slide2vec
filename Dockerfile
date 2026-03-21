@@ -28,6 +28,7 @@ ENV PATH="/home/user/.local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
+    libturbojpeg0-dev \
     zlib1g-dev \
     curl \
     vim screen \
@@ -92,6 +93,7 @@ ENV PATH="/home/user/.local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
+    libturbojpeg0-dev \
     zlib1g-dev \
     curl \
     vim screen \
@@ -114,6 +116,10 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
 COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
+
+# register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
+RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+    ldconfig
 
 # copy app code
 COPY --from=build /opt/app /opt/app
