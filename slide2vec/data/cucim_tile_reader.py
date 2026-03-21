@@ -47,8 +47,6 @@ class _SuperTile:
     y_lv0: int
     read_size_px: int
     block_size: int
-    tile_indices: np.ndarray
-    crop_offsets: np.ndarray  # (N, 2) — (crop_x, crop_y) at read level
 
 
 def _build_supertile_index(tiling_result: TilingResult):
@@ -94,7 +92,6 @@ def _build_supertile_index(tiling_result: TilingResult):
     ):
         st_id = len(supertiles)
         member_indices = []
-        offsets = []
         for x_idx in range(plan.block_size):
             for y_idx in range(plan.block_size):
                 coord = (
@@ -103,12 +100,9 @@ def _build_supertile_index(tiling_result: TilingResult):
                 )
                 tile_idx = coord_to_index[coord]
                 member_indices.append(tile_idx)
-                cx = x_idx * read_step_px
-                cy = y_idx * read_step_px
-                offsets.append((cx, cy))
                 tile_to_st[tile_idx] = st_id
-                tile_crop_x[tile_idx] = cx
-                tile_crop_y[tile_idx] = cy
+                tile_crop_x[tile_idx] = x_idx * read_step_px
+                tile_crop_y[tile_idx] = y_idx * read_step_px
 
         ordered_indices.extend(member_indices)
         supertiles.append(_SuperTile(
@@ -116,8 +110,6 @@ def _build_supertile_index(tiling_result: TilingResult):
             y_lv0=int(plan.y),
             read_size_px=int(plan.read_size_px),
             block_size=int(plan.block_size),
-            tile_indices=np.array(member_indices, dtype=np.int64),
-            crop_offsets=np.array(offsets, dtype=np.int32),
         ))
 
     return supertiles, tile_to_st, tile_crop_x, tile_crop_y, np.array(ordered_indices, dtype=np.int64)
