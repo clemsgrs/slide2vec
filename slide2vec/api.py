@@ -49,6 +49,9 @@ class PreprocessingConfig:
     use_padding: bool = True
     read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
+    on_the_fly: bool = True
+    gpu_decode: bool = False
+    adaptive_batching: bool = False
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
@@ -60,6 +63,9 @@ class PreprocessingConfig:
         default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
         read_tiles_from = getattr(tiling, "read_tiles_from", None)
+        on_the_fly = bool(getattr(tiling, "on_the_fly", False))
+        gpu_decode = bool(getattr(tiling, "gpu_decode", False))
+        adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -75,6 +81,9 @@ class PreprocessingConfig:
             read_tiles_from=(
                 Path(read_tiles_from) if read_tiles_from else None
             ),
+            on_the_fly=on_the_fly,
+            gpu_decode=gpu_decode,
+            adaptive_batching=adaptive_batching,
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),

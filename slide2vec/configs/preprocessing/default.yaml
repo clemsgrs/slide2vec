@@ -9,6 +9,9 @@ save_previews: true # save preview images of slide tiling and mask overlays
 seed: 0 # seed for reproducibility
 
 tiling:
+  on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
+  gpu_decode: false # attempt GPU-accelerated JPEG decoding via nvImageCodec (experimental)
+  adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
   read_tiles_from: # path to an existing directory containing HS2P `.tiles.tar` tile stores to reuse instead of writing new stores during tiling
   backend: "asap" # backend to use for slide reading

@@ -817,15 +817,48 @@ def _compute_tile_embeddings_for_slide(
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
-    tar_path = _resolve_tile_store_archive_for_slide(
-        slide=slide,
-        tiling_result=tiling_result,
-        preprocessing=preprocessing,
-    )
-    if tar_path is None:
-        raise ValueError(
-            f"Slide {slide.sample_id} is missing tiles_tar_path — "
-            "pre-extracted tile archives are required for embedding"
+    if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+        from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
+
+        collate_fn = OnTheFlyBatchTileCollator(
+            image_path=slide.image_path,
+            tiling_result=tiling_result,
+            num_cucim_workers=max(1, execution.num_workers),
+            gpu_decode=preprocessing.gpu_decode,
+        )
+        if collate_fn.ordered_indices is not None:
+            reorder = collate_fn.ordered_indices
+            if tile_indices is not None:
+                requested = set(resolved_indices.tolist())
+                resolved_indices = np.array(
+                    [i for i in reorder if i in requested], dtype=np.int64
+                )
+            else:
+                resolved_indices = reorder
+        if preprocessing.adaptive_batching:
+            batch_sampler = collate_fn.build_batch_sampler(execution.batch_size, resolved_indices)
+        else:
+            batch_sampler = None
+    else:
+        batch_sampler = None
+        if preprocessing.on_the_fly and preprocessing.read_tiles_from is not None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "read_tiles_from is set; ignoring on_the_fly=True and reading tiles from tar archives"
+            )
+        tar_path = _resolve_tile_store_archive_for_slide(
+            slide=slide,
+            tiling_result=tiling_result,
+            preprocessing=preprocessing,
+        )
+        if tar_path is None:
+            raise ValueError(
+                f"Slide {slide.sample_id} is missing tiles_tar_path — "
+                "pre-extracted tile archives are required for embedding"
+            )
+        collate_fn = BatchTileCollator(
+            tar_path=tar_path,
+            tiling_result=tiling_result,
         )
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = _build_batch_preprocessor(
@@ -834,15 +867,16 @@ def _compute_tile_embeddings_for_slide(
         tiling_result,
         execution=execution,
     )
+    loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
+    if batch_sampler is not None:
+        loader_kwargs["batch_sampler"] = batch_sampler
+    else:
+        loader_kwargs["batch_size"] = execution.batch_size
+        loader_kwargs["shuffle"] = False
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=execution.batch_size,
-        shuffle=False,
-        collate_fn=BatchTileCollator(
-            tar_path=tar_path,
-            tiling_result=tiling_result,
-        ),
-        **_embedding_dataloader_kwargs(loaded, execution),
+        collate_fn=collate_fn,
+        **loader_kwargs,
     )
     return _run_forward_pass(
         dataloader,
@@ -1673,7 +1707,7 @@ def _tile_slides(
         num_workers=num_workers,
         read_coordinates_from=read_coordinates_from,
         resume=resume,
-        save_tiles=preprocessing.read_tiles_from is None,
+        save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
     )
 
 
