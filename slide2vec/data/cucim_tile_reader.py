@@ -127,7 +127,7 @@ class CuCIMTileReader:
     """Read tiles directly from a WSI using cucim's batched read_region.
 
     When ``use_supertiles=True``, tiles are grouped into larger read regions
-    (8x8 or 4x4 blocks) following the same logic as hs2p tar extraction.
+    (8x8, 4x4, or 2x2 blocks) following the same logic as hs2p tar extraction.
     One ``read_region`` call per super tile replaces many individual calls.
     """
 
@@ -180,10 +180,7 @@ class CuCIMTileReader:
             "num_workers": max(1, self._num_cucim_workers),
         }
         if self._gpu_decode:
-            try:
-                kwargs["device"] = "cuda"
-            except Exception:
-                pass
+            kwargs["device"] = "cuda"
         try:
             return self._cu_image.read_region(locations, size, **kwargs)
         except TypeError:
@@ -191,8 +188,7 @@ class CuCIMTileReader:
             return self._cu_image.read_region(locations, size, **kwargs)
 
     def read_batch(self, tile_indices: np.ndarray) -> torch.Tensor:
-        n = len(tile_indices)
-        if n == 0:
+        if len(tile_indices) == 0:
             return torch.empty(
                 (0, 3, self._tile_size_px, self._tile_size_px), dtype=torch.uint8
             )

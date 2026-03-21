@@ -829,10 +829,8 @@ def _compute_tile_embeddings_for_slide(
         if collate_fn.ordered_indices is not None:
             reorder = collate_fn.ordered_indices
             if tile_indices is not None:
-                requested = set(resolved_indices.tolist())
-                resolved_indices = np.array(
-                    [i for i in reorder if i in requested], dtype=np.int64
-                )
+                mask = np.isin(reorder, resolved_indices)
+                resolved_indices = reorder[mask]
             else:
                 resolved_indices = reorder
         if preprocessing.adaptive_batching:

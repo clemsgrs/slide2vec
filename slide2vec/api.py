@@ -63,7 +63,7 @@ class PreprocessingConfig:
         default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
         read_tiles_from = getattr(tiling, "read_tiles_from", None)
-        on_the_fly = bool(getattr(tiling, "on_the_fly", False))
+        on_the_fly = bool(getattr(tiling, "on_the_fly", True))
         gpu_decode = bool(getattr(tiling, "gpu_decode", False))
         adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
         return cls(
