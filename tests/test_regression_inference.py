@@ -640,7 +640,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
 
     inference._tile_slides(
         [slide],
-        PreprocessingConfig(),
+        PreprocessingConfig(on_the_fly=False),
         output_dir=tmp_path,
         num_workers=0,
     )
@@ -1726,7 +1726,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         SimpleNamespace(level="tile"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=PreprocessingConfig(on_the_fly=False),
         execution=execution,
     )
 
@@ -1852,7 +1852,7 @@ def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_witho
                 tile_size_lv0=224,
                 tiles_tar_path=None,
             ),
-            preprocessing=PreprocessingConfig(),
+            preprocessing=PreprocessingConfig(on_the_fly=False),
             execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
         )
 
@@ -1935,7 +1935,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         SimpleNamespace(level="region"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=PreprocessingConfig(on_the_fly=False),
         execution=execution,
     )
 

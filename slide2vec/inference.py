@@ -1762,12 +1762,7 @@ def _resolve_tile_store_archive_for_slide(
     preprocessing: PreprocessingConfig,
 ) -> Path | None:
     if preprocessing.read_tiles_from is not None:
-        candidate = _tile_store_archive_path(preprocessing.read_tiles_from, slide.sample_id)
-        if candidate.is_file():
-            return candidate
-        raise FileNotFoundError(
-            f"Missing tile store archive for sample_id={slide.sample_id} in {preprocessing.read_tiles_from}"
-        )
+        return _tile_store_archive_path(preprocessing.read_tiles_from, slide.sample_id)
     return getattr(tiling_result, "tiles_tar_path", None)
 
 
