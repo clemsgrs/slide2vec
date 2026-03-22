@@ -823,7 +823,7 @@ def _compute_tile_embeddings_for_slide(
         collate_fn = OnTheFlyBatchTileCollator(
             image_path=slide.image_path,
             tiling_result=tiling_result,
-            num_cucim_workers=max(1, execution.num_workers),
+            num_cucim_workers=preprocessing.num_cucim_workers,
             gpu_decode=preprocessing.gpu_decode,
         )
         if collate_fn.ordered_indices is not None:
@@ -866,6 +866,21 @@ def _compute_tile_embeddings_for_slide(
         execution=execution,
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
+    if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+        import logging
+        import os
+
+        effective_num_workers = max(1, (os.cpu_count() or 4) // preprocessing.num_cucim_workers)
+        if effective_num_workers != execution.num_workers:
+            logging.getLogger(__name__).info(
+                f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
+                f"(cpu_count={os.cpu_count()} // num_cucim_workers={preprocessing.num_cucim_workers}); "
+                f"ignoring speed.num_workers={execution.num_workers}"
+            )
+        loader_kwargs["num_workers"] = effective_num_workers
+        if effective_num_workers == 0:
+            loader_kwargs.pop("persistent_workers", None)
+            loader_kwargs.pop("prefetch_factor", None)
     if batch_sampler is not None:
         loader_kwargs["batch_sampler"] = batch_sampler
     else:

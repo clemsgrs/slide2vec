@@ -13,6 +13,7 @@ tiling:
   gpu_decode: false # attempt GPU-accelerated JPEG decoding via nvImageCodec (experimental)
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
+  num_cucim_workers: 4 # number of internal cucim threads per read_region call (on-the-fly path only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
   read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
   read_tiles_from: # path to an existing directory containing HS2P `.tiles.tar` tile stores to reuse instead of writing new stores during tiling
   backend: "asap" # backend to use for slide reading

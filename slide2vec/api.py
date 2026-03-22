@@ -53,6 +53,7 @@ class PreprocessingConfig:
     gpu_decode: bool = False
     adaptive_batching: bool = False
     jpeg_backend: str = "turbojpeg"
+    num_cucim_workers: int = 4
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
@@ -86,6 +87,7 @@ class PreprocessingConfig:
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
             jpeg_backend=str(getattr(tiling, "jpeg_backend", "turbojpeg")),
+            num_cucim_workers=int(getattr(tiling, "num_cucim_workers", 4)),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
