@@ -68,16 +68,6 @@ def _build_supertile_index(tiling_result: TilingResult):
     read_step_px = _resolve_read_step_px(tiling_result)
     step_px_lv0 = _resolve_step_px_lv0(tiling_result)
 
-    coord_to_index = {
-        (int(x), int(y)): idx
-        for idx, (x, y) in enumerate(
-            zip(
-                tiling_result.x.astype(np.int64, copy=False).tolist(),
-                tiling_result.y.astype(np.int64, copy=False).tolist(),
-            )
-        )
-    }
-
     num_tiles = int(tiling_result.num_tiles)
     tile_to_st = np.empty(num_tiles, dtype=np.int32)
     tile_crop_x = np.empty(num_tiles, dtype=np.int32)
@@ -91,20 +81,15 @@ def _build_supertile_index(tiling_result: TilingResult):
         step_px_lv0=step_px_lv0,
     ):
         st_id = len(supertiles)
-        member_indices = []
+        tile_index_iter = iter(plan.tile_indices)
         for x_idx in range(plan.block_size):
             for y_idx in range(plan.block_size):
-                coord = (
-                    int(plan.x) + x_idx * step_px_lv0,
-                    int(plan.y) + y_idx * step_px_lv0,
-                )
-                tile_idx = coord_to_index[coord]
-                member_indices.append(tile_idx)
+                tile_idx = next(tile_index_iter)
                 tile_to_st[tile_idx] = st_id
                 tile_crop_x[tile_idx] = x_idx * read_step_px
                 tile_crop_y[tile_idx] = y_idx * read_step_px
+                ordered_indices.append(tile_idx)
 
-        ordered_indices.extend(member_indices)
         supertiles.append(_SuperTile(
             x_lv0=int(plan.x),
             y_lv0=int(plan.y),
