@@ -125,6 +125,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
             "read_coordinates_from": None,
             "read_tiles_from": None,
             "on_the_fly": False,
+            "jpeg_backend": "pil",
             "backend": "asap",
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,

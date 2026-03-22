@@ -1706,6 +1706,7 @@ def _tile_slides(
         read_coordinates_from=read_coordinates_from,
         resume=resume,
         save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
+        jpeg_backend=preprocessing.jpeg_backend,
     )
 
 

@@ -52,6 +52,7 @@ class PreprocessingConfig:
     on_the_fly: bool = True
     gpu_decode: bool = False
     adaptive_batching: bool = False
+    jpeg_backend: str = "turbojpeg"
     resume: bool = False
     segmentation: dict[str, Any] = field(default_factory=dict)
     filtering: dict[str, Any] = field(default_factory=dict)
@@ -84,6 +85,7 @@ class PreprocessingConfig:
             on_the_fly=on_the_fly,
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
+            jpeg_backend=str(getattr(tiling, "jpeg_backend", "turbojpeg")),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
