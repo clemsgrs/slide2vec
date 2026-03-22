@@ -47,7 +47,8 @@ tiling:
     downsample: 32 # downsample to use for preview rendering
 
 speed:
-  num_workers: 8 # number of workers for tiling slides
+  num_preprocessing_workers: 8 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing)
+  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // tiling.num_cucim_workers
 
 wandb:
   enable: false

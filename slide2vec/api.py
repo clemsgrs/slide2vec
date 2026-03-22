@@ -108,6 +108,7 @@ class ExecutionOptions:
     output_format: str = "pt"
     batch_size: int = 1
     num_workers: int = 0
+    num_preprocessing_workers: int = 8
     num_gpus: int | None = None
     mixed_precision: bool = False
     prefetch_factor: int = 4
@@ -123,7 +124,8 @@ class ExecutionOptions:
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(getattr(cfg.model, "batch_size", 1)),
-            num_workers=int(getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers)),
+            num_workers=int(getattr(cfg.speed, "num_dataloader_workers", getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers))),
+            num_preprocessing_workers=int(getattr(cfg.speed, "num_preprocessing_workers", cfg.speed.num_workers)),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),

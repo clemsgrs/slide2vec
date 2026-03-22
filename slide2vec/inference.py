@@ -193,7 +193,7 @@ def embed_slides(
                 slide_records,
                 preprocessing,
                 output_dir=work_dir,
-                num_workers=execution.num_workers,
+                num_workers=execution.num_preprocessing_workers,
             )
             _emit_tiling_finished(
                 process_list_path,
@@ -417,7 +417,7 @@ def run_pipeline(
             slide_records,
             preprocessing,
             output_dir=output_dir,
-            num_workers=execution.num_workers,
+            num_workers=execution.num_preprocessing_workers,
         )
         _emit_tiling_finished(
             process_list_path,
