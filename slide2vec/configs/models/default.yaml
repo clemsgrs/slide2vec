@@ -22,7 +22,7 @@ model:
 
 speed:
   fp16: false # use mixed precision during model inference
-  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // tiling.num_cucim_workers
+  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // speed.num_cucim_workers
   num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
 
 wandb:

@@ -225,7 +225,6 @@ def _default_base_config(
             "adaptive_batching": False,
             "use_supertiles": True,
             "jpeg_backend": "turbojpeg",
-            "num_cucim_workers": num_cucim_workers,
             "backend": "cucim",
             "read_coordinates_from": None,
             "read_tiles_from": None,
@@ -264,6 +263,7 @@ def _default_base_config(
             "fp16": False,
             "num_preprocessing_workers": num_preprocessing_workers,
             "num_dataloader_workers": num_dataloader_workers,
+            "num_cucim_workers": num_cucim_workers,
             "prefetch_factor_embedding": 4,
             "persistent_workers_embedding": True,
             "gpu_batch_preprocessing": True,
@@ -285,8 +285,8 @@ def _merge_base_config(base: dict[str, Any], config_file: Path | None) -> dict[s
     merged.setdefault("speed", {})
     merged["speed"]["num_preprocessing_workers"] = base["speed"]["num_preprocessing_workers"]
     merged["speed"]["num_dataloader_workers"] = base["speed"]["num_dataloader_workers"]
+    merged["speed"]["num_cucim_workers"] = base["speed"]["num_cucim_workers"]
     merged.setdefault("tiling", {})
-    merged["tiling"]["num_cucim_workers"] = base["tiling"]["num_cucim_workers"]
     merged["tiling"]["read_coordinates_from"] = None
     merged["tiling"]["read_tiles_from"] = None
     merged.setdefault("wandb", {})["enable"] = False
@@ -456,7 +456,7 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
         adaptive_batching=bool(tiling_cfg.get("adaptive_batching", False)),
         use_supertiles=bool(tiling_cfg.get("use_supertiles", True)),
         jpeg_backend=str(tiling_cfg.get("jpeg_backend", "turbojpeg")),
-        num_cucim_workers=int(tiling_cfg.get("num_cucim_workers", 4)),
+        num_cucim_workers=int(speed_cfg.get("num_cucim_workers", tiling_cfg.get("num_cucim_workers", 4))),
         resume=bool(config.get("resume", False)),
         segmentation=dict(tiling_cfg.get("seg_params", {})),
         filtering=dict(tiling_cfg.get("filter_params", {})),

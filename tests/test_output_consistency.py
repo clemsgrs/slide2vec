@@ -158,6 +158,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
 
     meta = json.loads((tmp_path / "tiles" / "test-wsi.coordinates.meta.json").read_text())
     assert meta["sample_id"] == "test-wsi"
+    assert meta["backend"] == "asap"
     assert meta["target_spacing_um"] == pytest.approx(0.5)
     assert meta["target_tile_size_px"] == 224
 
