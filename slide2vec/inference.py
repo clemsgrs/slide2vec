@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -90,6 +92,33 @@ def _optional_float(value: Any) -> float | None:
     except TypeError:
         pass
     return float(value)
+
+
+def _slurm_cpu_limit() -> int | None:
+    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_JOB_CPUS_PER_NODE"):
+        value = os.environ.get(env_name)
+        if not value:
+            continue
+        match = re.match(r"\s*(\d+)", value)
+        if match is None:
+            continue
+        limit = int(match.group(1))
+        if limit > 0:
+            return limit
+    return None
+
+
+def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
+    cpu_count = os.cpu_count() or 4
+    worker_budget = cpu_count
+    details = [f"cpu_count={cpu_count}"]
+    slurm_limit = _slurm_cpu_limit()
+    if slurm_limit is not None:
+        worker_budget = min(worker_budget, slurm_limit)
+        details.append(f"slurm_cpu_limit={slurm_limit}")
+    effective_num_workers = max(1, worker_budget // num_cucim_workers)
+    details.append(f"num_cucim_workers={num_cucim_workers}")
+    return effective_num_workers, " // ".join(details)
 
 
 def _make_slide_spec(
@@ -818,14 +847,25 @@ def _compute_tile_embeddings_for_slide(
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
+        if preprocessing.backend == "cucim":
+            from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
 
-        collate_fn = OnTheFlyBatchTileCollator(
-            image_path=slide.image_path,
-            tiling_result=tiling_result,
-            num_cucim_workers=preprocessing.num_cucim_workers,
-            gpu_decode=preprocessing.gpu_decode,
-        )
+            collate_fn = OnTheFlyBatchTileCollator(
+                image_path=slide.image_path,
+                tiling_result=tiling_result,
+                num_cucim_workers=preprocessing.num_cucim_workers,
+                gpu_decode=preprocessing.gpu_decode,
+                use_supertiles=preprocessing.use_supertiles,
+            )
+        else:
+            from slide2vec.data.wsd_tile_reader import WSDOnTheFlyBatchTileCollator
+
+            collate_fn = WSDOnTheFlyBatchTileCollator(
+                image_path=slide.image_path,
+                tiling_result=tiling_result,
+                backend=preprocessing.backend,
+                use_supertiles=preprocessing.use_supertiles,
+            )
         if collate_fn.ordered_indices is not None:
             reorder = collate_fn.ordered_indices
             if tile_indices is not None:
@@ -868,13 +908,12 @@ def _compute_tile_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         import logging
-        import os
 
-        effective_num_workers = max(1, (os.cpu_count() or 4) // preprocessing.num_cucim_workers)
+        effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         if effective_num_workers != execution.num_workers:
             logging.getLogger(__name__).info(
                 f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
-                f"(cpu_count={os.cpu_count()} // num_cucim_workers={preprocessing.num_cucim_workers}); "
+                f"({worker_context}); "
                 f"ignoring speed.num_workers={execution.num_workers}"
             )
         loader_kwargs["num_workers"] = effective_num_workers
@@ -1467,6 +1506,17 @@ def _run_forward_pass(
             outputs.append(embedding)
             processed += int(embedding.shape[0])
             batch_index += 1
+            batch_total_ms = (
+                prepared_batch.loader_wait_ms
+                + prepared_batch.ready_wait_ms
+                + prepared_batch.preprocess_ms
+                + forward_ms
+            )
+            gpu_busy_fraction = (
+                (prepared_batch.ready_wait_ms + prepared_batch.preprocess_ms + forward_ms) / batch_total_ms
+                if batch_total_ms > 0
+                else 0.0
+            )
             emit_progress(
                 "embedding.batch.timing",
                 sample_id=sample_id,
@@ -1479,6 +1529,7 @@ def _run_forward_pass(
                 reader_open_ms=round(prepared_batch.reader_open_ms, 4),
                 reader_read_ms=round(prepared_batch.reader_read_ms, 4),
                 forward_ms=round(forward_ms, 4),
+                gpu_busy_fraction=round(gpu_busy_fraction, 4),
                 unit=unit_label,
             )
             if sample_id is not None:

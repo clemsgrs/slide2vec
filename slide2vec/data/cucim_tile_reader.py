@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -165,15 +166,26 @@ class CuCIMTileReader:
             return self._cu_image.read_region(locations, size, **kwargs)
 
     def read_batch(self, tile_indices: np.ndarray) -> torch.Tensor:
+        tensor, _timing = self.read_batch_with_timing(tile_indices)
+        return tensor
+
+    def read_batch_with_timing(self, tile_indices: np.ndarray) -> tuple[torch.Tensor, dict[str, float]]:
         if len(tile_indices) == 0:
             return torch.empty(
                 (0, 3, self._tile_size_px, self._tile_size_px), dtype=torch.uint8
-            )
+            ), {"reader_open_ms": 0.0, "reader_read_ms": 0.0}
+        was_closed = self._cu_image is None
+        open_start = time.perf_counter()
         self._ensure_open()
+        reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
+        read_start = time.perf_counter()
 
         if not self._use_supertiles:
-            return self._read_batch_simple(tile_indices)
-        return self._read_batch_supertiles(tile_indices)
+            tensor = self._read_batch_simple(tile_indices)
+        else:
+            tensor = self._read_batch_supertiles(tile_indices)
+        reader_read_ms = (time.perf_counter() - read_start) * 1000.0
+        return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
 
     def _read_batch_simple(self, tile_indices: np.ndarray) -> torch.Tensor:
         locations = [(int(self._x[i]), int(self._y[i])) for i in tile_indices]
@@ -282,7 +294,10 @@ class OnTheFlyBatchTileCollator:
             return (
                 torch.empty((0,), dtype=torch.long),
                 torch.empty((0, 3, self.tile_size, self.tile_size), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
+        worker_start = time.perf_counter()
         tile_indices = np.asarray(batch_indices, dtype=np.int64)
-        tensor = self._reader.read_batch(tile_indices)
-        return torch.as_tensor(tile_indices, dtype=torch.long), tensor
+        tensor, timing = self._reader.read_batch_with_timing(tile_indices)
+        timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
+        return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing

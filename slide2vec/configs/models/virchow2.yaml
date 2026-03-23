@@ -13,8 +13,7 @@ tiling:
 model:
   level: "tile"
   name: "virchow2"
-  batch_size: 1
+  batch_size: 32
 
 speed:
   fp16: true
-  num_workers: 32 # number of workers for tiling slides

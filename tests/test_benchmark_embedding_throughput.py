@@ -219,6 +219,7 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
                 "worker_batch_ms": 9.0,
                 "reader_open_ms": 1.0,
                 "reader_read_ms": 8.0,
+                "gpu_busy_fraction": 0.7000,
             },
             "timestamp": 1.0,
         },
@@ -233,6 +234,7 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
                 "worker_batch_ms": 13.0,
                 "reader_open_ms": 0.0,
                 "reader_read_ms": 12.0,
+                "gpu_busy_fraction": 0.6429,
             },
             "timestamp": 2.0,
         },
@@ -252,6 +254,7 @@ def test_extract_batch_timing_metrics_summarizes_loader_and_forward_costs(benchm
         "mean_reader_open_ms": 0.5,
         "mean_reader_read_ms": 10.0,
         "loader_wait_fraction": 0.3418,
+        "gpu_busy_fraction": 0.6714,
     }
 
 
@@ -277,6 +280,7 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_reader_open_ms": 0.5,
             "mean_reader_read_ms": 10.0,
             "loader_wait_fraction": 0.4286,
+            "gpu_busy_fraction": 0.5714,
         },
         {
             "gpu_label": "A100",
@@ -298,6 +302,7 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_reader_open_ms": 0.0,
             "mean_reader_read_ms": 9.0,
             "loader_wait_fraction": 0.3846,
+            "gpu_busy_fraction": 0.6154,
         },
         {
             "gpu_label": "A100",
@@ -319,6 +324,7 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_reader_open_ms": 0.0,
             "mean_reader_read_ms": 7.0,
             "loader_wait_fraction": 0.3214,
+            "gpu_busy_fraction": 0.6786,
         },
         {
             "gpu_label": "A100",
@@ -340,6 +346,7 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_reader_open_ms": 0.0,
             "mean_reader_read_ms": 6.0,
             "loader_wait_fraction": 0.2963,
+            "gpu_busy_fraction": 0.7037,
         },
     ]
 
@@ -370,6 +377,7 @@ def test_aggregate_and_select_best_results_uses_deterministic_tie_breaks(benchma
             "mean_reader_open_ms": 0.0,
             "mean_reader_read_ms": 6.5,
             "loader_wait_fraction": 0.3089,
+            "gpu_busy_fraction": 0.6911,
         }
     ]
 

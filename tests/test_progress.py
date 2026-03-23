@@ -273,6 +273,8 @@ def test_run_forward_pass_emits_batch_timing_events():
     assert all(payload["worker_batch_ms"] >= 0.0 for payload in timing_payloads)
     assert all(payload["reader_open_ms"] >= 0.0 for payload in timing_payloads)
     assert all(payload["reader_read_ms"] >= 0.0 for payload in timing_payloads)
+    assert all(payload["gpu_busy_fraction"] >= 0.0 for payload in timing_payloads)
+    assert all(payload["gpu_busy_fraction"] <= 1.0 for payload in timing_payloads)
 
 
 def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):

@@ -465,6 +465,7 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
             "mean_reader_read_ms": 0.0,
             "mean_forward_ms": 0.0,
             "loader_wait_fraction": 0.0,
+            "gpu_busy_fraction": 0.0,
         }
 
     loader_wait_ms = [float(payload.get("loader_wait_ms", 0.0)) for payload in batch_payloads]
@@ -474,6 +475,7 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
     reader_open_ms = [float(payload.get("reader_open_ms", 0.0)) for payload in batch_payloads]
     reader_read_ms = [float(payload.get("reader_read_ms", 0.0)) for payload in batch_payloads]
     forward_ms = [float(payload.get("forward_ms", 0.0)) for payload in batch_payloads]
+    gpu_busy_fraction = [float(payload.get("gpu_busy_fraction", 0.0)) for payload in batch_payloads]
     total_ms = sum(loader_wait_ms) + sum(ready_wait_ms) + sum(preprocess_ms) + sum(forward_ms)
     return {
         "timed_batches": len(batch_payloads),
@@ -486,6 +488,7 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
         "mean_reader_read_ms": round(statistics.mean(reader_read_ms), 4),
         "mean_forward_ms": round(statistics.mean(forward_ms), 4),
         "loader_wait_fraction": round((sum(loader_wait_ms) + sum(ready_wait_ms)) / total_ms, 4) if total_ms > 0 else 0.0,
+        "gpu_busy_fraction": round(statistics.mean(gpu_busy_fraction), 4),
     }
 
 
@@ -542,6 +545,7 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
         "mean_reader_read_ms",
         "mean_forward_ms",
         "loader_wait_fraction",
+        "gpu_busy_fraction",
         "mean_tiles_per_second",
         "std_tiles_per_second",
         "mean_end_to_end_seconds",
@@ -555,6 +559,7 @@ def _coerce_csv_row(row: dict[str, str]) -> dict[str, Any]:
         "mean_mean_reader_read_ms",
         "mean_mean_forward_ms",
         "mean_loader_wait_fraction",
+        "mean_gpu_busy_fraction",
     }
     parsed: dict[str, Any] = {}
     for key, value in row.items():
@@ -608,6 +613,7 @@ def aggregate_trial_results(trial_rows: list[dict[str, Any]]) -> list[dict[str, 
         mean_reader_read_ms = [float(row.get("mean_reader_read_ms", 0.0)) for row in rows]
         mean_forward_ms = [float(row.get("mean_forward_ms", 0.0)) for row in rows]
         loader_wait_fraction = [float(row.get("loader_wait_fraction", 0.0)) for row in rows]
+        gpu_busy_fraction = [float(row.get("gpu_busy_fraction", 0.0)) for row in rows]
         timed_batches = [int(row.get("timed_batches", 0)) for row in rows]
         aggregated.append(
             {
@@ -636,6 +642,7 @@ def aggregate_trial_results(trial_rows: list[dict[str, Any]]) -> list[dict[str, 
                 "mean_reader_read_ms": round(statistics.mean(mean_reader_read_ms), 4),
                 "mean_forward_ms": round(statistics.mean(mean_forward_ms), 4),
                 "loader_wait_fraction": round(statistics.mean(loader_wait_fraction), 4),
+                "gpu_busy_fraction": round(statistics.mean(gpu_busy_fraction), 4),
             }
         )
     return aggregated
@@ -694,6 +701,7 @@ def select_best_results(aggregated_rows: list[dict[str, Any]]) -> list[dict[str,
                 "mean_reader_read_ms": float(row.get("mean_reader_read_ms", 0.0)),
                 "mean_forward_ms": float(row.get("mean_forward_ms", 0.0)),
                 "loader_wait_fraction": float(row.get("loader_wait_fraction", 0.0)),
+                "gpu_busy_fraction": float(row.get("gpu_busy_fraction", 0.0)),
             }
         )
     return best_rows

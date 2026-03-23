@@ -1824,6 +1824,112 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
     )
 
 
+def test_resolve_on_the_fly_num_workers_caps_to_slurm_allocation(monkeypatch):
+    import slide2vec.inference as inference
+
+    monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
+    monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
+    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+
+    workers, details = inference._resolve_on_the_fly_num_workers(4)
+
+    assert workers == 8
+    assert "cpu_count=96" in details
+    assert "slurm_cpu_limit=32" in details
+    assert "num_cucim_workers=4" in details
+
+
+def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["dataset"] = dataset
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.zeros((2, 3, 4, 4), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def __call__(self, image):
+            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+
+    class DummyCollator:
+        ordered_indices = None
+
+        def __init__(self, **kwargs):
+            captured["collator_kwargs"] = kwargs
+
+        def __call__(self, batch_indices):
+            tile_indices = torch.as_tensor(batch_indices, dtype=torch.long)
+            batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
+            return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
+
+    fake_cucim_module = types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.cucim_tile_reader", fake_cucim_module)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
+    monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
+    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        target_tile_size_px=4,
+        read_spacing_um=0.5,
+        read_tile_size_px=4,
+        tile_size_lv0=224,
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=99,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+        gpu_batch_preprocessing=True,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        slide,
+        tiling_result,
+        preprocessing=PreprocessingConfig(on_the_fly=True, backend="cucim", num_cucim_workers=4),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 8
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+
+
 def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_without_explicit_override():
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")

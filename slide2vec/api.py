@@ -52,6 +52,7 @@ class PreprocessingConfig:
     on_the_fly: bool = True
     gpu_decode: bool = False
     adaptive_batching: bool = False
+    use_supertiles: bool = True
     jpeg_backend: str = "turbojpeg"
     num_cucim_workers: int = 4
     resume: bool = False
@@ -86,6 +87,7 @@ class PreprocessingConfig:
             on_the_fly=on_the_fly,
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
+            use_supertiles=bool(getattr(tiling, "use_supertiles", True)),
             jpeg_backend=str(getattr(tiling, "jpeg_backend", "turbojpeg")),
             num_cucim_workers=int(getattr(tiling, "num_cucim_workers", 4)),
             resume=bool(getattr(cfg, "resume", False)),

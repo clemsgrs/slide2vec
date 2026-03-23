@@ -1,4 +1,4 @@
-csv: # path to csv containing slide paths
+csv:
 
 output_dir: "output"
 save_previews: false
@@ -13,11 +13,7 @@ tiling:
 model:
   level: "tile"
   name: "h0-mini"
-  batch_size: 64
+  batch_size: 32
 
 speed:
   fp16: true
-  num_workers: 32 # number of workers for tiling slides
-  num_workers_embedding: 32 # number of workers for embedding-time tile loading
-  prefetch_factor_embedding: 8 # batches prefetched per embedding worker
-  persistent_workers_embedding: true # keep embedding workers alive across slides

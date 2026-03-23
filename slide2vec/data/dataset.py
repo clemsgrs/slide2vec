@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,7 +40,10 @@ class BatchTileCollator:
             return (
                 torch.empty((0,), dtype=torch.long),
                 torch.empty((0, 3, self.tile_size, self.tile_size), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
+        worker_start = time.perf_counter()
         tile_indices = np.asarray(batch_indices, dtype=np.int64)
-        tensor = self._reader.read_batch(tile_indices)
-        return torch.as_tensor(tile_indices, dtype=torch.long), tensor
+        tensor, timing = self._reader.read_batch_with_timing(tile_indices)
+        timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
+        return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing

@@ -80,3 +80,41 @@ The merged outputs include:
 - `throughput_by_gpu_and_size.png` for grouped GPU-vs-size bars, choosing the winning model for each `(gpu, size)` bucket
 
 Use `--copy-locally` when your slide source lives on network storage and you want to reduce I/O variance during the sweep.
+
+## End-to-End Path Comparison
+
+For a direct full-pipeline comparison between:
+
+- tar-based embedding (`on_the_fly=false`)
+- on-the-fly `wsd_single` embedding (`backend=asap`, `use_supertiles=false`)
+- on-the-fly `cucim_supertiles` embedding
+
+use:
+
+```shell
+python scripts/benchmark_end_to_end_paths.py \
+  --csv /path/to/slides.csv \
+  --config-file /path/to/model-config.yaml \
+  --batch-size 256 \
+  --repeat 1 \
+  --output-dir /tmp/slide2vec-end-to-end
+```
+
+The model is taken from `--config-file`; the script does not accept a separate `--model` override.
+
+This benchmark runs the three paths independently from raw slide input to final embedding artifact and writes:
+
+- `trial_results.csv`
+- `summary.csv`
+- `end_to_end_by_path.png`
+- `stage_breakdown.png`
+- `embedding_subpath_breakdown.png`
+
+The summary also now includes an embedding subpath split derived from per-batch timing
+events:
+
+- `mean_data_pipeline_seconds`: timed embedding seconds spent in loader wait, ready
+  wait, and preprocessing
+- `mean_forward_seconds`: timed embedding seconds spent in model forward
+- `mean_data_pipeline_fraction` / `mean_forward_fraction`: shares of the timed
+  embedding batches accounted for by those two buckets

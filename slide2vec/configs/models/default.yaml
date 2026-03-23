@@ -12,7 +12,7 @@ model:
   mode: "cls" # embedding mode ["cls", "full"]
   arch: # architecture of custom model
   pretrained_weights: # path to the pretrained weights when using a custom model
-  batch_size: 256
+  batch_size: 32
   input_size: ${tiling.params.target_tile_size_px}
   patch_size: 256 # if level is "region", size used to unroll the region into patches
   token_size: 16 # size of the tokens used model is a custom pretrained ViT
@@ -22,7 +22,7 @@ model:
 
 speed:
   fp16: false # use mixed precision during model inference
-  num_workers_embedding: 8 # number of workers for data loading when embedding slides
+  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // tiling.num_cucim_workers
   num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
 
 wandb:

@@ -12,6 +12,7 @@ tiling:
   on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
   gpu_decode: false # attempt GPU-accelerated JPEG decoding via nvImageCodec (experimental)
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
+  use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)
   jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (on-the-fly path only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
   read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
@@ -48,7 +49,6 @@ tiling:
 
 speed:
   num_preprocessing_workers: 8 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing)
-  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // tiling.num_cucim_workers
 
 wandb:
   enable: false
