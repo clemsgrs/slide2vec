@@ -1,4 +1,5 @@
 import logging
+import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
@@ -141,8 +142,8 @@ class ExecutionOptions:
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(getattr(cfg.model, "batch_size", 1)),
-            num_workers=int(getattr(cfg.speed, "num_dataloader_workers", getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers))),
-            num_preprocessing_workers=int(getattr(cfg.speed, "num_preprocessing_workers", cfg.speed.num_workers)),
+            num_workers=int(getattr(cfg.speed, "num_dataloader_workers", getattr(cfg.speed, "num_workers_embedding", 8))),
+            num_preprocessing_workers=int(getattr(cfg.speed, "num_preprocessing_workers", 8)),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
@@ -160,6 +161,15 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
+        slurm_cpu_limit = None
+        for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
+            value = os.environ.get(env_name)
+            if value and value.strip().isdigit() and int(value.strip()) > 0:
+                slurm_cpu_limit = int(value.strip())
+                break
+        if slurm_cpu_limit is not None:
+            object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
+            object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

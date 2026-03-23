@@ -58,7 +58,9 @@ class WSDTileReader:
 
     def _ensure_open(self) -> None:
         if self._wsi is None:
-            import wholeslidedata as wsd
+            from slide2vec.utils.log_utils import suppress_c_stderr
+            with suppress_c_stderr():
+                import wholeslidedata as wsd
             from hs2p.wsi.backend import coerce_wsd_path
 
             self._wsi = wsd.WholeSlideImage(

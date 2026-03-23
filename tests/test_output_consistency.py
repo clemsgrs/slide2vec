@@ -63,7 +63,7 @@ MODEL_PARAMS = dict(
     input_size=224,          # resolved from ${tiling.params.target_tile_size_px}
     patch_size=256,
     token_size=16,
-    save_tile_embeddings=False,
+    save_tile_embeddings=True,
     save_latents=False,
 )
 
@@ -161,7 +161,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     assert meta["target_spacing_um"] == pytest.approx(0.5)
     assert meta["target_tile_size_px"] == 224
 
-    # 5. Assert embeddings are within tolerance
+    # 5. Assert slide embeddings are within tolerance
     gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu", weights_only=True)
     emb = torch.load(tmp_path / "slide_embeddings" / "test-wsi.pt", map_location="cpu", weights_only=True)
     assert emb.shape == gt_emb.shape, f"Shape mismatch: {emb.shape} vs {gt_emb.shape}"
@@ -175,4 +175,21 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
             f"(atol={atol}, rtol={rtol})"
         )
     else:
-        print(f"OK: embeddings within tolerance; mean cosine similarity={mean_cos:.4f}")
+        print(f"OK: slide embeddings within tolerance; mean cosine similarity={mean_cos:.4f}")
+
+    # 6. Assert tile-level embeddings match ground truth (verifies tile ordering)
+    gt_tile_emb = torch.load(GT_DIR / "test-wsi.tiles.pt", map_location="cpu", weights_only=True)
+    tile_emb = torch.load(tmp_path / "tile_embeddings" / "test-wsi.pt", map_location="cpu", weights_only=True)
+    assert tile_emb.shape == gt_tile_emb.shape, (
+        f"Tile embedding shape mismatch: {tile_emb.shape} vs {gt_tile_emb.shape}"
+    )
+    tile_cos = torch.nn.functional.cosine_similarity(tile_emb, gt_tile_emb, dim=-1)
+    mean_tile_cos = float(tile_cos.mean())
+    atol, rtol = 1e-2, 1e-3
+    if not torch.allclose(tile_emb, gt_tile_emb, atol=atol, rtol=rtol):
+        assert mean_tile_cos >= 0.99, (
+            f"Tile embedding mismatch: mean cosine similarity={mean_tile_cos:.4f} "
+            f"(atol={atol}, rtol={rtol})"
+        )
+    else:
+        print(f"OK: tile embeddings within tolerance; mean cosine similarity={mean_tile_cos:.4f}")

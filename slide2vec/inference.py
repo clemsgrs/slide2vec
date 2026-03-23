@@ -97,7 +97,7 @@ def _optional_float(value: Any) -> float | None:
 
 
 def _slurm_cpu_limit() -> int | None:
-    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_JOB_CPUS_PER_NODE"):
+    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
         value = os.environ.get(env_name)
         if not value:
             continue
@@ -850,6 +850,7 @@ def _compute_tile_embeddings_for_slide(
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
+    _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
         if resolved_backend == "cucim":
@@ -878,6 +879,7 @@ def _compute_tile_embeddings_for_slide(
                 resolved_indices = reorder[mask]
             else:
                 resolved_indices = reorder
+            _supertile_reorder = resolved_indices
         if preprocessing.adaptive_batching:
             batch_sampler = collate_fn.build_batch_sampler(execution.batch_size, resolved_indices)
         else:
@@ -919,7 +921,7 @@ def _compute_tile_embeddings_for_slide(
             logging.getLogger(__name__).info(
                 f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
                 f"({worker_context}); "
-                f"ignoring speed.num_workers={execution.num_workers}"
+                f"ignoring speed.num_dataloader_workers={execution.num_workers}"
             )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
@@ -935,7 +937,7 @@ def _compute_tile_embeddings_for_slide(
         collate_fn=collate_fn,
         **loader_kwargs,
     )
-    return _run_forward_pass(
+    tile_embeddings = _run_forward_pass(
         dataloader,
         loaded,
         autocast_context,
@@ -944,6 +946,10 @@ def _compute_tile_embeddings_for_slide(
         total_items=len(dataset),
         unit_label="region" if model.level == "region" else "tile",
     )
+    if _supertile_reorder is not None:
+        inverse = np.argsort(_supertile_reorder, kind="stable")
+        tile_embeddings = tile_embeddings[torch.as_tensor(inverse, dtype=torch.long)]
+    return tile_embeddings
 
 
 def _aggregate_tile_embeddings_for_slide(
@@ -1931,7 +1937,9 @@ def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path)
 
 
 def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
-    import wholeslidedata as wsd
+    from slide2vec.utils.log_utils import suppress_c_stderr
+    with suppress_c_stderr():
+        import wholeslidedata as wsd
 
     wsi = wsd.WholeSlideImage(wsi_fp, backend=backend)
     min_spacing = wsi.spacings[0]
