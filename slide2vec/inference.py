@@ -61,6 +61,7 @@ class BatchTransformSpec:
     mean: tuple[float, ...] | None
     std: tuple[float, ...] | None
     region_unfold_tile_size: int | None = None
+    resize_interpolation: str = "bilinear"
 
 
 @dataclass
@@ -1158,10 +1159,12 @@ def _build_batch_preprocessor(
     def preprocess(batch):
         image = batch
         image = _prepare_batch_tensor(image, preprocess_device=preprocess_device)
-        image = _resize_image_batch(
-            image,
-            (int(tiling_result.target_tile_size_px), int(tiling_result.target_tile_size_px)),
-        )
+        if spec.resize_size is None:
+            # Model has no Resize transform: apply bilinear resize to target tile size as fallback
+            image = _resize_image_batch(
+                image,
+                (int(tiling_result.target_tile_size_px), int(tiling_result.target_tile_size_px)),
+            )
         if model.level == "region":
             image = _apply_region_batch_transform_spec(
                 image,
@@ -1199,6 +1202,7 @@ def _build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
         return None
 
     resize_size = None
+    resize_interpolation = "bilinear"
     center_crop_size = None
     mean = None
     std = None
@@ -1224,6 +1228,7 @@ def _build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
             return None
         if step_name == "Resize":
             resize_size = _normalize_hw(getattr(step, "size", None))
+            resize_interpolation = _interp_mode_to_str(getattr(step, "interpolation", None))
         elif step_name == "CenterCrop":
             center_crop_size = _normalize_hw(getattr(step, "size", None))
         elif step_name == "Normalize":
@@ -1235,6 +1240,7 @@ def _build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
         mean=mean,
         std=std,
         region_unfold_tile_size=region_unfold_tile_size,
+        resize_interpolation=resize_interpolation,
     )
 
 
@@ -1265,23 +1271,37 @@ def _prepare_batch_tensor(image, *, preprocess_device):
     return image.float()
 
 
-def _resize_image_batch(image, size: tuple[int, int]):
+def _interp_mode_to_str(interp_mode) -> str:
+    """Map a torchvision InterpolationMode to the string accepted by F.interpolate."""
+    if interp_mode is None:
+        return "bilinear"
+    name = str(interp_mode).upper()
+    if "BICUBIC" in name:
+        return "bicubic"
+    if "NEAREST" in name:
+        return "nearest"
+    return "bilinear"
+
+
+def _resize_image_batch(image, size: tuple[int, int], *, mode: str = "bilinear"):
     if tuple(int(dim) for dim in image.shape[-2:]) == size:
         return image
     torch = _import_torch()
+    align_corners = False if mode in ("bilinear", "bicubic") else None
+    kwargs = {"antialias": True} if mode in ("bilinear", "bicubic") else {}
     return torch.nn.functional.interpolate(
         image,
         size=size,
-        mode="bilinear",
-        align_corners=False,
-        antialias=True,
+        mode=mode,
+        **({"align_corners": align_corners} if align_corners is not None else {}),
+        **kwargs,
     )
 
 
 def _apply_batch_transform_spec(image, spec: BatchTransformSpec):
     torch = _import_torch()
     if spec.resize_size is not None:
-        image = _resize_image_batch(image, spec.resize_size)
+        image = _resize_image_batch(image, spec.resize_size, mode=spec.resize_interpolation)
     if spec.center_crop_size is not None:
         image = _center_crop_batch(image, spec.center_crop_size)
     if spec.mean is not None and spec.std is not None:
