@@ -605,6 +605,31 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
     assert result == expected
     assert "requested precision=fp32" in caplog.text
 
+
+def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch):
+    model = Model.from_pretrained("prism", device="cpu")
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=np.zeros((2,), dtype=np.float32),
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        ),
+    ]
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+
+    result = model.embed_slides(
+        [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
+        preprocessing=PreprocessingConfig(),
+        execution=ExecutionOptions(precision="fp32"),
+    )
+
+    assert result == expected
+
 def test_model_embed_tiles_requires_output_dir_at_api_boundary():
     model = Model.from_pretrained("virchow2")
 

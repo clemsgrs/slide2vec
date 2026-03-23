@@ -29,7 +29,7 @@ def validate_removed_options(cfg) -> None:
         )
 
 
-def validate_model_recommended_settings(cfg) -> None:
+def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> None:
     model_cfg = getattr(cfg, "model", None)
     tiling = getattr(cfg, "tiling", None)
     tiling_params = getattr(tiling, "params", None) if tiling is not None else None
@@ -37,7 +37,7 @@ def validate_model_recommended_settings(cfg) -> None:
         model_name=getattr(model_cfg, "name", None),
         requested_input_size=getattr(model_cfg, "input_size", None),
         target_spacing_um=getattr(tiling_params, "target_spacing_um", None),
-        requested_precision=getattr(getattr(cfg, "speed", None), "precision", None),
+        requested_precision=None if run_on_cpu else getattr(getattr(cfg, "speed", None), "precision", None),
         allow_non_recommended_settings=bool(
             getattr(model_cfg, "allow_non_recommended_settings", False)
         ),
@@ -63,7 +63,7 @@ def get_cfg_from_args(args):
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
     validate_removed_options(cfg)
-    validate_model_recommended_settings(cfg)
+    validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
     return cfg
 
 

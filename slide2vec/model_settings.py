@@ -159,7 +159,7 @@ def validate_model_runtime_compatibility(model, preprocessing, execution=None) -
         model_name=getattr(model, "name", None),
         requested_input_size=_requested_input_size(model, preprocessing),
         target_spacing_um=getattr(preprocessing, "target_spacing_um", None),
-        requested_precision=getattr(execution, "precision", None),
+        requested_precision=_requested_precision(model, execution),
         allow_non_recommended_settings=bool(
             getattr(model, "allow_non_recommended_settings", False)
         ),
@@ -188,3 +188,9 @@ def _requested_input_size(model, preprocessing) -> int | None:
     if getattr(model, "level", None) in {"tile", "slide"}:
         return int(getattr(preprocessing, "target_tile_size_px"))
     return None
+
+
+def _requested_precision(model, execution) -> str | None:
+    if getattr(model, "_requested_device", None) == "cpu":
+        return None
+    return getattr(execution, "precision", None)
