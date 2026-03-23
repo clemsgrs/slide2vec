@@ -226,6 +226,10 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.read_tiles_from == base.read_tiles_from
     assert updated is not base
 
+
+def test_preprocessing_config_defaults_backend_to_auto():
+    assert PreprocessingConfig().backend == "auto"
+
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
     base = ExecutionOptions(
         output_dir=None,
@@ -370,6 +374,7 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
         output_dir="/tmp/run-002",
         resume=False,
         save_previews=True,
+        speed=SimpleNamespace(num_cucim_workers=6),
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,
@@ -393,7 +398,38 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
 
     assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
+    assert preprocessing.num_cucim_workers == 6
     assert not hasattr(preprocessing, "save_tiles")
+
+
+def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_workers():
+    cfg = SimpleNamespace(
+        output_dir="/tmp/run-003",
+        resume=False,
+        save_previews=False,
+        tiling=SimpleNamespace(
+            backend="asap",
+            num_cucim_workers=5,
+            read_coordinates_from=None,
+            read_tiles_from=None,
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                tolerance=0.07,
+                overlap=0.0,
+                tissue_threshold=0.1,
+                drop_holes=False,
+                use_padding=True,
+            ),
+            seg_params={"downsample": 64},
+            filter_params={"ref_tile_size": 224},
+            preview=SimpleNamespace(downsample=32),
+        ),
+    )
+
+    preprocessing = PreprocessingConfig.from_config(cfg)
+
+    assert preprocessing.num_cucim_workers == 5
 
 def test_validate_removed_options_rejects_legacy_preview_keys():
     pytest.importorskip("omegaconf")

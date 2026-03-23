@@ -345,7 +345,7 @@ def embed_tiles(
             image_path=slide.image_path,
             mask_path=slide.mask_path,
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
-            backend=_resolve_tiling_backend(preprocessing),
+            backend=_resolve_slide_backend(preprocessing, tiling_result),
         )
         artifact = _write_tile_embedding_artifact(
             slide.sample_id,
@@ -387,7 +387,7 @@ def aggregate_tiles(
                 image_path,
                 coordinates,
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_tiling_backend(preprocessing)),
+                metadata.get("backend", _resolve_slide_backend(preprocessing, tiling_result)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -847,7 +847,8 @@ def _compute_tile_embeddings_for_slide(
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        if preprocessing.backend == "cucim":
+        resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
+        if resolved_backend == "cucim":
             from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
 
             collate_fn = OnTheFlyBatchTileCollator(
@@ -863,7 +864,7 @@ def _compute_tile_embeddings_for_slide(
             collate_fn = WSDOnTheFlyBatchTileCollator(
                 image_path=slide.image_path,
                 tiling_result=tiling_result,
-                backend=preprocessing.backend,
+                backend=resolved_backend,
                 use_supertiles=preprocessing.use_supertiles,
             )
         if collate_fn.ordered_indices is not None:
@@ -960,7 +961,7 @@ def _aggregate_tile_embeddings_for_slide(
             slide.image_path,
             coordinates,
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_tiling_backend(preprocessing),
+            _resolve_slide_backend(preprocessing, tiling_result),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -1026,7 +1027,7 @@ def _persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_tiling_backend(preprocessing),
+                backend=_resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
     slide_artifact = None
@@ -1896,6 +1897,16 @@ def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
     if preprocessing is None:
         return "asap"
     return preprocessing.backend
+
+
+def _resolve_slide_backend(preprocessing: PreprocessingConfig | None, tiling_result) -> str:
+    backend = _resolve_tiling_backend(preprocessing)
+    if backend != "auto":
+        return backend
+    resolved_backend = getattr(tiling_result, "backend", None)
+    if isinstance(resolved_backend, str) and resolved_backend and resolved_backend != "auto":
+        return resolved_backend
+    return "asap"
 
 
 def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:

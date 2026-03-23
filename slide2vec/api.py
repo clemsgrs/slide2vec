@@ -37,9 +37,19 @@ SlideInput = PathLike | Mapping[str, object] | SlideLike | SlideSpec
 SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
+
+def _cfg_num_cucim_workers(cfg: Any) -> int:
+    speed = getattr(cfg, "speed", None)
+    if speed is not None and hasattr(speed, "num_cucim_workers"):
+        return int(getattr(speed, "num_cucim_workers"))
+    tiling = getattr(cfg, "tiling", None)
+    if tiling is not None and hasattr(tiling, "num_cucim_workers"):
+        return int(getattr(tiling, "num_cucim_workers"))
+    return 4
+
 @dataclass(frozen=True)
 class PreprocessingConfig:
-    backend: str = "asap"
+    backend: str = "auto"
     target_spacing_um: float = 0.5
     target_tile_size_px: int = 224
     tolerance: float = 0.05
@@ -89,7 +99,7 @@ class PreprocessingConfig:
             adaptive_batching=adaptive_batching,
             use_supertiles=bool(getattr(tiling, "use_supertiles", True)),
             jpeg_backend=str(getattr(tiling, "jpeg_backend", "turbojpeg")),
-            num_cucim_workers=int(getattr(tiling, "num_cucim_workers", 4)),
+            num_cucim_workers=_cfg_num_cucim_workers(cfg),
             resume=bool(getattr(cfg, "resume", False)),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
