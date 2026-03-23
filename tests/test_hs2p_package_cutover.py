@@ -157,7 +157,7 @@ def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):
     assert tiling_result.tiling_preview_path == Path("/tmp/preview/tiling/slide-1.jpg")
 
 
-def test_model_from_pretrained_uses_public_factory(monkeypatch):
+def test_model_from_preset_uses_public_factory(monkeypatch):
     api = importlib.import_module("slide2vec.api")
 
     captured = {}
@@ -167,7 +167,7 @@ def test_model_from_pretrained_uses_public_factory(monkeypatch):
         return SimpleNamespace(device="cpu", feature_dim=1280)
 
     monkeypatch.setattr("slide2vec.inference.load_model", fake_load_model)
-    model = api.Model.from_pretrained("virchow2")
+    model = api.Model.from_preset("virchow2")
 
     assert model.name == "virchow2"
     assert model.level == "tile"

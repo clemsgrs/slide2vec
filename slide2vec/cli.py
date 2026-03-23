@@ -23,7 +23,7 @@ def get_args_parser(add_help: bool = True):
 def build_model_and_pipeline(args):
     cfg, _cfg_path = _setup_cli_config(args)
     _hf_login()
-    model = Model.from_pretrained(
+    model = Model.from_preset(
         cfg.model.name,
         level=cfg.model.level,
         mode=cfg.model.mode,

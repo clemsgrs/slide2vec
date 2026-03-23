@@ -10,7 +10,7 @@
 ```python
 from slide2vec import Model
 
-model = Model.from_pretrained("virchow2")
+model = Model.from_preset("virchow2")
 embedded = model.embed_slide("/path/to/slide.svs")
 
 tile_embeddings = embedded.tile_embeddings
@@ -44,7 +44,7 @@ Pass `PreprocessingConfig(...)` when you want to control tiling and slide readin
 ```python
 from slide2vec import Model, PreprocessingConfig
 
-model = Model.from_pretrained("virchow2")
+model = Model.from_preset("virchow2")
 preprocessing = PreprocessingConfig(
     backend="auto",
     target_spacing_um=0.5,
@@ -79,7 +79,7 @@ Pass `ExecutionOptions(...)` when you want to control runtime behavior or persis
 ```python
 from slide2vec import ExecutionOptions, Model
 
-model = Model.from_pretrained("virchow2")
+model = Model.from_preset("virchow2")
 execution = ExecutionOptions(
     batch_size=32,
     num_gpus=2,
@@ -110,7 +110,7 @@ Use `Pipeline(...)` for manifest-driven batch processing and disk outputs.
 ```python
 from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
-model = Model.from_pretrained("virchow2")
+model = Model.from_preset("virchow2")
 preprocessing = PreprocessingConfig(
     target_spacing_um=0.5,
     target_tile_size_px=224,

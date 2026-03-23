@@ -22,15 +22,16 @@ pip install "slide2vec[models]"
 
 ```python
 from slide2vec import Model
+from slide2vec.utils.config import hf_login
 
-model = Model.from_pretrained("virchow2")
+hf_login()
+
+model = Model.from_preset("virchow2")
 embedded = model.embed_slide("/path/to/slide.svs")
 
 tile_embeddings = embedded.tile_embeddings
 coordinates = embedded.coordinates
 ```
-
-By default, `ExecutionOptions()` uses all available GPUs. Set `ExecutionOptions(num_gpus=4)` when you want to cap the sharding explicitly.
 
 Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:
 
@@ -48,6 +49,8 @@ pipeline = Pipeline(
 )
 result = pipeline.run(manifest_path="/path/to/slides.csv")
 ```
+
+By default, `ExecutionOptions()` uses all available GPUs. Set `ExecutionOptions(num_gpus=4)` when you want to cap the sharding explicitly.
 
 ### Input Manifest
 
@@ -77,7 +80,7 @@ The package writes explicit artifact directories:
 
 ### Supported Models
 
-`slide2vec` currently ships preset configs for 10 tile-level models and 3 slide-level models.  
+`slide2vec` currently ships preset configs for 20 tile-level models and 3 slide-level models.  
 For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
 
 ## CLI

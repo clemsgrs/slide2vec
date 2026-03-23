@@ -41,7 +41,7 @@ def main(argv=None) -> int:
         local_rank = distributed.get_local_rank()
 
         model_spec = dict(request["model"])
-        model = Model.from_pretrained(
+        model = Model.from_preset(
             model_spec["name"],
             level=model_spec["level"],
             device=f"cuda:{local_rank}",

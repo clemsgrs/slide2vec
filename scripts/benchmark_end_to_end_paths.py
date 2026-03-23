@@ -478,7 +478,7 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
         save_tile_embeddings=bool(model_cfg.get("save_tile_embeddings", False)),
         save_latents=bool(model_cfg.get("save_latents", False)),
     )
-    model = Model.from_pretrained(
+    model = Model.from_preset(
         str(model_cfg["name"]),
         level=model_cfg.get("level", "tile"),
         mode=model_cfg.get("mode"),

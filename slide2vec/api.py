@@ -221,7 +221,7 @@ class Model:
         self._backend: LoadedModel | None = None
 
     @classmethod
-    def from_pretrained(
+    def from_preset(
         cls,
         name: str,
         *,

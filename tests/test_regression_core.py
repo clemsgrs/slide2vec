@@ -94,7 +94,7 @@ def test_pt_artifacts_round_trip(tmp_path: Path):
     assert metadata["image_path"] == "/tmp/sample-b.svs"
 
 def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     preprocessing = PreprocessingConfig()
     pipeline = Pipeline(model, preprocessing, execution=ExecutionOptions(output_dir=tmp_path))
     captured = {}
@@ -114,7 +114,7 @@ def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
     assert captured["kwargs"]["preprocessing"] is preprocessing
 
 def test_pipeline_run_requires_output_dir():
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     pipeline = Pipeline(model, PreprocessingConfig(), execution=ExecutionOptions())
 
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir"):
@@ -124,29 +124,29 @@ def test_execution_options_validate_num_gpus():
     with pytest.raises(ValueError, match="num_gpus"):
         ExecutionOptions(num_gpus=0)
 
-def test_model_from_pretrained_canonicalizes_conchv15_alias():
-    model = Model.from_pretrained("conchv1.5")
+def test_model_from_preset_canonicalizes_conchv15_alias():
+    model = Model.from_preset("conchv1.5")
 
     assert model.name == "conchv15"
     assert model.level == "tile"
 
 
-def test_model_from_pretrained_defaults_tile_capable_models_to_tile_level():
-    model = Model.from_pretrained("virchow2")
+def test_model_from_preset_defaults_tile_capable_models_to_tile_level():
+    model = Model.from_preset("virchow2")
 
     assert model.name == "virchow2"
     assert model.level == "tile"
 
 
-def test_model_from_pretrained_requires_explicit_region_opt_in():
-    model = Model.from_pretrained("virchow2", level="region")
+def test_model_from_preset_requires_explicit_region_opt_in():
+    model = Model.from_preset("virchow2", level="region")
 
     assert model.name == "virchow2"
     assert model.level == "region"
 
 
-def test_model_from_pretrained_keeps_slide_default_for_slide_models():
-    model = Model.from_pretrained("prism")
+def test_model_from_preset_keeps_slide_default_for_slide_models():
+    model = Model.from_preset("prism")
 
     assert model.name == "prism"
     assert model.level == "slide"
@@ -363,14 +363,14 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             captured["preprocessing"] = preprocessing
             captured["execution"] = execution
 
-    def fake_from_pretrained(*model_args, **model_kwargs):
+    def fake_from_preset(*model_args, **model_kwargs):
         captured["model_args"] = model_args
         captured["model_kwargs"] = model_kwargs
         return "MODEL"
 
     monkeypatch.setattr(cli, "_setup_cli_config", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
     monkeypatch.setattr(cli, "_hf_login", lambda: None)
-    monkeypatch.setattr(cli.Model, "from_pretrained", staticmethod(fake_from_pretrained))
+    monkeypatch.setattr(cli.Model, "from_preset", staticmethod(fake_from_preset))
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
 
     pipeline, returned_cfg = cli.build_model_and_pipeline(args)

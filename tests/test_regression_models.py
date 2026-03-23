@@ -388,7 +388,7 @@ def test_model_factory_raises_clear_errors_for_invalid_configurations(options, m
         models_module.ModelFactory(options)
 
 def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     expected = EmbeddedSlide(
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 3), dtype=np.float32),
@@ -419,7 +419,7 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
     assert captured["slides"][0]["sample_id"] == "slide-a"
 
 def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     expected = EmbeddedSlide(
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 3), dtype=np.float32),
@@ -440,7 +440,7 @@ def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
     assert result is expected
 
 def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monkeypatch):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -482,7 +482,7 @@ def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monke
     assert isinstance(captured["kwargs"]["preprocessing"], PreprocessingConfig)
 
 def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monkeypatch):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -528,7 +528,7 @@ def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monk
 def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
     import slide2vec.progress as progress
 
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     captured = {}
     expected = [
@@ -564,7 +564,7 @@ def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
 def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
     import slide2vec.progress as progress
 
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     outer_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     replacement_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     captured = {}
@@ -599,7 +599,7 @@ def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
 
 
 def test_model_embed_slide_infers_preprocessing_from_model_defaults(monkeypatch):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     expected = EmbeddedSlide(
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 3), dtype=np.float32),
@@ -635,7 +635,7 @@ def test_model_embed_slides_warns_when_default_spacing_is_selected_from_multiple
     monkeypatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    model = Model.from_pretrained("musk")
+    model = Model.from_preset("musk")
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -674,9 +674,9 @@ def test_model_embed_slides_warns_and_uses_smallest_spacing_when_half_micron_is_
     import slide2vec.model_settings as model_settings
     import slide2vec.api as api
 
-    model = Model.from_pretrained("custom-model")
+    model = api.Model.from_preset("custom-model")
     expected = [
-        EmbeddedSlide(
+        api.EmbeddedSlide(
             sample_id="slide-a",
             tile_embeddings=np.zeros((1, 2), dtype=np.float32),
             slide_embedding=None,
@@ -716,7 +716,7 @@ def test_model_embed_slides_warns_and_uses_smallest_spacing_when_half_micron_is_
 
 
 def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
 
     with pytest.raises(ValueError, match="allow_non_recommended_settings"):
         model.embed_slides(
@@ -729,7 +729,7 @@ def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
     monkeypatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    model = Model.from_pretrained("virchow2", allow_non_recommended_settings=True)
+    model = Model.from_preset("virchow2", allow_non_recommended_settings=True)
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -756,7 +756,7 @@ def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
 
 
 def test_model_embed_slides_rejects_non_recommended_precision_by_default():
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
 
     with pytest.raises(ValueError, match="requested precision=fp32"):
         model.embed_slides(
@@ -770,7 +770,7 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
     monkeypatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    model = Model.from_pretrained("virchow2", allow_non_recommended_settings=True)
+    model = Model.from_preset("virchow2", allow_non_recommended_settings=True)
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -797,7 +797,7 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
 
 
 def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch):
-    model = Model.from_pretrained("prism", device="cpu")
+    model = Model.from_preset("prism", device="cpu")
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -821,7 +821,7 @@ def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch
     assert result == expected
 
 def test_model_embed_tiles_requires_output_dir_at_api_boundary():
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
 
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir"):
         model.embed_tiles(
@@ -831,7 +831,7 @@ def test_model_embed_tiles_requires_output_dir_at_api_boundary():
         )
 
 def test_model_embed_tiles_forwards_preprocessing(monkeypatch, tmp_path: Path):
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     captured = {}
 
     def fake_embed_tiles(model_arg, slides, tiling_results, *, execution, preprocessing=None):
@@ -855,7 +855,7 @@ def test_model_embed_tiles_forwards_preprocessing(monkeypatch, tmp_path: Path):
     assert captured["execution"].output_dir == tmp_path
 
 def test_model_aggregate_tiles_requires_output_dir_at_api_boundary():
-    model = Model.from_pretrained("prism", level="slide")
+    model = Model.from_preset("prism", level="slide")
 
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir"):
         model.aggregate_tiles(
@@ -864,7 +864,7 @@ def test_model_aggregate_tiles_requires_output_dir_at_api_boundary():
         )
 
 def test_model_aggregate_tiles_forwards_preprocessing(monkeypatch, tmp_path: Path):
-    model = Model.from_pretrained("prism", level="slide")
+    model = Model.from_preset("prism", level="slide")
     captured = {}
 
     def fake_aggregate_tiles(model_arg, tile_artifacts, *, execution, preprocessing=None):

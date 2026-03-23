@@ -274,7 +274,7 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
 ):
     import slide2vec.inference as inference
 
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_preset("virchow2")
     slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0, 1]),
@@ -340,7 +340,7 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     monkeypatch.setattr(inference, "_collect_distributed_pipeline_artifacts", fake_collect)
 
     result = inference.run_pipeline(
-        Model.from_pretrained("virchow2"),
+        Model.from_preset("virchow2"),
         slides=[slide],
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
@@ -357,7 +357,7 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
 def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    model = Model.from_pretrained("virchow2", level="slide")
+    model = Model.from_preset("virchow2", level="slide")
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="npz", save_tile_embeddings=True)
@@ -550,7 +550,7 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
-        Model.from_pretrained("virchow2"),
+        Model.from_preset("virchow2"),
         slides=[slide_record],
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path),
@@ -1049,7 +1049,7 @@ def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
     )
 
     result = inference._select_embedding_path(
-        model=Model.from_pretrained("virchow2"),
+        model=Model.from_preset("virchow2"),
         slide_records=[slide],
         tiling_results=[tiling_result],
         preprocessing=PreprocessingConfig(),
@@ -1087,7 +1087,7 @@ def test_select_embedding_path_uses_single_slide_distributed_when_one_slide(monk
     )
 
     result = inference._select_embedding_path(
-        model=Model.from_pretrained("virchow2"),
+        model=Model.from_preset("virchow2"),
         slide_records=[slide],
         tiling_results=[tiling_result],
         preprocessing=PreprocessingConfig(),
@@ -1123,7 +1123,7 @@ def test_select_embedding_path_uses_multi_slide_distributed_when_multiple_slides
     )
 
     result = inference._select_embedding_path(
-        model=Model.from_pretrained("virchow2"),
+        model=Model.from_preset("virchow2"),
         slide_records=slides,
         tiling_results=tiling_results,
         preprocessing=PreprocessingConfig(),
@@ -1405,7 +1405,7 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
-        Model.from_pretrained("prism", level="slide"),
+        Model.from_preset("prism", level="slide"),
         slides=[slide_record],
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", save_tile_embeddings=False),
@@ -1454,7 +1454,7 @@ def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tm
     )
 
     result = inference.embed_slides(
-        Model.from_pretrained("virchow2"),
+        Model.from_preset("virchow2"),
         [slide_record],
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
@@ -1514,7 +1514,7 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
     )
 
     result = inference.embed_slides(
-        Model.from_pretrained("virchow2"),
+        Model.from_preset("virchow2"),
         slides,
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
