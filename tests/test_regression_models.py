@@ -322,6 +322,46 @@ def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monk
     assert captured["slides"] == ["/tmp/slide-a.svs", "/tmp/slide-b.svs"]
     assert captured["kwargs"]["execution"].num_gpus == 2
 
+
+def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
+    model = Model.from_pretrained("virchow2")
+
+    with pytest.raises(ValueError, match="allow_non_recommended_settings"):
+        model.embed_slides(
+            [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
+            preprocessing=PreprocessingConfig(target_spacing_um=1.0, target_tile_size_px=256),
+        )
+
+
+def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    model = Model.from_pretrained("virchow2", allow_non_recommended_settings=True)
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        ),
+    ]
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        result = model.embed_slides(
+            [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
+            preprocessing=PreprocessingConfig(target_spacing_um=1.0, target_tile_size_px=256),
+        )
+
+    assert result == expected
+    assert "virchow2" in caplog.text
+    assert "recommended" in caplog.text
+
 def test_model_embed_tiles_requires_output_dir_at_api_boundary():
     model = Model.from_pretrained("virchow2")
 

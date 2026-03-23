@@ -28,6 +28,20 @@ def test_resource_loading_uses_packaged_configs():
     assert "model" in cfg
     assert config_resource("preprocessing", "default").name == "default.yaml"
 
+
+def test_packaged_model_presets_align_with_recommended_settings():
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    preset_dir = ROOT / "slide2vec" / "configs" / "models"
+    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
+
+    for preset_path in preset_paths:
+        args = SimpleNamespace(config_file=str(preset_path), output_dir=None, opts=[])
+        cfg = get_cfg_from_args(args)
+        assert cfg.model.name
+
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
     artifact = write_tile_embeddings(
@@ -277,6 +291,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             input_size=224,
             patch_size=256,
             token_size=16,
+            allow_non_recommended_settings=True,
             save_tile_embeddings=False,
             save_latents=False,
         ),
@@ -323,9 +338,74 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert returned_cfg is cfg
     assert captured["model_args"] == ("virchow2",)
     assert captured["model_kwargs"]["device"] == "cpu"
+    assert captured["model_kwargs"]["allow_non_recommended_settings"] is True
     assert captured["preprocessing"].backend == "asap"
     assert captured["execution"].output_dir == tmp_path
     assert captured["execution"].num_gpus == 1
+
+
+def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp_path: Path):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: output",
+                "tiling:",
+                "  params:",
+                "    target_spacing_um: 1.0",
+                "    target_tile_size_px: 256",
+                "model:",
+                "  name: virchow2",
+                "  level: tile",
+            ]
+        )
+    )
+
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+
+    with pytest.raises(ValueError, match="allow_non_recommended_settings"):
+        get_cfg_from_args(args)
+
+
+def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: output",
+                "tiling:",
+                "  params:",
+                "    target_spacing_um: 1.0",
+                "    target_tile_size_px: 256",
+                "model:",
+                "  name: virchow2",
+                "  level: tile",
+                "  allow_non_recommended_settings: true",
+            ]
+        )
+    )
+
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        cfg = get_cfg_from_args(args)
+
+    assert cfg.model.allow_non_recommended_settings is True
+    assert "virchow2" in caplog.text
+    assert "recommended" in caplog.text
 
 
 def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():

@@ -19,6 +19,7 @@ model:
   save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
   save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
   normalize_embeddings: false # L2 normalize tile embeddings (used by some custom checkpoints such as pathojepa)
+  allow_non_recommended_settings: false # when true, non-recommended model input size / spacing combinations warn instead of erroring
 
 speed:
   fp16: false # use mixed precision during model inference

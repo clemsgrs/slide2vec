@@ -7,6 +7,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 import slide2vec.distributed as distributed
+from slide2vec.model_settings import validate_model_settings
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_preprocessing_config, default_model_config
 
@@ -28,6 +29,20 @@ def validate_removed_options(cfg) -> None:
         )
 
 
+def validate_model_recommended_settings(cfg) -> None:
+    model_cfg = getattr(cfg, "model", None)
+    tiling = getattr(cfg, "tiling", None)
+    tiling_params = getattr(tiling, "params", None) if tiling is not None else None
+    validate_model_settings(
+        model_name=getattr(model_cfg, "name", None),
+        requested_input_size=getattr(model_cfg, "input_size", None),
+        target_spacing_um=getattr(tiling_params, "target_spacing_um", None),
+        allow_non_recommended_settings=bool(
+            getattr(model_cfg, "allow_non_recommended_settings", False)
+        ),
+    )
+
+
 def write_config(cfg, output_dir, name="config.yaml"):
     logger.info(OmegaConf.to_yaml(cfg))
     saved_cfg_path = os.path.join(output_dir, name)
@@ -47,6 +62,7 @@ def get_cfg_from_args(args):
     cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
     validate_removed_options(cfg)
+    validate_model_recommended_settings(cfg)
     return cfg
 
 

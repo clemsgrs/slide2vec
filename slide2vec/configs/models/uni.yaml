@@ -23,6 +23,7 @@ tiling:
 model:
   level: "region"
   name: "uni"
+  input_size: 224 # UNI consumes 224x224 tiles after region unrolling; keep this explicit since tiling tiles are 2048px
   batch_size: 1
 
 wandb:

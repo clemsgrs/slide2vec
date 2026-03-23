@@ -33,6 +33,9 @@ def build_model_and_pipeline(args):
         patch_size=cfg.model.patch_size,
         token_size=cfg.model.token_size,
         normalize_embeddings=getattr(cfg.model, "normalize_embeddings", None),
+        allow_non_recommended_settings=bool(
+            getattr(cfg.model, "allow_non_recommended_settings", False)
+        ),
         device="cpu" if args.run_on_cpu else "auto",
     )
     preprocessing = PreprocessingConfig.from_config(cfg)

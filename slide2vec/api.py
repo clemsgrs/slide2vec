@@ -3,6 +3,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
+from slide2vec.model_settings import (
+    canonicalize_model_name,
+    validate_model_preprocessing_compatibility,
+)
 
 if TYPE_CHECKING:
     from hs2p import SlideSpec
@@ -15,12 +19,6 @@ else:
 DEFAULT_LEVEL_BY_NAME = {
     "prism": "slide",
     "titan": "slide",
-}
-
-MODEL_NAME_ALIASES = {
-    "phikon-v2": "phikonv2",
-    "hibou-b": "hibou",
-    "hibou-l": "hibou",
 }
 
 PathLike = str | Path
@@ -194,10 +192,12 @@ class Model:
         patch_size: int | None = None,
         token_size: int | None = None,
         normalize_embeddings: bool | None = None,
+        allow_non_recommended_settings: bool = False,
     ) -> None:
         self.name = _canonical_model_name(name)
         self.level = level
         self._requested_device = device
+        self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._model_kwargs = {
             "mode": mode,
             "arch": arch,
@@ -222,6 +222,7 @@ class Model:
         patch_size: int | None = None,
         token_size: int | None = None,
         normalize_embeddings: bool | None = None,
+        allow_non_recommended_settings: bool = False,
         device: str = "auto",
     ) -> "Model":
         canonical_name = _canonical_model_name(name)
@@ -237,6 +238,7 @@ class Model:
             patch_size=patch_size,
             token_size=token_size,
             normalize_embeddings=normalize_embeddings,
+            allow_non_recommended_settings=allow_non_recommended_settings,
         )
 
     @property
@@ -259,6 +261,8 @@ class Model:
 
         resolved = _coerce_execution_options(execution)
         _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
+        if preprocessing is not None:
+            validate_model_preprocessing_compatibility(self, preprocessing)
         return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
 
     def aggregate_tiles(
@@ -337,6 +341,7 @@ class Model:
         from slide2vec.inference import embed_slides
 
         resolved = _coerce_execution_options(execution)
+        validate_model_preprocessing_compatibility(self, preprocessing)
         return embed_slides(
             self,
             slides,
@@ -381,6 +386,8 @@ class Pipeline:
     ) -> RunResult:
         from slide2vec.inference import run_pipeline
 
+        if not tiling_only:
+            validate_model_preprocessing_compatibility(self.model, self.preprocessing)
         return run_pipeline(
             self.model,
             slides=slides,
@@ -392,8 +399,7 @@ class Pipeline:
 
 
 def _canonical_model_name(name: str) -> str:
-    normalized = name.strip().lower()
-    return MODEL_NAME_ALIASES.get(normalized, normalized)
+    return canonicalize_model_name(name)
 
 
 def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOptions:
