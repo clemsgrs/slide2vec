@@ -1,18 +1,18 @@
-csv: # path to csv containing slide paths
+csv:
 
-output_dir: "output" # output directory
+output_dir: "output"
 save_previews: false
 
 tiling:
   params:
-    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    target_tile_size_px: 224 # size of the tiles to extract, in pixels
+    target_spacing_um: 0.5
+    target_tile_size_px: 224
 
 model:
   level: "slide"
   name: "prism"
-  save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
-  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
+  save_tile_embeddings: true
+  save_latents: false
 
 speed:
   fp16: true

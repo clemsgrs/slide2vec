@@ -1,7 +1,3 @@
-# csv: "/data/pathology/projects/clement/leopard/csvs/dev-slide2vec.csv"
-# csv: "/data/pathology/projects/clement/leopard/csvs/tcga/tcga-slide2vec.csv"
-# csv: "/data/pathology/projects/clement/leopard/csvs/test-slide2vec.csv" 
-# csv: "/data/pathology/projects/clement/leopard/csvs/cologne-slide2vec.csv"
 csv: "/data/pathology/projects/clement/leopard/csvs/brazil-slide2vec-august-2025-revision.csv"
 
 output_dir: "/data/pathology/projects/clement/discern/pathojepa/slide2vec"
@@ -9,23 +5,23 @@ save_previews: false
 
 tiling:
   params:
-    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1)
-    target_tile_size_px: 2048 # PathoJEPA inference target tile size
-    tissue_threshold: 0.1 # threshold used to filter out tiles with too little tissue
+    target_spacing_um: 0.5
+    tolerance: 0.05
+    target_tile_size_px: 2048
+    tissue_threshold: 0.1
   seg_params:
     downsample: 64
   filter_params:
     ref_tile_size: 256
 
 model:
-  level: "region" # set to "region" to run region-level inference with this tile encoder
+  level: "region"
   name: "pathojepa"
   arch: "vit_small"
   pretrained_weights: "/data/pathology/projects/clement/discern/pathojepa/runs/dmky8lh7/jepa-pathorob-latest.pth.tar"
   input_size: 224
-  patch_size: 256 # region-unrolling size when model.level == "region"
-  token_size: 16 # ViT patch size used by PathoJEPA
+  patch_size: 256
+  token_size: 16
   normalize_embeddings: false
   batch_size: 1
 

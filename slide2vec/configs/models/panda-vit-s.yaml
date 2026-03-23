@@ -1,12 +1,12 @@
 csv: ""
 
-output_dir: "output" # output directory
+output_dir: "output"
 save_previews: false
 
 tiling:
   params:
-    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    target_tile_size_px: 224 # size of the tiles to extract, in pixels
+    target_spacing_um: 0.5
+    target_tile_size_px: 224
 
 model:
   level: "tile"

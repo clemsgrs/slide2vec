@@ -1,17 +1,17 @@
-csv: # path to csv containing slide paths
+csv:
 
-output_dir: "output" # output directory
+output_dir: "output"
 save_previews: false
 
 tiling:
   params:
-    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    target_tile_size_px: 224 # size of the tiles to extract, in pixels
+    target_spacing_um: 0.5
+    target_tile_size_px: 224
 
 model:
-  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  level: "tile"
   name: "kaiko"
-  arch: "vitl14" # kaiko model architectures, options: ("vits8", "vits16", "vitb8", "vitb16", "vitl14")
+  arch: "vitl14"
 
 speed:
-  fp16: true # use mixed precision during model inference
+  fp16: true
