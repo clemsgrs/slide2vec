@@ -1,4 +1,4 @@
-name: Test WSI to embedding consistency
+name: Test suite
 
 on:
   pull_request:
