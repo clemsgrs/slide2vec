@@ -9,16 +9,50 @@ logger = logging.getLogger("slide2vec")
 class RecommendedModelSettings:
     input_size: tuple[int, int]
     spacings_um: tuple[float, ...]
+    precision: str | None = None
 
 
-def _square_settings(size: int, spacings_um: list[float]) -> RecommendedModelSettings:
+PRECISION_ALIASES = {
+    "fp32": "fp32",
+    "float32": "fp32",
+    "32": "fp32",
+    "fp16": "fp16",
+    "float16": "fp16",
+    "16": "fp16",
+    "half": "fp16",
+    "bf16": "bf16",
+    "bfloat16": "bf16",
+}
+
+
+def _square_settings(
+    size: int,
+    spacings_um: list[float],
+    *,
+    precision: str | None = None,
+) -> RecommendedModelSettings:
     return RecommendedModelSettings(
         input_size=(int(size), int(size)),
         spacings_um=tuple(float(value) for value in spacings_um),
+        precision=normalize_precision_name(precision),
     )
 
 
+def normalize_precision_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if normalized not in PRECISION_ALIASES:
+        supported = ", ".join(sorted(PRECISION_ALIASES))
+        raise ValueError(f"Unsupported precision {value!r}. Expected one of: {supported}")
+    return PRECISION_ALIASES[normalized]
+
+
 MODEL_NAME_ALIASES = {
+    "conch-v1.5": "conchv15",
+    "conch_v15": "conchv15",
+    "conchv1.5": "conchv15",
+    "conchv1_5": "conchv15",
     "phikon-v2": "phikonv2",
     "hibou-b": "hibou",
     "hibou-l": "hibou",
@@ -29,27 +63,27 @@ MODEL_NAME_ALIASES = {
 
 
 RECOMMENDED_MODEL_SETTINGS = {
-    "conch": _square_settings(448, [0.5]),
-    "conchv1.5": _square_settings(448, [0.5]),
-    "h0-mini": _square_settings(224, [0.5]),
-    "h-optimus-0": _square_settings(224, [0.5]),
-    "h-optimus-1": _square_settings(224, [0.5]),
-    "hibou": _square_settings(224, [0.5]),
-    "kaiko": _square_settings(224, [2.0, 1.0, 0.5, 0.25]),
-    "kaiko-midnight": _square_settings(224, [2.0, 1.0, 0.5, 0.25]),
-    "musk": _square_settings(384, [1.0, 0.5, 0.25]),
-    "panda-vit-s": _square_settings(224, [0.5]),
-    "pathojepa": _square_settings(224, [0.5]),
-    "phikon": _square_settings(224, [0.5]),
-    "phikonv2": _square_settings(224, [0.5]),
-    "prism": _square_settings(224, [0.5]),
-    "prov-gigapath": _square_settings(256, [0.5]),
+    "conch": _square_settings(448, [0.5], precision="fp32"),
+    "conchv15": _square_settings(448, [0.5], precision="fp16"),
+    "h0-mini": _square_settings(224, [0.5], precision="fp16"),
+    "h-optimus-0": _square_settings(224, [0.5], precision="fp16"),
+    "h-optimus-1": _square_settings(224, [0.5], precision="fp16"),
+    "hibou": _square_settings(224, [0.5], precision="fp16"),
+    "kaiko": _square_settings(224, [2.0, 1.0, 0.5, 0.25], precision="fp32"),
+    "kaiko-midnight": _square_settings(224, [2.0, 1.0, 0.5, 0.25], precision="fp16"),
+    "musk": _square_settings(384, [1.0, 0.5, 0.25], precision="fp16"),
+    "panda-vit-s": _square_settings(224, [0.5], precision="fp32"),
+    "pathojepa": _square_settings(224, [0.5], precision="fp32"),
+    "phikon": _square_settings(224, [0.5], precision="fp32"),
+    "phikonv2": _square_settings(224, [0.5], precision="fp32"),
+    "prism": _square_settings(224, [0.5], precision="fp16"),
+    "prov-gigapath": _square_settings(256, [0.5], precision="fp16"),
     "rumc-vit-s-50k": _square_settings(224, [0.5]),
-    "titan": _square_settings(512, [0.5]),
-    "uni": _square_settings(224, [0.5]),
-    "uni2": _square_settings(224, [0.5]),
-    "virchow": _square_settings(224, [0.5]),
-    "virchow2": _square_settings(224, [2.0, 1.0, 0.5, 0.25]),
+    "titan": _square_settings(512, [0.5], precision="fp16"),
+    "uni": _square_settings(224, [0.5], precision="fp16"),
+    "uni2": _square_settings(224, [0.5], precision="bf16"),
+    "virchow": _square_settings(224, [0.5], precision="fp16"),
+    "virchow2": _square_settings(224, [2.0, 1.0, 0.5, 0.25], precision="fp16"),
 }
 
 
@@ -69,6 +103,7 @@ def validate_model_settings(
     model_name: str | None,
     requested_input_size: Any = None,
     target_spacing_um: float | None = None,
+    requested_precision: Any = None,
     allow_non_recommended_settings: bool = False,
 ) -> None:
     settings = get_recommended_model_settings(model_name)
@@ -92,6 +127,17 @@ def validate_model_settings(
             f"(recommended: [{supported_spacings}])"
         )
 
+    normalized_precision = normalize_precision_name(requested_precision)
+    if (
+        normalized_precision is not None
+        and settings.precision is not None
+        and normalized_precision != settings.precision
+    ):
+        mismatches.append(
+            f"requested precision={normalized_precision} "
+            f"(recommended: {settings.precision})"
+        )
+
     if not mismatches:
         return
 
@@ -108,11 +154,12 @@ def validate_model_settings(
     raise ValueError(message)
 
 
-def validate_model_preprocessing_compatibility(model, preprocessing) -> None:
+def validate_model_runtime_compatibility(model, preprocessing, execution=None) -> None:
     validate_model_settings(
         model_name=getattr(model, "name", None),
         requested_input_size=_requested_input_size(model, preprocessing),
         target_spacing_um=getattr(preprocessing, "target_spacing_um", None),
+        requested_precision=getattr(execution, "precision", None),
         allow_non_recommended_settings=bool(
             getattr(model, "allow_non_recommended_settings", False)
         ),

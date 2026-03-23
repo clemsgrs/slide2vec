@@ -260,7 +260,7 @@ def _default_base_config(
             "preview": {"downsample": 32},
         },
         "speed": {
-            "fp16": False,
+            "precision": "fp32",
             "num_preprocessing_workers": num_preprocessing_workers,
             "num_dataloader_workers": num_dataloader_workers,
             "num_cucim_workers": num_cucim_workers,
@@ -471,7 +471,7 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
         batch_size=int(model_cfg.get("batch_size", 256)),
         num_workers=int(speed_cfg.get("num_dataloader_workers", speed_cfg.get("num_workers_embedding", 32))),
         num_preprocessing_workers=int(speed_cfg.get("num_preprocessing_workers", 8)),
-        mixed_precision=bool(speed_cfg.get("fp16", False)),
+        precision=str(speed_cfg.get("precision", "fp32")),
         prefetch_factor=int(speed_cfg.get("prefetch_factor_embedding", 4)),
         persistent_workers=bool(speed_cfg.get("persistent_workers_embedding", True)),
         gpu_batch_preprocessing=bool(speed_cfg.get("gpu_batch_preprocessing", True)),

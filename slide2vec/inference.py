@@ -30,6 +30,7 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
+from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.progress import (
     emit_progress,
     emit_progress_event,
@@ -156,6 +157,7 @@ def load_model(
     from slide2vec.models import ModelFactory
     from slide2vec.resources import load_config
 
+    name = canonicalize_model_name(name)
     cfg = OmegaConf.merge(
         OmegaConf.create(load_config("preprocessing", "default")),
         OmegaConf.create(load_config("models", "default")),
@@ -837,9 +839,10 @@ def _compute_tile_embeddings_for_slide(
     torch = _import_torch()
     from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 
+    autocast_dtype = _autocast_dtype(torch, execution.precision)
     autocast_context = (
-        torch.autocast(device_type="cuda", dtype=torch.float16)
-        if execution.mixed_precision and str(loaded.device).startswith("cuda")
+        torch.autocast(device_type="cuda", dtype=autocast_dtype)
+        if autocast_dtype is not None and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
     resolved_indices = np.arange(_num_tiles(tiling_result), dtype=np.int64)
@@ -1567,8 +1570,8 @@ def _run_forward_pass(
 
 
 def _preset_name(name: str, level: str) -> str | None:
-    preset = name
-    if name == "prov-gigapath":
+    preset = canonicalize_model_name(name)
+    if preset == "prov-gigapath":
         preset = "prov-gigapath-slide" if level == "slide" else "prov-gigapath-tile"
     candidate = Path(__file__).parent / "configs" / "models" / f"{preset}.yaml"
     if candidate.is_file():
@@ -2309,7 +2312,7 @@ def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
         "batch_size": execution.batch_size,
         "num_workers": execution.num_workers,
         "num_gpus": execution.num_gpus,
-        "mixed_precision": execution.mixed_precision,
+        "precision": execution.precision,
         "prefetch_factor": execution.prefetch_factor,
         "persistent_workers": execution.persistent_workers,
         "gpu_batch_preprocessing": execution.gpu_batch_preprocessing,
@@ -2345,13 +2348,21 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         batch_size=payload.get("batch_size"),
         num_workers=int(payload.get("num_workers", 0)),
         num_gpus=int(payload.get("num_gpus", 1)),
-        mixed_precision=bool(payload.get("mixed_precision", False)),
+        precision=payload.get("precision", "fp32"),
         prefetch_factor=int(payload.get("prefetch_factor", 4)),
         persistent_workers=bool(payload.get("persistent_workers", True)),
         gpu_batch_preprocessing=bool(payload.get("gpu_batch_preprocessing", True)),
         save_tile_embeddings=bool(payload.get("save_tile_embeddings", False)),
         save_latents=bool(payload.get("save_latents", False)),
     )
+
+
+def _autocast_dtype(torch, precision: str):
+    if precision == "fp16":
+        return torch.float16
+    if precision == "bf16":
+        return torch.bfloat16
+    return None
 
 
 def _collect_pipeline_artifacts(

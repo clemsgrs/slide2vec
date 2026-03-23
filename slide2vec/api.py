@@ -5,7 +5,9 @@ from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
 from slide2vec.model_settings import (
     canonicalize_model_name,
-    validate_model_preprocessing_compatibility,
+    get_recommended_model_settings,
+    normalize_precision_name,
+    validate_model_runtime_compatibility,
 )
 
 if TYPE_CHECKING:
@@ -120,7 +122,7 @@ class ExecutionOptions:
     num_workers: int = 0
     num_preprocessing_workers: int = 8
     num_gpus: int | None = None
-    mixed_precision: bool = False
+    precision: str | None = None
     prefetch_factor: int = 4
     persistent_workers: bool = True
     gpu_batch_preprocessing: bool = True
@@ -130,6 +132,7 @@ class ExecutionOptions:
     @classmethod
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
         configured_num_gpus = getattr(cfg.speed, "num_gpus", None)
+        requested_precision = normalize_precision_name(getattr(cfg.speed, "precision", "fp32"))
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
@@ -137,7 +140,7 @@ class ExecutionOptions:
             num_workers=int(getattr(cfg.speed, "num_dataloader_workers", getattr(cfg.speed, "num_workers_embedding", cfg.speed.num_workers))),
             num_preprocessing_workers=int(getattr(cfg.speed, "num_preprocessing_workers", cfg.speed.num_workers)),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
-            mixed_precision=bool(cfg.speed.fp16 and not run_on_cpu),
+            precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
             persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
             gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
@@ -148,6 +151,7 @@ class ExecutionOptions:
     def __post_init__(self) -> None:
         resolved_num_gpus = _default_num_gpus() if self.num_gpus is None else self.num_gpus
         object.__setattr__(self, "num_gpus", resolved_num_gpus)
+        object.__setattr__(self, "precision", normalize_precision_name(self.precision))
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
@@ -259,10 +263,10 @@ class Model:
     ) -> list[TileEmbeddingArtifact]:
         from slide2vec.inference import embed_tiles
 
-        resolved = _coerce_execution_options(execution)
+        resolved = _coerce_execution_options(execution, model=self)
         _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
         if preprocessing is not None:
-            validate_model_preprocessing_compatibility(self, preprocessing)
+            validate_model_runtime_compatibility(self, preprocessing, resolved)
         return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
 
     def aggregate_tiles(
@@ -274,7 +278,7 @@ class Model:
     ) -> list[SlideEmbeddingArtifact]:
         from slide2vec.inference import aggregate_tiles
 
-        resolved = _coerce_execution_options(execution)
+        resolved = _coerce_execution_options(execution, model=self)
         _require_output_dir_for_persistence(resolved, method_name="Model.aggregate_tiles(...)")
         return aggregate_tiles(self, tile_artifacts, execution=resolved, preprocessing=preprocessing)
 
@@ -340,8 +344,8 @@ class Model:
     ) -> list[EmbeddedSlide]:
         from slide2vec.inference import embed_slides
 
-        resolved = _coerce_execution_options(execution)
-        validate_model_preprocessing_compatibility(self, preprocessing)
+        resolved = _coerce_execution_options(execution, model=self)
+        validate_model_runtime_compatibility(self, preprocessing, resolved)
         return embed_slides(
             self,
             slides,
@@ -375,7 +379,7 @@ class Pipeline:
     ) -> None:
         self.model = model
         self.preprocessing = preprocessing
-        self.execution = _coerce_execution_options(execution)
+        self.execution = _coerce_execution_options(execution, model=model)
 
     def run(
         self,
@@ -387,7 +391,7 @@ class Pipeline:
         from slide2vec.inference import run_pipeline
 
         if not tiling_only:
-            validate_model_preprocessing_compatibility(self.model, self.preprocessing)
+            validate_model_runtime_compatibility(self.model, self.preprocessing, self.execution)
         return run_pipeline(
             self.model,
             slides=slides,
@@ -402,10 +406,16 @@ def _canonical_model_name(name: str) -> str:
     return canonicalize_model_name(name)
 
 
-def _coerce_execution_options(options: ExecutionOptions | None) -> ExecutionOptions:
-    if options is None:
-        return ExecutionOptions()
-    return options
+def _coerce_execution_options(
+    options: ExecutionOptions | None,
+    *,
+    model: Model | None = None,
+) -> ExecutionOptions:
+    resolved = ExecutionOptions() if options is None else options
+    if resolved.precision is not None:
+        return resolved
+    recommended = _recommended_execution_precision(model)
+    return replace(resolved, precision=recommended)
 
 
 def _coerce_num_gpus(value: Any) -> int | None:
@@ -427,3 +437,10 @@ def _default_num_gpus() -> int:
 def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_name: str) -> None:
     if execution.output_dir is None:
         raise ValueError(f"ExecutionOptions.output_dir is required for {method_name}")
+
+
+def _recommended_execution_precision(model: Model | None) -> str:
+    settings = get_recommended_model_settings(getattr(model, "name", None))
+    if settings is not None and settings.precision is not None:
+        return settings.precision
+    return "fp32"

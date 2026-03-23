@@ -14,4 +14,4 @@ model:
   arch: "vitl14"
 
 speed:
-  fp16: true
+  precision: "fp32"

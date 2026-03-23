@@ -105,7 +105,7 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
         "speed": {
             "num_workers": 12,
             "num_workers_embedding": 6,
-            "fp16": True,
+            "precision": "fp16",
         },
         "wandb": {"enable": True},
     }
@@ -126,7 +126,7 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
     assert cfg.model.batch_size == 32
     assert cfg.speed.num_workers_embedding == 3
     assert cfg.speed.num_workers == 12
-    assert cfg.speed.fp16 is True
+    assert cfg.speed.precision == "fp16"
     assert cfg.tiling.backend == "asap"
 
 

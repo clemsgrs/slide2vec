@@ -26,7 +26,7 @@ model:
   batch_size: 1
 
 speed:
-  fp16: false
+  precision: "fp32"
 
 wandb:
   enable: true

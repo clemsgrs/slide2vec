@@ -14,4 +14,4 @@ model:
   name: "hibou"
 
 speed:
-  fp16: true
+  precision: "fp16"

@@ -162,6 +162,112 @@ def test_load_model_merges_preprocessing_defaults_for_cross_file_interpolations(
     assert captured["options"].input_size == 256
     assert loaded.feature_dim == 128
 
+
+def test_load_model_uses_conchv15_preset_for_canonicalized_alias(monkeypatch):
+    import slide2vec.inference as inference
+
+    class AttrDict(dict):
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError as exc:
+                raise AttributeError(name) from exc
+
+        def __setattr__(self, name, value):
+            self[name] = value
+
+    def convert(value):
+        if isinstance(value, dict):
+            return AttrDict({key: convert(item) for key, item in value.items()})
+        if isinstance(value, list):
+            return [convert(item) for item in value]
+        return value
+
+    def merge_values(left, right):
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = AttrDict({key: convert(value) for key, value in left.items()})
+            for key, value in right.items():
+                if key in merged:
+                    merged[key] = merge_values(merged[key], value)
+                else:
+                    merged[key] = convert(value)
+            return merged
+        return convert(right)
+
+    def lookup(root, path):
+        current = root
+        for segment in path.split("."):
+            current = current[segment]
+        return current
+
+    def resolve_value(root, value):
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                value[key] = resolve_value(root, item)
+            return value
+        if isinstance(value, list):
+            for index, item in enumerate(list(value)):
+                value[index] = resolve_value(root, item)
+            return value
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            return resolve_value(root, lookup(root, value[2:-1]))
+        return value
+
+    class FakeOmegaConf:
+        @staticmethod
+        def create(value):
+            return convert(value)
+
+        @staticmethod
+        def merge(*values):
+            merged = AttrDict()
+            for value in values:
+                merged = merge_values(merged, convert(value))
+            return merged
+
+        @staticmethod
+        def resolve(value):
+            resolve_value(value, value)
+
+    captured = {}
+
+    class FakeBackend:
+        device = "cpu"
+        features_dim = 768
+
+        def to(self, _device):
+            return self
+
+        def get_transforms(self):
+            return "TRANSFORMS"
+
+    class FakeModelFactory:
+        def __init__(self, options):
+            captured["options"] = options
+
+        def get_model(self):
+            return FakeBackend()
+
+    def fake_load_config(*parts):
+        if parts == ("preprocessing", "default"):
+            return {"tiling": {"params": {"target_tile_size_px": 256}}}
+        if parts == ("models", "default"):
+            return {"model": {"mode": "cls", "input_size": "${tiling.params.target_tile_size_px}"}}
+        if parts == ("models", "conchv15"):
+            return {"model": {"name": "conchv15", "input_size": 448}}
+        raise AssertionError(parts)
+
+    monkeypatch.setitem(sys.modules, "omegaconf", types.SimpleNamespace(OmegaConf=FakeOmegaConf))
+    monkeypatch.setitem(sys.modules, "slide2vec.models", types.SimpleNamespace(ModelFactory=FakeModelFactory))
+    monkeypatch.setitem(sys.modules, "slide2vec.resources", types.SimpleNamespace(load_config=fake_load_config))
+    monkeypatch.setattr(inference, "_resolve_device", lambda requested, device: device)
+
+    loaded = inference.load_model(name="conchv15", level="tile")
+
+    assert captured["options"].name == "conchv15"
+    assert captured["options"].input_size == 448
+    assert loaded.feature_dim == 768
+
 def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
     monkeypatch,
     tmp_path: Path,
@@ -1640,7 +1746,7 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         batch_size=64,
         num_workers=8,
         num_gpus=2,
-        mixed_precision=True,
+        precision="bf16",
         prefetch_factor=7,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
@@ -1654,9 +1760,11 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     assert payload["prefetch_factor"] == 7
     assert payload["persistent_workers"] is False
     assert payload["gpu_batch_preprocessing"] is False
+    assert payload["precision"] == "bf16"
     assert restored.prefetch_factor == 7
     assert restored.persistent_workers is False
     assert restored.gpu_batch_preprocessing is False
+    assert restored.precision == "bf16"
 
 
 def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):

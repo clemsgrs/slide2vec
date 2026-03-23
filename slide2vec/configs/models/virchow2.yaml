@@ -13,4 +13,4 @@ model:
   name: "virchow2"
 
 speed:
-  fp16: true
+  precision: "fp16"

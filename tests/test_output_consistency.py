@@ -69,7 +69,7 @@ MODEL_PARAMS = dict(
 
 # -- speed --
 SPEED_PARAMS = dict(
-    fp16=True,               # override (default: false)
+    precision="fp16",       # override (default: fp32)
     num_workers=4,           # override (default: 8)
     num_workers_embedding=4, # override (default: 8)
 )

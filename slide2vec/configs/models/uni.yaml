@@ -11,3 +11,6 @@ tiling:
 model:
   level: "tile"
   name: "uni"
+
+speed:
+  precision: "fp16"

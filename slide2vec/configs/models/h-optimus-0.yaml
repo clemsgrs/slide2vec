@@ -13,4 +13,4 @@ model:
   name: "h-optimus-0"
 
 speed:
-  fp16: true
+  precision: "fp16"

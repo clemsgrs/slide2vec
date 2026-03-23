@@ -14,4 +14,4 @@ model:
   save_tile_embeddings: true
 
 speed:
-  fp16: true
+  precision: "fp16"

@@ -13,4 +13,4 @@ model:
   name: "prov-gigapath"
 
 speed:
-  fp16: true
+  precision: "fp16"

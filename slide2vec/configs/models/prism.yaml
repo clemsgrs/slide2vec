@@ -15,4 +15,4 @@ model:
   save_latents: false
 
 speed:
-  fp16: true
+  precision: "fp16"

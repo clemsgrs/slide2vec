@@ -13,4 +13,4 @@ model:
   name: "kaiko-midnight"
 
 speed:
-  fp16: true
+  precision: "fp16"

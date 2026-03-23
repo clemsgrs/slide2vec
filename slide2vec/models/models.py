@@ -75,6 +75,10 @@ def _select_mode_embedding(cls_embedding, patch_embeddings, *, mode: str):
     return cls_embedding
 
 
+def _resolve_mode(mode: str | None, *, default: str) -> str:
+    return default if mode is None else mode
+
+
 def _build_timm_hub_encoder(model_name: str, **kwargs):
     return timm.create_model(model_name, pretrained=True, **kwargs)
 
@@ -89,6 +93,7 @@ def _build_tile_model(options: DictConfig):
         "h-optimus-0": Hoptimus0,
         "h-optimus-1": Hoptimus1,
         "conch": CONCH,
+        "conchv15": CONCHv15,
         "musk": MUSK,
         "phikonv2": PhikonV2,
     }
@@ -113,14 +118,15 @@ def _build_tile_model(options: DictConfig):
 
 def _build_region_tile_encoder(options: DictConfig):
     region_factories = {
-        "virchow": Virchow,
-        "virchow2": Virchow2,
+        "virchow": lambda: Virchow(mode=options.mode),
+        "virchow2": lambda: Virchow2(mode=options.mode),
         "uni": UNI,
         "uni2": UNI2,
         "prov-gigapath": ProvGigaPath,
         "h-optimus-0": Hoptimus0,
         "h-optimus-1": Hoptimus1,
         "conch": CONCH,
+        "conchv15": CONCHv15,
         "musk": MUSK,
         "phikonv2": PhikonV2,
     }
@@ -529,10 +535,10 @@ class UNI2(FeatureExtractor):
 
 
 class Virchow(FeatureExtractor):
-    def __init__(self, mode: str = "cls"):
-        self.mode = mode
+    def __init__(self, mode: str | None = None):
+        self.mode = _resolve_mode(mode, default="full")
         self.features_dim = 1280
-        if mode == "full":
+        if self.mode == "full":
             self.features_dim = 2560
         super(Virchow, self).__init__()
 
@@ -555,10 +561,10 @@ class Virchow(FeatureExtractor):
 
 
 class Virchow2(FeatureExtractor):
-    def __init__(self, mode: str = "cls"):
-        self.mode = mode
+    def __init__(self, mode: str | None = None):
+        self.mode = _resolve_mode(mode, default="full")
         self.features_dim = 1280
-        if mode == "full":
+        if self.mode == "full":
             self.features_dim = 2560
         super(Virchow2, self).__init__()
 
@@ -633,10 +639,10 @@ class Hoptimus1(FeatureExtractor):
 
 
 class Hoptimus0Mini(FeatureExtractor):
-    def __init__(self, mode: str = "cls"):
-        self.mode = mode
+    def __init__(self, mode: str | None = None):
+        self.mode = _resolve_mode(mode, default="cls")
         self.features_dim = 768
-        if mode == "full":
+        if self.mode == "full":
             self.features_dim = 1536
         super(Hoptimus0Mini, self).__init__()
 
@@ -681,6 +687,25 @@ class CONCH(FeatureExtractor):
         return _embedding_output(embedding)
 
 
+class CONCHv15(FeatureExtractor):
+    def __init__(self):
+        self.features_dim = 768
+        super(CONCHv15, self).__init__()
+
+    def build_encoder(self):
+        titan = AutoModel.from_pretrained("MahmoodLab/TITAN", trust_remote_code=True)
+        encoder, transform = titan.return_conch()
+        self.transform = transform
+        return encoder
+
+    def get_transforms(self):
+        return self.transform
+
+    def forward(self, x):
+        embedding = self.encoder(x)
+        return _embedding_output(embedding)
+
+
 class MUSK(FeatureExtractor):
     def __init__(self):
         self.features_dim = 2048
@@ -712,7 +737,7 @@ class MUSK(FeatureExtractor):
             image=x,
             with_head=False,
             out_norm=False,
-            ms_aug=True,
+            ms_aug=False,
             return_global=True,
         )[0]
         return _embedding_output(embedding)

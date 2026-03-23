@@ -815,7 +815,7 @@ def _build_model_pipeline_from_config(config: dict[str, Any]):
         batch_size=int(model_cfg.get("batch_size", 1)),
         num_workers=int(speed_cfg.get("num_workers_embedding", speed_cfg.get("num_workers", 0))),
         num_gpus=int(speed_cfg["num_gpus"]) if speed_cfg.get("num_gpus") is not None else None,
-        mixed_precision=bool(speed_cfg.get("fp16", False)),
+        precision=str(speed_cfg.get("precision", "fp32")),
         prefetch_factor=int(speed_cfg.get("prefetch_factor_embedding", 4)),
         persistent_workers=bool(speed_cfg.get("persistent_workers_embedding", True)),
         gpu_batch_preprocessing=bool(speed_cfg.get("gpu_batch_preprocessing", True)),

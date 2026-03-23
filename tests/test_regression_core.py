@@ -42,6 +42,19 @@ def test_packaged_model_presets_align_with_recommended_settings():
         cfg = get_cfg_from_args(args)
         assert cfg.model.name
 
+
+def test_packaged_non_default_model_presets_do_not_contain_comments():
+    preset_dir = ROOT / "slide2vec" / "configs" / "models"
+    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
+
+    for preset_path in preset_paths:
+        lines_with_comments = [
+            f"{index}: {line}"
+            for index, line in enumerate(preset_path.read_text().splitlines(), start=1)
+            if "#" in line
+        ]
+        assert lines_with_comments == [], f"{preset_path} still contains comments: {lines_with_comments}"
+
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
     artifact = write_tile_embeddings(
@@ -111,6 +124,12 @@ def test_execution_options_validate_num_gpus():
     with pytest.raises(ValueError, match="num_gpus"):
         ExecutionOptions(num_gpus=0)
 
+def test_model_from_pretrained_canonicalizes_conchv15_alias():
+    model = Model.from_pretrained("conchv1.5")
+
+    assert model.name == "conchv15"
+    assert model.level == "tile"
+
 def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
     import slide2vec.api as api
 
@@ -130,7 +149,7 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             save_latents=True,
         ),
         speed=SimpleNamespace(
-            fp16=True,
+            precision="bf16",
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=3,
@@ -147,7 +166,7 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.batch_size == 4
     assert execution.num_workers == 2
     assert execution.num_gpus == 3
-    assert execution.mixed_precision is True
+    assert execution.precision == "bf16"
     assert execution.prefetch_factor == 5
     assert execution.persistent_workers is False
     assert execution.gpu_batch_preprocessing is False
@@ -166,7 +185,7 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             save_latents=False,
         ),
         speed=SimpleNamespace(
-            fp16=False,
+            precision="fp32",
             num_workers=6,
             num_workers_embedding=2,
             num_gpus=None,
@@ -179,11 +198,12 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     execution = api.ExecutionOptions.from_config(cfg)
 
     assert execution.num_gpus == 6
+    assert execution.precision == "fp32"
     assert execution.prefetch_factor == 3
     assert execution.persistent_workers is True
     assert execution.gpu_batch_preprocessing is True
 
-def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(monkeypatch, tmp_path: Path):
+def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
 
     monkeypatch.setattr(api, "_default_num_gpus", lambda: 8)
@@ -195,7 +215,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
             save_latents=False,
         ),
         speed=SimpleNamespace(
-            fp16=True,
+            precision="bf16",
             num_workers=4,
             num_workers_embedding=4,
             num_gpus=1,
@@ -207,7 +227,7 @@ def test_execution_options_from_config_disables_mixed_precision_for_cpu_runs(mon
 
     execution = api.ExecutionOptions.from_config(cfg, run_on_cpu=True)
 
-    assert execution.mixed_precision is False
+    assert execution.precision == "fp32"
     assert execution.num_gpus == 1
 
 def test_preprocessing_with_backend_preserves_other_fields():
@@ -251,7 +271,7 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         batch_size=8,
         num_workers=3,
         num_gpus=2,
-        mixed_precision=True,
+        precision="bf16",
         prefetch_factor=6,
         persistent_workers=False,
         gpu_batch_preprocessing=False,
@@ -266,7 +286,7 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.batch_size == base.batch_size
     assert updated.num_workers == base.num_workers
     assert updated.num_gpus == base.num_gpus
-    assert updated.mixed_precision == base.mixed_precision
+    assert updated.precision == base.precision
     assert updated.prefetch_factor == base.prefetch_factor
     assert updated.persistent_workers == base.persistent_workers
     assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
@@ -295,7 +315,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             save_tile_embeddings=False,
             save_latents=False,
         ),
-        speed=SimpleNamespace(fp16=False, num_workers=2, num_workers_embedding=3, num_gpus=2),
+        speed=SimpleNamespace(precision="fp32", num_workers=2, num_workers_embedding=3, num_gpus=2),
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,
@@ -406,6 +426,73 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
     assert cfg.model.allow_non_recommended_settings is True
     assert "virchow2" in caplog.text
     assert "recommended" in caplog.text
+
+
+def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tmp_path: Path):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: output",
+                "tiling:",
+                "  params:",
+                "    target_spacing_um: 0.5",
+                "    target_tile_size_px: 224",
+                "model:",
+                "  name: virchow2",
+                "  level: tile",
+                "speed:",
+                "  precision: fp32",
+            ]
+        )
+    )
+
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+
+    with pytest.raises(ValueError, match="requested precision=fp32"):
+        get_cfg_from_args(args)
+
+
+def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: output",
+                "tiling:",
+                "  params:",
+                "    target_spacing_um: 0.5",
+                "    target_tile_size_px: 224",
+                "model:",
+                "  name: virchow2",
+                "  level: tile",
+                "  allow_non_recommended_settings: true",
+                "speed:",
+                "  precision: fp32",
+            ]
+        )
+    )
+
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        cfg = get_cfg_from_args(args)
+
+    assert cfg.speed.precision == "fp32"
+    assert "requested precision=fp32" in caplog.text
 
 
 def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():

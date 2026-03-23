@@ -14,4 +14,4 @@ model:
   pretrained_weights: "/path/to/model/weights.pt"
 
 speed:
-  fp16: false
+  precision: "fp32"

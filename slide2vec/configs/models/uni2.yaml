@@ -11,3 +11,6 @@ tiling:
 model:
   level: "tile"
   name: "uni2"
+
+speed:
+  precision: "bf16"

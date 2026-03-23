@@ -13,4 +13,4 @@ model:
   name: "h0-mini"
 
 speed:
-  fp16: true
+  precision: "fp16"

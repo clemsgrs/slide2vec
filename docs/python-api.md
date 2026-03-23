@@ -105,7 +105,7 @@ preprocessing = PreprocessingConfig(
   Defaults to `1` in the Python API unless you set it explicitly.
 - `num_workers`
 - `num_gpus`
-- `mixed_precision`
+- `precision`
 - `prefetch_factor`
 - `persistent_workers`
 - `gpu_batch_preprocessing`
@@ -113,6 +113,8 @@ preprocessing = PreprocessingConfig(
 - `save_latents`
 
 `.pt` is the default output format. Use `output_format="npz"` to write NumPy artifacts instead.
+
+`precision` accepts `fp32`, `fp16`, or `bf16`. When you omit it in the Python API, `slide2vec` resolves it to the model's recommended precision when one is known.
 
 For slide-level models, `save_tile_embeddings=False` skips persisted tile embedding artifacts while still returning tile embeddings in-memory from direct APIs.
 
