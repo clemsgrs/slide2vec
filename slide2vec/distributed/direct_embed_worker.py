@@ -55,7 +55,15 @@ def main(argv=None) -> int:
             for slide, tiling_result in zip(slide_records, tiling_results)
         }
         progress_events_path = request.get("progress_events_path")
-        reporter = JsonlProgressReporter(progress_events_path, rank=global_rank) if progress_events_path else None
+        reporter = (
+            JsonlProgressReporter(
+                progress_events_path,
+                rank=global_rank,
+                progress_label=f"cuda:{local_rank}",
+            )
+            if progress_events_path
+            else None
+        )
         context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
 
         with context:

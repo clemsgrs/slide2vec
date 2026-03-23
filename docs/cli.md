@@ -59,7 +59,7 @@ In practice, the config controls:
 - which model preset to use
 - preprocessing/tiling parameters
 - output directory
-- batch size, workers, mixed precision, and GPU count
+- batch size, workers, precision, and GPU count
 - whether to save tile artifacts alongside slide-level outputs
 
 ## Common Overrides
@@ -86,7 +86,7 @@ Common overrides:
 ## Useful Flags
 
 - `--run-on-cpu`
-  Forces CPU inference and disables mixed precision.
+  Forces CPU inference and uses `speed.precision=fp32`.
 - `--tiling-only`
   Runs preprocessing/tiling without feature extraction.
 - `--output-dir /path/to/output`

@@ -9,14 +9,20 @@ save_previews: true # save preview images of slide tiling and mask overlays
 seed: 0 # seed for reproducibility
 
 tiling:
-  read_tiles_from: # path to a directory containing HS2P `.tiles.npz` / `.tiles.meta.json` artifacts (leave empty to compute the coordinates)
-  backend: "asap" # backend to use for slide reading
+  on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
+  gpu_decode: false # attempt GPU-accelerated JPEG decoding via nvImageCodec (experimental)
+  adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
+  use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)
+  jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
+  read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
+  read_tiles_from: # path to an existing directory containing HS2P `.tiles.tar` tile stores to reuse instead of writing new stores during tiling
+  backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     target_tile_size_px: 256 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
+    tissue_threshold: 0.1 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
     drop_holes: false # whether or not to drop tiles whose center pixel falls withing an identified holes
     use_padding: true # whether to pad the border of the slide
   seg_params:
@@ -28,7 +34,7 @@ tiling:
     use_otsu: false # use otsu's method instead of simple binary thresholding
     use_hsv: true # use HSV thresholding instead of simple binary thresholding
   filter_params:
-    ref_tile_size: ${target_tile_size_px} # reference tile size at spacing tiling.params.target_spacing_um
+    ref_tile_size: ${tiling.params.target_tile_size_px} # reference tile size at spacing tiling.params.target_spacing_um
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.target_spacing_um will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
     max_n_holes: 8 # maximum of holes to consider per detected foreground contours (positive integer, higher values lead to more accurate patching but increase computational cost ; keeps the biggest holes)
@@ -41,7 +47,8 @@ tiling:
     downsample: 32 # downsample to use for preview rendering
 
 speed:
-  num_workers: 8 # number of workers for tiling slides
+  num_preprocessing_workers: 8 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing)
+  num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
 
 wandb:
   enable: false

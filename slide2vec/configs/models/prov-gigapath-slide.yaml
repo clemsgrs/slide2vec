@@ -1,18 +1,17 @@
-csv: # path to csv containing slide paths
+csv:
 
-output_dir: "output" # output directory
-save_previews: true
+output_dir: "output"
+save_previews: false
 
 tiling:
   params:
-    target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    target_tile_size_px: 256 # size of the tiles to extract, in pixels
+    target_spacing_um: 0.5
+    target_tile_size_px: 256
 
 model:
-  level: "slide" # level at which to extract the features ("tile", "region" or "slide")
+  level: "slide"
   name: "prov-gigapath"
-  batch_size: 32
-  save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
+  save_tile_embeddings: true
 
 speed:
-  fp16: true # use mixed precision during model inference
+  precision: "fp16"

@@ -1,48 +1,28 @@
 # Supported Models
 
-`slide2vec` currently ships preset configs for 18 model entries:
+The canonical model presets live under `slide2vec/configs/models/`. Use the table below as the single source of truth for:
 
-- 10 tile-level presets
-- 5 region-level presets
-- 3 slide-level presets
+- which preset entries ship with `slide2vec`
+- which encoder level each entry uses
+- which spacing values are supported by the pretrained-model validator
 
-The canonical preset files live under `slide2vec/configs/models/`.
-
-## Tile-Level Presets
-
-| Preset | Model | Architecture | Parameters |
-| --- | --- | --- | --- |
-| `conch` | [CONCH](https://huggingface.co/MahmoodLab/conch) | ViT-B/16 | 86M |
-| `h-optimus-1` | [H-optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | ViT-G/14 | 1.1B |
-| `h0-mini` | [H0-mini](https://huggingface.co/bioptimus/H0-mini) | ViT-B/16 | 86M |
-| `hibou` | [Hibou-B](https://huggingface.co/histai/hibou-b) / [Hibou-L](https://huggingface.co/histai/hibou-L) | ViT-B/16 or ViT-L/16 | 86M / 307M |
-| `kaiko-midnight` | [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | ViT-G/14 | 1.1B |
-| `kaiko` | [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | Various | 86M - 307M |
-| `musk` | [MUSK](https://huggingface.co/xiangjx/musk) | ViT-L/16 | 307M |
-| `phikonv2` | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | ViT-L/16 | 307M |
-| `prov-gigapath-tile` | [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | ViT-G/14 | 1.1B |
-| `uni2` | [UNI2](https://huggingface.co/MahmoodLab/UNI2-h) | ViT-G/14 | 1.1B |
-
-## Region-Level Presets
-
-| Preset | Model | Architecture | Parameters |
-| --- | --- | --- | --- |
-| `h-optimus-0` | [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | ViT-G/14 | 1.1B |
-| `pathojepa` | PathoJEPA | ViT-S/16 (default) | 22M |
-| `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) | ViT-L/16 | 307M |
-| `virchow` | [Virchow](https://huggingface.co/paige-ai/Virchow) | ViT-H/14 | 632M |
-| `virchow2` | [Virchow2](https://huggingface.co/paige-ai/Virchow2) | ViT-H/14 | 632M |
-
-## Slide-Level Presets
-
-| Preset | Model | Architecture | Parameters |
-| --- | --- | --- | --- |
-| `prism` | [PRISM](https://huggingface.co/paige-ai/PRISM) | Perceiver Resampler | 99M |
-| `prov-gigapath-slide` | [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | Transformer (LongNet) | 87M |
-| `titan` | [TITAN](https://huggingface.co/MahmoodLab/TITAN) | Transformer | 49M |
-
-## Notes
-
-- `Model.from_pretrained(...)` chooses a default level for some models; pass `level=` explicitly when you want a non-default preset behavior.
-- The `hibou` preset supports both Hibou-B and Hibou-L variants through model options.
-- The README stays intentionally short; use this page and [`python-api.md`](/Users/clems/Code/slide2vec/docs/python-api.md) for fuller reference material.
+| Preset | Model | Encoder Level | Supported Spacing (um) | Notes |
+| --- | --- | --- | --- | --- |
+| `conch` | [CONCH](https://huggingface.co/MahmoodLab/conch) | `tile` | `0.5` | |
+| `conchv15` | [CONCHv1.5](https://huggingface.co/MahmoodLab/conchv1_5) | `tile` | `0.5` | |
+| `h-optimus-0` | [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | `tile` | `0.5` | |
+| `h-optimus-1` | [H-optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | `tile` | `0.5` | |
+| `h0-mini` | [H0-mini](https://huggingface.co/bioptimus/H0-mini) | `tile` | `0.5` | Supports `mode="cls"` or `mode="full"` |
+| `hibou` | [Hibou-B](https://huggingface.co/histai/hibou-b) / [Hibou-L](https://huggingface.co/histai/hibou-L) | `tile` | `0.5` | Supports `arch="hibou-b"` and `arch="hibou-L"` |
+| `kaiko` | [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | Supports `arch` in [`vits8`, `vits16`, `vitb8`, `vitb16`, `vitl14`] |
+| `kaiko-midnight` | [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | |
+| `musk` | [MUSK](https://huggingface.co/xiangjx/musk) | `tile` | `1.0`, `0.5`, `0.25` | |
+| `phikonv2` | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | `tile` | `0.5` |  |
+| `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) | `tile` | `0.5` | |
+| `uni2` | [UNI2](https://huggingface.co/MahmoodLab/UNI2-h) | `tile` | `0.5` | |
+| `virchow` | [Virchow](https://huggingface.co/paige-ai/Virchow) | `tile` | `0.5` | Supports `mode="cls"` or `mode="full"` |
+| `virchow2` | [Virchow2](https://huggingface.co/paige-ai/Virchow2) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | Supports `mode="cls"` or `mode="full"` |
+| `prov-gigapath-tile` | [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | `tile` | `0.5` | |
+| `prov-gigapath-slide` | [Prov-GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | `slide` | `0.5` | |
+| `prism` | [PRISM](https://huggingface.co/paige-ai/PRISM) | `slide` | `0.5` | |
+| `titan` | [TITAN](https://huggingface.co/MahmoodLab/TITAN) | `slide` | `0.5` | |

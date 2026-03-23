@@ -69,7 +69,7 @@ MODEL_PARAMS = dict(
 
 # -- speed --
 SPEED_PARAMS = dict(
-    fp16=True,               # override (default: false)
+    precision="fp16",       # override (default: fp32)
     num_workers=4,           # override (default: 8)
     num_workers_embedding=4, # override (default: 8)
 )
@@ -122,7 +122,9 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "save_previews": False,  # override (default: true)
         "seed": 0,
         "tiling": {
+            "read_coordinates_from": None,
             "read_tiles_from": None,
+            "on_the_fly": True,
             "backend": "asap",
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,
@@ -149,12 +151,13 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     )
 
     # 4. Assert coordinates match exactly (tiling is deterministic)
-    gt_coords = np.load(GT_DIR / "test-wsi.tiles.npz", allow_pickle=False)
-    coords = np.load(tmp_path / "coordinates" / "test-wsi.tiles.npz", allow_pickle=False)
+    gt_coords = np.load(GT_DIR / "test-wsi.coordinates.npz", allow_pickle=False)
+    coords = np.load(tmp_path / "tiles" / "test-wsi.coordinates.npz", allow_pickle=False)
     np.testing.assert_array_equal(coords, gt_coords)
 
-    meta = json.loads((tmp_path / "coordinates" / "test-wsi.tiles.meta.json").read_text())
+    meta = json.loads((tmp_path / "tiles" / "test-wsi.coordinates.meta.json").read_text())
     assert meta["sample_id"] == "test-wsi"
+    assert meta["backend"] == "asap"
     assert meta["target_spacing_um"] == pytest.approx(0.5)
     assert meta["target_tile_size_px"] == 224
 

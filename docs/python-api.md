@@ -60,6 +60,7 @@ Commonly overridden fields:
 - `target_tile_size_px`
 - `tissue_threshold`
 - `backend`
+  `backend` is the tiling / HS2P slide-reader backend. It may be `"asap"` or `"openslide"` depending on the reader you want HS2P to use.
 
 Defaults that most users can leave alone:
 
@@ -70,8 +71,11 @@ Defaults that most users can leave alone:
 - `segmentation={}`
 - `filtering={}`
 - `preview={}`
-- `read_tiles_from=None`
+- `read_coordinates_from=<output_dir>/coordinates` when omitted
+- `read_tiles_from=None` unless you want slide2vec to reuse an explicitly linked external `.tiles.tar` store root
 - `resume=False`
+
+`slide2vec` writes `.tiles.tar` stores during tiling by default. Set `read_tiles_from` only when you want embedding to consume an existing external tile-store root instead of the stores generated in the current run.
 
 Advanced example:
 
@@ -101,11 +105,16 @@ preprocessing = PreprocessingConfig(
   Defaults to `1` in the Python API unless you set it explicitly.
 - `num_workers`
 - `num_gpus`
-- `mixed_precision`
+- `precision`
+- `prefetch_factor`
+- `persistent_workers`
+- `gpu_batch_preprocessing`
 - `save_tile_embeddings`
 - `save_latents`
 
 `.pt` is the default output format. Use `output_format="npz"` to write NumPy artifacts instead.
+
+`precision` accepts `fp32`, `fp16`, or `bf16`. When you omit it in the Python API, `slide2vec` resolves it to the model's recommended precision when one is known.
 
 For slide-level models, `save_tile_embeddings=False` skips persisted tile embedding artifacts while still returning tile embeddings in-memory from direct APIs.
 
