@@ -145,7 +145,7 @@ def validate_model_settings(
         f"Model '{canonicalize_model_name(model_name)}' is configured with "
         f"{'; '.join(mismatches)}. "
         "Set `model.allow_non_recommended_settings=true` in YAML/CLI or "
-        "`allow_non_recommended_settings=True` in `Model.from_pretrained(...)` "
+        "`allow_non_recommended_settings=True` in `Model.from_preset(...)` "
         "to continue with a warning."
     )
     if allow_non_recommended_settings:

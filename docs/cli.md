@@ -96,6 +96,37 @@ Common overrides:
 
 ## GPU Behavior
 
+### GPU-accelerated tile decoding (`gpu_decode`)
+
+When using the on-the-fly cucim backend (`tiling.on_the_fly: true`, `tiling.backend: cucim` or `auto`), slide2vec can decode tiles on the GPU during embedding.
+
+Enable it in your config:
+
+```yaml
+tiling:
+  gpu_decode: true  # default
+```
+
+Or override from the command line:
+
+```shell
+python -m slide2vec --config-file /path/to/config.yaml tiling.gpu_decode=true
+```
+
+When enabled, two things happen:
+1. `ENABLE_CUSLIDE2=1` is set in the process environment before CuCIM is imported, activating NVIDIA's cuSlide2 GPU-accelerated SVS/TIFF reader.
+2. `device="cuda"` is passed to cucim's `read_region`, so batch JPEG decoding runs on the GPU via nvImageCodec.
+
+This can give a significant speedup (~3.8× for batch decoding) on `.svs` and `.tif` files.
+
+**Note:** decoded pixels are currently converted back to CPU via `np.asarray` before being fed into the DataLoader. The speedup is real (GPU decoding is faster than CPU) but the data still round-trips through CPU before reaching the model. A true zero-copy path would require bypassing the DataLoader entirely and is tracked in `ideas-to-explore.md`.
+
+**Requirements:** `libnuma1` must be installed and `nvImageCodec` must be available (included with `cucim-cu12`). If the installed CuCIM version does not support `device="cuda"`, slide2vec falls back silently to CPU decoding.
+
+**Default:** `true` — disable with `tiling.gpu_decode: false` if needed.
+
+### GPU count
+
 By default, the CLI uses all available GPUs.
 
 To cap GPU usage, set:

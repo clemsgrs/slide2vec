@@ -32,10 +32,11 @@ def _install_fake_rich_runtime(monkeypatch):
     fake_progress = types.ModuleType("rich.progress")
 
     class FakeConsole:
-        def __init__(self, file=None):
+        def __init__(self, file=None, **kwargs):
             self.file = file
             self.is_terminal = True
             self.lines = []
+            self.kwargs = kwargs
 
         def print(self, message, **kwargs):
             self.lines.append((message, kwargs))
@@ -467,6 +468,19 @@ def test_rich_reporter_tracks_multi_gpu_embedding_rows_separately(monkeypatch):
     }
     assert task_by_description["cuda:0: slide-a"]["completed"] == 3
     assert task_by_description["cuda:1: slide-b"]["completed"] == 0
+
+
+def test_create_api_progress_reporter_uses_rich_in_notebooks(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    monkeypatch.setattr(progress, "_is_notebook_session", lambda: True)
+
+    reporter = progress.create_api_progress_reporter(output_dir="/tmp/demo")
+
+    assert isinstance(reporter, progress.RichCliProgressReporter)
+    assert isinstance(reporter.console, FakeConsole)
+    assert reporter.console.kwargs["force_jupyter"] is True
 
 
 def test_progress_aware_log_handler_routes_logs_through_active_reporter():

@@ -115,6 +115,8 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
         "coordinates_npz_path",
         "coordinates_meta_path",
         "tiles_tar_path",
+        "mask_preview_path",
+        "tiling_preview_path",
         "feature_status",
         "aggregation_status",
         "error",
@@ -122,7 +124,40 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
     ]
 
 
-def test_model_from_pretrained_uses_public_factory(monkeypatch):
+def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    captured = {}
+
+    def fake_load_tiling_result(**kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        helper,
+        "_hs2p_exports",
+        lambda: {"load_tiling_result": fake_load_tiling_result},
+    )
+
+    row = {
+        "coordinates_npz_path": "/tmp/slide-1.coordinates.npz",
+        "coordinates_meta_path": "/tmp/slide-1.coordinates.meta.json",
+        "tiles_tar_path": "/tmp/slide-1.tiles.tar",
+        "mask_preview_path": "/tmp/preview/mask/slide-1.jpg",
+        "tiling_preview_path": "/tmp/preview/tiling/slide-1.jpg",
+    }
+
+    tiling_result = helper.load_tiling_result_from_row(row)
+
+    assert captured["kwargs"] == {
+        "coordinates_npz_path": Path("/tmp/slide-1.coordinates.npz"),
+        "coordinates_meta_path": Path("/tmp/slide-1.coordinates.meta.json"),
+    }
+    assert tiling_result.mask_preview_path == Path("/tmp/preview/mask/slide-1.jpg")
+    assert tiling_result.tiling_preview_path == Path("/tmp/preview/tiling/slide-1.jpg")
+
+
+def test_model_from_preset_uses_public_factory(monkeypatch):
     api = importlib.import_module("slide2vec.api")
 
     captured = {}
@@ -132,7 +167,7 @@ def test_model_from_pretrained_uses_public_factory(monkeypatch):
         return SimpleNamespace(device="cpu", feature_dim=1280)
 
     monkeypatch.setattr("slide2vec.inference.load_model", fake_load_model)
-    model = api.Model.from_pretrained("virchow2")
+    model = api.Model.from_preset("virchow2")
 
     assert model.name == "virchow2"
     assert model.level == "tile"

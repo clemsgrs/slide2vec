@@ -1,5 +1,6 @@
-hs2p>=2.4.0,<3
+hs2p>=2.5.0,<3
 omegaconf>=2.3.0
+PyTurboJPEG
 h5py
 matplotlib
 numpy<2

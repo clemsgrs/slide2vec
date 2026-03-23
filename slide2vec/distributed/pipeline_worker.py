@@ -37,7 +37,7 @@ def main(argv=None) -> int:
         world_size = distributed.get_global_size()
 
         model_spec = dict(request["model"])
-        model = Model.from_pretrained(
+        model = Model.from_preset(
             model_spec["name"],
             level=model_spec["level"],
             device=f"cuda:{local_rank}",

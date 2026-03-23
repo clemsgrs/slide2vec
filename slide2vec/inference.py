@@ -97,7 +97,7 @@ def _optional_float(value: Any) -> float | None:
 
 
 def _slurm_cpu_limit() -> int | None:
-    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_JOB_CPUS_PER_NODE"):
+    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
         value = os.environ.get(env_name)
         if not value:
             continue
@@ -850,6 +850,7 @@ def _compute_tile_embeddings_for_slide(
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
             return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
+    _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
         if resolved_backend == "cucim":
@@ -878,6 +879,7 @@ def _compute_tile_embeddings_for_slide(
                 resolved_indices = reorder[mask]
             else:
                 resolved_indices = reorder
+            _supertile_reorder = resolved_indices
         if preprocessing.adaptive_batching:
             batch_sampler = collate_fn.build_batch_sampler(execution.batch_size, resolved_indices)
         else:
@@ -919,7 +921,7 @@ def _compute_tile_embeddings_for_slide(
             logging.getLogger(__name__).info(
                 f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
                 f"({worker_context}); "
-                f"ignoring speed.num_workers={execution.num_workers}"
+                f"ignoring speed.num_dataloader_workers={execution.num_workers}"
             )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
@@ -935,7 +937,7 @@ def _compute_tile_embeddings_for_slide(
         collate_fn=collate_fn,
         **loader_kwargs,
     )
-    return _run_forward_pass(
+    tile_embeddings = _run_forward_pass(
         dataloader,
         loaded,
         autocast_context,
@@ -944,6 +946,10 @@ def _compute_tile_embeddings_for_slide(
         total_items=len(dataset),
         unit_label="region" if model.level == "region" else "tile",
     )
+    if _supertile_reorder is not None:
+        inverse = np.argsort(_supertile_reorder, kind="stable")
+        tile_embeddings = tile_embeddings[torch.as_tensor(inverse, dtype=torch.long)]
+    return tile_embeddings
 
 
 def _aggregate_tile_embeddings_for_slide(
@@ -997,6 +1003,9 @@ def _make_embedded_slide(
         raise ValueError(
             f"Tile embedding count ({_num_rows(tile_embeddings)}) does not match coordinate count ({len(coordinates)})"
         )
+    num_tiles = _require_attr(tiling_result, "num_tiles", allow_missing=True)
+    mask_preview_path = _require_attr(tiling_result, "mask_preview_path", allow_missing=True)
+    tiling_preview_path = _require_attr(tiling_result, "tiling_preview_path", allow_missing=True)
     return EmbeddedSlide(
         sample_id=slide.sample_id,
         tile_embeddings=tile_embeddings,
@@ -1005,6 +1014,9 @@ def _make_embedded_slide(
         tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
         image_path=slide.image_path,
         mask_path=slide.mask_path,
+        num_tiles=int(num_tiles) if num_tiles is not None else len(coordinates),
+        mask_preview_path=Path(mask_preview_path) if mask_preview_path is not None else None,
+        tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
         latents=latents,
     )
 
@@ -1702,14 +1714,18 @@ def _prepare_tiled_slides(
     num_workers: int,
 ) -> tuple[list[SlideSpec], list[Any], Path]:
     process_list_path = output_dir / "process_list.csv"
-    _tile_slides_with_progress(
+    tiling_artifacts = _tile_slides_with_progress(
         slide_records,
         preprocessing,
         output_dir=output_dir,
         num_workers=num_workers,
         process_list_path=process_list_path,
+    ) or []
+    _record_slide_metadata_in_process_list(
+        process_list_path,
+        slide_records,
+        tiling_artifacts=tiling_artifacts,
     )
-    _record_slide_metadata_in_process_list(process_list_path, slide_records)
     process_df = _load_process_df(process_list_path)
     tiling_results = []
     successful_slides = []
@@ -1732,7 +1748,7 @@ def _tile_slides_with_progress(
     output_dir: Path,
     num_workers: int,
     process_list_path: Path,
-) -> None:
+) -> list[Any]:
     stop_event = threading.Event()
     monitor = threading.Thread(
         target=_monitor_tiling_progress,
@@ -1741,7 +1757,7 @@ def _tile_slides_with_progress(
     )
     monitor.start()
     try:
-        _tile_slides(slide_records, preprocessing, output_dir=output_dir, num_workers=num_workers)
+        return _tile_slides(slide_records, preprocessing, output_dir=output_dir, num_workers=num_workers)
     finally:
         stop_event.set()
         monitor.join(timeout=1.0)
@@ -1781,11 +1797,11 @@ def _tile_slides(
     *,
     output_dir: Path,
     num_workers: int,
-):
+) -> list[Any]:
     from hs2p import tile_slides
 
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
-    tile_slides(
+    return tile_slides(
         slides,
         tiling=tiling_cfg,
         segmentation=segmentation_cfg,
@@ -1800,7 +1816,12 @@ def _tile_slides(
     )
 
 
-def _record_slide_metadata_in_process_list(process_list_path: Path, slide_records: Sequence[SlideSpec]) -> None:
+def _record_slide_metadata_in_process_list(
+    process_list_path: Path,
+    slide_records: Sequence[SlideSpec],
+    *,
+    tiling_artifacts: Sequence[Any],
+) -> None:
     import pandas as pd
 
     spacing_by_sample_id = {
@@ -1808,15 +1829,37 @@ def _record_slide_metadata_in_process_list(process_list_path: Path, slide_record
         for slide in slide_records
         if getattr(slide, "spacing_at_level_0", None) is not None
     }
+    mask_preview_by_sample_id = {
+        str(getattr(artifact, "sample_id")): getattr(artifact, "mask_preview_path", None)
+        for artifact in tiling_artifacts
+    }
+    tiling_preview_by_sample_id = {
+        str(getattr(artifact, "sample_id")): getattr(artifact, "tiling_preview_path", None)
+        for artifact in tiling_artifacts
+    }
     process_df = pd.read_csv(process_list_path)
     if "spacing_at_level_0" not in process_df.columns:
         process_df["spacing_at_level_0"] = [None] * len(process_df)
+    if "mask_preview_path" not in process_df.columns:
+        process_df["mask_preview_path"] = [None] * len(process_df)
+    if "tiling_preview_path" not in process_df.columns:
+        process_df["tiling_preview_path"] = [None] * len(process_df)
     if spacing_by_sample_id:
         mapped_spacing = process_df["sample_id"].astype(str).map(spacing_by_sample_id)
         process_df["spacing_at_level_0"] = process_df["spacing_at_level_0"].where(
             process_df["spacing_at_level_0"].notna(),
             mapped_spacing,
         )
+    mapped_mask_preview_paths = process_df["sample_id"].astype(str).map(mask_preview_by_sample_id)
+    process_df["mask_preview_path"] = process_df["mask_preview_path"].where(
+        process_df["mask_preview_path"].notna(),
+        mapped_mask_preview_paths,
+    )
+    mapped_tiling_preview_paths = process_df["sample_id"].astype(str).map(tiling_preview_by_sample_id)
+    process_df["tiling_preview_path"] = process_df["tiling_preview_path"].where(
+        process_df["tiling_preview_path"].notna(),
+        mapped_tiling_preview_paths,
+    )
     process_df.to_csv(process_list_path, index=False)
 
 
@@ -1894,7 +1937,9 @@ def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path)
 
 
 def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
-    import wholeslidedata as wsd
+    from slide2vec.utils.log_utils import suppress_c_stderr
+    with suppress_c_stderr():
+        import wholeslidedata as wsd
 
     wsi = wsd.WholeSlideImage(wsi_fp, backend=backend)
     min_spacing = wsi.spacings[0]

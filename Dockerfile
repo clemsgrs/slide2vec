@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
     cmake \
     zlib1g-dev \
+    libnuma1 \
     curl \
     vim screen \
     zip unzip \
@@ -104,6 +105,7 @@ ENV PATH="/home/user/.local/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libtiff-dev \
     zlib1g-dev \
+    libnuma1 \
     curl \
     vim screen \
     zip unzip \

@@ -115,17 +115,16 @@ class CuCIMTileReader:
         tiling_result: TilingResult,
         *,
         num_cucim_workers: int = 4,
-        gpu_decode: bool = False,
+        gpu_decode: bool = True,
         use_supertiles: bool = True,
     ):
-        self._image_path = image_path
+        from hs2p.wsi.cucim_reader import CuImageReader
         self._x = tiling_result.x
         self._y = tiling_result.y
         self._read_level = tiling_result.read_level
         self._tile_size_px = int(tiling_result.read_tile_size_px)
         self._num_cucim_workers = num_cucim_workers
-        self._gpu_decode = gpu_decode
-        self._cu_image = None
+        self._reader = CuImageReader(image_path, gpu_decode=gpu_decode)
 
         self._use_supertiles = use_supertiles
         if use_supertiles:
@@ -141,29 +140,13 @@ class CuCIMTileReader:
             self._tile_to_st = None
             self.ordered_indices = None
 
-    def _ensure_open(self):
-        if self._cu_image is None:
-            try:
-                from cucim import CuImage
-            except ImportError as exc:
-                raise ImportError(
-                    "cucim is required for on-the-fly tile reading. "
-                    "Install it with: pip install cucim-cuXX (where XX matches your CUDA version)"
-                ) from exc
-            self._cu_image = CuImage(str(self._image_path))
-
     def _read_region(self, locations, size):
-        kwargs = {
-            "level": int(self._read_level),
-            "num_workers": max(1, self._num_cucim_workers),
-        }
-        if self._gpu_decode:
-            kwargs["device"] = "cuda"
-        try:
-            return self._cu_image.read_region(locations, size, **kwargs)
-        except TypeError:
-            kwargs.pop("device", None)
-            return self._cu_image.read_region(locations, size, **kwargs)
+        return self._reader.read_region(
+            locations,
+            size,
+            level=int(self._read_level),
+            num_workers=self._num_cucim_workers,
+        )
 
     def read_batch(self, tile_indices: np.ndarray) -> torch.Tensor:
         tensor, _timing = self.read_batch_with_timing(tile_indices)
@@ -174,9 +157,9 @@ class CuCIMTileReader:
             return torch.empty(
                 (0, 3, self._tile_size_px, self._tile_size_px), dtype=torch.uint8
             ), {"reader_open_ms": 0.0, "reader_read_ms": 0.0}
-        was_closed = self._cu_image is None
+        was_closed = self._reader._cu_image is None
         open_start = time.perf_counter()
-        self._ensure_open()
+        self._reader._ensure_open()
         reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
         read_start = time.perf_counter()
 
@@ -242,7 +225,7 @@ class OnTheFlyBatchTileCollator:
         image_path: Path,
         tiling_result: TilingResult,
         num_cucim_workers: int = 4,
-        gpu_decode: bool = False,
+        gpu_decode: bool = True,
         use_supertiles: bool = True,
     ):
         self.tile_size = int(tiling_result.read_tile_size_px)

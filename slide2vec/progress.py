@@ -367,6 +367,27 @@ def create_cli_progress_reporter(*, output_dir: str | Path | None = None, stream
     return RichCliProgressReporter(output_dir=output_dir, console=console)
 
 
+def create_api_progress_reporter(*, output_dir: str | Path | None = None, stream=None):
+    try:
+        from rich.console import Console
+    except ImportError:
+        if _is_notebook_session() or _stream_is_interactive(stream):
+            return PlainTextCliProgressReporter(stream=stream or sys.stdout)
+        return NullProgressReporter()
+    if _is_notebook_session():
+        console_kwargs = {}
+        if stream is not None:
+            console_kwargs["file"] = stream
+        else:
+            console_kwargs["force_jupyter"] = True
+        console = Console(**console_kwargs)
+        return RichCliProgressReporter(output_dir=output_dir, console=console)
+    console = Console(file=stream or sys.stdout)
+    if not console.is_terminal:
+        return NullProgressReporter()
+    return RichCliProgressReporter(output_dir=output_dir, console=console)
+
+
 def get_progress_reporter():
     return _ACTIVE_REPORTER.get()
 
@@ -439,6 +460,28 @@ def _progress_task_key(base: str, payload: dict[str, Any]) -> str:
     if label is None:
         return base
     return f"{base}:{label}"
+
+
+def _is_notebook_session() -> bool:
+    try:
+        from IPython import get_ipython
+    except ImportError:
+        return False
+    shell = get_ipython()
+    if shell is None:
+        return False
+    return shell.__class__.__name__ == "ZMQInteractiveShell"
+
+
+def _stream_is_interactive(stream=None) -> bool:
+    target = stream or sys.stdout
+    isatty = getattr(target, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
 
 
 def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:

@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import logging
 import os
@@ -6,6 +7,24 @@ from typing import Optional
 
 import slide2vec.distributed as distributed
 from slide2vec.progress import emit_progress_log
+
+
+@contextlib.contextmanager
+def suppress_c_stderr():
+    """Temporarily redirect C-level stderr to /dev/null.
+
+    Used to silence noisy C library messages that bypass Python logging
+    (e.g. ASAP/spdlog's 'error opening log file' emitted at import time).
+    """
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_fd = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(saved_fd, 2)
+        os.close(saved_fd)
+        os.close(devnull_fd)
 
 
 class _ProgressAwareStreamHandler(logging.Handler):
