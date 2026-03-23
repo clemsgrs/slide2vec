@@ -2,7 +2,7 @@ from slide2vec.api import EmbeddedSlide, ExecutionOptions, Model, Pipeline, Prep
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
 
 
-__version__ = "3.1.0"
+__version__ = "3.2.0"
 
 __all__ = [
     "Model",
