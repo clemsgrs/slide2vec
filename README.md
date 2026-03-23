@@ -21,18 +21,10 @@ pip install "slide2vec[models]"
 ## Python API
 
 ```python
-from slide2vec import Model, PreprocessingConfig
+from slide2vec import Model
 
-model = Model.from_pretrained("virchow2", level="tile")
-preprocessing = PreprocessingConfig(
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
-    tissue_threshold=0.1,
-)
-embedded = model.embed_slide(
-    "/path/to/slide.svs",
-    preprocessing=preprocessing,
-)
+model = Model.from_pretrained("virchow2")
+embedded = model.embed_slide("/path/to/slide.svs")
 
 tile_embeddings = embedded.tile_embeddings
 coordinates = embedded.coordinates
@@ -43,11 +35,15 @@ By default, `ExecutionOptions()` uses all available GPUs. Set `ExecutionOptions(
 Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:
 
 ```python
-from slide2vec import ExecutionOptions, Pipeline
+from slide2vec import ExecutionOptions, Pipeline, PreprocessingConfig
 
 pipeline = Pipeline(
     model=model,
-    preprocessing=preprocessing,
+    preprocessing=PreprocessingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        tissue_threshold=0.1,
+    ),
     execution=ExecutionOptions(output_dir="outputs/demo"),
 )
 result = pipeline.run(manifest_path="/path/to/slides.csv")
@@ -115,4 +111,5 @@ docker run --rm -it \
 
 - [`docs/cli.md`](docs/cli.md) for the config-driven CLI guide
 - [`docs/python-api.md`](docs/python-api.md) for the detailed API reference
+- [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API
 - [`docs/models.md`](docs/models.md) for the full supported-model catalog

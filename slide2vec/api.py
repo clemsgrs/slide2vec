@@ -1,4 +1,6 @@
+import logging
 from dataclasses import dataclass, field, replace
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 
@@ -22,6 +24,8 @@ DEFAULT_LEVEL_BY_NAME = {
     "prism": "slide",
     "titan": "slide",
 }
+
+logger = logging.getLogger("slide2vec")
 
 PathLike = str | Path
 
@@ -179,6 +183,9 @@ class EmbeddedSlide:
     tile_size_lv0: int
     image_path: Path
     mask_path: Path | None = None
+    num_tiles: int | None = None
+    mask_preview_path: Path | None = None
+    tiling_preview_path: Path | None = None
     latents: Any | None = None
 
 
@@ -230,7 +237,7 @@ class Model:
         device: str = "auto",
     ) -> "Model":
         canonical_name = _canonical_model_name(name)
-        resolved_level = level or DEFAULT_LEVEL_BY_NAME.get(canonical_name, "tile")
+        resolved_level = _resolve_model_level(canonical_name, requested_level=level)
         return cls(
             name=canonical_name,
             level=resolved_level,
@@ -267,7 +274,8 @@ class Model:
         _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
         if preprocessing is not None:
             validate_model_runtime_compatibility(self, preprocessing, resolved)
-        return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
 
     def aggregate_tiles(
         self,
@@ -280,14 +288,15 @@ class Model:
 
         resolved = _coerce_execution_options(execution, model=self)
         _require_output_dir_for_persistence(resolved, method_name="Model.aggregate_tiles(...)")
-        return aggregate_tiles(self, tile_artifacts, execution=resolved, preprocessing=preprocessing)
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            return aggregate_tiles(self, tile_artifacts, execution=resolved, preprocessing=preprocessing)
 
     @overload
     def embed_slide(
         self,
         slide: PathLike,
         *,
-        preprocessing: PreprocessingConfig,
+        preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
         mask_path: PathLike | None = None,
@@ -300,7 +309,7 @@ class Model:
         self,
         slide: Mapping[str, object] | SlideLike | SlideSpec,
         *,
-        preprocessing: PreprocessingConfig,
+        preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
         sample_id: None = None,
         mask_path: None = None,
@@ -312,7 +321,7 @@ class Model:
         self,
         slide: SlideInput,
         *,
-        preprocessing: PreprocessingConfig,
+        preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
         mask_path: PathLike | None = None,
@@ -339,19 +348,21 @@ class Model:
         self,
         slides: SlideSequence,
         *,
-        preprocessing: PreprocessingConfig,
+        preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
     ) -> list[EmbeddedSlide]:
         from slide2vec.inference import embed_slides
 
         resolved = _coerce_execution_options(execution, model=self)
-        validate_model_runtime_compatibility(self, preprocessing, resolved)
-        return embed_slides(
-            self,
-            slides,
-            preprocessing=preprocessing,
-            execution=resolved,
-        )
+        resolved_preprocessing = _resolve_direct_api_preprocessing(self, preprocessing)
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            validate_model_runtime_compatibility(self, resolved_preprocessing, resolved)
+            return embed_slides(
+                self,
+                slides,
+                preprocessing=resolved_preprocessing,
+                execution=resolved,
+            )
 
     def _load_backend(self) -> "LoadedModel":
         if self._backend is None:
@@ -390,20 +401,27 @@ class Pipeline:
     ) -> RunResult:
         from slide2vec.inference import run_pipeline
 
-        if not tiling_only:
-            validate_model_runtime_compatibility(self.model, self.preprocessing, self.execution)
-        return run_pipeline(
-            self.model,
-            slides=slides,
-            manifest_path=manifest_path,
-            preprocessing=self.preprocessing,
-            tiling_only=tiling_only,
-            execution=self.execution,
-        )
+        with _auto_progress_reporting(output_dir=self.execution.output_dir):
+            if not tiling_only:
+                validate_model_runtime_compatibility(self.model, self.preprocessing, self.execution)
+            return run_pipeline(
+                self.model,
+                slides=slides,
+                manifest_path=manifest_path,
+                preprocessing=self.preprocessing,
+                tiling_only=tiling_only,
+                execution=self.execution,
+            )
 
 
 def _canonical_model_name(name: str) -> str:
     return canonicalize_model_name(name)
+
+
+def _resolve_model_level(name: str, *, requested_level: str | None) -> str:
+    if requested_level is not None:
+        return requested_level
+    return DEFAULT_LEVEL_BY_NAME.get(name, "tile")
 
 
 def _coerce_execution_options(
@@ -444,3 +462,80 @@ def _recommended_execution_precision(model: Model | None) -> str:
     if settings is not None and settings.precision is not None:
         return settings.precision
     return "fp32"
+
+
+def _resolve_direct_api_preprocessing(
+    model: Model,
+    preprocessing: PreprocessingConfig | None,
+) -> PreprocessingConfig:
+    if preprocessing is not None:
+        return preprocessing
+
+    settings = get_recommended_model_settings(getattr(model, "name", None))
+    target_tile_size_px = _default_target_tile_size_px(model, settings)
+    target_spacing_um = _default_target_spacing_um(model, settings)
+    return PreprocessingConfig(
+        backend="auto",
+        target_spacing_um=target_spacing_um,
+        target_tile_size_px=target_tile_size_px,
+    )
+
+
+def _default_target_tile_size_px(model: Model, settings) -> int:
+    explicit_input_size = getattr(model, "_model_kwargs", {}).get("input_size")
+    if explicit_input_size is not None:
+        return int(explicit_input_size)
+    if settings is not None:
+        return int(settings.input_size[0])
+    return int(PreprocessingConfig().target_tile_size_px)
+
+
+def _default_target_spacing_um(model: Model, settings) -> float:
+    if settings is None or not getattr(settings, "spacings_um", ()):
+        default_spacing = float(PreprocessingConfig().target_spacing_um)
+        logger.warning(
+            "No recommended preprocessing spacing is known for model '%s'; defaulting direct API calls to "
+            "target_spacing_um=%g. Pass PreprocessingConfig(...) to override.",
+            getattr(model, "name", None),
+            default_spacing,
+        )
+        return default_spacing
+
+    supported_spacings = tuple(float(value) for value in settings.spacings_um)
+    if len(supported_spacings) == 1:
+        return supported_spacings[0]
+
+    if any(abs(value - 0.5) <= 1e-8 for value in supported_spacings):
+        chosen = 0.5
+    else:
+        chosen = min(supported_spacings)
+    supported_text = ", ".join(f"{spacing:g}" for spacing in supported_spacings)
+    logger.warning(
+        "Model '%s' supports multiple spacings [%s]; defaulting direct API calls to target_spacing_um=%g. "
+        "Pass PreprocessingConfig(target_spacing_um=...) to choose another supported spacing.",
+        getattr(model, "name", None),
+        supported_text,
+        chosen,
+    )
+    return chosen
+
+
+@contextmanager
+def _auto_progress_reporting(*, output_dir: PathLike | None):
+    from slide2vec.progress import (
+        NullProgressReporter,
+        activate_progress_reporter,
+        create_api_progress_reporter,
+        get_progress_reporter,
+    )
+
+    active = get_progress_reporter()
+    if not isinstance(active, NullProgressReporter):
+        yield
+        return
+    reporter = create_api_progress_reporter(output_dir=output_dir)
+    if isinstance(reporter, NullProgressReporter):
+        yield
+        return
+    with activate_progress_reporter(reporter):
+        yield

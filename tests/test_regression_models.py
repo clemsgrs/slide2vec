@@ -525,6 +525,196 @@ def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monk
     assert captured["kwargs"]["execution"].num_gpus == 2
 
 
+def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
+    import slide2vec.progress as progress
+
+    model = Model.from_pretrained("virchow2")
+    reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
+    captured = {}
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        )
+    ]
+
+    monkeypatch.setattr(progress, "create_api_progress_reporter", lambda **kwargs: reporter)
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["reporter"] = progress.get_progress_reporter()
+        return expected
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    result = model.embed_slides(
+        ["/tmp/slide-a.svs"],
+        preprocessing=PreprocessingConfig(),
+    )
+
+    assert result == expected
+    assert captured["reporter"] is reporter
+    assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
+
+
+def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
+    import slide2vec.progress as progress
+
+    model = Model.from_pretrained("virchow2")
+    outer_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
+    replacement_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
+    captured = {}
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        )
+    ]
+
+    monkeypatch.setattr(progress, "create_api_progress_reporter", lambda **kwargs: replacement_reporter)
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["reporter"] = progress.get_progress_reporter()
+        return expected
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    with progress.activate_progress_reporter(outer_reporter):
+        result = model.embed_slides(
+            ["/tmp/slide-a.svs"],
+            preprocessing=PreprocessingConfig(),
+        )
+
+    assert result == expected
+    assert captured["reporter"] is outer_reporter
+
+
+def test_model_embed_slide_infers_preprocessing_from_model_defaults(monkeypatch):
+    model = Model.from_pretrained("virchow2")
+    expected = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((2, 3), dtype=np.float32),
+        slide_embedding=None,
+        coordinates=np.array([[0, 0], [1, 1]], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+    )
+    captured = {}
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["model"] = model_arg
+        captured["slides"] = slides
+        captured["preprocessing"] = kwargs["preprocessing"]
+        return [expected]
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    result = model.embed_slide("/tmp/slide-a.svs")
+
+    assert result is expected
+    assert captured["model"] is model
+    assert captured["slides"][0]["sample_id"] == "slide-a"
+    assert captured["slides"][0]["image_path"] == Path("/tmp/slide-a.svs")
+    assert isinstance(captured["preprocessing"], PreprocessingConfig)
+    assert captured["preprocessing"].backend == "auto"
+    assert captured["preprocessing"].target_tile_size_px == 224
+    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
+
+
+def test_model_embed_slides_warns_when_default_spacing_is_selected_from_multiple_recommendations(
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    model = Model.from_pretrained("musk")
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        )
+    ]
+    captured = {}
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["preprocessing"] = kwargs["preprocessing"]
+        return expected
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        result = model.embed_slides(
+            ["/tmp/slide-a.svs"],
+        )
+
+    assert result == expected
+    assert captured["preprocessing"].target_tile_size_px == 384
+    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
+    assert "supports multiple spacings" in caplog.text
+    assert "target_spacing_um" in caplog.text
+
+
+def test_model_embed_slides_warns_and_uses_smallest_spacing_when_half_micron_is_unavailable(
+    monkeypatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    import slide2vec.api as api
+    import slide2vec.model_settings as model_settings
+
+    model = Model.from_pretrained("virchow2")
+    expected = [
+        EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+            slide_embedding=None,
+            coordinates=np.array([[0, 0]], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=None,
+        )
+    ]
+    captured = {}
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["preprocessing"] = kwargs["preprocessing"]
+        return expected
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+    monkeypatch.setattr(
+        api,
+        "get_recommended_model_settings",
+        lambda name: model_settings.RecommendedModelSettings(
+            input_size=(224, 224),
+            spacings_um=(2.0, 1.0, 0.25),
+            precision="fp16",
+        ),
+    )
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        result = model.embed_slides(
+            ["/tmp/slide-a.svs"],
+        )
+
+    assert result == expected
+    assert captured["preprocessing"].target_tile_size_px == 224
+    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.25)
+    assert "supports multiple spacings" in caplog.text
+    assert "0.25" in caplog.text
+
+
 def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
     model = Model.from_pretrained("virchow2")
 

@@ -476,6 +476,32 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
     assert tile_artifacts == ["tile-a"]
     assert slide_artifacts == ["slide-a", "slide-b"]
 
+
+def test_make_embedded_slide_carries_tiling_artifact_fields():
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+        num_tiles=7,
+        mask_preview_path=Path("/tmp/slide-a-mask-preview.png"),
+        tiling_preview_path=Path("/tmp/slide-a-tiling-preview.png"),
+    )
+
+    embedded = inference._make_embedded_slide(
+        slide=slide,
+        tiling_result=tiling_result,
+        tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+        slide_embedding=None,
+    )
+
+    assert embedded.num_tiles == 7
+    assert embedded.mask_preview_path == Path("/tmp/slide-a-mask-preview.png")
+    assert embedded.tiling_preview_path == Path("/tmp/slide-a-tiling-preview.png")
+
+
 def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -866,6 +892,41 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     recorded = pd.read_csv(process_list_path)
     assert recorded.loc[0, "spacing_at_level_0"] == pytest.approx(0.25)
+
+
+def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    tiling_artifacts = [
+        SimpleNamespace(
+            sample_id="slide-a",
+            mask_preview_path=Path("/tmp/preview/mask/slide-a.png"),
+            tiling_preview_path=Path("/tmp/preview/tiling/slide-a.png"),
+        )
+    ]
+
+    monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: tiling_artifacts)
+    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+
+    slide = make_slide("slide-a")
+
+    inference._prepare_tiled_slides(
+        [slide],
+        PreprocessingConfig(),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    recorded = pd.read_csv(process_list_path)
+    assert Path(recorded.loc[0, "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png")
+    assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png")
 
 
 def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():

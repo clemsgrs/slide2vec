@@ -107,6 +107,10 @@ def load_process_df(
         df["spacing_at_level_0"] = [None] * len(df)
     if "tiles_tar_path" not in df.columns:
         df["tiles_tar_path"] = [None] * len(df)
+    if "mask_preview_path" not in df.columns:
+        df["mask_preview_path"] = [None] * len(df)
+    if "tiling_preview_path" not in df.columns:
+        df["tiling_preview_path"] = [None] * len(df)
     if needs_feature_status and "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
     if include_aggregation_status and "aggregation_status" not in df.columns:
@@ -122,6 +126,8 @@ def load_process_df(
         "coordinates_meta_path",
     ]
     ordered_columns.append("tiles_tar_path")
+    ordered_columns.append("mask_preview_path")
+    ordered_columns.append("tiling_preview_path")
     if needs_feature_status:
         ordered_columns.append("feature_status")
     if include_aggregation_status:
@@ -139,4 +145,6 @@ def load_tiling_result_from_row(row):
     setattr(tiling_result, "coordinates_npz_path", Path(row["coordinates_npz_path"]))
     setattr(tiling_result, "coordinates_meta_path", Path(row["coordinates_meta_path"]))
     setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
+    setattr(tiling_result, "mask_preview_path", _optional_path(row.get("mask_preview_path")))
+    setattr(tiling_result, "tiling_preview_path", _optional_path(row.get("tiling_preview_path")))
     return tiling_result

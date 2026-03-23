@@ -130,6 +130,27 @@ def test_model_from_pretrained_canonicalizes_conchv15_alias():
     assert model.name == "conchv15"
     assert model.level == "tile"
 
+
+def test_model_from_pretrained_defaults_tile_capable_models_to_tile_level():
+    model = Model.from_pretrained("virchow2")
+
+    assert model.name == "virchow2"
+    assert model.level == "tile"
+
+
+def test_model_from_pretrained_requires_explicit_region_opt_in():
+    model = Model.from_pretrained("virchow2", level="region")
+
+    assert model.name == "virchow2"
+    assert model.level == "region"
+
+
+def test_model_from_pretrained_keeps_slide_default_for_slide_models():
+    model = Model.from_pretrained("prism")
+
+    assert model.name == "prism"
+    assert model.level == "slide"
+
 def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
     import slide2vec.api as api
 
