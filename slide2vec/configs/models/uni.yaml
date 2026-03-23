@@ -1,40 +1,13 @@
-# csv: "/data/temporary/clement/leopard/csvs/dev-slide2vec.csv"
-# csv: "/data/temporary/clement/leopard/csvs/tcga/tcga-slide2vec.csv"
-# csv: "/data/temporary/clement/leopard/csvs/validation-without-pen-marks-slide2vec.csv"
-# csv: "/data/temporary/clement/leopard/csvs/test-slide2vec.csv"
-# csv: "/data/temporary/clement/leopard/csvs/brazil-slide2vec.csv"
-# csv: "/data/temporary/clement/leopard/csvs/cologne-slide2vec.csv"
-# csv: "/data/temporary/clement/code/ab-mil/data/unicorn-task-1/validation+test.csv"
-csv: "/data/temporary/clement/code/slide2vec/tmp.csv"
+csv:
 
 output_dir: "output/debug"
-
-save_previews: true
+save_previews: false
 
 tiling:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    target_tile_size_px: 2048 # size of the tiles to extract, in pixels
-    tissue_threshold: 0.01 # threshold used to filter out tiles that have less tissue than this value (percentage)
-  filter_params:
-    ref_tile_size: 224
+    target_tile_size_px: 224 # size of the tiles to extract, in pixels
 
 model:
   level: "region"
   name: "uni"
-  input_size: 224 # UNI consumes 224x224 tiles after region unrolling; keep this explicit since tiling tiles are 2048px
-  batch_size: 1
-
-wandb:
-  enable: false
-  project: "unicorn"
-  username: "clemsg"
-  exp_name: "features"
-  # tags: ["features", "dev", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "tcga", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "validation", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "test", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "brazil", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  # tags: ["features", "cologne", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]
-  tags: ["features", "${model.name}", "${model.level}", "${tiling.params.target_tile_size_px}"]

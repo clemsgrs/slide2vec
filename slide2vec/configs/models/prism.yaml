@@ -1,24 +1,18 @@
 csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
-save_previews: true
+save_previews: false
 
 tiling:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.07 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     target_tile_size_px: 224 # size of the tiles to extract, in pixels
-    tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
-  filter_params:
-    ref_tile_size: 224
 
 model:
   level: "slide"
   name: "prism"
-  batch_size: 32
   save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
   save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
 
 speed:
   fp16: true
-  num_workers_embedding: 16

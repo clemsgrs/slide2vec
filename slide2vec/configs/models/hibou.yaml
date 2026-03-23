@@ -1,8 +1,7 @@
-csv: # path to csv containing slide paths
+csv:
 
-output_dir: "output" # output directory
-
-save_previews: true
+output_dir: "output"
+save_previews: false
 
 tiling:
   params:
@@ -13,7 +12,6 @@ model:
   level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   arch: "hibou-b" # Hibou model architectures, options: ("hibou-b", "hibou-L")
   name: "hibou"
-  batch_size: 1
 
 speed:
   fp16: true # use mixed precision during model inference

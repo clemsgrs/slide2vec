@@ -1,7 +1,7 @@
 csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
-save_previews: true
+save_previews: false
 
 tiling:
   params:
@@ -11,7 +11,6 @@ tiling:
 model:
   level: "slide" # level at which to extract the features ("tile", "region" or "slide")
   name: "titan"
-  batch_size: 32
   save_tile_embeddings: true # whether to save tile embeddings alongside the pooled slide embedding
 
 speed:

@@ -6,14 +6,11 @@ save_previews: false
 tiling:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
-    tolerance: 0.1 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     target_tile_size_px: 224 # size of the tiles to extract, in pixels
-    tissue_threshold: 0.1 # threshold used to filter out tiles that have less tissue than this value (percentage)
 
 model:
   level: "tile"
   name: "virchow2"
-  batch_size: 32
 
 speed:
   fp16: true

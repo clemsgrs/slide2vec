@@ -1,8 +1,7 @@
 csv: # path to csv containing slide paths
 
 output_dir: "output" # output directory
-
-save_previews: true
+save_previews: false
 
 tiling:
   params:
@@ -12,7 +11,6 @@ tiling:
 model:
   level: "tile" # level at which to extract the features ("tile" or "region")
   name: "kaiko-midnight"
-  batch_size: 1
 
 speed:
   fp16: true # use mixed precision during model inference
