@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import os
 import time
 from typing import TYPE_CHECKING
 
@@ -115,7 +116,7 @@ class CuCIMTileReader:
         tiling_result: TilingResult,
         *,
         num_cucim_workers: int = 4,
-        gpu_decode: bool = False,
+        gpu_decode: bool = True,
         use_supertiles: bool = True,
     ):
         self._image_path = image_path
@@ -143,6 +144,8 @@ class CuCIMTileReader:
 
     def _ensure_open(self):
         if self._cu_image is None:
+            if self._gpu_decode:
+                os.environ["ENABLE_CUSLIDE2"] = "1"
             try:
                 from cucim import CuImage
             except ImportError as exc:
@@ -242,7 +245,7 @@ class OnTheFlyBatchTileCollator:
         image_path: Path,
         tiling_result: TilingResult,
         num_cucim_workers: int = 4,
-        gpu_decode: bool = False,
+        gpu_decode: bool = True,
         use_supertiles: bool = True,
     ):
         self.tile_size = int(tiling_result.read_tile_size_px)

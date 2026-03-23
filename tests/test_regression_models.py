@@ -671,10 +671,10 @@ def test_model_embed_slides_warns_and_uses_smallest_spacing_when_half_micron_is_
     monkeypatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    import slide2vec.api as api
     import slide2vec.model_settings as model_settings
+    import slide2vec.api as api
 
-    model = Model.from_pretrained("virchow2")
+    model = Model.from_pretrained("custom-model")
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
@@ -696,7 +696,7 @@ def test_model_embed_slides_warns_and_uses_smallest_spacing_when_half_micron_is_
     monkeypatch.setattr(
         api,
         "get_recommended_model_settings",
-        lambda name: model_settings.RecommendedModelSettings(
+        lambda _name: model_settings.RecommendedModelSettings(
             input_size=(224, 224),
             spacings_um=(2.0, 1.0, 0.25),
             precision="fp16",
