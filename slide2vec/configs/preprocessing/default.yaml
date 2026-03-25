@@ -10,7 +10,7 @@ seed: 0 # seed for reproducibility
 
 tiling:
   on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
-  gpu_decode: true # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set false to fall back to CPU decoding
+  gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)
   jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
