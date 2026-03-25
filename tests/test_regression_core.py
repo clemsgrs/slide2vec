@@ -656,6 +656,35 @@ def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_
 
     assert preprocessing.num_cucim_workers == 5
 
+
+def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
+    cfg = SimpleNamespace(
+        output_dir="/tmp/run-004",
+        resume=False,
+        save_previews=False,
+        tiling=SimpleNamespace(
+            backend="cucim",
+            read_coordinates_from=None,
+            read_tiles_from=None,
+            params=SimpleNamespace(
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                tolerance=0.07,
+                overlap=0.0,
+                tissue_threshold=0.1,
+                drop_holes=False,
+                use_padding=True,
+            ),
+            seg_params={"downsample": 64},
+            filter_params={"ref_tile_size": 224},
+            preview=SimpleNamespace(downsample=32),
+        ),
+    )
+
+    preprocessing = PreprocessingConfig.from_config(cfg)
+
+    assert preprocessing.gpu_decode is False
+
 def test_validate_removed_options_rejects_legacy_preview_keys():
     pytest.importorskip("omegaconf")
     from omegaconf import OmegaConf

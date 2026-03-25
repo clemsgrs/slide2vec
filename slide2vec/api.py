@@ -65,7 +65,7 @@ class PreprocessingConfig:
     read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
     on_the_fly: bool = True
-    gpu_decode: bool = True
+    gpu_decode: bool = False
     adaptive_batching: bool = False
     use_supertiles: bool = True
     jpeg_backend: str = "turbojpeg"
@@ -82,7 +82,7 @@ class PreprocessingConfig:
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
         read_tiles_from = getattr(tiling, "read_tiles_from", None)
         on_the_fly = bool(getattr(tiling, "on_the_fly", True))
-        gpu_decode = bool(getattr(tiling, "gpu_decode", True))
+        gpu_decode = bool(getattr(tiling, "gpu_decode", False))
         adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
         return cls(
             backend=tiling.backend,

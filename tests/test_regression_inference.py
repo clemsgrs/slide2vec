@@ -2152,6 +2152,11 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
         def __init__(self, **kwargs):
             raise AssertionError("wsd collator should not be used")
 
+    fake_dataset_module = types.SimpleNamespace(
+        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
+        TileIndexDataset=lambda tile_indices: list(tile_indices),
+    )
+    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
     monkeypatch.setitem(sys.modules, "slide2vec.data.cucim_tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCucimCollator))
     monkeypatch.setitem(sys.modules, "slide2vec.data.wsd_tile_reader", types.SimpleNamespace(WSDOnTheFlyBatchTileCollator=DummyWSDCollator))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
@@ -2187,6 +2192,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
 
     assert result.shape == (2, 3)
     assert captured["cucim_collator_kwargs"]["num_cucim_workers"] == 4
+    assert captured["cucim_collator_kwargs"]["gpu_decode"] is False
 
 
 def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(monkeypatch):

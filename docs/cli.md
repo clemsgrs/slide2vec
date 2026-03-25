@@ -104,7 +104,7 @@ Enable it in your config:
 
 ```yaml
 tiling:
-  gpu_decode: true  # default
+  gpu_decode: false  # default
 ```
 
 Or override from the command line:
@@ -123,7 +123,7 @@ This can give a significant speedup (~3.8× for batch decoding) on `.svs` and `.
 
 **Requirements:** `libnuma1` must be installed and `nvImageCodec` must be available (included with `cucim-cu12`). If the installed CuCIM version does not support `device="cuda"`, slide2vec falls back silently to CPU decoding.
 
-**Default:** `true` — disable with `tiling.gpu_decode: false` if needed.
+**Default:** `false` — enable with `tiling.gpu_decode: true` when the runtime supports GPU decode.
 
 ### GPU count
 
