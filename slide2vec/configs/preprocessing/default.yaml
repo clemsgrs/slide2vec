@@ -21,9 +21,9 @@ tiling:
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    target_tile_size_px: 256 # size of the tiles to extract, in pixels
+    target_tile_size_px: 224 # size of the tiles to extract, in pixels
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    tissue_threshold: 0.01 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
+    tissue_threshold: 0.1 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
   seg_params:
     # downsample controls which pyramid level is read for tissue segmentation.
     # Larger values are faster and use less memory; smaller values can improve mask precision.
@@ -35,7 +35,7 @@ tiling:
     use_otsu: false # use otsu's method instead of simple binary thresholding
     use_hsv: true # use HSV thresholding instead of simple binary thresholding
   filter_params:
-    ref_tile_size: 16 # reference tile size at the target spacing
+    ref_tile_size: ${tiling.params.target_tile_size_px} # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.target_spacing_um will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
     filter_white: false # whether to filter out mostly white tiles
