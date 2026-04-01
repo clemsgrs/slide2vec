@@ -59,23 +59,13 @@ RUN set -eux; \
 RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /root/.cache/pip
 
-COPY --chown=user:user requirements.in /opt/app/requirements.in
-COPY --chown=user:user requirements-models.in /opt/app/requirements-models.in
-RUN python -m pip install \
-      --no-cache-dir \
-      --no-color \
-      --requirement /opt/app/requirements-models.in \
-    && rm -rf /root/.cache/pip
-
 COPY --chown=user:user slide2vec /opt/app/slide2vec
-COPY --chown=user:user setup.py /opt/app/setup.py
-COPY --chown=user:user setup.cfg /opt/app/setup.cfg
 COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
-COPY --chown=user:user MANIFEST.in /opt/app/MANIFEST.in
 COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
 
-RUN python -m pip install /opt/app
+RUN python -m pip install --no-cache-dir --no-color "/opt/app[all]" \
+    && rm -rf /root/.cache/pip
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
 RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \

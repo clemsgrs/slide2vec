@@ -6,11 +6,10 @@ pandas
 pillow
 rich
 tqdm
-hs2p>=2.5.1,<3
+hs2p>=3
 torch
 torchvision
 transformers
 wandb
-wholeslidedata<0.0.16
 einops
 timm

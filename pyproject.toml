@@ -1,6 +1,144 @@
 [build-system]
-requires = ["setuptools>=42.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "slide2vec"
+version = "3.2.1"
+description = "Embedding of whole slide images with Foundation Models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [
+    { name = "Clément Grisi", email = "clement.grisi@radboudumc.nl" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "hs2p>=3",
+    "omegaconf",
+    "h5py",
+    "matplotlib",
+    "numpy<2",
+    "pandas",
+    "pillow",
+    "PyTurboJPEG",
+    "rich",
+    "tqdm",
+    "torch",
+    "torchvision",
+    "transformers",
+    "wandb",
+    "einops",
+    "timm",
+]
+
+[project.urls]
+Homepage = "https://github.com/clemsgrs/slide2vec"
+"Bug Tracker" = "https://github.com/clemsgrs/slide2vec/issues"
+
+[project.scripts]
+slide2vec = "slide2vec.cli:main"
+
+[project.optional-dependencies]
+openslide = [
+    "hs2p[openslide]>=3",
+]
+asap = [
+    "hs2p[asap]>=3",
+]
+cucim = [
+    "hs2p[cucim]>=3",
+]
+vips = [
+    "hs2p[vips]>=3",
+]
+models = [
+    "torch>=2.3,<2.8",
+    "torchvision>=0.18.0",
+    "einops>=0.8.0",
+    "timm>=1.0.3",
+    "transformers>=4.53",
+    "huggingface-hub>=0.30.0,<1.0",
+    "environs",
+    "einops-exts>=0.0.4",
+    "sacremoses",
+    "xformers>=0.0.31",
+    # Hibou
+    "scipy~=1.8.1",
+    "scikit-image~=0.19.3",
+    # MUSK & CONCH
+    "musk @ git+https://github.com/lilab-stanford/MUSK.git",
+    "conch @ git+https://github.com/Mahmoodlab/CONCH.git",
+    # Prov-GigaPath
+    "torchmetrics>=0.10.3",
+    "fvcore",
+    "iopath",
+    "webdataset",
+    "scikit-survival",
+    "scikit-learn",
+    "fairscale",
+    "packaging==23.2",
+    "ninja==1.11.1.1",
+    "psutil<6",
+    "prov-gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
+]
+all = [
+    "hs2p[all]>=3",
+    "torch>=2.3,<2.8",
+    "torchvision>=0.18.0",
+    "einops>=0.8.0",
+    "timm>=1.0.3",
+    "transformers>=4.53",
+    "huggingface-hub>=0.30.0,<1.0",
+    "environs",
+    "einops-exts>=0.0.4",
+    "sacremoses",
+    "xformers>=0.0.31",
+    # Hibou
+    "scipy~=1.8.1",
+    "scikit-image~=0.19.3",
+    # MUSK & CONCH
+    "musk @ git+https://github.com/lilab-stanford/MUSK.git",
+    "conch @ git+https://github.com/Mahmoodlab/CONCH.git",
+    # Prov-GigaPath
+    "torchmetrics>=0.10.3",
+    "fvcore",
+    "iopath",
+    "webdataset",
+    "scikit-survival",
+    "scikit-learn",
+    "fairscale",
+    "packaging==23.2",
+    "ninja==1.11.1.1",
+    "psutil<6",
+    "prov-gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
+]
+testing = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "mypy>=0.910",
+    "flake8>=3.9",
+    "flake8-pyproject>=1.2.3",
+    "tox>=3.24",
+]
+
+[tool.setuptools]
+include-package-data = true
+zip-safe = false
+
+[tool.setuptools.packages.find]
+include = ["slide2vec*"]
+
+[tool.setuptools.package-data]
+slide2vec = ["py.typed"]
+"slide2vec.configs" = ["*.yaml", "models/*.yaml", "preprocessing/*.yaml"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=slide2vec"
@@ -22,6 +160,9 @@ warn_unreachable = true
 warn_unused_configs = true
 no_implicit_reexport = true
 
+[tool.flake8]
+max-line-length = 160
+
 [tool.bumpver]
 current_version = "3.2.1"
 version_pattern = "MAJOR.MINOR.PATCH"
@@ -29,13 +170,14 @@ commit = false       # We do version bumping in CI, not as a commit
 tag = false          # Git tag already exists — we don't auto-tag
 push = false         # Don't push anything in CI
 files = [
-    "setup.cfg",
+    "pyproject.toml",
     "slide2vec/__init__.py"
 ]
 
 [tool.bumpver.file_patterns]
-"setup.cfg" = [
-    '^version = {version}$',
+"pyproject.toml" = [
+    '^current_version = "{version}"$',
+    '^version = "{version}"$',
 ]
 "slide2vec/__init__.py" = [
     '^__version__ = "{version}"$',

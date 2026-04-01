@@ -2058,8 +2058,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    fake_cucim_module = types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.cucim_tile_reader", fake_cucim_module)
+    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
@@ -2148,17 +2147,12 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    class DummyWSDCollator:
-        def __init__(self, **kwargs):
-            raise AssertionError("wsd collator should not be used")
-
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
         TileIndexDataset=lambda tile_indices: list(tile_indices),
     )
     monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.cucim_tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCucimCollator))
-    monkeypatch.setitem(sys.modules, "slide2vec.data.wsd_tile_reader", types.SimpleNamespace(WSDOnTheFlyBatchTileCollator=DummyWSDCollator))
+    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCucimCollator))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
@@ -2224,11 +2218,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
         def __call__(self, image):
             return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
 
-    class DummyCucimCollator:
-        def __init__(self, **kwargs):
-            raise AssertionError("cucim collator should not be used")
-
-    class DummyWSDCollator:
+    class DummyCollator:
         ordered_indices = None
 
         def __init__(self, **kwargs):
@@ -2239,8 +2229,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setitem(sys.modules, "slide2vec.data.cucim_tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCucimCollator))
-    monkeypatch.setitem(sys.modules, "slide2vec.data.wsd_tile_reader", types.SimpleNamespace(WSDOnTheFlyBatchTileCollator=DummyWSDCollator))
+    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
@@ -2437,3 +2426,20 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
             "tiling_result": tiling_result,
         },
     )
+
+
+def test_scale_coordinates_scales_down():
+    from slide2vec.inference import _scale_coordinates
+
+    coords = np.array([[10, 20], [30, 40]])
+    # base=0.25, target=0.5 → scale=0.5 → coordinates halved
+    result = _scale_coordinates(coords, base_spacing_um=0.25, spacing=0.5)
+    np.testing.assert_array_equal(result, [[5, 10], [15, 20]])
+
+
+def test_scale_coordinates_identity_when_spacings_equal():
+    from slide2vec.inference import _scale_coordinates
+
+    coords = np.array([[10, 20], [30, 40]])
+    result = _scale_coordinates(coords, base_spacing_um=0.5, spacing=0.5)
+    np.testing.assert_array_equal(result, [[10, 20], [30, 40]])

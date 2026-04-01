@@ -387,10 +387,9 @@ def aggregate_tiles(
         image_path = Path(metadata["image_path"])
         if model.name == "prov-gigapath":
             coordinates = _scale_coordinates(
-                image_path,
                 coordinates,
+                float(_require_attr(tiling_result, "base_spacing_um")),
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_slide_backend(preprocessing, tiling_result)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -853,25 +852,16 @@ def _compute_tile_embeddings_for_slide(
     _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
-        if resolved_backend == "cucim":
-            from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
+        from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator
 
-            collate_fn = OnTheFlyBatchTileCollator(
-                image_path=slide.image_path,
-                tiling_result=tiling_result,
-                num_cucim_workers=preprocessing.num_cucim_workers,
-                gpu_decode=preprocessing.gpu_decode,
-                use_supertiles=preprocessing.use_supertiles,
-            )
-        else:
-            from slide2vec.data.wsd_tile_reader import WSDOnTheFlyBatchTileCollator
-
-            collate_fn = WSDOnTheFlyBatchTileCollator(
-                image_path=slide.image_path,
-                tiling_result=tiling_result,
-                backend=resolved_backend,
-                use_supertiles=preprocessing.use_supertiles,
-            )
+        collate_fn = OnTheFlyBatchTileCollator(
+            image_path=slide.image_path,
+            tiling_result=tiling_result,
+            backend=resolved_backend,
+            num_cucim_workers=preprocessing.num_cucim_workers,
+            gpu_decode=preprocessing.gpu_decode,
+            use_supertiles=preprocessing.use_supertiles,
+        )
         if collate_fn.ordered_indices is not None:
             reorder = collate_fn.ordered_indices
             if tile_indices is not None:
@@ -968,10 +958,9 @@ def _aggregate_tile_embeddings_for_slide(
     coordinates = _coordinate_matrix(tiling_result)
     if model.name == "prov-gigapath":
         coordinates = _scale_coordinates(
-            slide.image_path,
             coordinates,
+            float(_require_attr(tiling_result, "base_spacing_um")),
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_slide_backend(preprocessing, tiling_result),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -1936,14 +1925,8 @@ def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path)
     return load_tiling_result(coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path)
 
 
-def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
-    from slide2vec.utils.log_utils import suppress_c_stderr
-    with suppress_c_stderr():
-        import wholeslidedata as wsd
-
-    wsi = wsd.WholeSlideImage(wsi_fp, backend=backend)
-    min_spacing = wsi.spacings[0]
-    scale = min_spacing / spacing
+def _scale_coordinates(coordinates: np.ndarray, base_spacing_um: float, spacing: float) -> np.ndarray:
+    scale = base_spacing_um / spacing
     return (coordinates * scale).astype(int)
 
 

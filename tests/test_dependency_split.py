@@ -1,14 +1,13 @@
 import ast
-import configparser
 import re
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP_CFG = ROOT / "setup.cfg"
+PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
 CORE_REQUIREMENTS = ROOT / "requirements.in"
 CORE_REQUIREMENTS_TXT = ROOT / "requirements.txt"
-MODELS_REQUIREMENTS = ROOT / "requirements-models.in"
 
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
@@ -31,14 +30,20 @@ CORE_RUNTIME_REQUIREMENT_NAMES = {
     "tqdm",
     "timm",
     "wandb",
-    "wholeslidedata",
 }
 
 
-def _load_setup_cfg() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser()
-    parser.read(SETUP_CFG, encoding="utf-8")
-    return parser
+def _load_pyproject() -> dict:
+    return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+
+
+def _dep_names(deps: list[str]) -> set[str]:
+    names: set[str] = set()
+    for dep in deps:
+        match = re.match(r"^[A-Za-z0-9_.-]+", dep)
+        assert match is not None, f"Could not parse dependency: {dep}"
+        names.add(match.group(0).replace("_", "-").lower())
+    return names
 
 
 def _requirement_names(raw_block: str) -> set[str]:
@@ -76,39 +81,15 @@ def _top_level_imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_setup_cfg_moves_model_runtime_deps_into_models_extra():
-    parser = _load_setup_cfg()
+def test_pyproject_moves_model_runtime_deps_into_models_extra():
+    data = _load_pyproject()
 
-    install_requires = _requirement_names(parser["options"]["install_requires"])
-    models_extra = _requirement_names(parser["options.extras_require"]["models"])
+    install_requires = _dep_names(data["project"]["dependencies"])
+    models_extra = _dep_names(data["project"]["optional-dependencies"]["models"])
 
     assert FOUNDATION_REQUIREMENT_NAMES.isdisjoint(install_requires)
     assert FOUNDATION_REQUIREMENT_NAMES <= models_extra
     assert CORE_RUNTIME_REQUIREMENT_NAMES <= install_requires
-
-
-def test_requirements_files_split_core_from_foundation_runtime():
-    core_requirements_text = CORE_REQUIREMENTS.read_text(encoding="utf-8")
-    foundation_requirements_text = MODELS_REQUIREMENTS.read_text(encoding="utf-8")
-    core_requirements = _requirement_names(core_requirements_text)
-    foundation_requirements = _requirement_names(foundation_requirements_text)
-    core_requirement_lines = _requirement_lines(core_requirements_text)
-    foundation_requirement_lines = _requirement_lines(foundation_requirements_text)
-
-    assert FOUNDATION_REQUIREMENT_NAMES.isdisjoint(core_requirements)
-    assert FOUNDATION_REQUIREMENT_NAMES <= foundation_requirements
-    assert CORE_RUNTIME_REQUIREMENT_NAMES <= core_requirements
-    assert "-r requirements.in" in foundation_requirements_text
-    assert core_requirement_lines["torch"] == "torch"
-    assert core_requirement_lines["torchvision"] == "torchvision"
-    assert core_requirement_lines["einops"] == "einops"
-    assert core_requirement_lines["timm"] == "timm"
-    assert core_requirement_lines["transformers"] == "transformers"
-    assert foundation_requirement_lines["torch"] == "torch>=2.3,<2.8"
-    assert foundation_requirement_lines["torchvision"] == "torchvision>=0.18.0"
-    assert foundation_requirement_lines["einops"] == "einops>=0.8.0"
-    assert foundation_requirement_lines["timm"] == "timm>=1.0.3"
-    assert foundation_requirement_lines["transformers"] == "transformers>=4.53"
 
 
 def test_requirements_txt_matches_generic_core_runtime_requirements():
