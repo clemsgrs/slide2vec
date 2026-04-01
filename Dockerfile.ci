@@ -55,21 +55,9 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# Python deps & app
+# Python deps
 RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /root/.cache/pip
-
-COPY --chown=user:user slide2vec /opt/app/slide2vec
-COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
-COPY --chown=user:user README.md /opt/app/README.md
-COPY --chown=user:user LICENSE /opt/app/LICENSE
-
-RUN python -m pip install --no-cache-dir --no-color "/opt/app[models,asap]" \
-    && rm -rf /root/.cache/pip
-
-# register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
-RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
-    ldconfig
 
 USER user
 WORKDIR /opt/app
