@@ -47,7 +47,7 @@ TILING_FILTER_PARAMS = dict(
 )
 
 # -- tiling.preview --
-TILING_PREVIEW = dict(downsample=32)
+TILING_PREVIEW = dict(save=False, downsample=32)
 
 # -- model --
 MODEL_PARAMS = dict(
@@ -116,7 +116,6 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "output_dir": str(tmp_path),
         "resume": False,
         "resume_dirname": None,
-        "save_previews": False,  # override (default: true)
         "seed": 0,
         "tiling": {
             "read_coordinates_from": None,

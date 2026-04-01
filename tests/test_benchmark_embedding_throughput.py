@@ -92,7 +92,6 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
         "csv": "/original/slides.csv",
         "output_dir": "/original/output",
         "resume": True,
-        "save_previews": True,
         "model": {
             "name": "virchow2",
             "level": "tile",
@@ -101,6 +100,7 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
         "tiling": {
             "backend": "asap",
             "params": {"target_spacing_um": 0.5, "target_tile_size_px": 224},
+            "preview": {"save": True},
         },
         "speed": {
             "num_workers": 12,
@@ -121,7 +121,7 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
     assert cfg.csv == str(tmp_path / "slides.csv")
     assert cfg.output_dir == str(tmp_path / "trial-output")
     assert cfg.resume is False
-    assert cfg.save_previews is False
+    assert cfg.tiling.preview.save is False
     assert cfg.wandb.enable is False
     assert cfg.model.batch_size == 32
     assert cfg.speed.num_workers_embedding == 3

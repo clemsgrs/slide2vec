@@ -1,9 +1,9 @@
 csv: ""
 
 output_dir: "output"
-save_previews: false
-
 tiling:
+  preview:
+    save: false
   params:
     target_spacing_um: 0.5
     target_tile_size_px: 224

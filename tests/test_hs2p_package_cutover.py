@@ -91,7 +91,21 @@ def test_load_slide_manifest_preserves_optional_spacing_at_level_0(monkeypatch, 
     assert slides[1].spacing_at_level_0 is None
 
 
-def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
+def test_load_slide_manifest_rejects_legacy_mask_columns(tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    manifest = tmp_path / "legacy.csv"
+    manifest.write_text(
+        "sample_id,image_path,tissue_mask_path\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported manifest schema"):
+        helper.load_slide_manifest(manifest)
+
+
+def test_load_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 
     process_list = tmp_path / "process_list.csv"
@@ -122,6 +136,21 @@ def test_load_process_df_requires_hs2p_process_list_columns(tmp_path: Path):
         "error",
         "traceback",
     ]
+    assert df.loc[0, "mask_path"] == "/data/slide-1-mask.png"
+
+
+def test_load_process_df_rejects_legacy_mask_columns(tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    process_list = tmp_path / "legacy-process_list.csv"
+    process_list.write_text(
+        "sample_id,image_path,tissue_mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Unsupported process_list.csv schema"):
+        helper.load_process_df(process_list)
 
 
 def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):

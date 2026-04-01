@@ -106,7 +106,6 @@ def main():
             "output_dir": str(tmp_path),
             "resume": False,
             "resume_dirname": None,
-            "save_previews": False,
             "seed": 0,
             "tiling": {
                 "read_coordinates_from": None,
@@ -116,7 +115,7 @@ def main():
                 "params": TILING_PARAMS,
                 "seg_params": TILING_SEG_PARAMS,
                 "filter_params": TILING_FILTER_PARAMS,
-                "preview": {"downsample": 32},
+                "preview": {"save": False, "downsample": 32},
             },
             "model": MODEL_PARAMS,
             "speed": SPEED_PARAMS,

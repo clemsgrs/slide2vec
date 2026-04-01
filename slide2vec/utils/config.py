@@ -16,17 +16,11 @@ logger = logging.getLogger("slide2vec")
 
 def validate_removed_options(cfg) -> None:
     if "restrict_to_tissue" in cfg.model:
-        raise ValueError(
-            "model.restrict_to_tissue is no longer supported in slide2vec."
-        )
+        raise ValueError("model.restrict_to_tissue is not a valid slide2vec option.")
     if "visualize" in cfg:
-        raise ValueError(
-            "visualize is no longer supported in slide2vec; use save_previews instead."
-        )
+        raise ValueError("visualize is not a valid slide2vec option.")
     if "visu_params" in cfg.tiling:
-        raise ValueError(
-            "tiling.visu_params is no longer supported in slide2vec; use tiling.preview instead."
-        )
+        raise ValueError("tiling.visu_params is not a valid slide2vec option.")
 
 
 def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> None:

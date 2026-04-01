@@ -49,6 +49,11 @@ def _hs2p_exports() -> dict[str, Any]:
 def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
     manifest_path = Path(csv_path).resolve()
     df = pd.read_csv(manifest_path)
+    legacy_mask_columns = sorted(
+        column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
+    )
+    if legacy_mask_columns:
+        raise ValueError(f"Unsupported manifest schema in {manifest_path}")
     missing = sorted(set(REQUIRED_MANIFEST_COLUMNS) - set(df.columns))
     if missing:
         raise ValueError(
@@ -96,6 +101,11 @@ def load_process_df(
 ) -> pd.DataFrame:
     process_list_path = Path(process_list_path)
     df = pd.read_csv(process_list_path)
+    legacy_mask_columns = sorted(
+        column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
+    )
+    if legacy_mask_columns:
+        raise ValueError(f"Unsupported process_list.csv schema in {process_list_path}")
     missing = sorted(set(BASE_PROCESS_COLUMNS) - set(df.columns))
     if missing:
         raise ValueError(
