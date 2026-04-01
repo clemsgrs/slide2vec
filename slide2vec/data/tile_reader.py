@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
 import time
 from typing import TYPE_CHECKING
 
@@ -42,137 +41,127 @@ class SuperTileBatchSampler:
         return len(self.batches)
 
 
-@dataclass(frozen=True)
-class _SuperTile:
-    x_lv0: int
-    y_lv0: int
-    read_size_px: int
-    block_size: int
+class WSITileReader:
+    """Random-access tile reader for WSI files supporting four backends.
 
+    Backends: ``"cucim"`` (default), ``"openslide"``, ``"vips"``, ``"asap"``.
 
-def _build_supertile_index(tiling_result: TilingResult):
-    """Build super tile grouping and per-tile lookup structures.
+    When ``use_supertiles=True``, tiles are grouped into 8×8/4×4/2×2 blocks so
+    that one region read covers multiple tiles.  ``num_cucim_workers`` and
+    ``gpu_decode`` are cucim-specific and silently unused for other backends.
 
-    Returns:
-        supertiles: list of ``_SuperTile``
-        tile_to_st: array mapping tile_index → supertile id
-        tile_crop_x: array mapping tile_index → crop x offset at read level
-        tile_crop_y: array mapping tile_index → crop y offset at read level
-        ordered_indices: tile indices reordered so tiles in the same super tile are contiguous
-    """
-    from hs2p.api import (
-        _iter_grouped_read_plans_for_tar_extraction,
-        _resolve_read_step_px,
-        _resolve_step_px_lv0,
-    )
-
-    read_step_px = _resolve_read_step_px(tiling_result)
-    step_px_lv0 = _resolve_step_px_lv0(tiling_result)
-
-    num_tiles = int(tiling_result.num_tiles)
-    tile_to_st = np.empty(num_tiles, dtype=np.int32)
-    tile_crop_x = np.empty(num_tiles, dtype=np.int32)
-    tile_crop_y = np.empty(num_tiles, dtype=np.int32)
-    supertiles: list[_SuperTile] = []
-    ordered_indices: list[int] = []
-
-    for plan in _iter_grouped_read_plans_for_tar_extraction(
-        result=tiling_result,
-        read_step_px=read_step_px,
-        step_px_lv0=step_px_lv0,
-    ):
-        st_id = len(supertiles)
-        tile_index_iter = iter(plan.tile_indices)
-        for x_idx in range(plan.block_size):
-            for y_idx in range(plan.block_size):
-                tile_idx = next(tile_index_iter)
-                tile_to_st[tile_idx] = st_id
-                tile_crop_x[tile_idx] = x_idx * read_step_px
-                tile_crop_y[tile_idx] = y_idx * read_step_px
-                ordered_indices.append(tile_idx)
-
-        supertiles.append(_SuperTile(
-            x_lv0=int(plan.x),
-            y_lv0=int(plan.y),
-            read_size_px=int(plan.read_size_px),
-            block_size=int(plan.block_size),
-        ))
-
-    return supertiles, tile_to_st, tile_crop_x, tile_crop_y, np.array(ordered_indices, dtype=np.int64)
-
-
-class CuCIMTileReader:
-    """Read tiles directly from a WSI using cucim's batched read_region.
-
-    When ``use_supertiles=True``, tiles are grouped into larger read regions
-    (8x8, 4x4, or 2x2 blocks) following the same logic as hs2p tar extraction.
-    One ``read_region`` call per super tile replaces many individual calls.
+    WSI handles are opened lazily on first read via ``_ensure_open()``, making
+    this safe to construct before forking DataLoader workers.
     """
 
     def __init__(
         self,
-        image_path: Path,
-        tiling_result: TilingResult,
+        image_path: "Path",
+        tiling_result: "TilingResult",
         *,
+        backend: str = "cucim",
         num_cucim_workers: int = 4,
-        gpu_decode: bool = True,
+        gpu_decode: bool = False,
         use_supertiles: bool = True,
     ):
-        from hs2p.wsi.cucim_reader import CuImageReader
+        self._image_path = str(image_path)
+        self._backend = backend
+        self._num_cucim_workers = num_cucim_workers
+        self._gpu_decode = gpu_decode
+        self._read_level = int(tiling_result.read_level)
+        self._tile_size_px = int(tiling_result.effective_tile_size_px)
         self._x = tiling_result.x
         self._y = tiling_result.y
-        self._read_level = tiling_result.read_level
-        self._tile_size_px = int(tiling_result.read_tile_size_px)
-        self._num_cucim_workers = num_cucim_workers
-        self._reader = CuImageReader(image_path, gpu_decode=gpu_decode)
+        self._reader = None
 
-        self._use_supertiles = use_supertiles
         if use_supertiles:
-            (
-                self._supertiles,
-                self._tile_to_st,
-                self._tile_crop_x,
-                self._tile_crop_y,
-                self.ordered_indices,
-            ) = _build_supertile_index(tiling_result)
+            from hs2p.wsi.streaming.plans import build_supertile_index
+
+            index = build_supertile_index(tiling_result)
+            self._supertile_plans = index.plans
+            self._tile_to_st = index.tile_to_st
+            self._tile_crop_x = index.tile_crop_x
+            self._tile_crop_y = index.tile_crop_y
+            self.ordered_indices = index.ordered_indices
         else:
-            self._supertiles = None
+            self._supertile_plans = None
             self._tile_to_st = None
             self.ordered_indices = None
+        self._use_supertiles = use_supertiles
 
-    def _read_region(self, locations, size):
-        return self._reader.read_region(
-            locations,
-            size,
-            level=int(self._read_level),
-            num_workers=self._num_cucim_workers,
-        )
+    def _ensure_open(self) -> None:
+        if self._reader is not None:
+            return
+        if self._backend == "cucim":
+            from hs2p.wsi.backends.cucim import CuCIMReader
+
+            self._reader = CuCIMReader(self._image_path, gpu_decode=self._gpu_decode)
+        elif self._backend == "openslide":
+            from hs2p.wsi.backends.openslide import OpenSlideReader
+
+            self._reader = OpenSlideReader(self._image_path)
+        elif self._backend == "vips":
+            from hs2p.wsi.backends.vips import VIPSReader
+
+            self._reader = VIPSReader(self._image_path)
+        elif self._backend == "asap":
+            from hs2p.wsi.backends.asap import ASAPReader
+            from slide2vec.utils.log_utils import suppress_c_stderr
+
+            with suppress_c_stderr():
+                self._reader = ASAPReader(self._image_path)
+        else:
+            raise ValueError(
+                f"Unknown backend: {self._backend!r}. "
+                "Choose from: cucim, openslide, vips, asap"
+            )
+
+    def _read_regions_batch(
+        self, locations: list[tuple[int, int]], size: int
+    ) -> list[np.ndarray]:
+        """Read one or more regions; returns list of (H, W, 3) uint8 arrays."""
+        if self._backend == "cucim":
+            return list(
+                self._reader.read_regions(
+                    locations,
+                    self._read_level,
+                    (size, size),
+                    num_workers=self._num_cucim_workers,
+                )
+            )
+        return [
+            self._reader.read_region(loc, self._read_level, (size, size))
+            for loc in locations
+        ]
 
     def read_batch(self, tile_indices: np.ndarray) -> torch.Tensor:
         tensor, _timing = self.read_batch_with_timing(tile_indices)
         return tensor
 
-    def read_batch_with_timing(self, tile_indices: np.ndarray) -> tuple[torch.Tensor, dict[str, float]]:
+    def read_batch_with_timing(
+        self, tile_indices: np.ndarray
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        ts = self._tile_size_px
         if len(tile_indices) == 0:
-            return torch.empty(
-                (0, 3, self._tile_size_px, self._tile_size_px), dtype=torch.uint8
-            ), {"reader_open_ms": 0.0, "reader_read_ms": 0.0}
-        was_closed = self._reader._cu_image is None
+            return (
+                torch.empty((0, 3, ts, ts), dtype=torch.uint8),
+                {"reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+        was_closed = self._reader is None
         open_start = time.perf_counter()
-        self._reader._ensure_open()
+        self._ensure_open()
         reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
         read_start = time.perf_counter()
-
-        if not self._use_supertiles:
-            tensor = self._read_batch_simple(tile_indices)
-        else:
+        if self._use_supertiles:
             tensor = self._read_batch_supertiles(tile_indices)
+        else:
+            tensor = self._read_batch_simple(tile_indices)
         reader_read_ms = (time.perf_counter() - read_start) * 1000.0
         return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
 
     def _read_batch_simple(self, tile_indices: np.ndarray) -> torch.Tensor:
         locations = [(int(self._x[i]), int(self._y[i])) for i in tile_indices]
-        regions = self._read_region(locations, (self._tile_size_px, self._tile_size_px))
+        regions = self._read_regions_batch(locations, self._tile_size_px)
         batch = np.stack([np.asarray(r)[:, :, :3] for r in regions], axis=0)
         return torch.from_numpy(batch).permute(0, 3, 1, 2).contiguous()
 
@@ -180,58 +169,60 @@ class CuCIMTileReader:
         ts = self._tile_size_px
         batch = np.empty((len(tile_indices), ts, ts, 3), dtype=np.uint8)
 
-        # Group requested tiles by super tile, then by read_size for batched reads.
-        st_to_batch_positions: dict[int, list[int]] = defaultdict(list)
-        for batch_pos, tile_idx in enumerate(tile_indices):
-            st_id = int(self._tile_to_st[tile_idx])
-            st_to_batch_positions[st_id].append(batch_pos)
+        # Group batch positions by supertile, then supertiles by read_size.
+        st_to_positions: dict[int, list[int]] = defaultdict(list)
+        for pos, tile_idx in enumerate(tile_indices):
+            st_to_positions[int(self._tile_to_st[tile_idx])].append(pos)
 
         by_read_size: dict[int, list[int]] = defaultdict(list)
-        for st_id in st_to_batch_positions:
-            rs = self._supertiles[st_id].read_size_px
-            by_read_size[rs].append(st_id)
+        for st_id in st_to_positions:
+            by_read_size[self._supertile_plans[st_id].read_size_px].append(st_id)
 
         for read_size, st_ids in by_read_size.items():
             locations = [
-                (self._supertiles[st_id].x_lv0, self._supertiles[st_id].y_lv0)
+                (self._supertile_plans[st_id].x, self._supertile_plans[st_id].y)
                 for st_id in st_ids
             ]
-            regions = self._read_region(locations, (read_size, read_size))
+            regions = self._read_regions_batch(locations, read_size)
             for st_id, region in zip(st_ids, regions):
                 region_arr = np.asarray(region)[:, :, :3]
-                for batch_pos in st_to_batch_positions[st_id]:
-                    tile_idx = int(tile_indices[batch_pos])
+                for pos in st_to_positions[st_id]:
+                    tile_idx = int(tile_indices[pos])
                     cx = int(self._tile_crop_x[tile_idx])
                     cy = int(self._tile_crop_y[tile_idx])
-                    batch[batch_pos] = region_arr[cy : cy + ts, cx : cx + ts]
+                    batch[pos] = region_arr[cy : cy + ts, cx : cx + ts]
 
         return torch.from_numpy(batch).permute(0, 3, 1, 2).contiguous()
 
 
 class OnTheFlyBatchTileCollator:
-    """Collator that reads tiles directly from a WSI via cucim.
+    """Collator that reads tiles directly from a WSI via the configured backend.
 
-    Same interface as ``BatchTileCollator``: returns ``(indices_tensor, image_tensor)``.
+    Returns ``(indices_tensor, image_tensor, timing_dict)`` where
+    ``image_tensor`` is ``(B, 3, read_tile_size_px, read_tile_size_px)`` uint8.
 
     When super tiles are enabled (default), tiles are grouped into larger read
     regions to reduce the number of WSI reads.  Use ``ordered_indices`` to
-    reorder the dataset so that tiles within the same super tile are batched
-    together by the DataLoader.
+    reorder the dataset so tiles within the same super tile are batched together
+    by the DataLoader.  Use ``build_batch_sampler()`` to ensure no super tile is
+    ever split across batches.
     """
 
     def __init__(
         self,
         *,
-        image_path: Path,
-        tiling_result: TilingResult,
+        image_path: "Path",
+        tiling_result: "TilingResult",
+        backend: str = "cucim",
         num_cucim_workers: int = 4,
-        gpu_decode: bool = True,
+        gpu_decode: bool = False,
         use_supertiles: bool = True,
     ):
-        self.tile_size = int(tiling_result.read_tile_size_px)
-        self._reader = CuCIMTileReader(
+        self.tile_size = int(tiling_result.effective_tile_size_px)
+        self._reader = WSITileReader(
             image_path,
             tiling_result,
+            backend=backend,
             num_cucim_workers=num_cucim_workers,
             gpu_decode=gpu_decode,
             use_supertiles=use_supertiles,
@@ -250,10 +241,7 @@ class OnTheFlyBatchTileCollator:
         """Build a batch sampler that never splits super tiles across batches.
 
         ``dataset_indices`` are the tile indices that will be in the dataset
-        (after any DDP filtering).  The sampler groups consecutive dataset
-        positions that belong to the same super tile.
-
-        Returns None when super tiles are disabled.
+        (after any DDP filtering).  Returns ``None`` when super tiles are disabled.
         """
         if self._reader._tile_to_st is None:
             return None

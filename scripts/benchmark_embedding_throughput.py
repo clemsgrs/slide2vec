@@ -346,7 +346,8 @@ def build_trial_config(
     config["csv"] = str(csv_path)
     config["output_dir"] = str(output_dir)
     config["resume"] = False
-    config["save_previews"] = False
+    config.setdefault("tiling", {}).setdefault("preview", {})
+    config["tiling"]["preview"]["save"] = False
     config["wandb"]["enable"] = False
     config["model"]["batch_size"] = int(batch_size)
     config["speed"]["num_workers_embedding"] = int(embedding_workers)
@@ -803,8 +804,8 @@ def _build_model_pipeline_from_config(config: dict[str, Any]):
         segmentation=dict(tiling_cfg.get("seg_params", {})),
         filtering=dict(tiling_cfg.get("filter_params", {})),
         preview={
-            "save_mask_preview": bool(config.get("save_previews", False)),
-            "save_tiling_preview": bool(config.get("save_previews", False)),
+            "save_mask_preview": bool(preview.get("save", False)),
+            "save_tiling_preview": bool(preview.get("save", False)),
             "downsample": int(preview.get("downsample", 32)),
         },
     )

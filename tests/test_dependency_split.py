@@ -1,14 +1,10 @@
 import ast
-import configparser
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP_CFG = ROOT / "setup.cfg"
+PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
-CORE_REQUIREMENTS = ROOT / "requirements.in"
-CORE_REQUIREMENTS_TXT = ROOT / "requirements.txt"
-MODELS_REQUIREMENTS = ROOT / "requirements-models.in"
 
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
@@ -31,38 +27,33 @@ CORE_RUNTIME_REQUIREMENT_NAMES = {
     "tqdm",
     "timm",
     "wandb",
-    "wholeslidedata",
 }
 
 
-def _load_setup_cfg() -> configparser.ConfigParser:
-    parser = configparser.ConfigParser()
-    parser.read(SETUP_CFG, encoding="utf-8")
-    return parser
-
-
-def _requirement_names(raw_block: str) -> set[str]:
-    names: set[str] = set()
-    for line in raw_block.splitlines():
-        requirement = line.strip()
-        if not requirement or requirement.startswith("#") or requirement.startswith("-r "):
+def _load_list_from_pyproject(key: str) -> list[str]:
+    raw = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(rf"^{re.escape(key)} = \[(.*?)^\]", raw, re.S | re.M)
+    assert match is not None, f"Could not find {key} in pyproject.toml"
+    items: list[str] = []
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        match = re.match(r"^[A-Za-z0-9_.-]+", requirement)
-        assert match is not None, f"Could not parse requirement line: {requirement}"
+        if "#" in stripped:
+            stripped = stripped.split("#", 1)[0].rstrip()
+        if stripped.endswith(","):
+            stripped = stripped[:-1].rstrip()
+        items.append(ast.literal_eval(stripped))
+    return items
+
+
+def _dep_names(deps: list[str]) -> set[str]:
+    names: set[str] = set()
+    for dep in deps:
+        match = re.match(r"^[A-Za-z0-9_.-]+", dep)
+        assert match is not None, f"Could not parse dependency: {dep}"
         names.add(match.group(0).replace("_", "-").lower())
     return names
-
-
-def _requirement_lines(raw_block: str) -> dict[str, str]:
-    lines: dict[str, str] = {}
-    for raw_line in raw_block.splitlines():
-        requirement = raw_line.strip()
-        if not requirement or requirement.startswith("#") or requirement.startswith("-r "):
-            continue
-        match = re.match(r"^[A-Za-z0-9_.-]+", requirement)
-        assert match is not None, f"Could not parse requirement line: {requirement}"
-        lines[match.group(0).replace("_", "-").lower()] = requirement
-    return lines
 
 
 def _top_level_imported_modules(path: Path) -> set[str]:
@@ -76,49 +67,33 @@ def _top_level_imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_setup_cfg_moves_model_runtime_deps_into_models_extra():
-    parser = _load_setup_cfg()
-
-    install_requires = _requirement_names(parser["options"]["install_requires"])
-    models_extra = _requirement_names(parser["options.extras_require"]["models"])
+def test_pyproject_moves_model_runtime_deps_into_models_extra():
+    install_requires = _dep_names(_load_list_from_pyproject("dependencies"))
+    models_extra = _dep_names(_load_list_from_pyproject("models"))
 
     assert FOUNDATION_REQUIREMENT_NAMES.isdisjoint(install_requires)
     assert FOUNDATION_REQUIREMENT_NAMES <= models_extra
     assert CORE_RUNTIME_REQUIREMENT_NAMES <= install_requires
 
 
-def test_requirements_files_split_core_from_foundation_runtime():
-    core_requirements_text = CORE_REQUIREMENTS.read_text(encoding="utf-8")
-    foundation_requirements_text = MODELS_REQUIREMENTS.read_text(encoding="utf-8")
-    core_requirements = _requirement_names(core_requirements_text)
-    foundation_requirements = _requirement_names(foundation_requirements_text)
-    core_requirement_lines = _requirement_lines(core_requirements_text)
-    foundation_requirement_lines = _requirement_lines(foundation_requirements_text)
+def test_pyproject_uses_upstream_gigapath_distribution_name():
+    models_extra = _dep_names(_load_list_from_pyproject("models"))
+    all_extra = _dep_names(_load_list_from_pyproject("all"))
 
-    assert FOUNDATION_REQUIREMENT_NAMES.isdisjoint(core_requirements)
-    assert FOUNDATION_REQUIREMENT_NAMES <= foundation_requirements
-    assert CORE_RUNTIME_REQUIREMENT_NAMES <= core_requirements
-    assert "-r requirements.in" in foundation_requirements_text
-    assert core_requirement_lines["torch"] == "torch"
-    assert core_requirement_lines["torchvision"] == "torchvision"
-    assert core_requirement_lines["einops"] == "einops"
-    assert core_requirement_lines["timm"] == "timm"
-    assert core_requirement_lines["transformers"] == "transformers"
-    assert foundation_requirement_lines["torch"] == "torch>=2.3,<2.8"
-    assert foundation_requirement_lines["torchvision"] == "torchvision>=0.18.0"
-    assert foundation_requirement_lines["einops"] == "einops>=0.8.0"
-    assert foundation_requirement_lines["timm"] == "timm>=1.0.3"
-    assert foundation_requirement_lines["transformers"] == "transformers>=4.53"
+    assert "gigapath" in models_extra
+    assert "gigapath" in all_extra
+    assert "prov-gigapath" not in models_extra
+    assert "prov-gigapath" not in all_extra
 
 
-def test_requirements_txt_matches_generic_core_runtime_requirements():
-    requirement_lines = _requirement_lines(CORE_REQUIREMENTS_TXT.read_text(encoding="utf-8"))
+def test_pyproject_declares_core_runtime_requirements():
+    install_requires = _dep_names(_load_list_from_pyproject("dependencies"))
 
-    assert requirement_lines["torch"] == "torch"
-    assert requirement_lines["torchvision"] == "torchvision"
-    assert requirement_lines["einops"] == "einops"
-    assert requirement_lines["timm"] == "timm"
-    assert requirement_lines["transformers"] == "transformers"
+    assert "torch" in install_requires
+    assert "torchvision" in install_requires
+    assert "einops" in install_requires
+    assert "timm" in install_requires
+    assert "transformers" in install_requires
 
 
 def test_readme_documents_core_and_models_installs():

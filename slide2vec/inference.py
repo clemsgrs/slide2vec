@@ -37,7 +37,7 @@ from slide2vec.progress import (
     read_progress_events,
     read_tiling_progress_snapshot,
 )
-from slide2vec.utils.coordinates import coordinate_arrays, coordinate_matrix
+from slide2vec.utils.coordinates import coordinate_arrays
 
 if TYPE_CHECKING:
     from hs2p import SlideSpec
@@ -383,14 +383,14 @@ def aggregate_tiles(
             Path(metadata["coordinates_npz_path"]),
             Path(metadata["coordinates_meta_path"]),
         )
-        coordinates = _coordinate_matrix(tiling_result)
+        x_values, y_values = _coordinate_arrays(tiling_result)
+        coordinates = np.column_stack((x_values, y_values))
         image_path = Path(metadata["image_path"])
         if model.name == "prov-gigapath":
             coordinates = _scale_coordinates(
-                image_path,
                 coordinates,
+                float(_require_attr(tiling_result, "base_spacing_um")),
                 float(_require_attr(tiling_result, "target_spacing_um")),
-                metadata.get("backend", _resolve_slide_backend(preprocessing, tiling_result)),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -853,25 +853,16 @@ def _compute_tile_embeddings_for_slide(
     _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
-        if resolved_backend == "cucim":
-            from slide2vec.data.cucim_tile_reader import OnTheFlyBatchTileCollator
+        from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator
 
-            collate_fn = OnTheFlyBatchTileCollator(
-                image_path=slide.image_path,
-                tiling_result=tiling_result,
-                num_cucim_workers=preprocessing.num_cucim_workers,
-                gpu_decode=preprocessing.gpu_decode,
-                use_supertiles=preprocessing.use_supertiles,
-            )
-        else:
-            from slide2vec.data.wsd_tile_reader import WSDOnTheFlyBatchTileCollator
-
-            collate_fn = WSDOnTheFlyBatchTileCollator(
-                image_path=slide.image_path,
-                tiling_result=tiling_result,
-                backend=resolved_backend,
-                use_supertiles=preprocessing.use_supertiles,
-            )
+        collate_fn = OnTheFlyBatchTileCollator(
+            image_path=slide.image_path,
+            tiling_result=tiling_result,
+            backend=resolved_backend,
+            num_cucim_workers=preprocessing.num_cucim_workers,
+            gpu_decode=preprocessing.gpu_decode,
+            use_supertiles=preprocessing.use_supertiles,
+        )
         if collate_fn.ordered_indices is not None:
             reorder = collate_fn.ordered_indices
             if tile_indices is not None:
@@ -965,13 +956,13 @@ def _aggregate_tile_embeddings_for_slide(
     if model.level != "slide":
         return None, None
     torch = _import_torch()
-    coordinates = _coordinate_matrix(tiling_result)
+    x_values, y_values = _coordinate_arrays(tiling_result)
+    coordinates = np.column_stack((x_values, y_values))
     if model.name == "prov-gigapath":
         coordinates = _scale_coordinates(
-            slide.image_path,
             coordinates,
+            float(_require_attr(tiling_result, "base_spacing_um")),
             float(_require_attr(tiling_result, "target_spacing_um")),
-            _resolve_slide_backend(preprocessing, tiling_result),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -998,10 +989,10 @@ def _make_embedded_slide(
     slide_embedding=None,
     latents=None,
 ) -> EmbeddedSlide:
-    coordinates = _coordinate_matrix(tiling_result)
-    if _num_rows(tile_embeddings) != len(coordinates):
+    x_values, y_values = _coordinate_arrays(tiling_result)
+    if _num_rows(tile_embeddings) != len(x_values):
         raise ValueError(
-            f"Tile embedding count ({_num_rows(tile_embeddings)}) does not match coordinate count ({len(coordinates)})"
+            f"Tile embedding count ({_num_rows(tile_embeddings)}) does not match coordinate count ({len(x_values)})"
         )
     num_tiles = _require_attr(tiling_result, "num_tiles", allow_missing=True)
     mask_preview_path = _require_attr(tiling_result, "mask_preview_path", allow_missing=True)
@@ -1010,11 +1001,12 @@ def _make_embedded_slide(
         sample_id=slide.sample_id,
         tile_embeddings=tile_embeddings,
         slide_embedding=slide_embedding,
-        coordinates=coordinates,
+        x=x_values,
+        y=y_values,
         tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
         image_path=slide.image_path,
         mask_path=slide.mask_path,
-        num_tiles=int(num_tiles) if num_tiles is not None else len(coordinates),
+        num_tiles=int(num_tiles) if num_tiles is not None else len(x_values),
         mask_preview_path=Path(mask_preview_path) if mask_preview_path is not None else None,
         tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
         latents=latents,
@@ -1178,7 +1170,7 @@ def _build_batch_preprocessor(
             # Model has no Resize transform: apply bilinear resize to target tile size as fallback
             image = _resize_image_batch(
                 image,
-                (int(tiling_result.target_tile_size_px), int(tiling_result.target_tile_size_px)),
+                (int(tiling_result.requested_tile_size_px), int(tiling_result.requested_tile_size_px)),
             )
         if model.level == "region":
             image = _apply_region_batch_transform_spec(
@@ -1656,10 +1648,6 @@ def _coordinate_arrays(tiling_result) -> tuple[np.ndarray, np.ndarray]:
     return coordinate_arrays(tiling_result)
 
 
-def _coordinate_matrix(tiling_result) -> np.ndarray:
-    return coordinate_matrix(tiling_result)
-
-
 def _require_attr(obj, name: str, allow_missing: bool = False):
     value = getattr(obj, name, None)
     if value is None and not allow_missing:
@@ -1873,8 +1861,6 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
         tolerance=preprocessing.tolerance,
         overlap=preprocessing.overlap,
         tissue_threshold=preprocessing.tissue_threshold,
-        drop_holes=preprocessing.drop_holes,
-        use_padding=preprocessing.use_padding,
     )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
@@ -1936,14 +1922,8 @@ def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path)
     return load_tiling_result(coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path)
 
 
-def _scale_coordinates(wsi_fp: Path, coordinates: np.ndarray, spacing: float, backend: str):
-    from slide2vec.utils.log_utils import suppress_c_stderr
-    with suppress_c_stderr():
-        import wholeslidedata as wsd
-
-    wsi = wsd.WholeSlideImage(wsi_fp, backend=backend)
-    min_spacing = wsi.spacings[0]
-    scale = min_spacing / spacing
+def _scale_coordinates(coordinates: np.ndarray, base_spacing_um: float, spacing: float) -> np.ndarray:
+    scale = base_spacing_um / spacing
     return (coordinates * scale).astype(int)
 
 
@@ -2339,8 +2319,6 @@ def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, An
         "tolerance": preprocessing.tolerance,
         "overlap": preprocessing.overlap,
         "tissue_threshold": preprocessing.tissue_threshold,
-        "drop_holes": preprocessing.drop_holes,
-        "use_padding": preprocessing.use_padding,
         "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
         "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
         "resume": preprocessing.resume,
@@ -2374,8 +2352,6 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         tolerance=float(payload["tolerance"]),
         overlap=float(payload["overlap"]),
         tissue_threshold=float(payload["tissue_threshold"]),
-        drop_holes=bool(payload["drop_holes"]),
-        use_padding=bool(payload["use_padding"]),
         read_coordinates_from=Path(payload["read_coordinates_from"]) if payload.get("read_coordinates_from") else None,
         read_tiles_from=Path(payload["read_tiles_from"]) if payload.get("read_tiles_from") else None,
         resume=bool(payload.get("resume", False)),

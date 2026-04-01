@@ -14,7 +14,8 @@ model = Model.from_preset("virchow2")
 embedded = model.embed_slide("/path/to/slide.svs")
 
 tile_embeddings = embedded.tile_embeddings
-coordinates = embedded.coordinates
+x = embedded.x
+y = embedded.y
 ```
 
 `embed_slide(...)` returns an `EmbeddedSlide` with:
@@ -22,7 +23,8 @@ coordinates = embedded.coordinates
 - `sample_id`
 - `tile_embeddings`
 - `slide_embedding`
-- `coordinates`
+- `x`
+- `y`
 - `tile_size_lv0`
 - `image_path`
 - `mask_path`

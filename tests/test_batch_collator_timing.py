@@ -27,7 +27,7 @@ def test_batch_tile_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
 
     collator = dataset.BatchTileCollator(
         tar_path=Path("/tmp/fake.tiles.tar"),
-        tiling_result=SimpleNamespace(target_tile_size_px=4),
+        tiling_result=SimpleNamespace(requested_tile_size_px=4),
     )
 
     indices, tensor, timing = collator([2, 5])
@@ -39,57 +39,26 @@ def test_batch_tile_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
     assert timing["worker_batch_ms"] >= 0.0
 
 
-def test_wsd_collator_emits_worker_and_reader_timing(monkeypatch: pytest.MonkeyPatch):
+def test_on_the_fly_collator_emits_worker_and_reader_timing(monkeypatch: pytest.MonkeyPatch):
     torch = pytest.importorskip("torch")
-    import slide2vec.data.wsd_tile_reader as wsd_tile_reader
+    import slide2vec.data.tile_reader as tile_reader
 
     class FakeReader:
         ordered_indices = None
 
-        def __init__(self, image_path, tiling_result, *, backend: str, use_supertiles: bool):
-            self.tile_size = int(tiling_result.read_tile_size_px)
-
-        def read_batch_with_timing(self, tile_indices):
-            tensor = torch.zeros((len(tile_indices), 3, self.tile_size, self.tile_size), dtype=torch.uint8)
-            return tensor, {"reader_open_ms": 0.75, "reader_read_ms": 5.5}
-
-    monkeypatch.setattr(wsd_tile_reader, "WSDTileReader", FakeReader)
-
-    collator = wsd_tile_reader.WSDOnTheFlyBatchTileCollator(
-        image_path=Path("/tmp/fake.svs"),
-        tiling_result=SimpleNamespace(read_tile_size_px=4),
-        backend="asap",
-        use_supertiles=False,
-    )
-
-    indices, tensor, timing = collator([1, 3])
-
-    assert indices.tolist() == [1, 3]
-    assert tuple(tensor.shape) == (2, 3, 4, 4)
-    assert timing["reader_open_ms"] == pytest.approx(0.75)
-    assert timing["reader_read_ms"] == pytest.approx(5.5)
-    assert timing["worker_batch_ms"] >= 0.0
-
-
-def test_cucim_collator_emits_worker_and_reader_timing(monkeypatch: pytest.MonkeyPatch):
-    torch = pytest.importorskip("torch")
-    import slide2vec.data.cucim_tile_reader as cucim_tile_reader
-
-    class FakeReader:
-        ordered_indices = None
-
-        def __init__(self, image_path, tiling_result, *, num_cucim_workers: int, gpu_decode: bool, use_supertiles: bool):
-            self.tile_size = int(tiling_result.read_tile_size_px)
+        def __init__(self, image_path, tiling_result, *, backend: str, num_cucim_workers: int, gpu_decode: bool, use_supertiles: bool):
+            self.tile_size = int(tiling_result.effective_tile_size_px)
 
         def read_batch_with_timing(self, tile_indices):
             tensor = torch.zeros((len(tile_indices), 3, self.tile_size, self.tile_size), dtype=torch.uint8)
             return tensor, {"reader_open_ms": 2.0, "reader_read_ms": 7.25}
 
-    monkeypatch.setattr(cucim_tile_reader, "CuCIMTileReader", FakeReader)
+    monkeypatch.setattr(tile_reader, "WSITileReader", FakeReader)
 
-    collator = cucim_tile_reader.OnTheFlyBatchTileCollator(
+    collator = tile_reader.OnTheFlyBatchTileCollator(
         image_path=Path("/tmp/fake.svs"),
-        tiling_result=SimpleNamespace(read_tile_size_px=4),
+        tiling_result=SimpleNamespace(effective_tile_size_px=4),
+        backend="cucim",
         num_cucim_workers=4,
         gpu_decode=False,
         use_supertiles=False,

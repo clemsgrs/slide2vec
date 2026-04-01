@@ -60,6 +60,7 @@ In practice, the config controls:
 - preprocessing/tiling parameters
 - output directory
 - batch size, workers, precision, and GPU count
+- whether to save tiling previews through `tiling.preview.save`
 - whether to save tile artifacts alongside slide-level outputs
 
 ## Common Overrides
@@ -80,6 +81,7 @@ Common overrides:
 - `output_dir=/path/to/output`
 - `speed.num_gpus=4`
 - `speed.num_workers_embedding=8`
+- `tiling.preview.save=true`
 - `model.name=...`
 - `model.level=tile|region|slide`
 

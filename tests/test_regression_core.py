@@ -29,6 +29,18 @@ def test_resource_loading_uses_packaged_configs():
     assert config_resource("preprocessing", "default").name == "default.yaml"
 
 
+def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
+    pytest.importorskip("omegaconf")
+    cfg = load_config("preprocessing", "default")
+
+    assert hasattr(cfg, "save_tiles")
+    assert not hasattr(cfg.tiling.params, "drop_holes")
+    assert not hasattr(cfg.tiling.params, "use_padding")
+    assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
+    assert hasattr(cfg.tiling.filter_params, "filter_blur")
+    assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
+
+
 def test_packaged_model_presets_align_with_recommended_settings():
     pytest.importorskip("omegaconf")
 
@@ -259,8 +271,6 @@ def test_preprocessing_with_backend_preserves_other_fields():
         tolerance=0.1,
         overlap=0.2,
         tissue_threshold=0.4,
-        drop_holes=True,
-        use_padding=False,
         read_coordinates_from=Path("/tmp/coordinates"),
         read_tiles_from=Path("/tmp/tiles"),
         resume=True,
@@ -322,7 +332,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     cfg = SimpleNamespace(
         csv="/tmp/slides.csv",
         output_dir=str(tmp_path),
-        save_previews=False,
         model=SimpleNamespace(
             name="virchow2",
             level="tile",
@@ -346,12 +355,10 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
         ),
     )
 
@@ -557,7 +564,6 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
     cfg = SimpleNamespace(
         resume=True,
         output_dir="/tmp/run-001",
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,
@@ -568,12 +574,10 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
         ),
     )
 
@@ -598,7 +602,6 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-002",
         resume=False,
-        save_previews=True,
         speed=SimpleNamespace(num_cucim_workers=6),
         tiling=SimpleNamespace(
             backend="asap",
@@ -610,12 +613,10 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=True, downsample=32),
         ),
     )
 
@@ -631,7 +632,6 @@ def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_
     cfg = SimpleNamespace(
         output_dir="/tmp/run-003",
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="asap",
             num_cucim_workers=5,
@@ -643,12 +643,10 @@ def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
         ),
     )
 
@@ -661,7 +659,6 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-004",
         resume=False,
-        save_previews=False,
         tiling=SimpleNamespace(
             backend="cucim",
             read_coordinates_from=None,
@@ -672,12 +669,10 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(downsample=32),
+            preview=SimpleNamespace(save=False, downsample=32),
         ),
     )
 
@@ -691,26 +686,25 @@ def test_validate_removed_options_rejects_legacy_preview_keys():
 
     from slide2vec.utils.config import validate_removed_options
 
-    with pytest.raises(ValueError, match="save_previews"):
+    with pytest.raises(ValueError, match="visualize"):
         validate_removed_options(
             OmegaConf.create(
                 {
                     "visualize": True,
                     "model": {},
-                    "tiling": {"preview": {"downsample": 32}},
+                    "tiling": {"preview": {"save": True, "downsample": 32}},
                 }
             )
         )
 
-    with pytest.raises(ValueError, match="tiling.preview"):
+    with pytest.raises(ValueError, match="tiling.visu_params"):
         validate_removed_options(
             OmegaConf.create(
                 {
-                    "save_previews": True,
                     "model": {},
                     "tiling": {
                         "visu_params": {"downsample": 32},
-                        "preview": {"downsample": 32},
+                        "preview": {"save": True, "downsample": 32},
                     },
                 }
             )

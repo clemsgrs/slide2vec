@@ -21,8 +21,6 @@ TILING_PARAMS = dict(
     target_tile_size_px=224,  # override (default: 256)
     overlap=0.0,
     tissue_threshold=0.1,     # override (default: 0.01)
-    drop_holes=False,
-    use_padding=True,
 )
 
 # -- tiling.seg_params --
@@ -41,7 +39,6 @@ TILING_FILTER_PARAMS = dict(
     ref_tile_size=224,  # override (default: 16)
     a_t=4,
     a_h=2,
-    max_n_holes=8,
     filter_white=False,
     filter_black=False,
     white_threshold=220,
@@ -50,7 +47,7 @@ TILING_FILTER_PARAMS = dict(
 )
 
 # -- tiling.preview --
-TILING_PREVIEW = dict(downsample=32)
+TILING_PREVIEW = dict(save=False, downsample=32)
 
 # -- model --
 MODEL_PARAMS = dict(
@@ -104,7 +101,7 @@ def mask_path() -> Path:
     reason="HF_TOKEN required for model weight download",
 )
 def test_output_consistency(wsi_path, mask_path, tmp_path):
-    """Running the full pipeline with hardcoded params produces coordinates and
+    """Running the full pipeline with hardcoded params produces x/y coordinates and
     embeddings that match the ground truth fixtures in test/gt/."""
 
     # 1. Build a temporary CSV with resolved absolute paths
@@ -119,7 +116,6 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         "output_dir": str(tmp_path),
         "resume": False,
         "resume_dirname": None,
-        "save_previews": False,  # override (default: true)
         "seed": 0,
         "tiling": {
             "read_coordinates_from": None,
@@ -156,10 +152,10 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     np.testing.assert_array_equal(coords, gt_coords)
 
     meta = json.loads((tmp_path / "tiles" / "test-wsi.coordinates.meta.json").read_text())
-    assert meta["sample_id"] == "test-wsi"
-    assert meta["backend"] == "asap"
-    assert meta["target_spacing_um"] == pytest.approx(0.5)
-    assert meta["target_tile_size_px"] == 224
+    assert meta["provenance"]["sample_id"] == "test-wsi"
+    assert meta["provenance"]["backend"] == "asap"
+    assert meta["tiling"]["requested_spacing_um"] == pytest.approx(0.5)
+    assert meta["tiling"]["requested_tile_size_px"] == 224
 
     # 5. Assert slide embeddings are within tolerance
     gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu", weights_only=True)

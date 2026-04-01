@@ -1,9 +1,10 @@
 csv: "/data/pathology/projects/clement/leopard/csvs/brazil-slide2vec-august-2025-revision.csv"
 
 output_dir: "/data/pathology/projects/clement/discern/pathojepa/slide2vec"
-save_previews: false
 
 tiling:
+  preview:
+    save: false
   params:
     target_spacing_um: 0.5
     tolerance: 0.05

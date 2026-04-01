@@ -53,28 +53,17 @@ RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/
 
 WORKDIR /opt/app/
 
-# core deps live in requirements.in; model runtime extras live in requirements-models.in
 RUN python -m pip install --upgrade pip setuptools pip-tools \
     && rm -rf /home/user/.cache/pip
 
-# install slide2vec
-COPY --chown=user:user requirements.in /opt/app/requirements.in
-COPY --chown=user:user requirements-models.in /opt/app/requirements-models.in
-RUN python -m pip install \
-    --no-cache-dir \
-    --no-color \
-    --requirement /opt/app/requirements-models.in \
-    && rm -rf /home/user/.cache/pip
-
+# install slide2vec with all model extras
 COPY --chown=user:user slide2vec /opt/app/slide2vec
-COPY --chown=user:user setup.py /opt/app/setup.py
-COPY --chown=user:user setup.cfg /opt/app/setup.cfg
 COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
-COPY --chown=user:user MANIFEST.in /opt/app/MANIFEST.in
 COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
 
-RUN python -m pip install /opt/app
+RUN python -m pip install --no-cache-dir --no-color "/opt/app[all]" \
+    && rm -rf /home/user/.cache/pip
 RUN python -m pip install 'flash-attn>=2.7.1,<=2.8.0' --no-build-isolation
 
 

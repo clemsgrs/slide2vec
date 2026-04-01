@@ -265,7 +265,6 @@ def _default_base_config(
         "csv": str(csv_path),
         "output_dir": str(output_dir),
         "resume": False,
-        "save_previews": False,
         "model": {
             "name": model_name,
             "level": "tile",
@@ -312,6 +311,7 @@ def _default_base_config(
                 "fraction_threshold": 0.9,
             },
             "preview": {
+                "save": False,
                 "downsample": 32,
             },
         },
@@ -340,7 +340,8 @@ def _merge_base_config(base: dict[str, Any], config_file: Path | None) -> dict[s
     merged["csv"] = base["csv"]
     merged["output_dir"] = base["output_dir"]
     merged["resume"] = False
-    merged["save_previews"] = False
+    merged.setdefault("tiling", {}).setdefault("preview", {})
+    merged["tiling"]["preview"]["save"] = False
     merged.setdefault("model", {})["batch_size"] = base["model"]["batch_size"]
     merged.setdefault("speed", {})
     merged["speed"]["num_preprocessing_workers"] = base["speed"]["num_preprocessing_workers"]
@@ -538,8 +539,8 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
         segmentation=dict(tiling_cfg.get("seg_params", {})),
         filtering=dict(tiling_cfg.get("filter_params", {})),
         preview={
-            "save_mask_preview": bool(config.get("save_previews", False)),
-            "save_tiling_preview": bool(config.get("save_previews", False)),
+            "save_mask_preview": bool(preview.get("save", False)),
+            "save_tiling_preview": bool(preview.get("save", False)),
             "downsample": int(preview.get("downsample", 32)),
         },
     )
@@ -761,7 +762,8 @@ def _setup_tiling(
     setup_config["csv"] = str(csv_path)
     setup_config["output_dir"] = str(setup_dir)
     setup_config["resume"] = True  # safe to resume if partially done
-    setup_config["save_previews"] = False
+    setup_config.setdefault("tiling", {}).setdefault("preview", {})
+    setup_config["tiling"]["preview"]["save"] = False
     setup_config["tiling"]["on_the_fly"] = False
     setup_config["tiling"]["backend"] = "cucim"
     setup_config["tiling"]["use_supertiles"] = True

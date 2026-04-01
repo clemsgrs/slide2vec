@@ -60,8 +60,6 @@ class PreprocessingConfig:
     tolerance: float = 0.05
     overlap: float = 0.0
     tissue_threshold: float = 0.01
-    drop_holes: bool = False
-    use_padding: bool = True
     read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
     on_the_fly: bool = True
@@ -84,6 +82,13 @@ class PreprocessingConfig:
         on_the_fly = bool(getattr(tiling, "on_the_fly", True))
         gpu_decode = bool(getattr(tiling, "gpu_decode", False))
         adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
+        preview_cfg = getattr(tiling, "preview", None)
+        if isinstance(preview_cfg, Mapping):
+            preview_save = bool(preview_cfg.get("save", False))
+            preview_downsample = int(preview_cfg.get("downsample", 32))
+        else:
+            preview_save = bool(getattr(preview_cfg, "save", False))
+            preview_downsample = int(getattr(preview_cfg, "downsample", 32))
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -91,8 +96,6 @@ class PreprocessingConfig:
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
             tissue_threshold=float(tiling.params.tissue_threshold),
-            drop_holes=bool(tiling.params.drop_holes),
-            use_padding=bool(tiling.params.use_padding),
             read_coordinates_from=(
                 Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
             ),
@@ -109,9 +112,9 @@ class PreprocessingConfig:
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
             preview={
-                "save_mask_preview": bool(cfg.save_previews),
-                "save_tiling_preview": bool(cfg.save_previews),
-                "downsample": int(tiling.preview.downsample),
+                "save_mask_preview": preview_save,
+                "save_tiling_preview": preview_save,
+                "downsample": preview_downsample,
             },
         )
 
@@ -189,7 +192,8 @@ class EmbeddedSlide:
     sample_id: str
     tile_embeddings: Any
     slide_embedding: Any | None
-    coordinates: Any
+    x: Any
+    y: Any
     tile_size_lv0: int
     image_path: Path
     mask_path: Path | None = None
