@@ -5,8 +5,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = ROOT / "pyproject.toml"
 README = ROOT / "README.md"
-CORE_REQUIREMENTS = ROOT / "requirements.in"
-CORE_REQUIREMENTS_TXT = ROOT / "requirements.txt"
 
 FOUNDATION_REQUIREMENT_NAMES = {
     "huggingface-hub",
@@ -58,30 +56,6 @@ def _dep_names(deps: list[str]) -> set[str]:
     return names
 
 
-def _requirement_names(raw_block: str) -> set[str]:
-    names: set[str] = set()
-    for line in raw_block.splitlines():
-        requirement = line.strip()
-        if not requirement or requirement.startswith("#") or requirement.startswith("-r "):
-            continue
-        match = re.match(r"^[A-Za-z0-9_.-]+", requirement)
-        assert match is not None, f"Could not parse requirement line: {requirement}"
-        names.add(match.group(0).replace("_", "-").lower())
-    return names
-
-
-def _requirement_lines(raw_block: str) -> dict[str, str]:
-    lines: dict[str, str] = {}
-    for raw_line in raw_block.splitlines():
-        requirement = raw_line.strip()
-        if not requirement or requirement.startswith("#") or requirement.startswith("-r "):
-            continue
-        match = re.match(r"^[A-Za-z0-9_.-]+", requirement)
-        assert match is not None, f"Could not parse requirement line: {requirement}"
-        lines[match.group(0).replace("_", "-").lower()] = requirement
-    return lines
-
-
 def _top_level_imported_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     modules: set[str] = set()
@@ -112,14 +86,14 @@ def test_pyproject_uses_upstream_gigapath_distribution_name():
     assert "prov-gigapath" not in all_extra
 
 
-def test_requirements_txt_matches_generic_core_runtime_requirements():
-    requirement_lines = _requirement_lines(CORE_REQUIREMENTS_TXT.read_text(encoding="utf-8"))
+def test_pyproject_declares_core_runtime_requirements():
+    install_requires = _dep_names(_load_list_from_pyproject("dependencies"))
 
-    assert requirement_lines["torch"] == "torch"
-    assert requirement_lines["torchvision"] == "torchvision"
-    assert requirement_lines["einops"] == "einops"
-    assert requirement_lines["timm"] == "timm"
-    assert requirement_lines["transformers"] == "transformers"
+    assert "torch" in install_requires
+    assert "torchvision" in install_requires
+    assert "einops" in install_requires
+    assert "timm" in install_requires
+    assert "transformers" in install_requires
 
 
 def test_readme_documents_core_and_models_installs():
