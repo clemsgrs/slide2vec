@@ -29,6 +29,18 @@ def test_resource_loading_uses_packaged_configs():
     assert config_resource("preprocessing", "default").name == "default.yaml"
 
 
+def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
+    pytest.importorskip("omegaconf")
+    cfg = load_config("preprocessing", "default")
+
+    assert hasattr(cfg, "save_tiles")
+    assert not hasattr(cfg.tiling.params, "drop_holes")
+    assert not hasattr(cfg.tiling.params, "use_padding")
+    assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
+    assert hasattr(cfg.tiling.filter_params, "filter_blur")
+    assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
+
+
 def test_packaged_model_presets_align_with_recommended_settings():
     pytest.importorskip("omegaconf")
 
@@ -259,8 +271,6 @@ def test_preprocessing_with_backend_preserves_other_fields():
         tolerance=0.1,
         overlap=0.2,
         tissue_threshold=0.4,
-        drop_holes=True,
-        use_padding=False,
         read_coordinates_from=Path("/tmp/coordinates"),
         read_tiles_from=Path("/tmp/tiles"),
         resume=True,
@@ -346,8 +356,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -568,8 +576,6 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -610,8 +616,6 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -643,8 +647,6 @@ def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -672,8 +674,6 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
-                drop_holes=False,
-                use_padding=True,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},

@@ -845,8 +845,6 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
-        drop_holes=False,
-        use_padding=True,
         segmentation={"downsample": 64},
         filtering={"ref_tile_size": 224},
         preview={"save_mask_preview": True, "save_tiling_preview": False, "downsample": 32},

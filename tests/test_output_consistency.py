@@ -21,8 +21,6 @@ TILING_PARAMS = dict(
     target_tile_size_px=224,  # override (default: 256)
     overlap=0.0,
     tissue_threshold=0.1,     # override (default: 0.01)
-    drop_holes=False,
-    use_padding=True,
 )
 
 # -- tiling.seg_params --
@@ -41,7 +39,6 @@ TILING_FILTER_PARAMS = dict(
     ref_tile_size=224,  # override (default: 16)
     a_t=4,
     a_h=2,
-    max_n_holes=8,
     filter_white=False,
     filter_black=False,
     white_threshold=220,

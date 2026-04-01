@@ -60,8 +60,6 @@ class PreprocessingConfig:
     tolerance: float = 0.05
     overlap: float = 0.0
     tissue_threshold: float = 0.01
-    drop_holes: bool = False
-    use_padding: bool = True
     read_coordinates_from: Path | None = None
     read_tiles_from: Path | None = None
     on_the_fly: bool = True
@@ -91,8 +89,6 @@ class PreprocessingConfig:
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
             tissue_threshold=float(tiling.params.tissue_threshold),
-            drop_holes=bool(tiling.params.drop_holes),
-            use_padding=bool(tiling.params.use_padding),
             read_coordinates_from=(
                 Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
             ),

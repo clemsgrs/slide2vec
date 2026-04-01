@@ -1862,8 +1862,6 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
         tolerance=preprocessing.tolerance,
         overlap=preprocessing.overlap,
         tissue_threshold=preprocessing.tissue_threshold,
-        drop_holes=preprocessing.drop_holes,
-        use_padding=preprocessing.use_padding,
     )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
@@ -2322,8 +2320,6 @@ def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, An
         "tolerance": preprocessing.tolerance,
         "overlap": preprocessing.overlap,
         "tissue_threshold": preprocessing.tissue_threshold,
-        "drop_holes": preprocessing.drop_holes,
-        "use_padding": preprocessing.use_padding,
         "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
         "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
         "resume": preprocessing.resume,
@@ -2357,8 +2353,6 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         tolerance=float(payload["tolerance"]),
         overlap=float(payload["overlap"]),
         tissue_threshold=float(payload["tissue_threshold"]),
-        drop_holes=bool(payload["drop_holes"]),
-        use_padding=bool(payload["use_padding"]),
         read_coordinates_from=Path(payload["read_coordinates_from"]) if payload.get("read_coordinates_from") else None,
         read_tiles_from=Path(payload["read_tiles_from"]) if payload.get("read_tiles_from") else None,
         resume=bool(payload.get("resume", False)),
