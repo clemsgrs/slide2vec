@@ -27,7 +27,7 @@ def test_batch_tile_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
 
     collator = dataset.BatchTileCollator(
         tar_path=Path("/tmp/fake.tiles.tar"),
-        tiling_result=SimpleNamespace(target_tile_size_px=4),
+        tiling_result=SimpleNamespace(requested_tile_size_px=4),
     )
 
     indices, tensor, timing = collator([2, 5])
@@ -47,7 +47,7 @@ def test_on_the_fly_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
         ordered_indices = None
 
         def __init__(self, image_path, tiling_result, *, backend: str, num_cucim_workers: int, gpu_decode: bool, use_supertiles: bool):
-            self.tile_size = int(tiling_result.read_tile_size_px)
+            self.tile_size = int(tiling_result.effective_tile_size_px)
 
         def read_batch_with_timing(self, tile_indices):
             tensor = torch.zeros((len(tile_indices), 3, self.tile_size, self.tile_size), dtype=torch.uint8)
@@ -57,7 +57,7 @@ def test_on_the_fly_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
 
     collator = tile_reader.OnTheFlyBatchTileCollator(
         image_path=Path("/tmp/fake.svs"),
-        tiling_result=SimpleNamespace(read_tile_size_px=4),
+        tiling_result=SimpleNamespace(effective_tile_size_px=4),
         backend="cucim",
         num_cucim_workers=4,
         gpu_decode=False,

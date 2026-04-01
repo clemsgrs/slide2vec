@@ -152,10 +152,10 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     np.testing.assert_array_equal(coords, gt_coords)
 
     meta = json.loads((tmp_path / "tiles" / "test-wsi.coordinates.meta.json").read_text())
-    assert meta["sample_id"] == "test-wsi"
-    assert meta["backend"] == "asap"
-    assert meta["target_spacing_um"] == pytest.approx(0.5)
-    assert meta["target_tile_size_px"] == 224
+    assert meta["provenance"]["sample_id"] == "test-wsi"
+    assert meta["provenance"]["backend"] == "asap"
+    assert meta["tiling"]["requested_spacing_um"] == pytest.approx(0.5)
+    assert meta["tiling"]["requested_tile_size_px"] == 224
 
     # 5. Assert slide embeddings are within tolerance
     gt_emb = torch.load(GT_DIR / "test-wsi.pt", map_location="cpu", weights_only=True)

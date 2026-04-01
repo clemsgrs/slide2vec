@@ -69,7 +69,7 @@ class WSITileReader:
         self._num_cucim_workers = num_cucim_workers
         self._gpu_decode = gpu_decode
         self._read_level = int(tiling_result.read_level)
-        self._tile_size_px = int(tiling_result.read_tile_size_px)
+        self._tile_size_px = int(tiling_result.effective_tile_size_px)
         self._x = tiling_result.x
         self._y = tiling_result.y
         self._reader = None
@@ -218,7 +218,7 @@ class OnTheFlyBatchTileCollator:
         gpu_decode: bool = False,
         use_supertiles: bool = True,
     ):
-        self.tile_size = int(tiling_result.read_tile_size_px)
+        self.tile_size = int(tiling_result.effective_tile_size_px)
         self._reader = WSITileReader(
             image_path,
             tiling_result,

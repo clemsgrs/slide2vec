@@ -1170,7 +1170,7 @@ def _build_batch_preprocessor(
             # Model has no Resize transform: apply bilinear resize to target tile size as fallback
             image = _resize_image_batch(
                 image,
-                (int(tiling_result.target_tile_size_px), int(tiling_result.target_tile_size_px)),
+                (int(tiling_result.requested_tile_size_px), int(tiling_result.requested_tile_size_px)),
             )
         if model.level == "region":
             image = _apply_region_batch_transform_spec(

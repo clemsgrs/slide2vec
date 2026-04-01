@@ -29,7 +29,7 @@ class BatchTileCollator:
         tar_path: Path,
         tiling_result: "TilingResult",
     ):
-        self.tile_size = int(tiling_result.target_tile_size_px)
+        self.tile_size = int(tiling_result.requested_tile_size_px)
         self._reader = TarTileReader(
             tar_path=tar_path,
             tile_size_px=self.tile_size,

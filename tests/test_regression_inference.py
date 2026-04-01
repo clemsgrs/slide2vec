@@ -1639,8 +1639,8 @@ def test_region_batch_preprocessor_resizes_whole_region_before_unfolding():
         device=torch.device("cpu"),
     )
     tiling_result = SimpleNamespace(
-        target_tile_size_px=4,
-        read_tile_size_px=2,
+        requested_tile_size_px=4,
+        effective_tile_size_px=2,
     )
     execution = ExecutionOptions(gpu_batch_preprocessing=False)
 
@@ -1676,8 +1676,8 @@ def test_region_batch_preprocessor_unfolds_then_applies_tile_transforms():
         device=torch.device("cpu"),
     )
     tiling_result = SimpleNamespace(
-        target_tile_size_px=4,
-        read_tile_size_px=4,
+        requested_tile_size_px=4,
+        effective_tile_size_px=4,
     )
     execution = ExecutionOptions(gpu_batch_preprocessing=False)
 
@@ -1766,8 +1766,8 @@ def test_region_batch_preprocessor_uses_region_unfolding_from_transform_stack():
         device=torch.device("cpu"),
     )
     tiling_result = SimpleNamespace(
-        target_tile_size_px=8,
-        read_tile_size_px=8,
+        requested_tile_size_px=8,
+        effective_tile_size_px=8,
     )
 
     preprocess = inference._build_batch_preprocessor(
@@ -1804,8 +1804,8 @@ def test_region_batch_preprocessor_rejects_mismatched_region_unfolding_tile_size
         device=torch.device("cpu"),
     )
     tiling_result = SimpleNamespace(
-        target_tile_size_px=8,
-        read_tile_size_px=8,
+        requested_tile_size_px=8,
+        effective_tile_size_px=8,
     )
 
     preprocess = inference._build_batch_preprocessor(
@@ -1904,9 +1904,9 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         x=np.array([0, 10]),
         y=np.array([5, 15]),
         target_spacing_um=0.5,
-        target_tile_size_px=4,
+        requested_tile_size_px=4,
         read_spacing_um=0.5,
-        read_tile_size_px=4,
+        effective_tile_size_px=4,
         tile_size_lv0=224,
         tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
     )
@@ -1996,9 +1996,9 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         x=np.array([0]),
         y=np.array([5]),
         target_spacing_um=0.5,
-        target_tile_size_px=4,
+        requested_tile_size_px=4,
         read_spacing_um=0.5,
-        read_tile_size_px=4,
+        effective_tile_size_px=4,
         tile_size_lv0=224,
         tiles_tar_path=Path("/tmp/current-run.tiles.tar"),
     )
@@ -2098,9 +2098,9 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
         x=np.array([0, 10]),
         y=np.array([5, 15]),
         target_spacing_um=0.5,
-        target_tile_size_px=4,
+        requested_tile_size_px=4,
         read_spacing_um=0.5,
-        read_tile_size_px=4,
+        effective_tile_size_px=4,
         tile_size_lv0=224,
     )
     execution = ExecutionOptions(
@@ -2413,9 +2413,9 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         x=np.array([0, 10]),
         y=np.array([5, 15]),
         target_spacing_um=0.5,
-        target_tile_size_px=4,
+        requested_tile_size_px=4,
         read_spacing_um=0.5,
-        read_tile_size_px=4,
+        effective_tile_size_px=4,
         tile_size_lv0=224,
         tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
     )
