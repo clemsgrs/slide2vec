@@ -697,7 +697,7 @@ def test_validate_removed_options_rejects_legacy_preview_keys():
             )
         )
 
-    with pytest.raises(ValueError, match="tiling.preview"):
+    with pytest.raises(ValueError, match="tiling.visu_params"):
         validate_removed_options(
             OmegaConf.create(
                 {

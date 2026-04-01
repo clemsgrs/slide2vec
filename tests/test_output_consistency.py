@@ -101,7 +101,7 @@ def mask_path() -> Path:
     reason="HF_TOKEN required for model weight download",
 )
 def test_output_consistency(wsi_path, mask_path, tmp_path):
-    """Running the full pipeline with hardcoded params produces coordinates and
+    """Running the full pipeline with hardcoded params produces x/y coordinates and
     embeddings that match the ground truth fixtures in test/gt/."""
 
     # 1. Build a temporary CSV with resolved absolute paths

@@ -442,7 +442,8 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
             sample_id="slide-a",
             tile_embeddings=np.zeros((1, 2), dtype=np.float32),
             slide_embedding=np.zeros((2,), dtype=np.float32),
-            coordinates=np.array([[0, 0]], dtype=np.int64),
+            x=np.array([0], dtype=np.int64),
+            y=np.array([0], dtype=np.int64),
             tile_size_lv0=224,
             image_path=Path("/tmp/slide-a.svs"),
             mask_path=None,
@@ -451,7 +452,8 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
             sample_id="slide-b",
             tile_embeddings=np.zeros((1, 2), dtype=np.float32),
             slide_embedding=None,
-            coordinates=np.array([[1, 1]], dtype=np.int64),
+            x=np.array([1], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
             tile_size_lv0=224,
             image_path=Path("/tmp/slide-b.svs"),
             mask_path=None,
@@ -515,7 +517,8 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
         sample_id="slide-a",
         tile_embeddings=np.zeros((1, 2), dtype=np.float32),
         slide_embedding=None,
-        coordinates=np.array([[0, 1]], dtype=np.int64),
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
@@ -670,6 +673,7 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
 
 
 def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_failure(monkeypatch, tmp_path: Path):
+    pytest.importorskip("torch")
     import slide2vec.inference as inference
 
     slides = [make_slide("slide-a"), make_slide("slide-b")]
@@ -866,6 +870,14 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
     assert resume is False
 
 
+def test_num_tiles_accepts_x_y_tiling_result():
+    import slide2vec.inference as inference
+
+    tiling_result = SimpleNamespace(x=np.array([0, 2, 4], dtype=np.int64), y=np.array([1, 3, 5], dtype=np.int64))
+
+    assert inference._num_tiles(tiling_result) == 3
+
+
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -1015,7 +1027,8 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     assert captured["tile_embeddings_shape"] == (2, 2)
     assert captured["execution_num_gpus"] == 2
     np.testing.assert_array_equal(embedded.slide_embedding, np.array([9.0, 8.0], dtype=np.float32))
-    np.testing.assert_array_equal(embedded.coordinates, np.array([[0, 2], [1, 3]], dtype=np.int64))
+    np.testing.assert_array_equal(embedded.x, np.array([0, 1], dtype=np.int64))
+    np.testing.assert_array_equal(embedded.y, np.array([2, 3], dtype=np.int64))
 
 def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
     import slide2vec.inference as inference
@@ -1027,7 +1040,8 @@ def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
             sample_id="slide-a",
             tile_embeddings=np.zeros((1, 2), dtype=np.float32),
             slide_embedding=None,
-            coordinates=np.array([[0, 1]], dtype=np.int64),
+            x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
             tile_size_lv0=224,
             image_path=Path("/tmp/slide-a.svs"),
             mask_path=None,
@@ -1066,7 +1080,8 @@ def test_select_embedding_path_uses_single_slide_distributed_when_one_slide(monk
         sample_id="slide-a",
         tile_embeddings=np.zeros((1, 2), dtype=np.float32),
         slide_embedding=None,
-        coordinates=np.array([[0, 1]], dtype=np.int64),
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
@@ -1159,7 +1174,8 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
     )
     assert tile_only.slide_embedding is None
-    assert tile_only.coordinates.shape == (2, 2)
+    np.testing.assert_array_equal(tile_only.x, np.array([0, 1], dtype=np.int64))
+    np.testing.assert_array_equal(tile_only.y, np.array([2, 3], dtype=np.int64))
 
     slide_level = inference._make_embedded_slide(
         slide=slide,
@@ -1239,7 +1255,8 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
         slide_embedding=np.zeros((8,), dtype=np.float32),
-        coordinates=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([2, 3], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
@@ -1291,6 +1308,7 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
 
 
 def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_failure(monkeypatch, tmp_path: Path):
+    pytest.importorskip("torch")
     import slide2vec.inference as inference
 
     slides = [make_slide("slide-a"), make_slide("slide-b")]
@@ -1381,7 +1399,8 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
         slide_embedding=np.zeros((8,), dtype=np.float32),
-        coordinates=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([2, 3], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
@@ -1427,7 +1446,8 @@ def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tm
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
         slide_embedding=None,
-        coordinates=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([2, 3], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
@@ -1477,7 +1497,8 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
             sample_id="slide-a",
             tile_embeddings=np.zeros((3, 2), dtype=np.float32),
             slide_embedding=None,
-            coordinates=np.array([[0, 0], [1, 1], [2, 2]], dtype=np.int64),
+            x=np.array([0, 1, 2], dtype=np.int64),
+            y=np.array([0, 1, 2], dtype=np.int64),
             tile_size_lv0=224,
             image_path=Path("/tmp/slide-a.svs"),
             mask_path=None,
@@ -1486,7 +1507,8 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
             sample_id="slide-b",
             tile_embeddings=np.zeros((1, 2), dtype=np.float32),
             slide_embedding=None,
-            coordinates=np.array([[0, 0]], dtype=np.int64),
+            x=np.array([0], dtype=np.int64),
+            y=np.array([0], dtype=np.int64),
             tile_size_lv0=224,
             image_path=Path("/tmp/slide-b.svs"),
             mask_path=None,
@@ -2270,7 +2292,8 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
         slide_embedding=None,
-        coordinates=np.array([[0, 2], [1, 3]], dtype=np.int64),
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([2, 3], dtype=np.int64),
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,

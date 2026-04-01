@@ -192,7 +192,8 @@ class EmbeddedSlide:
     sample_id: str
     tile_embeddings: Any
     slide_embedding: Any | None
-    coordinates: Any
+    x: Any
+    y: Any
     tile_size_lv0: int
     image_path: Path
     mask_path: Path | None = None

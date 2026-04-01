@@ -30,7 +30,8 @@ model = Model.from_preset("virchow2")
 embedded = model.embed_slide("/path/to/slide.svs")
 
 tile_embeddings = embedded.tile_embeddings
-coordinates = embedded.coordinates
+x = embedded.x
+y = embedded.y
 ```
 
 Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:

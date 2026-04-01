@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from slide2vec.resources import load_config
@@ -184,6 +185,19 @@ def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):
     }
     assert tiling_result.mask_preview_path == Path("/tmp/preview/mask/slide-1.jpg")
     assert tiling_result.tiling_preview_path == Path("/tmp/preview/tiling/slide-1.jpg")
+
+
+def test_coordinate_arrays_requires_x_and_y():
+    helper = importlib.import_module("slide2vec.utils.coordinates")
+
+    with pytest.raises(ValueError, match="x/y"):
+        helper.coordinate_arrays(SimpleNamespace())
+
+    result = SimpleNamespace(x=np.array([1, 3], dtype=np.int64), y=np.array([2, 4], dtype=np.int64))
+    x_values, y_values = helper.coordinate_arrays(result)
+
+    np.testing.assert_array_equal(x_values, np.array([1, 3], dtype=np.int64))
+    np.testing.assert_array_equal(y_values, np.array([2, 4], dtype=np.int64))
 
 
 def test_model_from_preset_uses_public_factory(monkeypatch):

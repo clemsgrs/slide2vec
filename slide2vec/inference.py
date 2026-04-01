@@ -37,7 +37,7 @@ from slide2vec.progress import (
     read_progress_events,
     read_tiling_progress_snapshot,
 )
-from slide2vec.utils.coordinates import coordinate_arrays, coordinate_matrix
+from slide2vec.utils.coordinates import coordinate_arrays
 
 if TYPE_CHECKING:
     from hs2p import SlideSpec
@@ -383,7 +383,8 @@ def aggregate_tiles(
             Path(metadata["coordinates_npz_path"]),
             Path(metadata["coordinates_meta_path"]),
         )
-        coordinates = _coordinate_matrix(tiling_result)
+        x_values, y_values = _coordinate_arrays(tiling_result)
+        coordinates = np.column_stack((x_values, y_values))
         image_path = Path(metadata["image_path"])
         if model.name == "prov-gigapath":
             coordinates = _scale_coordinates(
@@ -955,7 +956,8 @@ def _aggregate_tile_embeddings_for_slide(
     if model.level != "slide":
         return None, None
     torch = _import_torch()
-    coordinates = _coordinate_matrix(tiling_result)
+    x_values, y_values = _coordinate_arrays(tiling_result)
+    coordinates = np.column_stack((x_values, y_values))
     if model.name == "prov-gigapath":
         coordinates = _scale_coordinates(
             coordinates,
@@ -987,10 +989,10 @@ def _make_embedded_slide(
     slide_embedding=None,
     latents=None,
 ) -> EmbeddedSlide:
-    coordinates = _coordinate_matrix(tiling_result)
-    if _num_rows(tile_embeddings) != len(coordinates):
+    x_values, y_values = _coordinate_arrays(tiling_result)
+    if _num_rows(tile_embeddings) != len(x_values):
         raise ValueError(
-            f"Tile embedding count ({_num_rows(tile_embeddings)}) does not match coordinate count ({len(coordinates)})"
+            f"Tile embedding count ({_num_rows(tile_embeddings)}) does not match coordinate count ({len(x_values)})"
         )
     num_tiles = _require_attr(tiling_result, "num_tiles", allow_missing=True)
     mask_preview_path = _require_attr(tiling_result, "mask_preview_path", allow_missing=True)
@@ -999,11 +1001,12 @@ def _make_embedded_slide(
         sample_id=slide.sample_id,
         tile_embeddings=tile_embeddings,
         slide_embedding=slide_embedding,
-        coordinates=coordinates,
+        x=x_values,
+        y=y_values,
         tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
         image_path=slide.image_path,
         mask_path=slide.mask_path,
-        num_tiles=int(num_tiles) if num_tiles is not None else len(coordinates),
+        num_tiles=int(num_tiles) if num_tiles is not None else len(x_values),
         mask_preview_path=Path(mask_preview_path) if mask_preview_path is not None else None,
         tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
         latents=latents,
@@ -1643,10 +1646,6 @@ def _normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
 
 def _coordinate_arrays(tiling_result) -> tuple[np.ndarray, np.ndarray]:
     return coordinate_arrays(tiling_result)
-
-
-def _coordinate_matrix(tiling_result) -> np.ndarray:
-    return coordinate_matrix(tiling_result)
 
 
 def _require_attr(obj, name: str, allow_missing: bool = False):
