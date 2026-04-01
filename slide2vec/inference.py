@@ -142,58 +142,42 @@ def _make_slide_spec(
 def load_model(
     *,
     name: str,
-    level: str,
     device: str = "auto",
-    mode: str | None = None,
-    arch: str | None = None,
-    pretrained_weights: str | None = None,
-    input_size: int | None = None,
-    patch_size: int | None = None,
-    token_size: int | None = None,
-    normalize_embeddings: bool | None = None,
+    output_variant: str | None = None,
+    token: str | None = None,
+    # level is accepted for API compatibility but derived from registry
+    level: str | None = None,
 ) -> LoadedModel:
-    from omegaconf import OmegaConf
-
-    from slide2vec.models import ModelFactory
-    from slide2vec.resources import load_config
+    from slide2vec.encoders import encoder_registry
+    from slide2vec.encoders.compat import SlideEncoderCompat, TileEncoderCompat
 
     name = canonicalize_model_name(name)
-    cfg = OmegaConf.merge(
-        OmegaConf.create(load_config("preprocessing", "default")),
-        OmegaConf.create(load_config("models", "default")),
-    )
-    preset_name = _preset_name(name, level)
-    if preset_name is not None:
-        cfg = OmegaConf.merge(cfg, load_config("models", preset_name))
+    info = encoder_registry.info(name)
+    resolved_level = info["level"]
 
-    overrides = {
-        "name": name,
-        "level": level,
-        "mode": mode,
-        "arch": arch,
-        "pretrained_weights": pretrained_weights,
-        "input_size": input_size,
-        "patch_size": patch_size,
-        "token_size": token_size,
-        "normalize_embeddings": normalize_embeddings,
-    }
-    for key, value in overrides.items():
-        if value is not None:
-            cfg.model[key] = value
+    if token is None:
+        token = os.environ.get("HF_TOKEN")
 
-    OmegaConf.resolve(cfg)
-    model_cfg = cfg.model
+    encoder_cls = encoder_registry.get(name)
+    encoder = encoder_cls(token=token, output_variant=output_variant)
 
-    backend_model = ModelFactory(model_cfg).get_model()
-    target_device = _resolve_device(device, backend_model.device)
-    backend_model = backend_model.to(target_device)
-    backend_model.device = target_device
+    if resolved_level == "tile":
+        wrapped = TileEncoderCompat(encoder)
+    else:
+        tile_enc_name = info["tile_encoder"]
+        tile_enc_ov = info["tile_encoder_output_variant"]
+        tile_enc_cls = encoder_registry.get(tile_enc_name)
+        tile_encoder = tile_enc_cls(token=token, output_variant=tile_enc_ov)
+        wrapped = SlideEncoderCompat(encoder, tile_encoder)
+
+    target_device = _resolve_device(device, wrapped.device)
+    wrapped.to(target_device)
     return LoadedModel(
         name=name,
-        level=level,
-        model=backend_model,
-        transforms=backend_model.get_transforms(),
-        feature_dim=int(getattr(backend_model, "features_dim")),
+        level=resolved_level,
+        model=wrapped,
+        transforms=wrapped.get_transforms(),
+        feature_dim=int(wrapped.features_dim),
         device=target_device,
     )
 
@@ -1573,15 +1557,6 @@ def _run_forward_pass(
     return torch.cat(outputs, dim=0)
 
 
-def _preset_name(name: str, level: str) -> str | None:
-    preset = canonicalize_model_name(name)
-    if preset == "prov-gigapath":
-        preset = "prov-gigapath-slide" if level == "slide" else "prov-gigapath-tile"
-    candidate = Path(__file__).parent / "configs" / "models" / f"{preset}.yaml"
-    if candidate.is_file():
-        return preset
-    return None
-
 
 def _resolve_device(device: str, default_device):
     torch = _import_torch()
@@ -2306,8 +2281,7 @@ def _num_tiles(tiling_result) -> int:
 def _serialize_model(model) -> dict[str, Any]:
     return {
         "name": model.name,
-        "level": model.level,
-        "kwargs": {key: value for key, value in model._model_kwargs.items() if value is not None},
+        "output_variant": getattr(model, "_output_variant", None),
     }
 
 

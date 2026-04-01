@@ -6,12 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
-from slide2vec.model_settings import (
-    canonicalize_model_name,
-    get_recommended_model_settings,
-    normalize_precision_name,
-    validate_model_runtime_compatibility,
-)
+from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
 
 if TYPE_CHECKING:
     from hs2p import SlideSpec
@@ -19,12 +14,6 @@ if TYPE_CHECKING:
 else:
     LoadedModel = Any
     SlideSpec = Any
-
-
-DEFAULT_LEVEL_BY_NAME = {
-    "prism": "slide",
-    "titan": "slide",
-}
 
 logger = logging.getLogger("slide2vec")
 
@@ -208,30 +197,15 @@ class Model:
         self,
         *,
         name: str,
-        level: str,
         device: str = "auto",
-        mode: str | None = None,
-        arch: str | None = None,
-        pretrained_weights: str | None = None,
-        input_size: int | None = None,
-        patch_size: int | None = None,
-        token_size: int | None = None,
-        normalize_embeddings: bool | None = None,
+        output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
     ) -> None:
         self.name = _canonical_model_name(name)
-        self.level = level
+        self.level = _resolve_model_level(self.name)
         self._requested_device = device
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
-        self._model_kwargs = {
-            "mode": mode,
-            "arch": arch,
-            "pretrained_weights": pretrained_weights,
-            "input_size": input_size,
-            "patch_size": patch_size,
-            "token_size": token_size,
-            "normalize_embeddings": normalize_embeddings,
-        }
+        self._output_variant = output_variant
         self._backend: LoadedModel | None = None
 
     @classmethod
@@ -239,30 +213,14 @@ class Model:
         cls,
         name: str,
         *,
-        level: str | None = None,
-        mode: str | None = None,
-        arch: str | None = None,
-        pretrained_weights: str | None = None,
-        input_size: int | None = None,
-        patch_size: int | None = None,
-        token_size: int | None = None,
-        normalize_embeddings: bool | None = None,
+        output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
         device: str = "auto",
     ) -> "Model":
-        canonical_name = _canonical_model_name(name)
-        resolved_level = _resolve_model_level(canonical_name, requested_level=level)
         return cls(
-            name=canonical_name,
-            level=resolved_level,
+            name=_canonical_model_name(name),
             device=device,
-            mode=mode,
-            arch=arch,
-            pretrained_weights=pretrained_weights,
-            input_size=input_size,
-            patch_size=patch_size,
-            token_size=token_size,
-            normalize_embeddings=normalize_embeddings,
+            output_variant=output_variant,
             allow_non_recommended_settings=allow_non_recommended_settings,
         )
 
@@ -287,7 +245,7 @@ class Model:
         resolved = _coerce_execution_options(execution, model=self)
         _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
         if preprocessing is not None:
-            validate_model_runtime_compatibility(self, preprocessing, resolved)
+            _validate_model_config(self, preprocessing, resolved)
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
 
@@ -370,7 +328,7 @@ class Model:
         resolved = _coerce_execution_options(execution, model=self)
         resolved_preprocessing = _resolve_direct_api_preprocessing(self, preprocessing)
         with _auto_progress_reporting(output_dir=resolved.output_dir):
-            validate_model_runtime_compatibility(self, resolved_preprocessing, resolved)
+            _validate_model_config(self, resolved_preprocessing, resolved)
             return embed_slides(
                 self,
                 slides,
@@ -386,9 +344,8 @@ class Model:
             emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
-                level=self.level,
                 device=self._requested_device,
-                **self._model_kwargs,
+                output_variant=self._output_variant,
             )
             emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
@@ -417,7 +374,7 @@ class Pipeline:
 
         with _auto_progress_reporting(output_dir=self.execution.output_dir):
             if not tiling_only:
-                validate_model_runtime_compatibility(self.model, self.preprocessing, self.execution)
+                _validate_model_config(self.model, self.preprocessing, self.execution)
             return run_pipeline(
                 self.model,
                 slides=slides,
@@ -432,10 +389,9 @@ def _canonical_model_name(name: str) -> str:
     return canonicalize_model_name(name)
 
 
-def _resolve_model_level(name: str, *, requested_level: str | None) -> str:
-    if requested_level is not None:
-        return requested_level
-    return DEFAULT_LEVEL_BY_NAME.get(name, "tile")
+def _resolve_model_level(name: str) -> str:
+    from slide2vec.encoders.registry import encoder_registry
+    return encoder_registry.info(name)["level"]
 
 
 def _coerce_execution_options(
@@ -472,9 +428,10 @@ def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_n
 
 
 def _recommended_execution_precision(model: Model | None) -> str:
-    settings = get_recommended_model_settings(getattr(model, "name", None))
-    if settings is not None and settings.precision is not None:
-        return settings.precision
+    from slide2vec.encoders.registry import encoder_registry
+    name = getattr(model, "name", None)
+    if name and name in encoder_registry:
+        return encoder_registry.info(name).get("precision") or "fp32"
     return "fp32"
 
 
@@ -485,9 +442,9 @@ def _resolve_direct_api_preprocessing(
     if preprocessing is not None:
         return preprocessing
 
-    settings = get_recommended_model_settings(getattr(model, "name", None))
-    target_tile_size_px = _default_target_tile_size_px(model, settings)
-    target_spacing_um = _default_target_spacing_um(model, settings)
+    from slide2vec.encoders.registry import resolve_preprocessing_requirements
+    name = getattr(model, "name", None)
+    target_tile_size_px, target_spacing_um = _default_preprocessing_from_registry(name)
     return PreprocessingConfig(
         backend="auto",
         target_spacing_um=target_spacing_um,
@@ -495,43 +452,55 @@ def _resolve_direct_api_preprocessing(
     )
 
 
-def _default_target_tile_size_px(model: Model, settings) -> int:
-    explicit_input_size = getattr(model, "_model_kwargs", {}).get("input_size")
-    if explicit_input_size is not None:
-        return int(explicit_input_size)
-    if settings is not None:
-        return int(settings.input_size[0])
-    return int(PreprocessingConfig().target_tile_size_px)
+def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
+    from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_requirements
+    if not name or name not in encoder_registry:
+        default = PreprocessingConfig()
+        return int(default.target_tile_size_px), float(default.target_spacing_um)
 
+    reqs = resolve_preprocessing_requirements(name)
+    tile_size_px = int(reqs["tile_size_px"])
+    spacing_um = reqs["spacing_um"]
 
-def _default_target_spacing_um(model: Model, settings) -> float:
-    if settings is None or not getattr(settings, "spacings_um", ()):
-        default_spacing = float(PreprocessingConfig().target_spacing_um)
+    if isinstance(spacing_um, list):
+        if any(abs(s - 0.5) <= 1e-8 for s in spacing_um):
+            chosen = 0.5
+        else:
+            chosen = min(spacing_um)
+        supported_text = ", ".join(f"{s:g}" for s in spacing_um)
         logger.warning(
-            "No recommended preprocessing spacing is known for model '%s'; defaulting direct API calls to "
-            "target_spacing_um=%g. Pass PreprocessingConfig(...) to override.",
-            getattr(model, "name", None),
-            default_spacing,
+            "Model '%s' supports multiple spacings [%s]; defaulting direct API calls to target_spacing_um=%g. "
+            "Pass PreprocessingConfig(target_spacing_um=...) to choose another supported spacing.",
+            name,
+            supported_text,
+            chosen,
         )
-        return default_spacing
+        return tile_size_px, chosen
 
-    supported_spacings = tuple(float(value) for value in settings.spacings_um)
-    if len(supported_spacings) == 1:
-        return supported_spacings[0]
+    return tile_size_px, float(spacing_um)
 
-    if any(abs(value - 0.5) <= 1e-8 for value in supported_spacings):
-        chosen = 0.5
-    else:
-        chosen = min(supported_spacings)
-    supported_text = ", ".join(f"{spacing:g}" for spacing in supported_spacings)
-    logger.warning(
-        "Model '%s' supports multiple spacings [%s]; defaulting direct API calls to target_spacing_um=%g. "
-        "Pass PreprocessingConfig(target_spacing_um=...) to choose another supported spacing.",
-        getattr(model, "name", None),
-        supported_text,
-        chosen,
+
+def _validate_model_config(
+    model: Model,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions | None = None,
+) -> None:
+    from slide2vec.encoders.registry import encoder_registry
+    from slide2vec.encoders.validation import validate_encoder_config
+    name = getattr(model, "name", None)
+    if not name or name not in encoder_registry:
+        return
+    # Skip precision validation for CPU execution (fp32 is always valid on CPU).
+    on_cpu = getattr(model, "_requested_device", None) == "cpu"
+    precision = None if on_cpu or execution is None else getattr(execution, "precision", None)
+    validate_encoder_config(
+        name,
+        target_tile_size_px=getattr(preprocessing, "target_tile_size_px", None),
+        target_spacing_um=getattr(preprocessing, "target_spacing_um", None),
+        precision=precision,
+        output_variant=getattr(model, "_output_variant", None),
+        allow_non_recommended=bool(getattr(model, "allow_non_recommended_settings", False)),
     )
-    return chosen
 
 
 @contextmanager

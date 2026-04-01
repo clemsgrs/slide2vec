@@ -150,13 +150,6 @@ def test_model_from_preset_defaults_tile_capable_models_to_tile_level():
     assert model.level == "tile"
 
 
-def test_model_from_preset_requires_explicit_region_opt_in():
-    model = Model.from_preset("virchow2", level="region")
-
-    assert model.name == "virchow2"
-    assert model.level == "region"
-
-
 def test_model_from_preset_keeps_slide_default_for_slide_models():
     model = Model.from_preset("prism")
 
@@ -482,7 +475,7 @@ def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tm
 
     args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
 
-    with pytest.raises(ValueError, match="requested precision=fp32"):
+    with pytest.raises(ValueError, match="precision=fp32"):
         get_cfg_from_args(args)
 
 
@@ -520,7 +513,7 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
         cfg = get_cfg_from_args(args)
 
     assert cfg.speed.precision == "fp32"
-    assert "requested precision=fp32" in caplog.text
+    assert "precision=fp32" in caplog.text
 
 
 def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_path: Path):
