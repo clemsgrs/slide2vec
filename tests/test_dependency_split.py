@@ -1,6 +1,5 @@
 import ast
 import re
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,8 +32,21 @@ CORE_RUNTIME_REQUIREMENT_NAMES = {
 }
 
 
-def _load_pyproject() -> dict:
-    return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+def _load_list_from_pyproject(key: str) -> list[str]:
+    raw = PYPROJECT.read_text(encoding="utf-8")
+    match = re.search(rf"^{re.escape(key)} = \[(.*?)^\]", raw, re.S | re.M)
+    assert match is not None, f"Could not find {key} in pyproject.toml"
+    items: list[str] = []
+    for line in match.group(1).splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "#" in stripped:
+            stripped = stripped.split("#", 1)[0].rstrip()
+        if stripped.endswith(","):
+            stripped = stripped[:-1].rstrip()
+        items.append(ast.literal_eval(stripped))
+    return items
 
 
 def _dep_names(deps: list[str]) -> set[str]:
@@ -82,14 +94,22 @@ def _top_level_imported_modules(path: Path) -> set[str]:
 
 
 def test_pyproject_moves_model_runtime_deps_into_models_extra():
-    data = _load_pyproject()
-
-    install_requires = _dep_names(data["project"]["dependencies"])
-    models_extra = _dep_names(data["project"]["optional-dependencies"]["models"])
+    install_requires = _dep_names(_load_list_from_pyproject("dependencies"))
+    models_extra = _dep_names(_load_list_from_pyproject("models"))
 
     assert FOUNDATION_REQUIREMENT_NAMES.isdisjoint(install_requires)
     assert FOUNDATION_REQUIREMENT_NAMES <= models_extra
     assert CORE_RUNTIME_REQUIREMENT_NAMES <= install_requires
+
+
+def test_pyproject_uses_upstream_gigapath_distribution_name():
+    models_extra = _dep_names(_load_list_from_pyproject("models"))
+    all_extra = _dep_names(_load_list_from_pyproject("all"))
+
+    assert "gigapath" in models_extra
+    assert "gigapath" in all_extra
+    assert "prov-gigapath" not in models_extra
+    assert "prov-gigapath" not in all_extra
 
 
 def test_requirements_txt_matches_generic_core_runtime_requirements():

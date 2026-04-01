@@ -87,7 +87,7 @@ models = [
     "packaging==23.2",
     "ninja==1.11.1.1",
     "psutil<6",
-    "prov-gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
+    "gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
 ]
 all = [
     "hs2p[all]>=3",
@@ -118,7 +118,7 @@ all = [
     "packaging==23.2",
     "ninja==1.11.1.1",
     "psutil<6",
-    "prov-gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
+    "gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
 ]
 testing = [
     "pytest>=6.0",
