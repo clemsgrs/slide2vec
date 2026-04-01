@@ -64,7 +64,7 @@ COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
 COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
 
-RUN python -m pip install --no-cache-dir --no-color "/opt/app[all]" \
+RUN python -m pip install --no-cache-dir --no-color "/opt/app[models,asap]" \
     && rm -rf /root/.cache/pip
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
