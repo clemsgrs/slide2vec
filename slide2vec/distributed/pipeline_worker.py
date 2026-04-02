@@ -39,9 +39,8 @@ def main(argv=None) -> int:
         model_spec = dict(request["model"])
         model = Model.from_preset(
             model_spec["name"],
-            level=model_spec["level"],
             device=f"cuda:{local_rank}",
-            **dict(model_spec.get("kwargs", {})),
+            output_variant=model_spec.get("output_variant"),
         )
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])

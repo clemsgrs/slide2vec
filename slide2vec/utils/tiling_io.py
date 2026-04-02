@@ -1,10 +1,9 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pandas as pd
 
-if TYPE_CHECKING:
-    from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, SlideSpec, TilingConfig
+from hs2p import SlideSpec, load_tiling_result
 
 
 REQUIRED_MANIFEST_COLUMNS = ("sample_id", "image_path")
@@ -31,22 +30,7 @@ def _optional_float(value: Any) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value)
-
-
-def _hs2p_exports() -> dict[str, Any]:
-    from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, SlideSpec, TilingConfig, load_tiling_result
-
-    return {
-        "FilterConfig": FilterConfig,
-        "PreviewConfig": PreviewConfig,
-        "SegmentationConfig": SegmentationConfig,
-        "SlideSpec": SlideSpec,
-        "TilingConfig": TilingConfig,
-        "load_tiling_result": load_tiling_result,
-    }
-
-
-def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
+def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     manifest_path = Path(csv_path).resolve()
     df = pd.read_csv(manifest_path)
     legacy_mask_columns = sorted(
@@ -75,10 +59,8 @@ def load_slide_manifest(csv_path: str | Path) -> list["SlideSpec"]:
         if "spacing_at_level_0" in df.columns
         else pd.Series([None] * len(df), index=df.index)
     )
-    hs2p = _hs2p_exports()
-    slide_spec = hs2p["SlideSpec"]
     return [
-        slide_spec(
+        SlideSpec(
             sample_id=str(sample_id),
             image_path=Path(image_path),
             mask_path=_optional_path(mask_path),
@@ -147,8 +129,7 @@ def load_process_df(
 
 
 def load_tiling_result_from_row(row):
-    hs2p = _hs2p_exports()
-    tiling_result = hs2p["load_tiling_result"](
+    tiling_result = load_tiling_result(
         coordinates_npz_path=Path(row["coordinates_npz_path"]),
         coordinates_meta_path=Path(row["coordinates_meta_path"]),
     )

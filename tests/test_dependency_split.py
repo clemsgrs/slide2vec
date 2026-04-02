@@ -103,6 +103,12 @@ def test_readme_documents_core_and_models_installs():
     assert 'pip install "slide2vec[models]"' in readme
 
 
-def test_models_module_imports_transformers():
-    imported_modules = _top_level_imported_modules(ROOT / "slide2vec" / "models" / "models.py")
-    assert "transformers" in imported_modules
+def test_encoder_model_files_reference_transformers():
+    # Verify that at least one encoder model file references `transformers`
+    # (used as a lazy import for HuggingFace-based encoders like CONCH, Phikon, etc.)
+    encoder_models_dir = ROOT / "slide2vec" / "encoders" / "models"
+    references = [
+        f for f in encoder_models_dir.glob("*.py")
+        if "transformers" in f.read_text(encoding="utf-8")
+    ]
+    assert references, "Expected at least one encoder model file to reference transformers"

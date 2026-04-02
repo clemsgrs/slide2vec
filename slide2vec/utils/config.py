@@ -7,14 +7,16 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 import slide2vec.distributed as distributed
-from slide2vec.model_settings import validate_model_settings
+from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
-from slide2vec.configs import default_preprocessing_config, default_model_config
+from slide2vec.configs import default_config
 
 logger = logging.getLogger("slide2vec")
 
 
 def validate_removed_options(cfg) -> None:
+    if "level" in cfg.model:
+        raise ValueError("model.level is not a valid slide2vec option.")
     if "restrict_to_tissue" in cfg.model:
         raise ValueError("model.restrict_to_tissue is not a valid slide2vec option.")
     if "visualize" in cfg:
@@ -23,18 +25,59 @@ def validate_removed_options(cfg) -> None:
         raise ValueError("tiling.visu_params is not a valid slide2vec option.")
 
 
+def _encoder_derived_cfg(model_name: str) -> dict:
+    """Build OmegaConf defaults derived from encoder registry metadata."""
+    from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_requirements
+
+    canonical = canonicalize_model_name(model_name)
+    if not canonical or canonical not in encoder_registry:
+        return {}
+
+    info = encoder_registry.info(canonical)
+    reqs = resolve_preprocessing_requirements(canonical)
+
+    spacing_um = reqs["spacing_um"]
+    if isinstance(spacing_um, list):
+        spacing_um = 0.5 if any(abs(s - 0.5) <= 1e-8 for s in spacing_um) else spacing_um[0]
+
+    return {
+        "tiling": {
+            "params": {
+                "target_tile_size_px": reqs["tile_size_px"],
+                "target_spacing_um": float(spacing_um),
+            }
+        },
+        "speed": {
+            "precision": info["precision"],
+        },
+    }
+
+
 def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> None:
-    model_cfg = getattr(cfg, "model", None)
-    tiling = getattr(cfg, "tiling", None)
-    tiling_params = getattr(tiling, "params", None) if tiling is not None else None
-    validate_model_settings(
-        model_name=getattr(model_cfg, "name", None),
-        requested_input_size=getattr(model_cfg, "input_size", None),
-        target_spacing_um=getattr(tiling_params, "target_spacing_um", None),
-        requested_precision=None if run_on_cpu else getattr(getattr(cfg, "speed", None), "precision", None),
-        allow_non_recommended_settings=bool(
-            getattr(model_cfg, "allow_non_recommended_settings", False)
-        ),
+    from slide2vec.encoders.registry import encoder_registry
+    from slide2vec.encoders.validation import validate_encoder_config
+
+    model_cfg = cfg.model
+    model_name = model_cfg.name
+    if not model_name:
+        return
+
+    canonical = canonicalize_model_name(model_name)
+    if canonical not in encoder_registry:
+        return
+
+    tiling_params = cfg.tiling.params
+    target_spacing_um = tiling_params.target_spacing_um
+    target_tile_size_px = tiling_params.target_tile_size_px
+    precision = None if run_on_cpu else cfg.speed.precision
+    allow_non_recommended = bool(model_cfg.allow_non_recommended_settings)
+
+    validate_encoder_config(
+        canonical,
+        target_tile_size_px=target_tile_size_px,
+        target_spacing_um=target_spacing_um,
+        precision=precision,
+        allow_non_recommended=allow_non_recommended,
     )
 
 
@@ -50,14 +93,19 @@ def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_preprocessing_cfg = OmegaConf.create(default_preprocessing_config)
-    default_model_cfg = OmegaConf.create(default_model_config)
-    default_cfg = OmegaConf.merge(default_preprocessing_cfg, default_model_cfg)
-    cfg = OmegaConf.load(args.config_file)
-    cfg = OmegaConf.merge(default_cfg, cfg, OmegaConf.from_cli(args.opts))
+    default_cfg = OmegaConf.create(default_config)
+
+    # Load user config first to derive model name for registry lookup.
+    user_cfg = OmegaConf.load(args.config_file)
+    model_name = user_cfg.model.name or ""
+    encoder_defaults = _encoder_derived_cfg(model_name)
+    if encoder_defaults:
+        default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
+
+    cfg = OmegaConf.merge(default_cfg, user_cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
     validate_removed_options(cfg)
-    validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
+    validate_model_recommended_settings(cfg, run_on_cpu=bool(args.run_on_cpu))
     return cfg
 
 
@@ -80,7 +128,7 @@ def setup(args):
         run_id = ""
 
     if cfg.wandb.enable:
-        key = os.environ.get("WANDB_API_KEY")
+        key = os.environ["WANDB_API_KEY"] if "WANDB_API_KEY" in os.environ else None
         wandb_run = initialize_wandb(cfg, key=key)
         wandb_run.define_metric("processed", summary="max")
         run_id = wandb_run.id
@@ -97,6 +145,8 @@ def setup(args):
     if cfg.wandb.enable:
         wandb_run.save(cfg_path)
     return cfg, cfg_path
+
+
 def hf_login():
     from huggingface_hub import login
 

@@ -24,18 +24,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_resource_loading_uses_packaged_configs():
     pytest.importorskip("omegaconf")
-    cfg = load_config("models", "default")
+    cfg = load_config("default")
     assert "model" in cfg
-    assert config_resource("preprocessing", "default").name == "default.yaml"
+    assert "tiling" in cfg
+    assert hasattr(cfg.model, "output_variant")
+    assert config_resource("default").name == "default.yaml"
 
 
 def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     pytest.importorskip("omegaconf")
-    cfg = load_config("preprocessing", "default")
+    cfg = load_config("default")
 
     assert hasattr(cfg, "save_tiles")
-    assert not hasattr(cfg.tiling.params, "drop_holes")
-    assert not hasattr(cfg.tiling.params, "use_padding")
     assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
     assert hasattr(cfg.tiling.filter_params, "filter_blur")
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
@@ -150,13 +150,6 @@ def test_model_from_preset_defaults_tile_capable_models_to_tile_level():
     assert model.level == "tile"
 
 
-def test_model_from_preset_requires_explicit_region_opt_in():
-    model = Model.from_preset("virchow2", level="region")
-
-    assert model.name == "virchow2"
-    assert model.level == "region"
-
-
 def test_model_from_preset_keeps_slide_default_for_slide_models():
     model = Model.from_preset("prism")
 
@@ -183,8 +176,8 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
         ),
         speed=SimpleNamespace(
             precision="bf16",
-            num_workers=6,
-            num_workers_embedding=2,
+            num_dataloader_workers=2,
+            num_preprocessing_workers=8,
             num_gpus=3,
             prefetch_factor_embedding=5,
             persistent_workers_embedding=False,
@@ -219,8 +212,8 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
         ),
         speed=SimpleNamespace(
             precision="fp32",
-            num_workers=6,
-            num_workers_embedding=2,
+            num_dataloader_workers=2,
+            num_preprocessing_workers=8,
             num_gpus=None,
             prefetch_factor_embedding=3,
             persistent_workers_embedding=True,
@@ -249,8 +242,8 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
         ),
         speed=SimpleNamespace(
             precision="bf16",
-            num_workers=4,
-            num_workers_embedding=4,
+            num_dataloader_workers=4,
+            num_preprocessing_workers=8,
             num_gpus=1,
             prefetch_factor_embedding=4,
             persistent_workers_embedding=True,
@@ -332,23 +325,34 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     cfg = SimpleNamespace(
         csv="/tmp/slides.csv",
         output_dir=str(tmp_path),
+        resume=False,
         model=SimpleNamespace(
             name="virchow2",
-            level="tile",
-            mode="cls",
-            arch=None,
-            pretrained_weights=None,
-            input_size=224,
-            patch_size=256,
-            token_size=16,
+            output_variant="cls",
+            batch_size=4,
             allow_non_recommended_settings=True,
             save_tile_embeddings=False,
             save_latents=False,
         ),
-        speed=SimpleNamespace(precision="fp32", num_workers=2, num_workers_embedding=3, num_gpus=2),
+        speed=SimpleNamespace(
+            precision="fp32",
+            num_dataloader_workers=3,
+            num_preprocessing_workers=8,
+            num_gpus=2,
+            prefetch_factor_embedding=4,
+            persistent_workers_embedding=True,
+            gpu_batch_preprocessing=True,
+            num_cucim_workers=4,
+        ),
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,
+            read_tiles_from=None,
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -409,12 +413,11 @@ def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp
                 "    target_tile_size_px: 256",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
             ]
         )
     )
 
-    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=False)
 
     with pytest.raises(ValueError, match="allow_non_recommended_settings"):
         get_cfg_from_args(args)
@@ -440,13 +443,12 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
                 "    target_tile_size_px: 256",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "  allow_non_recommended_settings: true",
             ]
         )
     )
 
-    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=False)
 
     with caplog.at_level("WARNING", logger="slide2vec"):
         cfg = get_cfg_from_args(args)
@@ -473,16 +475,15 @@ def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tm
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "speed:",
                 "  precision: fp32",
             ]
         )
     )
 
-    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=False)
 
-    with pytest.raises(ValueError, match="requested precision=fp32"):
+    with pytest.raises(ValueError, match="precision=fp32"):
         get_cfg_from_args(args)
 
 
@@ -506,7 +507,6 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "  allow_non_recommended_settings: true",
                 "speed:",
                 "  precision: fp32",
@@ -514,13 +514,13 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
         )
     )
 
-    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[])
+    args = SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=False)
 
     with caplog.at_level("WARNING", logger="slide2vec"):
         cfg = get_cfg_from_args(args)
 
     assert cfg.speed.precision == "fp32"
-    assert "requested precision=fp32" in caplog.text
+    assert "precision=fp32" in caplog.text
 
 
 def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_path: Path):
@@ -540,7 +540,6 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: prism",
-                "  level: slide",
                 "speed:",
                 "  precision: fp32",
             ]
@@ -564,10 +563,16 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
     cfg = SimpleNamespace(
         resume=True,
         output_dir="/tmp/run-001",
+        speed=SimpleNamespace(num_cucim_workers=4),
         tiling=SimpleNamespace(
             backend="asap",
             read_coordinates_from=None,
             read_tiles_from=None,
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -587,7 +592,6 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
     assert preprocessing.target_tile_size_px == 224
     assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
     assert preprocessing.read_tiles_from is None
-    assert not hasattr(preprocessing, "save_tiles")
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
@@ -607,6 +611,11 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
             backend="asap",
             read_coordinates_from=None,
             read_tiles_from="/tmp/tile-store",
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -625,18 +634,22 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
     assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
     assert preprocessing.num_cucim_workers == 6
-    assert not hasattr(preprocessing, "save_tiles")
 
 
-def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_workers():
+def test_preprocessing_config_from_config_uses_explicit_speed_num_cucim_workers():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-003",
         resume=False,
+        speed=SimpleNamespace(num_cucim_workers=5),
         tiling=SimpleNamespace(
             backend="asap",
-            num_cucim_workers=5,
             read_coordinates_from=None,
             read_tiles_from=None,
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -659,10 +672,16 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-004",
         resume=False,
+        speed=SimpleNamespace(num_cucim_workers=4),
         tiling=SimpleNamespace(
             backend="cucim",
             read_coordinates_from=None,
             read_tiles_from=None,
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
             params=SimpleNamespace(
                 target_spacing_um=0.5,
                 target_tile_size_px=224,
@@ -685,6 +704,16 @@ def test_validate_removed_options_rejects_legacy_preview_keys():
     from omegaconf import OmegaConf
 
     from slide2vec.utils.config import validate_removed_options
+
+    with pytest.raises(ValueError, match="model.level"):
+        validate_removed_options(
+            OmegaConf.create(
+                {
+                    "model": {"level": "tile"},
+                    "tiling": {"preview": {"save": True, "downsample": 32}},
+                }
+            )
+        )
 
     with pytest.raises(ValueError, match="visualize"):
         validate_removed_options(

@@ -41,233 +41,6 @@ def make_slide(
     )
 
 
-def test_load_model_merges_preprocessing_defaults_for_cross_file_interpolations(monkeypatch):
-    import slide2vec.inference as inference
-
-    class AttrDict(dict):
-        def __getattr__(self, name):
-            try:
-                return self[name]
-            except KeyError as exc:
-                raise AttributeError(name) from exc
-
-        def __setattr__(self, name, value):
-            self[name] = value
-
-    def convert(value):
-        if isinstance(value, dict):
-            return AttrDict({key: convert(item) for key, item in value.items()})
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        return value
-
-    def merge_values(left, right):
-        if isinstance(left, dict) and isinstance(right, dict):
-            merged = AttrDict({key: convert(value) for key, value in left.items()})
-            for key, value in right.items():
-                if key in merged:
-                    merged[key] = merge_values(merged[key], value)
-                else:
-                    merged[key] = convert(value)
-            return merged
-        return convert(right)
-
-    def lookup(root, path):
-        current = root
-        for segment in path.split("."):
-            current = current[segment]
-        return current
-
-    def resolve_value(root, value):
-        if isinstance(value, dict):
-            for key, item in list(value.items()):
-                value[key] = resolve_value(root, item)
-            return value
-        if isinstance(value, list):
-            for index, item in enumerate(list(value)):
-                value[index] = resolve_value(root, item)
-            return value
-        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-            return resolve_value(root, lookup(root, value[2:-1]))
-        return value
-
-    class FakeOmegaConf:
-        @staticmethod
-        def create(value):
-            return convert(value)
-
-        @staticmethod
-        def merge(*values):
-            merged = AttrDict()
-            for value in values:
-                merged = merge_values(merged, convert(value))
-            return merged
-
-        @staticmethod
-        def resolve(value):
-            resolve_value(value, value)
-
-    captured: dict[str, object] = {}
-
-    class FakeBackend:
-        device = "cpu"
-        features_dim = 128
-
-        def to(self, _device):
-            return self
-
-        def get_transforms(self):
-            return "TRANSFORMS"
-
-    class FakeModelFactory:
-        def __init__(self, options):
-            captured["options"] = options
-
-        def get_model(self):
-            return FakeBackend()
-
-    def fake_load_config(*parts):
-        if parts == ("preprocessing", "default"):
-            return {
-                "tiling": {
-                    "params": {
-                        "target_tile_size_px": 256,
-                    }
-                }
-            }
-        if parts == ("models", "default"):
-            return {
-                "model": {
-                    "mode": "cls",
-                    "input_size": "${tiling.params.target_tile_size_px}",
-                    "patch_size": 256,
-                    "token_size": 16,
-                    "normalize_embeddings": False,
-                }
-            }
-        if parts == ("models", "h0-mini"):
-            return {"model": {}}
-        raise AssertionError(parts)
-
-    monkeypatch.setitem(sys.modules, "omegaconf", types.SimpleNamespace(OmegaConf=FakeOmegaConf))
-    monkeypatch.setitem(sys.modules, "slide2vec.models", types.SimpleNamespace(ModelFactory=FakeModelFactory))
-    monkeypatch.setitem(sys.modules, "slide2vec.resources", types.SimpleNamespace(load_config=fake_load_config))
-    monkeypatch.setattr(inference, "_resolve_device", lambda requested, device: device)
-
-    loaded = inference.load_model(name="h0-mini", level="tile")
-
-    assert captured["options"].name == "h0-mini"
-    assert captured["options"].level == "tile"
-    assert captured["options"].mode == "cls"
-    assert captured["options"].input_size == 256
-    assert loaded.feature_dim == 128
-
-
-def test_load_model_uses_conchv15_preset_for_canonicalized_alias(monkeypatch):
-    import slide2vec.inference as inference
-
-    class AttrDict(dict):
-        def __getattr__(self, name):
-            try:
-                return self[name]
-            except KeyError as exc:
-                raise AttributeError(name) from exc
-
-        def __setattr__(self, name, value):
-            self[name] = value
-
-    def convert(value):
-        if isinstance(value, dict):
-            return AttrDict({key: convert(item) for key, item in value.items()})
-        if isinstance(value, list):
-            return [convert(item) for item in value]
-        return value
-
-    def merge_values(left, right):
-        if isinstance(left, dict) and isinstance(right, dict):
-            merged = AttrDict({key: convert(value) for key, value in left.items()})
-            for key, value in right.items():
-                if key in merged:
-                    merged[key] = merge_values(merged[key], value)
-                else:
-                    merged[key] = convert(value)
-            return merged
-        return convert(right)
-
-    def lookup(root, path):
-        current = root
-        for segment in path.split("."):
-            current = current[segment]
-        return current
-
-    def resolve_value(root, value):
-        if isinstance(value, dict):
-            for key, item in list(value.items()):
-                value[key] = resolve_value(root, item)
-            return value
-        if isinstance(value, list):
-            for index, item in enumerate(list(value)):
-                value[index] = resolve_value(root, item)
-            return value
-        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
-            return resolve_value(root, lookup(root, value[2:-1]))
-        return value
-
-    class FakeOmegaConf:
-        @staticmethod
-        def create(value):
-            return convert(value)
-
-        @staticmethod
-        def merge(*values):
-            merged = AttrDict()
-            for value in values:
-                merged = merge_values(merged, convert(value))
-            return merged
-
-        @staticmethod
-        def resolve(value):
-            resolve_value(value, value)
-
-    captured = {}
-
-    class FakeBackend:
-        device = "cpu"
-        features_dim = 768
-
-        def to(self, _device):
-            return self
-
-        def get_transforms(self):
-            return "TRANSFORMS"
-
-    class FakeModelFactory:
-        def __init__(self, options):
-            captured["options"] = options
-
-        def get_model(self):
-            return FakeBackend()
-
-    def fake_load_config(*parts):
-        if parts == ("preprocessing", "default"):
-            return {"tiling": {"params": {"target_tile_size_px": 256}}}
-        if parts == ("models", "default"):
-            return {"model": {"mode": "cls", "input_size": "${tiling.params.target_tile_size_px}"}}
-        if parts == ("models", "conchv15"):
-            return {"model": {"name": "conchv15", "input_size": 448}}
-        raise AssertionError(parts)
-
-    monkeypatch.setitem(sys.modules, "omegaconf", types.SimpleNamespace(OmegaConf=FakeOmegaConf))
-    monkeypatch.setitem(sys.modules, "slide2vec.models", types.SimpleNamespace(ModelFactory=FakeModelFactory))
-    monkeypatch.setitem(sys.modules, "slide2vec.resources", types.SimpleNamespace(load_config=fake_load_config))
-    monkeypatch.setattr(inference, "_resolve_device", lambda requested, device: device)
-
-    loaded = inference.load_model(name="conchv15", level="tile")
-
-    assert captured["options"].name == "conchv15"
-    assert captured["options"].input_size == 448
-    assert loaded.feature_dim == 768
-
 def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_than_one(
     monkeypatch,
     tmp_path: Path,
@@ -357,7 +130,7 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
 def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
-    model = Model.from_preset("virchow2", level="slide")
+    model = Model.from_preset("prism")
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="npz", save_tile_embeddings=True)
@@ -1422,7 +1195,7 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
-        Model.from_preset("prism", level="slide"),
+        Model.from_preset("prism"),
         slides=[slide_record],
         preprocessing=PreprocessingConfig(),
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", save_tile_embeddings=False),
@@ -1601,8 +1374,8 @@ def test_run_forward_pass_handles_empty_dataloader():
     from contextlib import nullcontext
 
     class DummyModel:
-        def __call__(self, image):
-            return {"embedding": torch.zeros((image.shape[0], 5), dtype=torch.float32)}
+        def encode_tiles(self, image):
+            return torch.zeros((image.shape[0], 5), dtype=torch.float32)
 
     dataloader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(
@@ -1874,8 +1647,8 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
@@ -1967,8 +1740,8 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
@@ -2064,8 +1837,8 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCollator:
         ordered_indices = None
@@ -2153,8 +1926,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCucimCollator:
         ordered_indices = None
@@ -2235,8 +2008,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCollator:
         ordered_indices = None
@@ -2378,10 +2151,10 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
     class DummyRegionModel:
         tile_size = 2
 
-        def __call__(self, image):
+        def encode_tiles(self, image):
             assert image.ndim == 5
             assert image.shape[1:] == (4, 3, 2, 2)
-            return {"embedding": torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)}
+            return torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),

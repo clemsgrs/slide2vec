@@ -51,15 +51,8 @@ TILING_PREVIEW = dict(save=False, downsample=32)
 
 # -- model --
 MODEL_PARAMS = dict(
-    level="slide",           # override (default: "tile")
     name="prism",            # override (default: null)
-    mode="cls",
-    arch=None,
-    pretrained_weights=None,
     batch_size=8,            # override (default: 256)
-    input_size=224,          # resolved from ${tiling.params.target_tile_size_px}
-    patch_size=256,
-    token_size=16,
     save_tile_embeddings=True,
     save_latents=False,
 )
@@ -103,6 +96,9 @@ def mask_path() -> Path:
 def test_output_consistency(wsi_path, mask_path, tmp_path):
     """Running the full pipeline with hardcoded params produces x/y coordinates and
     embeddings that match the ground truth fixtures in test/gt/."""
+
+    pytest.importorskip("transformers")
+    pytest.importorskip("wholeslidedata")
 
     # 1. Build a temporary CSV with resolved absolute paths
     tmp_csv = tmp_path / "test.csv"

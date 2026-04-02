@@ -40,13 +40,8 @@ def test_slide2vec_code_does_not_import_vendored_hs2p_paths():
         assert "slide2vec.hs2p" not in source
 
 
-def test_load_slide_manifest_requires_hs2p_schema(monkeypatch, tmp_path: Path):
+def test_load_slide_manifest_requires_hs2p_schema(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
-    monkeypatch.setattr(
-        helper,
-        "_hs2p_exports",
-        lambda: {"SlideSpec": SimpleNamespace},
-    )
 
     manifest = tmp_path / "slides.csv"
     manifest.write_text(
@@ -69,13 +64,8 @@ def test_load_slide_manifest_requires_hs2p_schema(monkeypatch, tmp_path: Path):
         helper.load_slide_manifest(legacy_manifest)
 
 
-def test_load_slide_manifest_preserves_optional_spacing_at_level_0(monkeypatch, tmp_path: Path):
+def test_load_slide_manifest_preserves_optional_spacing_at_level_0(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
-    monkeypatch.setattr(
-        helper,
-        "_hs2p_exports",
-        lambda: {"SlideSpec": SimpleNamespace},
-    )
 
     manifest = tmp_path / "slides.csv"
     manifest.write_text(
@@ -163,11 +153,7 @@ def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):
         captured["kwargs"] = kwargs
         return SimpleNamespace()
 
-    monkeypatch.setattr(
-        helper,
-        "_hs2p_exports",
-        lambda: {"load_tiling_result": fake_load_tiling_result},
-    )
+    monkeypatch.setattr(helper, "load_tiling_result", fake_load_tiling_result)
 
     row = {
         "coordinates_npz_path": "/tmp/slide-1.coordinates.npz",
@@ -220,6 +206,6 @@ def test_model_from_preset_uses_public_factory(monkeypatch):
 
 def test_load_config_returns_omegaconf_object():
     pytest.importorskip("omegaconf")
-    cfg = load_config("models", "default")
+    cfg = load_config("default")
 
     assert "model" in cfg

@@ -25,14 +25,7 @@ def build_model_and_pipeline(args):
     _hf_login()
     model = Model.from_preset(
         cfg.model.name,
-        level=cfg.model.level,
-        mode=cfg.model.mode,
-        arch=cfg.model.arch,
-        pretrained_weights=cfg.model.pretrained_weights,
-        input_size=cfg.model.input_size,
-        patch_size=cfg.model.patch_size,
-        token_size=cfg.model.token_size,
-        normalize_embeddings=getattr(cfg.model, "normalize_embeddings", None),
+        output_variant=getattr(cfg.model, "output_variant", None),
         allow_non_recommended_settings=bool(
             getattr(cfg.model, "allow_non_recommended_settings", False)
         ),

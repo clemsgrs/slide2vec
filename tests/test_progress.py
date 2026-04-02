@@ -70,7 +70,8 @@ def _install_fake_rich_runtime(monkeypatch):
             self.tasks.pop(task_id, None)
 
         def advance(self, task_id, advance=1):
-            self.tasks[task_id]["completed"] = self.tasks[task_id].get("completed", 0) + advance
+            completed = self.tasks[task_id]["completed"] if "completed" in self.tasks[task_id] else 0
+            self.tasks[task_id]["completed"] = completed + advance
 
     fake_console.Console = FakeConsole
     fake_progress.Progress = FakeProgress
@@ -207,9 +208,9 @@ def test_run_forward_pass_reports_processed_tile_counts():
     reporter = RecordingReporter()
 
     class FakeModel:
-        def __call__(self, image):
+        def encode_tiles(self, image):
             batch_size = image.shape[0]
-            return {"embedding": torch.ones((batch_size, 3), dtype=torch.float32)}
+            return torch.ones((batch_size, 3), dtype=torch.float32)
 
     dataloader = [
         (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
@@ -243,9 +244,9 @@ def test_run_forward_pass_emits_batch_timing_events():
     reporter = RecordingReporter()
 
     class FakeModel:
-        def __call__(self, image):
+        def encode_tiles(self, image):
             batch_size = image.shape[0]
-            return {"embedding": torch.ones((batch_size, 3), dtype=torch.float32)}
+            return torch.ones((batch_size, 3), dtype=torch.float32)
 
     dataloader = [
         (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
@@ -276,6 +277,50 @@ def test_run_forward_pass_emits_batch_timing_events():
     assert all(payload["reader_read_ms"] >= 0.0 for payload in timing_payloads)
     assert all(payload["gpu_busy_fraction"] >= 0.0 for payload in timing_payloads)
     assert all(payload["gpu_busy_fraction"] <= 1.0 for payload in timing_payloads)
+
+
+def test_run_forward_pass_prefers_tile_encoder_when_present():
+    torch = pytest.importorskip("torch")
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+
+    reporter = RecordingReporter()
+
+    class SlideModel:
+        def __init__(self):
+            self.tile_encoder = TileEncoder()
+
+        def encode_tiles(self, image):
+            return self.tile_encoder.encode_tiles(image)
+
+    class TileEncoder:
+        def encode_tiles(self, image):
+            batch_size = image.shape[0]
+            return torch.full((batch_size, 3), 7.0, dtype=torch.float32)
+
+    dataloader = [
+        (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
+        (torch.tensor([2]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
+    ]
+    loaded = SimpleNamespace(
+        device="cpu",
+        feature_dim=1280,
+        tile_feature_dim=3,
+        model=SlideModel(),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        outputs = inference._run_forward_pass(
+            dataloader,
+            loaded,
+            nullcontext(),
+            sample_id="slide-a",
+            total_items=3,
+            unit_label="tile",
+        )
+
+    assert outputs.shape == (3, 3)
+    assert torch.all(outputs == 7.0)
 
 
 def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):

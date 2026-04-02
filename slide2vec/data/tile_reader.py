@@ -1,16 +1,10 @@
-from __future__ import annotations
-
 from collections import defaultdict
 import time
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from hs2p import TilingResult
+from hs2p import TilingResult
 
 
 class SuperTileBatchSampler:
@@ -57,7 +51,7 @@ class WSITileReader:
     def __init__(
         self,
         image_path: "Path",
-        tiling_result: "TilingResult",
+        tiling_result: TilingResult,
         *,
         backend: str = "cucim",
         num_cucim_workers: int = 4,
@@ -212,7 +206,7 @@ class OnTheFlyBatchTileCollator:
         self,
         *,
         image_path: "Path",
-        tiling_result: "TilingResult",
+        tiling_result: TilingResult,
         backend: str = "cucim",
         num_cucim_workers: int = 4,
         gpu_decode: bool = False,

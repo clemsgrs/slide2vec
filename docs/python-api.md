@@ -35,7 +35,7 @@ y = embedded.y
 
 `tile_embeddings` has shape `(N, D)`. For slide-level models, `slide_embedding` has shape `(D)`.
 
-Non-slide models default to `level="tile"`. Use `level="region"` only when you want region-level extraction explicitly. Slide-native models such as `prism` and `titan` still default to `level="slide"`.
+The encoder level is inferred from the preset, so callers do not need to configure it directly. Tile-focused presets and slide-native presets are selected automatically by name.
 
 When you call the direct API from an interactive terminal or a Jupyter notebook, `slide2vec` shows live progress by default. If you already installed a custom reporter with `slide2vec.progress.activate_progress_reporter(...)`, the API leaves it in place.
 
