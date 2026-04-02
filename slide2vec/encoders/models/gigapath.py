@@ -18,10 +18,9 @@ from slide2vec.encoders.registry import register_encoder
     source="prov-gigapath/prov-gigapath",
 )
 class GigaPath(TimmTileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf_hub:prov-gigapath/prov-gigapath",
-            token=token,
             output_variant=output_variant,
         )
 
@@ -38,7 +37,7 @@ class GigaPath(TimmTileEncoder):
     source="prov-gigapath/prov-gigapath",
 )
 class GigaPathSlideEncoder(SlideEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         from gigapath.slide_encoder import create_model
 
         self._model = create_model(

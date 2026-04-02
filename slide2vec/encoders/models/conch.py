@@ -26,7 +26,7 @@ from slide2vec.encoders.registry import register_encoder
     source="MahmoodLab/conch",
 )
 class CONCH(TileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         from conch.open_clip_custom import create_model_from_pretrained
 
         self._model, self._transform = create_model_from_pretrained(
@@ -66,7 +66,7 @@ class CONCH(TileEncoder):
     source="MahmoodLab/TITAN",
 )
 class CONCHv15(TileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         from transformers import AutoModel
 
         titan = AutoModel.from_pretrained("MahmoodLab/TITAN", trust_remote_code=True)

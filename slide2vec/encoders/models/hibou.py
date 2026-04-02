@@ -33,19 +33,10 @@ class _HibouBase(TileEncoder):
 
     _encode_dim: int
 
-    def __init__(
-        self,
-        model_name: str,
-        *,
-        token: str | None = None,
-        output_variant: str | None = None,
-    ):
+    def __init__(self, model_name: str, *, output_variant: str | None = None):
         from transformers import AutoModel
 
-        kwargs = {"trust_remote_code": True}
-        if token is not None:
-            kwargs["token"] = token
-        self._model = AutoModel.from_pretrained(model_name, **kwargs).eval()
+        self._model = AutoModel.from_pretrained(model_name, trust_remote_code=True).eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)
 
@@ -82,8 +73,8 @@ class _HibouBase(TileEncoder):
 class HibouB(_HibouBase):
     _encode_dim = 768
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("histai/hibou-b", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("histai/hibou-b", output_variant=output_variant)
 
 
 @register_encoder(
@@ -98,5 +89,5 @@ class HibouB(_HibouBase):
 class HibouL(_HibouBase):
     _encode_dim = 1024
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("histai/hibou-L", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("histai/hibou-L", output_variant=output_variant)

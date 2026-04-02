@@ -38,7 +38,6 @@ class _HOptimusBase(TimmTileEncoder):
         self,
         model_name: str,
         *,
-        token: str | None = None,
         output_variant: str | None = None,
         **timm_kwargs,
     ):
@@ -49,7 +48,6 @@ class _HOptimusBase(TimmTileEncoder):
         )
         super().__init__(
             model_name,
-            token=token,
             output_variant="default",
             **timm_kwargs,
         )
@@ -77,10 +75,9 @@ class _HOptimusBase(TimmTileEncoder):
     source="bioptimus/H-optimus-0",
 )
 class HOptimus0(TimmTileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf-hub:bioptimus/H-optimus-0",
-            token=token,
             output_variant=output_variant,
             init_values=1e-5,
             dynamic_img_size=False,
@@ -100,10 +97,9 @@ class HOptimus0(TimmTileEncoder):
     source="bioptimus/H-optimus-1",
 )
 class HOptimus1(TimmTileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf-hub:bioptimus/H-optimus-1",
-            token=token,
             output_variant=output_variant,
             init_values=1e-5,
             dynamic_img_size=False,
@@ -126,14 +122,14 @@ class HOptimus1(TimmTileEncoder):
     source="bioptimus/H0-mini",
 )
 class H0Mini(_HOptimusBase):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf-hub:bioptimus/H0-mini",
-            token=token,
             output_variant=output_variant,
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
         )
+
 
     def get_transform(self) -> Callable:
         return _hoptimus_transform()

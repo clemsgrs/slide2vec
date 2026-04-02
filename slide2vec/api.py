@@ -201,8 +201,9 @@ class Model:
         output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
     ) -> None:
-        self.name = _canonical_model_name(name)
-        self.level = _resolve_model_level(self.name)
+        self.name = canonicalize_model_name(name)
+        from slide2vec.encoders.registry import encoder_registry
+        self.level = encoder_registry.info(self.name)["level"]
         self._requested_device = device
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._output_variant = output_variant
@@ -218,7 +219,7 @@ class Model:
         device: str = "auto",
     ) -> "Model":
         return cls(
-            name=_canonical_model_name(name),
+            name=name,
             device=device,
             output_variant=output_variant,
             allow_non_recommended_settings=allow_non_recommended_settings,
@@ -383,15 +384,6 @@ class Pipeline:
                 tiling_only=tiling_only,
                 execution=self.execution,
             )
-
-
-def _canonical_model_name(name: str) -> str:
-    return canonicalize_model_name(name)
-
-
-def _resolve_model_level(name: str) -> str:
-    from slide2vec.encoders.registry import encoder_registry
-    return encoder_registry.info(name)["level"]
 
 
 def _coerce_execution_options(

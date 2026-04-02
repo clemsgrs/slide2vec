@@ -19,22 +19,11 @@ class _PhikonBase(TileEncoder):
 
     _encode_dim: int
 
-    def __init__(
-        self,
-        model_name: str,
-        *,
-        token: str | None = None,
-        output_variant: str | None = None,
-    ):
+    def __init__(self, model_name: str, *, output_variant: str | None = None):
         from transformers import AutoImageProcessor, AutoModel
 
-        kwargs = {}
-        if token is not None:
-            kwargs["token"] = token
-        self._model = AutoModel.from_pretrained(model_name, **kwargs).eval()
-        self._processor = AutoImageProcessor.from_pretrained(
-            model_name, use_fast=True, **kwargs
-        )
+        self._model = AutoModel.from_pretrained(model_name).eval()
+        self._processor = AutoImageProcessor.from_pretrained(model_name, use_fast=True)
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)
 
@@ -77,8 +66,9 @@ class _PhikonBase(TileEncoder):
 class Phikon(_PhikonBase):
     _encode_dim = 768
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("owkin/phikon", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("owkin/phikon", output_variant=output_variant)
+
 
 
 @register_encoder(
@@ -93,5 +83,5 @@ class Phikon(_PhikonBase):
 class PhikonV2(_PhikonBase):
     _encode_dim = 1024
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("owkin/phikon-v2", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("owkin/phikon-v2", output_variant=output_variant)

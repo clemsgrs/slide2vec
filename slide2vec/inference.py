@@ -145,8 +145,6 @@ def load_model(
     device: str = "auto",
     output_variant: str | None = None,
     token: str | None = None,
-    # level is accepted for API compatibility but derived from registry
-    level: str | None = None,
 ) -> LoadedModel:
     from slide2vec.encoders import encoder_registry
     from slide2vec.encoders.compat import SlideEncoderCompat, TileEncoderCompat
@@ -158,8 +156,13 @@ def load_model(
     if token is None:
         token = os.environ.get("HF_TOKEN")
 
+    if token is not None:
+        from huggingface_hub import login as hf_login
+
+        hf_login(token=token, add_to_git_credential=False)
+
     encoder_cls = encoder_registry.get(name)
-    encoder = encoder_cls(token=token, output_variant=output_variant)
+    encoder = encoder_cls(output_variant=output_variant)
 
     if resolved_level == "tile":
         wrapped = TileEncoderCompat(encoder)
@@ -167,7 +170,7 @@ def load_model(
         tile_enc_name = info["tile_encoder"]
         tile_enc_ov = info["tile_encoder_output_variant"]
         tile_enc_cls = encoder_registry.get(tile_enc_name)
-        tile_encoder = tile_enc_cls(token=token, output_variant=tile_enc_ov)
+        tile_encoder = tile_enc_cls(output_variant=tile_enc_ov)
         wrapped = SlideEncoderCompat(encoder, tile_encoder)
 
     target_device = _resolve_device(device, wrapped.device)

@@ -25,13 +25,10 @@ from slide2vec.encoders.registry import register_encoder
     source="kaiko-ai/midnight",
 )
 class Midnight(TileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         from transformers import AutoModel
 
-        kwargs = {}
-        if token is not None:
-            kwargs["token"] = token
-        self._model = AutoModel.from_pretrained("kaiko-ai/midnight", **kwargs).eval()
+        self._model = AutoModel.from_pretrained("kaiko-ai/midnight").eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)
 

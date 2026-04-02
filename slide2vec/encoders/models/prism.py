@@ -20,13 +20,10 @@ from slide2vec.encoders.registry import register_encoder
     source="paige-ai/Prism",
 )
 class PrismSlideEncoder(SlideEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         from transformers import AutoModel
 
-        kwargs = {"trust_remote_code": True}
-        if token is not None:
-            kwargs["token"] = token
-        self._model = AutoModel.from_pretrained("paige-ai/Prism", **kwargs).eval()
+        self._model = AutoModel.from_pretrained("paige-ai/Prism", trust_remote_code=True).eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)
 

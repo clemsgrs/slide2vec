@@ -20,10 +20,9 @@ from slide2vec.encoders.registry import register_encoder
     source="MahmoodLab/UNI",
 )
 class UNI(TimmTileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf-hub:MahmoodLab/UNI",
-            token=token,
             output_variant=output_variant,
             init_values=1e-5,
             dynamic_img_size=True,
@@ -40,10 +39,9 @@ class UNI(TimmTileEncoder):
     source="MahmoodLab/UNI2-h",
 )
 class UNI2(TimmTileEncoder):
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, *, output_variant: str | None = None):
         super().__init__(
             "hf-hub:MahmoodLab/UNI2-h",
-            token=token,
             output_variant=output_variant,
             img_size=224,
             patch_size=14,

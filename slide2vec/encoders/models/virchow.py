@@ -20,7 +20,7 @@ class _VirchowBase(TimmTileEncoder):
 
     _num_prefix_tokens: int = 1  # Override in subclass if needed
 
-    def __init__(self, model_name: str, *, token: str | None = None, output_variant: str | None = None):
+    def __init__(self, model_name: str, *, output_variant: str | None = None):
         self._output_variant = resolve_requested_output_variant(
             output_variant,
             default="cls_patch_mean",
@@ -28,7 +28,6 @@ class _VirchowBase(TimmTileEncoder):
         )
         super().__init__(
             model_name,
-            token=token,
             output_variant="default",
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
@@ -62,8 +61,8 @@ class _VirchowBase(TimmTileEncoder):
 class Virchow(_VirchowBase):
     _num_prefix_tokens = 1
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("hf-hub:paige-ai/Virchow", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("hf-hub:paige-ai/Virchow", output_variant=output_variant)
 
 
 @register_encoder(
@@ -81,5 +80,5 @@ class Virchow(_VirchowBase):
 class Virchow2(_VirchowBase):
     _num_prefix_tokens = 5  # 1 CLS + 4 register tokens
 
-    def __init__(self, *, token: str | None = None, output_variant: str | None = None):
-        super().__init__("hf-hub:paige-ai/Virchow2", token=token, output_variant=output_variant)
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__("hf-hub:paige-ai/Virchow2", output_variant=output_variant)

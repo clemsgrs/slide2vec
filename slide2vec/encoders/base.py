@@ -92,7 +92,6 @@ class TimmTileEncoder(TileEncoder):
         self,
         model_name: str,
         *,
-        token: str | None = None,
         output_variant: str | None = None,
         **timm_kwargs,
     ):
@@ -100,8 +99,6 @@ class TimmTileEncoder(TileEncoder):
 
         defaults = {"pretrained": True, "num_classes": 0}
         defaults.update(timm_kwargs)
-        if token is not None:
-            defaults["hf_token"] = token
         self._model = timm.create_model(model_name, **defaults).eval()
         self._device = torch.device("cpu")
         if not hasattr(self, "_output_variant"):
