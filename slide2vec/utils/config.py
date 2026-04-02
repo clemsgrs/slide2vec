@@ -105,7 +105,7 @@ def get_cfg_from_args(args):
     cfg = OmegaConf.merge(default_cfg, user_cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
     validate_removed_options(cfg)
-    validate_model_recommended_settings(cfg, run_on_cpu=bool(args.run_on_cpu) if hasattr(args, "run_on_cpu") else False)
+    validate_model_recommended_settings(cfg, run_on_cpu=bool(args.run_on_cpu))
     return cfg
 
 

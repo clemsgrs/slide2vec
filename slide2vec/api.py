@@ -30,10 +30,8 @@ TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
 def _cfg_num_cucim_workers(cfg: Any) -> int:
-    if hasattr(cfg, "speed") and hasattr(cfg.speed, "num_cucim_workers") and cfg.speed.num_cucim_workers is not None:
+    if cfg.speed.num_cucim_workers is not None:
         return int(cfg.speed.num_cucim_workers)
-    if hasattr(cfg, "tiling") and hasattr(cfg.tiling, "num_cucim_workers") and cfg.tiling.num_cucim_workers is not None:
-        return int(cfg.tiling.num_cucim_workers)
     return 4
 
 
@@ -62,18 +60,14 @@ class PreprocessingConfig:
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
         default_read_coordinates_from = Path(cfg.output_dir) / "coordinates"
-        read_coordinates_from = tiling.read_coordinates_from if hasattr(tiling, "read_coordinates_from") else None
-        read_tiles_from = tiling.read_tiles_from if hasattr(tiling, "read_tiles_from") else None
-        on_the_fly = bool(tiling.on_the_fly) if hasattr(tiling, "on_the_fly") else True
-        gpu_decode = bool(tiling.gpu_decode) if hasattr(tiling, "gpu_decode") else False
-        adaptive_batching = bool(tiling.adaptive_batching) if hasattr(tiling, "adaptive_batching") else False
-        if hasattr(tiling, "preview"):
-            preview_cfg = tiling.preview
-            preview_save = bool(preview_cfg.save)
-            preview_downsample = int(preview_cfg.downsample)
-        else:
-            preview_save = False
-            preview_downsample = 32
+        read_coordinates_from = tiling.read_coordinates_from
+        read_tiles_from = tiling.read_tiles_from
+        on_the_fly = bool(tiling.on_the_fly)
+        gpu_decode = bool(tiling.gpu_decode)
+        adaptive_batching = bool(tiling.adaptive_batching)
+        preview_cfg = tiling.preview
+        preview_save = bool(preview_cfg.save)
+        preview_downsample = int(preview_cfg.downsample)
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -90,10 +84,10 @@ class PreprocessingConfig:
             on_the_fly=on_the_fly,
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
-            use_supertiles=bool(tiling.use_supertiles) if hasattr(tiling, "use_supertiles") else True,
-            jpeg_backend=str(tiling.jpeg_backend) if hasattr(tiling, "jpeg_backend") else "turbojpeg",
+            use_supertiles=bool(tiling.use_supertiles),
+            jpeg_backend=str(tiling.jpeg_backend),
             num_cucim_workers=_cfg_num_cucim_workers(cfg),
-            resume=bool(cfg.resume) if hasattr(cfg, "resume") else False,
+            resume=bool(cfg.resume),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
             preview={
@@ -126,34 +120,23 @@ class ExecutionOptions:
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
         configured_num_gpus = cfg.speed.num_gpus
         requested_precision = normalize_precision_name(cfg.speed.precision)
-        if hasattr(cfg.speed, "num_dataloader_workers"):
-            num_workers = cfg.speed.num_dataloader_workers
-        elif hasattr(cfg.speed, "num_workers_embedding"):
-            num_workers = cfg.speed.num_workers_embedding
-        else:
-            num_workers = 8
-        prefetch_factor = 4
-        if hasattr(cfg.speed, "prefetch_factor_embedding"):
-            prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
-        persistent_workers = True
-        if hasattr(cfg.speed, "persistent_workers_embedding"):
-            persistent_workers = bool(cfg.speed.persistent_workers_embedding)
-        gpu_batch_preprocessing = True
-        if hasattr(cfg.speed, "gpu_batch_preprocessing"):
-            gpu_batch_preprocessing = bool(cfg.speed.gpu_batch_preprocessing)
+        num_workers = cfg.speed.num_dataloader_workers
+        prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
+        persistent_workers = bool(cfg.speed.persistent_workers_embedding)
+        gpu_batch_preprocessing = bool(cfg.speed.gpu_batch_preprocessing)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
-            batch_size=int(cfg.model.batch_size) if hasattr(cfg.model, "batch_size") else 1,
+            batch_size=int(cfg.model.batch_size),
             num_workers=int(num_workers),
-            num_preprocessing_workers=int(cfg.speed.num_preprocessing_workers) if hasattr(cfg.speed, "num_preprocessing_workers") else 8,
+            num_preprocessing_workers=int(cfg.speed.num_preprocessing_workers),
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=prefetch_factor,
             persistent_workers=persistent_workers,
             gpu_batch_preprocessing=gpu_batch_preprocessing,
-            save_tile_embeddings=bool(cfg.model.save_tile_embeddings) if hasattr(cfg.model, "save_tile_embeddings") else False,
-            save_latents=bool(cfg.model.save_latents) if hasattr(cfg.model, "save_latents") else False,
+            save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
+            save_latents=bool(cfg.model.save_latents),
         )
 
     def __post_init__(self) -> None:
