@@ -54,7 +54,7 @@ def test_slide_encoders_have_slide_level():
 def test_slide_encoders_declare_tile_encoder_dependency():
     for name in EXPECTED_SLIDE_ENCODERS:
         info = encoder_registry.info(name)
-        dep = info.get("tile_encoder")
+        dep = info["tile_encoder"] if "tile_encoder" in info else None
         assert dep is not None, f"{name}: missing tile_encoder dependency"
         assert dep in encoder_registry, f"{name}: tile_encoder '{dep}' is not registered"
 
@@ -62,19 +62,20 @@ def test_slide_encoders_declare_tile_encoder_dependency():
 def test_all_encoders_declare_precision():
     for name in EXPECTED_ENCODERS:
         info = encoder_registry.info(name)
-        assert info.get("precision") in ("fp16", "fp32", "bf16"), (
-            f"{name}: unexpected or missing precision={info.get('precision')}"
+        precision = info["precision"] if "precision" in info else None
+        assert precision in ("fp16", "fp32", "bf16"), (
+            f"{name}: unexpected or missing precision={precision}"
         )
 
 
 def test_all_encoders_declare_output_variants():
     for name in EXPECTED_ENCODERS:
         info = encoder_registry.info(name)
-        variants = info.get("output_variants")
+        variants = info["output_variants"] if "output_variants" in info else None
         assert isinstance(variants, dict) and variants, (
             f"{name}: missing or empty output_variants"
         )
-        default = info.get("default_output_variant")
+        default = info["default_output_variant"] if "default_output_variant" in info else None
         assert default in variants, (
             f"{name}: default_output_variant '{default}' not in output_variants"
         )
@@ -154,7 +155,7 @@ def test_resolve_encoder_output_raises_when_overriding_slide_encoder():
 
 def test_encoder_not_in_registry_raises_key_error():
     with pytest.raises(KeyError):
-        encoder_registry.get("nonexistent-model")
+        encoder_registry.require("nonexistent-model")
 
 
 def test_encoder_contains_check():

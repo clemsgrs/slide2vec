@@ -35,7 +35,7 @@ def validate_encoder_config(
 
     mismatches: list[str] = []
 
-    rec_precision = info.get("precision")
+    rec_precision = info["precision"] if "precision" in info else None
     if precision is not None and rec_precision is not None:
         norm_precision = normalize_precision_name(precision)
         if norm_precision != rec_precision:
@@ -43,7 +43,7 @@ def validate_encoder_config(
                 f"precision={norm_precision} (recommended: {rec_precision})"
             )
 
-    rec_spacing = info.get("supported_spacing_um")
+    rec_spacing = info["supported_spacing_um"] if "supported_spacing_um" in info else None
     if target_spacing_um is not None and rec_spacing is not None:
         valid_spacings = rec_spacing if isinstance(rec_spacing, list) else [rec_spacing]
         if not any(abs(float(target_spacing_um) - float(s)) <= 1e-8 for s in valid_spacings):
@@ -54,7 +54,7 @@ def validate_encoder_config(
 
     if target_tile_size_px is not None:
         reqs = resolve_preprocessing_requirements(encoder_name, info)
-        rec_tile_size = reqs.get("tile_size_px")
+        rec_tile_size = reqs["tile_size_px"]
         if rec_tile_size is not None and int(target_tile_size_px) != int(rec_tile_size):
             mismatches.append(
                 f"target_tile_size_px={target_tile_size_px} (recommended: {rec_tile_size})"

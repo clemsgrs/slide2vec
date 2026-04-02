@@ -13,12 +13,11 @@ def require_encoder_metadata_field(
     field: str,
 ) -> Any:
     """Return one required encoder metadata field or raise a contract error."""
-    value = metadata.get(field)
-    if value is None:
+    if field not in metadata or metadata[field] is None:
         raise ValueError(
             f"Encoder '{encoder_name}' must declare {field} metadata"
         )
-    return value
+    return metadata[field]
 
 
 def resolve_encoder_level(
@@ -120,7 +119,7 @@ def resolve_encoder_output(
     """Resolve one concrete encoder output contract."""
     info = metadata if metadata is not None else encoder_registry.info(encoder_name)
     level = resolve_encoder_level(encoder_name, info)
-    output_variants = info.get("output_variants")
+    output_variants = info["output_variants"] if "output_variants" in info else None
     default_output_variant = require_encoder_metadata_field(
         encoder_name,
         info,

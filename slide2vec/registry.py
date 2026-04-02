@@ -34,7 +34,7 @@ class Registry:
 
         return decorator
 
-    def get(self, name: str) -> type:
+    def require(self, name: str) -> type:
         """Retrieve a registered class by name."""
         if name not in self._entries:
             available = ", ".join(sorted(self._entries)) or "(none)"

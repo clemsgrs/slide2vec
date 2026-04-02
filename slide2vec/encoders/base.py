@@ -61,6 +61,13 @@ class TileEncoder(Encoder):
 class SlideEncoder(Encoder):
     """Base class for encoders that pool tile features into slide features."""
 
+    tile_encoder: TileEncoder | None = None
+
+    def encode_tiles(self, batch: Tensor) -> Tensor:
+        if self.tile_encoder is None:
+            raise AttributeError("slide encoders must attach a tile_encoder before encoding tiles")
+        return self.tile_encoder.encode_tiles(batch)
+
     @abstractmethod
     def encode_slide(
         self,

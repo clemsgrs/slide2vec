@@ -30,12 +30,10 @@ TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
 def _cfg_num_cucim_workers(cfg: Any) -> int:
-    speed = getattr(cfg, "speed", None)
-    if speed is not None and hasattr(speed, "num_cucim_workers"):
-        return int(getattr(speed, "num_cucim_workers"))
-    tiling = getattr(cfg, "tiling", None)
-    if tiling is not None and hasattr(tiling, "num_cucim_workers"):
-        return int(getattr(tiling, "num_cucim_workers"))
+    if hasattr(cfg, "speed") and hasattr(cfg.speed, "num_cucim_workers") and cfg.speed.num_cucim_workers is not None:
+        return int(cfg.speed.num_cucim_workers)
+    if hasattr(cfg, "tiling") and hasattr(cfg.tiling, "num_cucim_workers") and cfg.tiling.num_cucim_workers is not None:
+        return int(cfg.tiling.num_cucim_workers)
     return 4
 
 
@@ -63,19 +61,19 @@ class PreprocessingConfig:
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
-        default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
-        read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
-        read_tiles_from = getattr(tiling, "read_tiles_from", None)
-        on_the_fly = bool(getattr(tiling, "on_the_fly", True))
-        gpu_decode = bool(getattr(tiling, "gpu_decode", False))
-        adaptive_batching = bool(getattr(tiling, "adaptive_batching", False))
-        preview_cfg = getattr(tiling, "preview", None)
-        if isinstance(preview_cfg, Mapping):
-            preview_save = bool(preview_cfg.get("save", False))
-            preview_downsample = int(preview_cfg.get("downsample", 32))
+        default_read_coordinates_from = Path(cfg.output_dir) / "coordinates"
+        read_coordinates_from = tiling.read_coordinates_from if hasattr(tiling, "read_coordinates_from") else None
+        read_tiles_from = tiling.read_tiles_from if hasattr(tiling, "read_tiles_from") else None
+        on_the_fly = bool(tiling.on_the_fly) if hasattr(tiling, "on_the_fly") else True
+        gpu_decode = bool(tiling.gpu_decode) if hasattr(tiling, "gpu_decode") else False
+        adaptive_batching = bool(tiling.adaptive_batching) if hasattr(tiling, "adaptive_batching") else False
+        if hasattr(tiling, "preview"):
+            preview_cfg = tiling.preview
+            preview_save = bool(preview_cfg.save)
+            preview_downsample = int(preview_cfg.downsample)
         else:
-            preview_save = bool(getattr(preview_cfg, "save", False))
-            preview_downsample = int(getattr(preview_cfg, "downsample", 32))
+            preview_save = False
+            preview_downsample = 32
         return cls(
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
@@ -92,10 +90,10 @@ class PreprocessingConfig:
             on_the_fly=on_the_fly,
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
-            use_supertiles=bool(getattr(tiling, "use_supertiles", True)),
-            jpeg_backend=str(getattr(tiling, "jpeg_backend", "turbojpeg")),
+            use_supertiles=bool(tiling.use_supertiles) if hasattr(tiling, "use_supertiles") else True,
+            jpeg_backend=str(tiling.jpeg_backend) if hasattr(tiling, "jpeg_backend") else "turbojpeg",
             num_cucim_workers=_cfg_num_cucim_workers(cfg),
-            resume=bool(getattr(cfg, "resume", False)),
+            resume=bool(cfg.resume) if hasattr(cfg, "resume") else False,
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
             preview={
@@ -126,21 +124,36 @@ class ExecutionOptions:
 
     @classmethod
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
-        configured_num_gpus = getattr(cfg.speed, "num_gpus", None)
-        requested_precision = normalize_precision_name(getattr(cfg.speed, "precision", "fp32"))
+        configured_num_gpus = cfg.speed.num_gpus
+        requested_precision = normalize_precision_name(cfg.speed.precision)
+        if hasattr(cfg.speed, "num_dataloader_workers"):
+            num_workers = cfg.speed.num_dataloader_workers
+        elif hasattr(cfg.speed, "num_workers_embedding"):
+            num_workers = cfg.speed.num_workers_embedding
+        else:
+            num_workers = 8
+        prefetch_factor = 4
+        if hasattr(cfg.speed, "prefetch_factor_embedding"):
+            prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
+        persistent_workers = True
+        if hasattr(cfg.speed, "persistent_workers_embedding"):
+            persistent_workers = bool(cfg.speed.persistent_workers_embedding)
+        gpu_batch_preprocessing = True
+        if hasattr(cfg.speed, "gpu_batch_preprocessing"):
+            gpu_batch_preprocessing = bool(cfg.speed.gpu_batch_preprocessing)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
-            batch_size=int(getattr(cfg.model, "batch_size", 1)),
-            num_workers=int(getattr(cfg.speed, "num_dataloader_workers", getattr(cfg.speed, "num_workers_embedding", 8))),
-            num_preprocessing_workers=int(getattr(cfg.speed, "num_preprocessing_workers", 8)),
+            batch_size=int(cfg.model.batch_size) if hasattr(cfg.model, "batch_size") else 1,
+            num_workers=int(num_workers),
+            num_preprocessing_workers=int(cfg.speed.num_preprocessing_workers) if hasattr(cfg.speed, "num_preprocessing_workers") else 8,
             num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
             precision="fp32" if run_on_cpu else requested_precision,
-            prefetch_factor=int(getattr(cfg.speed, "prefetch_factor_embedding", 4)),
-            persistent_workers=bool(getattr(cfg.speed, "persistent_workers_embedding", True)),
-            gpu_batch_preprocessing=bool(getattr(cfg.speed, "gpu_batch_preprocessing", True)),
-            save_tile_embeddings=bool(getattr(cfg.model, "save_tile_embeddings", False)),
-            save_latents=bool(getattr(cfg.model, "save_latents", False)),
+            prefetch_factor=prefetch_factor,
+            persistent_workers=persistent_workers,
+            gpu_batch_preprocessing=gpu_batch_preprocessing,
+            save_tile_embeddings=bool(cfg.model.save_tile_embeddings) if hasattr(cfg.model, "save_tile_embeddings") else False,
+            save_latents=bool(cfg.model.save_latents) if hasattr(cfg.model, "save_latents") else False,
         )
 
     def __post_init__(self) -> None:
@@ -153,7 +166,9 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
         slurm_cpu_limit = None
         for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
-            value = os.environ.get(env_name)
+            if env_name not in os.environ:
+                continue
+            value = os.environ[env_name]
             if value and value.strip().isdigit() and int(value.strip()) > 0:
                 slurm_cpu_limit = int(value.strip())
                 break
@@ -418,9 +433,10 @@ def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_n
 
 def _recommended_execution_precision(model: Model | None) -> str:
     from slide2vec.encoders.registry import encoder_registry
-    name = getattr(model, "name", None)
+    name = None if model is None else model.name
     if name and name in encoder_registry:
-        return encoder_registry.info(name).get("precision") or "fp32"
+        info = encoder_registry.info(name)
+        return info["precision"] if "precision" in info and info["precision"] is not None else "fp32"
     return "fp32"
 
 
@@ -432,7 +448,7 @@ def _resolve_direct_api_preprocessing(
         return preprocessing
 
     from slide2vec.encoders.registry import resolve_preprocessing_requirements
-    name = getattr(model, "name", None)
+    name = model.name
     target_tile_size_px, target_spacing_um = _default_preprocessing_from_registry(name)
     return PreprocessingConfig(
         backend="auto",
@@ -476,19 +492,19 @@ def _validate_model_config(
 ) -> None:
     from slide2vec.encoders.registry import encoder_registry
     from slide2vec.encoders.validation import validate_encoder_config
-    name = getattr(model, "name", None)
-    if not name or name not in encoder_registry:
+    name = model.name
+    if name not in encoder_registry:
         return
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
-    on_cpu = getattr(model, "_requested_device", None) == "cpu"
-    precision = None if on_cpu or execution is None else getattr(execution, "precision", None)
+    on_cpu = model._requested_device == "cpu"
+    precision = None if on_cpu or execution is None else execution.precision
     validate_encoder_config(
         name,
-        target_tile_size_px=getattr(preprocessing, "target_tile_size_px", None),
-        target_spacing_um=getattr(preprocessing, "target_spacing_um", None),
+        target_tile_size_px=preprocessing.target_tile_size_px,
+        target_spacing_um=preprocessing.target_spacing_um,
         precision=precision,
-        output_variant=getattr(model, "_output_variant", None),
-        allow_non_recommended=bool(getattr(model, "allow_non_recommended_settings", False)),
+        output_variant=model._output_variant,
+        allow_non_recommended=bool(model.allow_non_recommended_settings),
     )
 
 

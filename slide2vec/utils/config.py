@@ -57,8 +57,8 @@ def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> Non
     from slide2vec.encoders.registry import encoder_registry
     from slide2vec.encoders.validation import validate_encoder_config
 
-    model_cfg = getattr(cfg, "model", None)
-    model_name = getattr(model_cfg, "name", None)
+    model_cfg = cfg.model
+    model_name = model_cfg.name
     if not model_name:
         return
 
@@ -66,12 +66,11 @@ def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> Non
     if canonical not in encoder_registry:
         return
 
-    tiling = getattr(cfg, "tiling", None)
-    tiling_params = getattr(tiling, "params", None) if tiling is not None else None
-    target_spacing_um = getattr(tiling_params, "target_spacing_um", None)
-    target_tile_size_px = getattr(tiling_params, "target_tile_size_px", None)
-    precision = None if run_on_cpu else getattr(getattr(cfg, "speed", None), "precision", None)
-    allow_non_recommended = bool(getattr(model_cfg, "allow_non_recommended_settings", False))
+    tiling_params = cfg.tiling.params
+    target_spacing_um = tiling_params.target_spacing_um
+    target_tile_size_px = tiling_params.target_tile_size_px
+    precision = None if run_on_cpu else cfg.speed.precision
+    allow_non_recommended = bool(model_cfg.allow_non_recommended_settings)
 
     validate_encoder_config(
         canonical,
@@ -98,7 +97,7 @@ def get_cfg_from_args(args):
 
     # Load user config first to derive model name for registry lookup.
     user_cfg = OmegaConf.load(args.config_file)
-    model_name = getattr(getattr(user_cfg, "model", None), "name", None) or ""
+    model_name = user_cfg.model.name or ""
     encoder_defaults = _encoder_derived_cfg(model_name)
     if encoder_defaults:
         default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
@@ -106,7 +105,7 @@ def get_cfg_from_args(args):
     cfg = OmegaConf.merge(default_cfg, user_cfg, OmegaConf.from_cli(args.opts))
     OmegaConf.resolve(cfg)
     validate_removed_options(cfg)
-    validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
+    validate_model_recommended_settings(cfg, run_on_cpu=bool(args.run_on_cpu) if hasattr(args, "run_on_cpu") else False)
     return cfg
 
 
@@ -129,7 +128,7 @@ def setup(args):
         run_id = ""
 
     if cfg.wandb.enable:
-        key = os.environ.get("WANDB_API_KEY")
+        key = os.environ["WANDB_API_KEY"] if "WANDB_API_KEY" in os.environ else None
         wandb_run = initialize_wandb(cfg, key=key)
         wandb_run.define_metric("processed", summary="max")
         run_id = wandb_run.id
