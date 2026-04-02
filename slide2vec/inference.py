@@ -172,6 +172,7 @@ def load_model(
         feature_dim=int(encoder.encode_dim),
         device=target_device,
         tile_encoder=tile_encoder,
+        tile_feature_dim=int(tile_encoder.encode_dim) if tile_encoder is not None else None,
     )
 
 
@@ -825,7 +826,8 @@ def _compute_tile_embeddings_for_slide(
     if tile_indices is not None:
         resolved_indices = np.asarray(tile_indices, dtype=np.int64)
         if resolved_indices.size == 0:
-            return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
+            feature_dim = loaded.tile_feature_dim if loaded.tile_feature_dim is not None else loaded.feature_dim
+            return torch.empty((0, int(feature_dim)), dtype=torch.float32)
     _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
@@ -1497,12 +1499,15 @@ def _run_forward_pass(
     processed = 0
     batch_index = 0
     prefetcher = _BatchPrefetcher(dataloader, loaded, batch_preprocessor)
+    tile_encoder = getattr(loaded, "tile_encoder", None)
+    if tile_encoder is None:
+        tile_encoder = loaded.model
     with torch.inference_mode(), autocast_context:
         for prepared_batch in prefetcher:
             image = prepared_batch.image
             forward_start = time.perf_counter()
             with _maybe_nvtx_range(torch, "slide2vec.batch_forward"):
-                embedding = loaded.model.encode_tiles(image).detach().cpu()
+                embedding = _encode_tiles(tile_encoder, image).detach().cpu()
             forward_ms = (time.perf_counter() - forward_start) * 1000.0
             outputs.append(embedding)
             processed += int(embedding.shape[0])
@@ -1542,7 +1547,8 @@ def _run_forward_pass(
                     unit=unit_label,
                 )
     if not outputs:
-        return torch.empty((0, int(loaded.feature_dim)), dtype=torch.float32)
+        feature_dim = loaded.tile_feature_dim if loaded.tile_feature_dim is not None else loaded.feature_dim
+        return torch.empty((0, int(feature_dim)), dtype=torch.float32)
     return torch.cat(outputs, dim=0)
 
 
@@ -2347,6 +2353,19 @@ def _autocast_dtype(torch, precision: str):
     if precision == "bf16":
         return torch.bfloat16
     return None
+
+
+def _encode_tiles(encoder: object, image):
+    if hasattr(encoder, "encode_tiles"):
+        output = encoder.encode_tiles(image)
+    else:
+        output = encoder(image)
+    if isinstance(output, dict):
+        if "embedding" in output:
+            output = output["embedding"]
+        elif len(output) == 1:
+            output = next(iter(output.values()))
+    return output
 
 
 def _collect_pipeline_artifacts(

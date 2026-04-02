@@ -278,6 +278,48 @@ def test_run_forward_pass_emits_batch_timing_events():
     assert all(payload["gpu_busy_fraction"] <= 1.0 for payload in timing_payloads)
 
 
+def test_run_forward_pass_prefers_tile_encoder_when_present():
+    torch = pytest.importorskip("torch")
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+
+    reporter = RecordingReporter()
+
+    class SlideModel:
+        def encode_tiles(self, image):
+            raise AssertionError("slide encoder should not handle tile embeddings")
+
+    class TileEncoder:
+        def encode_tiles(self, image):
+            batch_size = image.shape[0]
+            return torch.full((batch_size, 3), 7.0, dtype=torch.float32)
+
+    dataloader = [
+        (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
+        (torch.tensor([2]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
+    ]
+    loaded = SimpleNamespace(
+        device="cpu",
+        feature_dim=1280,
+        tile_feature_dim=3,
+        model=SlideModel(),
+        tile_encoder=TileEncoder(),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        outputs = inference._run_forward_pass(
+            dataloader,
+            loaded,
+            nullcontext(),
+            sample_id="slide-a",
+            total_items=3,
+            unit_label="tile",
+        )
+
+    assert outputs.shape == (3, 3)
+    assert torch.all(outputs == 7.0)
+
+
 def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):
     import slide2vec.progress as progress
 

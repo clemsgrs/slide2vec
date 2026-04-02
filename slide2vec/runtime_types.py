@@ -12,3 +12,4 @@ class LoadedModel:
     feature_dim: int
     device: torch.device
     tile_encoder: object | None = None
+    tile_feature_dim: int | None = None
