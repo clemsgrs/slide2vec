@@ -11,8 +11,9 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import Any, Callable, Sequence
 
+from hs2p import SlideSpec
 import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
 
@@ -30,7 +31,9 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
+from slide2vec.encoders.registry import encoder_registry
 from slide2vec.model_settings import canonicalize_model_name
+from slide2vec.runtime_types import LoadedModel
 from slide2vec.progress import (
     emit_progress,
     emit_progress_event,
@@ -38,21 +41,6 @@ from slide2vec.progress import (
     read_tiling_progress_snapshot,
 )
 from slide2vec.utils.coordinates import coordinate_arrays
-
-if TYPE_CHECKING:
-    from hs2p import SlideSpec
-else:
-    SlideSpec = Any
-
-
-@dataclass
-class LoadedModel:
-    name: str
-    level: str
-    model: Any
-    transforms: Any
-    feature_dim: int
-    device: Any
 
 
 @dataclass(frozen=True)
@@ -147,8 +135,6 @@ def load_model(
     token: str | None = None,
 ) -> LoadedModel:
     from slide2vec.encoders import encoder_registry
-    from slide2vec.encoders.compat import SlideEncoderCompat, TileEncoderCompat
-
     name = canonicalize_model_name(name)
     info = encoder_registry.info(name)
     resolved_level = info["level"]
@@ -164,24 +150,28 @@ def load_model(
     encoder_cls = encoder_registry.get(name)
     encoder = encoder_cls(output_variant=output_variant)
 
+    tile_encoder = None
     if resolved_level == "tile":
-        wrapped = TileEncoderCompat(encoder)
+        transforms = encoder.get_transform()
     else:
         tile_enc_name = info["tile_encoder"]
         tile_enc_ov = info["tile_encoder_output_variant"]
         tile_enc_cls = encoder_registry.get(tile_enc_name)
         tile_encoder = tile_enc_cls(output_variant=tile_enc_ov)
-        wrapped = SlideEncoderCompat(encoder, tile_encoder)
+        transforms = tile_encoder.get_transform()
 
-    target_device = _resolve_device(device, wrapped.device)
-    wrapped.to(target_device)
+    target_device = _resolve_device(device, encoder.device)
+    encoder.to(target_device)
+    if tile_encoder is not None:
+        tile_encoder.to(target_device)
     return LoadedModel(
         name=name,
         level=resolved_level,
-        model=wrapped,
-        transforms=wrapped.get_transforms(),
-        feature_dim=int(wrapped.features_dim),
+        model=encoder,
+        transforms=transforms,
+        feature_dim=int(encoder.encode_dim),
         device=target_device,
+        tile_encoder=tile_encoder,
     )
 
 
@@ -385,13 +375,12 @@ def aggregate_tiles(
             tile_features = torch.as_tensor(tile_features)
         tile_features = tile_features.to(loaded.device)
         with torch.inference_mode():
-            output = loaded.model.forward_slide(
+            embedding = loaded.model.encode_slide(
                 tile_features,
-                tile_coordinates=coordinate_tensor,
+                coordinate_tensor,
                 tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
             )
-        embedding = output["embedding"]
-        latents = output.get("latents") if execution.save_latents else None
+        latents = None
         slide_artifact = _write_slide_embedding_artifact(
             artifact.sample_id,
             embedding,
@@ -956,15 +945,12 @@ def _aggregate_tile_embeddings_for_slide(
         tile_embeddings = torch.as_tensor(tile_embeddings)
     features = tile_embeddings.to(loaded.device)
     with torch.inference_mode():
-        output = loaded.model.forward_slide(
+        slide_embedding = loaded.model.encode_slide(
             features,
-            tile_coordinates=coordinate_tensor,
+            coordinate_tensor,
             tile_size_lv0=int(_require_attr(tiling_result, "tile_size_lv0")),
-        )
-    slide_embedding = output["embedding"].detach().cpu()
-    latents = output.get("latents") if execution.save_latents else None
-    if latents is not None and torch.is_tensor(latents):
-        latents = latents.detach().cpu()
+        ).detach().cpu()
+    latents = None
     return slide_embedding, latents
 
 
@@ -1113,7 +1099,7 @@ def _create_transforms(loaded: LoadedModel):
 def _create_region_transforms(base_transforms, backend_model):
     import torchvision
 
-    from slide2vec.data import RegionUnfolding
+    from slide2vec.data.augmentations import RegionUnfolding
 
     return torchvision.transforms.Compose(
         [
@@ -1381,7 +1367,7 @@ def _maybe_nvtx_range(torch, label: str):
             try:
                 nvtx.range_pop()
             except Exception:
-                return
+                pass
 
 
 class _BatchPrefetcher:
@@ -1516,7 +1502,7 @@ def _run_forward_pass(
             image = prepared_batch.image
             forward_start = time.perf_counter()
             with _maybe_nvtx_range(torch, "slide2vec.batch_forward"):
-                embedding = loaded.model(image)["embedding"].detach().cpu()
+                embedding = loaded.model.encode_tiles(image).detach().cpu()
             forward_ms = (time.perf_counter() - forward_start) * 1000.0
             outputs.append(embedding)
             processed += int(embedding.shape[0])

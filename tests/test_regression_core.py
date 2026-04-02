@@ -24,18 +24,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_resource_loading_uses_packaged_configs():
     pytest.importorskip("omegaconf")
-    cfg = load_config("models", "default")
+    cfg = load_config("default")
     assert "model" in cfg
-    assert config_resource("preprocessing", "default").name == "default.yaml"
+    assert "tiling" in cfg
+    assert hasattr(cfg.model, "output_variant")
+    assert config_resource("default").name == "default.yaml"
 
 
 def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     pytest.importorskip("omegaconf")
-    cfg = load_config("preprocessing", "default")
+    cfg = load_config("default")
 
     assert hasattr(cfg, "save_tiles")
-    assert not hasattr(cfg.tiling.params, "drop_holes")
-    assert not hasattr(cfg.tiling.params, "use_padding")
     assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
     assert hasattr(cfg.tiling.filter_params, "filter_blur")
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
@@ -328,12 +328,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         model=SimpleNamespace(
             name="virchow2",
             level="tile",
-            mode="cls",
-            arch=None,
-            pretrained_weights=None,
-            input_size=224,
-            patch_size=256,
-            token_size=16,
+            output_variant="cls",
             allow_non_recommended_settings=True,
             save_tile_embeddings=False,
             save_latents=False,
@@ -580,7 +575,6 @@ def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_
     assert preprocessing.target_tile_size_px == 224
     assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
     assert preprocessing.read_tiles_from is None
-    assert not hasattr(preprocessing, "save_tiles")
     assert preprocessing.resume is True
     assert preprocessing.segmentation == {"downsample": 64}
     assert preprocessing.filtering == {"ref_tile_size": 224}
@@ -618,7 +612,6 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
     assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
     assert preprocessing.num_cucim_workers == 6
-    assert not hasattr(preprocessing, "save_tiles")
 
 
 def test_preprocessing_config_from_config_falls_back_to_legacy_tiling_num_cucim_workers():

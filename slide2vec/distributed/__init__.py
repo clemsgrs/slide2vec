@@ -3,7 +3,7 @@ import os
 import random
 import re
 import socket
-from typing import Dict, List
+from typing import Dict, List, Self
 
 import torch
 import torch.distributed as dist
@@ -228,7 +228,7 @@ class _TorchDistributedEnvironment:
         self.local_rank = 0
         self.local_world_size = 1
 
-    def export(self, *, overwrite: bool) -> "_TorchDistributedEnvironment":
+    def export(self, *, overwrite: bool) -> Self:
         # See the "Environment variable initialization" section from
         # https://pytorch.org/docs/stable/distributed.html for the complete list of
         # environment variables required for the env:// initialization method.

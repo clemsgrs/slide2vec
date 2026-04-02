@@ -3,7 +3,7 @@
 Importing this package registers all encoders in the encoder_registry.
 """
 
-from slide2vec.encoders.models import (
+from . import (
     conch,
     gigapath,
     hibou,

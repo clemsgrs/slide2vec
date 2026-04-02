@@ -1,9 +1,7 @@
 """Encoder abstractions for tile-level and slide-level feature extraction."""
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import Callable
+from typing import Callable, Self
 
 import torch
 from torch import Tensor
@@ -41,7 +39,7 @@ class Encoder(ABC):
         ...
 
     @abstractmethod
-    def to(self, device: torch.device | str) -> Encoder:
+    def to(self, device: torch.device | str) -> Self:
         """Move encoder to the given device. Returns self."""
         ...
 
@@ -121,7 +119,7 @@ class TimmTileEncoder(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> TimmTileEncoder:
+    def to(self, device: torch.device | str) -> Self:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

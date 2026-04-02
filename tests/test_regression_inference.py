@@ -1374,8 +1374,8 @@ def test_run_forward_pass_handles_empty_dataloader():
     from contextlib import nullcontext
 
     class DummyModel:
-        def __call__(self, image):
-            return {"embedding": torch.zeros((image.shape[0], 5), dtype=torch.float32)}
+        def encode_tiles(self, image):
+            return torch.zeros((image.shape[0], 5), dtype=torch.float32)
 
     dataloader = torch.utils.data.DataLoader(
         torch.utils.data.TensorDataset(
@@ -1647,8 +1647,8 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
@@ -1740,8 +1740,8 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),
@@ -1837,8 +1837,8 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCollator:
         ordered_indices = None
@@ -1926,8 +1926,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCucimCollator:
         ordered_indices = None
@@ -2008,8 +2008,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
     class DummyModel:
         encoder = DummyEncoder()
 
-        def __call__(self, image):
-            return {"embedding": torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)}
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
     class DummyCollator:
         ordered_indices = None
@@ -2151,10 +2151,10 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
     class DummyRegionModel:
         tile_size = 2
 
-        def __call__(self, image):
+        def encode_tiles(self, image):
             assert image.ndim == 5
             assert image.shape[1:] == (4, 3, 2, 2)
-            return {"embedding": torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)}
+            return torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)
 
     fake_dataset_module = types.SimpleNamespace(
         BatchTileCollator=lambda **kwargs: ("collator", kwargs),

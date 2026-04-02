@@ -3,9 +3,7 @@
 Requires the ``transformers`` package.
 """
 
-from __future__ import annotations
-
-from typing import Callable
+from typing import Callable, Self
 
 import torch
 from torch import Tensor
@@ -55,7 +53,7 @@ class _HibouBase(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> _HibouBase:
+    def to(self, device: torch.device | str) -> Self:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

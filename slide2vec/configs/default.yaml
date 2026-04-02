@@ -8,6 +8,15 @@ save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to
 
 seed: 0 # seed for reproducibility
 
+model:
+  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
+  name: # preset model name; see docs/models.md for supported request strings
+  output_variant: # requested output variant for presets that expose multiple outputs
+  batch_size: 32
+  save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
+  save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
+  allow_non_recommended_settings: false # when true, non-recommended spacing / tile size / precision combinations warn instead of erroring
+
 tiling:
   on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
   gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it
@@ -55,6 +64,9 @@ tiling:
     mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
 
 speed:
+  precision: fp32 # model inference precision ["fp32", "fp16", "bf16"]
+  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // speed.num_cucim_workers
+  num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
   num_preprocessing_workers: 8 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing)
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
 
@@ -63,7 +75,7 @@ wandb:
   project: "" # wandb project name
   username: "" # wandb username
   exp_name: "" # wandb experiment name
-  tags: ["tiling", "${tiling.params.target_tile_size_px}"] # wandb tags
+  tags: ["features", "${model.level}", "${tiling.params.target_tile_size_px}"] # wandb tags
   dir: "/home/user/"
   group:
   resume_id: "${resume_dirname}"

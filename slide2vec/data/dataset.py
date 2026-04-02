@@ -1,14 +1,12 @@
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from .tile_store import TarTileReader
+from hs2p import TilingResult
 
-if TYPE_CHECKING:
-    from hs2p import TilingResult
+from .tile_store import TarTileReader
 
 
 class TileIndexDataset(torch.utils.data.Dataset):
@@ -27,7 +25,7 @@ class BatchTileCollator:
         self,
         *,
         tar_path: Path,
-        tiling_result: "TilingResult",
+        tiling_result: TilingResult,
     ):
         self.tile_size = int(tiling_result.requested_tile_size_px)
         self._reader = TarTileReader(

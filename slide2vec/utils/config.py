@@ -9,7 +9,7 @@ from omegaconf import OmegaConf
 import slide2vec.distributed as distributed
 from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
-from slide2vec.configs import default_preprocessing_config, default_model_config
+from slide2vec.configs import default_config
 
 logger = logging.getLogger("slide2vec")
 
@@ -95,9 +95,7 @@ def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_preprocessing_cfg = OmegaConf.create(default_preprocessing_config)
-    default_model_cfg = OmegaConf.create(default_model_config)
-    default_cfg = OmegaConf.merge(default_preprocessing_cfg, default_model_cfg)
+    default_cfg = OmegaConf.create(default_config)
 
     # Load user config first to derive model name for registry lookup.
     user_cfg = OmegaConf.load(args.config_file)

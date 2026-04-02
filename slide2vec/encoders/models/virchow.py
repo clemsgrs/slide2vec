@@ -1,7 +1,5 @@
 """Virchow and Virchow2 encoder implementations."""
 
-from __future__ import annotations
-
 import timm.layers
 import torch
 from torch import Tensor

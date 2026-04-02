@@ -1,7 +1,5 @@
 """UNI and UNI2 encoder implementations."""
 
-from __future__ import annotations
-
 import timm
 import timm.layers
 import torch

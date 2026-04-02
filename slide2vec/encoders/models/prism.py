@@ -1,8 +1,8 @@
 """PRISM slide encoder implementation."""
 
-from __future__ import annotations
-
 import torch
+
+from typing import Self
 
 from slide2vec.encoders.base import SlideEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -35,7 +35,7 @@ class PrismSlideEncoder(SlideEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> PrismSlideEncoder:
+    def to(self, device: torch.device | str) -> Self:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

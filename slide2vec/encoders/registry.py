@@ -1,7 +1,5 @@
 """Encoder registry with enforced metadata schema."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from slide2vec.registry import Registry

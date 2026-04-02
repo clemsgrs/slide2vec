@@ -1,7 +1,5 @@
 """H-Optimus-0, H-Optimus-1, and H0-mini encoder implementations."""
 
-from __future__ import annotations
-
 from typing import Callable
 
 import timm.layers

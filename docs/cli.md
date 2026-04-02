@@ -50,9 +50,9 @@ Set `csv:` in your config file to point to this manifest.
 
 The main bundled defaults live under:
 
-- `slide2vec/configs/preprocessing/default.yaml`
-- `slide2vec/configs/models/default.yaml`
-- `slide2vec/configs/models/*.yaml`
+- `slide2vec/configs/default.yaml`
+
+Supported model presets are documented in [`docs/models.md`](models.md) and resolved through the encoder registry.
 
 In practice, the config controls:
 

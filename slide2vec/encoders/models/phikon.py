@@ -3,9 +3,7 @@
 Both require the ``transformers`` package.
 """
 
-from __future__ import annotations
-
-from typing import Callable
+from typing import Callable, Self
 
 import torch
 from torch import Tensor
@@ -48,12 +46,10 @@ class _PhikonBase(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> _PhikonBase:
+    def to(self, device: torch.device | str) -> Self:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self
-
-
 @register_encoder(
     "phikon",
     output_variants={"default": {"encode_dim": 768}},

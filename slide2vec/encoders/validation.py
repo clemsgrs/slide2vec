@@ -1,7 +1,5 @@
 """Validate encoder config against model recommended settings."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -10,6 +8,7 @@ from slide2vec.encoders.registry import (
     resolve_encoder_output,
     resolve_preprocessing_requirements,
 )
+from slide2vec.model_settings import normalize_precision_name
 
 logger = logging.getLogger("slide2vec")
 
@@ -38,7 +37,6 @@ def validate_encoder_config(
 
     rec_precision = info.get("precision")
     if precision is not None and rec_precision is not None:
-        from slide2vec.model_settings import normalize_precision_name
         norm_precision = normalize_precision_name(precision)
         if norm_precision != rec_precision:
             mismatches.append(

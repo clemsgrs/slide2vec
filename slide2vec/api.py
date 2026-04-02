@@ -3,17 +3,14 @@ import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence, overload
+from typing import Any, Mapping, Protocol, Self, Sequence, overload
+
+from hs2p import SlideSpec
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
+from slide2vec.encoders.registry import encoder_registry
 from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
-
-if TYPE_CHECKING:
-    from hs2p import SlideSpec
-    from slide2vec.inference import LoadedModel
-else:
-    LoadedModel = Any
-    SlideSpec = Any
+from slide2vec.runtime_types import LoadedModel
 
 logger = logging.getLogger("slide2vec")
 
@@ -41,6 +38,7 @@ def _cfg_num_cucim_workers(cfg: Any) -> int:
         return int(getattr(tiling, "num_cucim_workers"))
     return 4
 
+
 @dataclass(frozen=True)
 class PreprocessingConfig:
     backend: str = "auto"
@@ -63,7 +61,7 @@ class PreprocessingConfig:
     preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg: Any) -> "PreprocessingConfig":
+    def from_config(cls, cfg: Any) -> Self:
         tiling = cfg.tiling
         default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
@@ -107,7 +105,7 @@ class PreprocessingConfig:
             },
         )
 
-    def with_backend(self, backend: str) -> "PreprocessingConfig":
+    def with_backend(self, backend: str) -> Self:
         return replace(self, backend=backend)
 
 
@@ -127,7 +125,7 @@ class ExecutionOptions:
     save_latents: bool = False
 
     @classmethod
-    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
+    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> Self:
         configured_num_gpus = getattr(cfg.speed, "num_gpus", None)
         requested_precision = normalize_precision_name(getattr(cfg.speed, "precision", "fp32"))
         return cls(
@@ -163,7 +161,7 @@ class ExecutionOptions:
             object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
             object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
 
-    def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
+    def with_output_dir(self, output_dir: PathLike | None) -> Self:
         if output_dir is None:
             return self
         return replace(self, output_dir=Path(output_dir))
@@ -202,7 +200,6 @@ class Model:
         allow_non_recommended_settings: bool = False,
     ) -> None:
         self.name = canonicalize_model_name(name)
-        from slide2vec.encoders.registry import encoder_registry
         self.level = encoder_registry.info(self.name)["level"]
         self._requested_device = device
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
@@ -217,7 +214,7 @@ class Model:
         output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
         device: str = "auto",
-    ) -> "Model":
+    ) -> Self:
         return cls(
             name=name,
             device=device,
@@ -337,7 +334,7 @@ class Model:
                 execution=resolved,
             )
 
-    def _load_backend(self) -> "LoadedModel":
+    def _load_backend(self) -> LoadedModel:
         if self._backend is None:
             from slide2vec.inference import load_model
             from slide2vec.progress import emit_progress
