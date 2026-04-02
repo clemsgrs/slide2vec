@@ -33,7 +33,7 @@ EXPECTED_ENCODERS = EXPECTED_TILE_ENCODERS | EXPECTED_SLIDE_ENCODERS
 
 
 def test_all_expected_encoders_are_registered():
-    registered = set(encoder_registry.list())
+    registered = set(encoder_registry.names())
     assert EXPECTED_ENCODERS <= registered, (
         f"Missing encoders: {EXPECTED_ENCODERS - registered}"
     )

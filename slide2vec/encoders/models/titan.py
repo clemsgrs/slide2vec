@@ -2,6 +2,7 @@
 
 import numpy as np
 import torch
+from transformers import AutoModel
 
 from slide2vec.encoders.base import SlideEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -20,8 +21,6 @@ from slide2vec.encoders.registry import register_encoder
 )
 class TitanSlideEncoder(SlideEncoder):
     def __init__(self, *, output_variant: str | None = None):
-        from transformers import AutoModel
-
         self._model = AutoModel.from_pretrained("MahmoodLab/TITAN", trust_remote_code=True).eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)

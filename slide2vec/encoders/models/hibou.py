@@ -8,6 +8,7 @@ from typing import Callable
 import torch
 from torch import Tensor
 from torchvision.transforms import v2
+from transformers import AutoModel
 
 from slide2vec.encoders.base import TileEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -32,8 +33,6 @@ class _HibouBase(TileEncoder):
     _encode_dim: int
 
     def __init__(self, model_name: str, *, output_variant: str | None = None):
-        from transformers import AutoModel
-
         self._model = AutoModel.from_pretrained(model_name, trust_remote_code=True).eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)

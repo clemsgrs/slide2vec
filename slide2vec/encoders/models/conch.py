@@ -9,6 +9,7 @@ from typing import Callable
 
 import torch
 from torch import Tensor
+from transformers import AutoModel
 
 from slide2vec.encoders.base import TileEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -65,8 +66,6 @@ class CONCH(TileEncoder):
 )
 class CONCHv15(TileEncoder):
     def __init__(self, *, output_variant: str | None = None):
-        from transformers import AutoModel
-
         titan = AutoModel.from_pretrained("MahmoodLab/TITAN", trust_remote_code=True)
         self._model, self._transform = titan.return_conch()
         self._model.eval()

@@ -8,6 +8,7 @@ from typing import Callable
 import torch
 from torch import Tensor
 from torchvision.transforms import v2
+from transformers import AutoModel
 
 from slide2vec.encoders.base import TileEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -24,8 +25,6 @@ from slide2vec.encoders.registry import register_encoder
 )
 class Midnight(TileEncoder):
     def __init__(self, *, output_variant: str | None = None):
-        from transformers import AutoModel
-
         self._model = AutoModel.from_pretrained("kaiko-ai/midnight").eval()
         self._device = torch.device("cpu")
         self._output_variant = resolve_requested_output_variant(output_variant)

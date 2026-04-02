@@ -7,6 +7,7 @@ from typing import Callable
 
 import torch
 from torch import Tensor
+from transformers import AutoImageProcessor, AutoModel
 
 from slide2vec.encoders.base import TileEncoder, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
@@ -18,8 +19,6 @@ class _PhikonBase(TileEncoder):
     _encode_dim: int
 
     def __init__(self, model_name: str, *, output_variant: str | None = None):
-        from transformers import AutoImageProcessor, AutoModel
-
         self._model = AutoModel.from_pretrained(model_name).eval()
         self._processor = AutoImageProcessor.from_pretrained(model_name, use_fast=True)
         self._device = torch.device("cpu")

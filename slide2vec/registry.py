@@ -45,7 +45,7 @@ class Registry:
     def __contains__(self, name: str) -> bool:
         return name in self._entries
 
-    def list(self) -> list[str]:
+    def names(self) -> list[str]:
         """List all registered component names."""
         return list(self._entries.keys())
 
