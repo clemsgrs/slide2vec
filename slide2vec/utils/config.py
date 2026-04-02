@@ -15,6 +15,8 @@ logger = logging.getLogger("slide2vec")
 
 
 def validate_removed_options(cfg) -> None:
+    if "level" in cfg.model:
+        raise ValueError("model.level is not a valid slide2vec option.")
     if "restrict_to_tissue" in cfg.model:
         raise ValueError("model.restrict_to_tissue is not a valid slide2vec option.")
     if "visualize" in cfg:
@@ -47,9 +49,6 @@ def _encoder_derived_cfg(model_name: str) -> dict:
         },
         "speed": {
             "precision": info["precision"],
-        },
-        "model": {
-            "level": info["level"],
         },
     }
 

@@ -5,7 +5,7 @@ CONCH v1.5 requires ``transformers`` and uses the TITAN model to extract
 the CONCH v1.5 backbone.
 """
 
-from typing import Callable, Self
+from typing import Callable
 
 import torch
 from torch import Tensor
@@ -48,7 +48,7 @@ class CONCH(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> Self:
+    def to(self, device: torch.device | str) -> "CONCH":
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self
@@ -87,7 +87,7 @@ class CONCHv15(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> Self:
+    def to(self, device: torch.device | str) -> "CONCHv15":
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

@@ -9,7 +9,6 @@ save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to
 seed: 0 # seed for reproducibility
 
 model:
-  level: "tile" # level at which to extract the features ("tile", "region" or "slide")
   name: # preset model name; see docs/models.md for supported request strings
   output_variant: # requested output variant for presets that expose multiple outputs
   batch_size: 32
@@ -75,7 +74,7 @@ wandb:
   project: "" # wandb project name
   username: "" # wandb username
   exp_name: "" # wandb experiment name
-  tags: ["features", "${model.level}", "${tiling.params.target_tile_size_px}"] # wandb tags
+  tags: ["features", "${tiling.params.target_tile_size_px}"] # wandb tags
   dir: "/home/user/"
   group:
   resume_id: "${resume_dirname}"

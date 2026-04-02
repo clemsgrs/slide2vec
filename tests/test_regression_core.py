@@ -327,7 +327,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         output_dir=str(tmp_path),
         model=SimpleNamespace(
             name="virchow2",
-            level="tile",
             output_variant="cls",
             allow_non_recommended_settings=True,
             save_tile_embeddings=False,
@@ -397,7 +396,6 @@ def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp
                 "    target_tile_size_px: 256",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
             ]
         )
     )
@@ -428,7 +426,6 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
                 "    target_tile_size_px: 256",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "  allow_non_recommended_settings: true",
             ]
         )
@@ -461,7 +458,6 @@ def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tm
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "speed:",
                 "  precision: fp32",
             ]
@@ -494,7 +490,6 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: virchow2",
-                "  level: tile",
                 "  allow_non_recommended_settings: true",
                 "speed:",
                 "  precision: fp32",
@@ -528,7 +523,6 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
                 "    target_tile_size_px: 224",
                 "model:",
                 "  name: prism",
-                "  level: slide",
                 "speed:",
                 "  precision: fp32",
             ]
@@ -671,6 +665,16 @@ def test_validate_removed_options_rejects_legacy_preview_keys():
     from omegaconf import OmegaConf
 
     from slide2vec.utils.config import validate_removed_options
+
+    with pytest.raises(ValueError, match="model.level"):
+        validate_removed_options(
+            OmegaConf.create(
+                {
+                    "model": {"level": "tile"},
+                    "tiling": {"preview": {"save": True, "downsample": 32}},
+                }
+            )
+        )
 
     with pytest.raises(ValueError, match="visualize"):
         validate_removed_options(

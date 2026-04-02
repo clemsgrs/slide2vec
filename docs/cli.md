@@ -72,8 +72,7 @@ python -m slide2vec \
   --config-file /path/to/config.yaml \
   output_dir=/tmp/slide2vec-run \
   speed.num_gpus=4 \
-  model.name=virchow2 \
-  model.level=region
+  model.name=virchow2
 ```
 
 Common overrides:
@@ -83,7 +82,7 @@ Common overrides:
 - `speed.num_workers_embedding=8`
 - `tiling.preview.save=true`
 - `model.name=...`
-- `model.level=tile|region|slide`
+- `model.output_variant=...`
 
 ## Useful Flags
 

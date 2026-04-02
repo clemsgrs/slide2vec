@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Self, Sequence, overload
+from typing import Any, Mapping, Protocol, Sequence, overload
 
 from hs2p import SlideSpec
 
@@ -61,7 +61,7 @@ class PreprocessingConfig:
     preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg: Any) -> Self:
+    def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
         default_read_coordinates_from = Path(getattr(cfg, "output_dir", "output")) / "coordinates"
         read_coordinates_from = getattr(tiling, "read_coordinates_from", None)
@@ -105,7 +105,7 @@ class PreprocessingConfig:
             },
         )
 
-    def with_backend(self, backend: str) -> Self:
+    def with_backend(self, backend: str) -> "PreprocessingConfig":
         return replace(self, backend=backend)
 
 
@@ -125,7 +125,7 @@ class ExecutionOptions:
     save_latents: bool = False
 
     @classmethod
-    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> Self:
+    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
         configured_num_gpus = getattr(cfg.speed, "num_gpus", None)
         requested_precision = normalize_precision_name(getattr(cfg.speed, "precision", "fp32"))
         return cls(
@@ -161,7 +161,7 @@ class ExecutionOptions:
             object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
             object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
 
-    def with_output_dir(self, output_dir: PathLike | None) -> Self:
+    def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
             return self
         return replace(self, output_dir=Path(output_dir))
@@ -214,7 +214,7 @@ class Model:
         output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
         device: str = "auto",
-    ) -> Self:
+    ) -> "Model":
         return cls(
             name=name,
             device=device,

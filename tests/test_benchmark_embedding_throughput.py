@@ -94,7 +94,6 @@ def test_build_trial_config_normalizes_non_benchmark_runtime_flags(benchmark_mod
         "resume": True,
         "model": {
             "name": "virchow2",
-            "level": "tile",
             "batch_size": 8,
         },
         "tiling": {
@@ -159,7 +158,7 @@ def test_load_cli_merged_config_uses_regular_cli_loader(
         captured["output_dir"] = args.output_dir
         captured["opts"] = list(args.opts)
         return {
-            "model": {"name": "h0-mini", "mode": "cls"},
+            "model": {"name": "h0-mini"},
             "speed": {"num_workers_embedding": 8},
             "wandb": {"enable": False},
         }
@@ -178,7 +177,7 @@ def test_load_cli_merged_config_uses_regular_cli_loader(
         "opts": [],
     }
     assert loaded == {
-        "model": {"name": "h0-mini", "mode": "cls"},
+        "model": {"name": "h0-mini"},
         "speed": {"num_workers_embedding": 8},
         "wandb": {"enable": False},
     }

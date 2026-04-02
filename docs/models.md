@@ -6,7 +6,7 @@ The canonical model presets are registered in code and documented below. Use the
 - which encoder level each entry uses
 - which spacing values are supported by the pretrained-model validator
 
-Legacy config knobs such as `mode`, `arch`, and `pretrained_weights` were removed from slide2vec. Preset-specific behavior now lives in registry metadata and, where supported, `model.output_variant`.
+Preset-specific behavior lives in registry metadata and, where supported, `model.output_variant`.
 
 | Preset | Model | Encoder Level | Supported Spacing (um) | Notes |
 | --- | --- | --- | --- | --- |
@@ -15,8 +15,8 @@ Legacy config knobs such as `mode`, `arch`, and `pretrained_weights` were remove
 | `h-optimus-0` | [H-optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | `tile` | `0.5` | |
 | `h-optimus-1` | [H-optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | `tile` | `0.5` | |
 | `h0-mini` | [H0-mini](https://huggingface.co/bioptimus/H0-mini) | `tile` | `0.5` | Supports `output_variant="cls"` or `output_variant="cls_patch_mean"` |
-| `hibou` | [Hibou-B](https://huggingface.co/histai/hibou-b) / [Hibou-L](https://huggingface.co/histai/hibou-L) | `tile` | `0.5` | Direct preset, no custom `mode` or `arch` knobs |
-| `kaiko` | [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | Direct preset, no custom `mode` or `arch` knobs |
+| `hibou` | [Hibou-B](https://huggingface.co/histai/hibou-b) / [Hibou-L](https://huggingface.co/histai/hibou-L) | `tile` | `0.5` | Registry-backed direct preset |
+| `kaiko` | [Kaiko](https://github.com/kaiko-ai/towards_large_pathology_fms) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | Registry-backed direct preset |
 | `kaiko-midnight` | [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | |
 | `musk` | [MUSK](https://huggingface.co/xiangjx/musk) | `tile` | `1.0`, `0.5`, `0.25` | |
 | `phikonv2` | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | `tile` | `0.5` |  |
