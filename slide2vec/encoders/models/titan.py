@@ -33,7 +33,7 @@ class TitanSlideEncoder(SlideEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> TitanSlideEncoder:
+    def to(self, device: torch.device | str) -> "TitanSlideEncoder":
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

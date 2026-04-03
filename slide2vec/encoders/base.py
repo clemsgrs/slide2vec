@@ -41,7 +41,7 @@ class Encoder(ABC):
         ...
 
     @abstractmethod
-    def to(self, device: torch.device | str) -> Encoder:
+    def to(self, device: torch.device | str) -> "Encoder":
         """Move encoder to the given device. Returns self."""
         ...
 
@@ -124,7 +124,7 @@ class TimmTileEncoder(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> TimmTileEncoder:
+    def to(self, device: torch.device | str) -> "TimmTileEncoder":
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self
