@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Benchmark slide2vec full pipelines across tar and on-the-fly read modes."""
 
-from __future__ import annotations
 
 import argparse
 import csv

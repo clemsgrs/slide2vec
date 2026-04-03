@@ -1,5 +1,4 @@
 """PRISM slide encoder implementation."""
-from __future__ import annotations
 
 import torch
 from transformers import AutoModel

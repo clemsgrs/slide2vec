@@ -9,7 +9,6 @@ Compares five configurations in increasing order of optimization:
   cucim_supertiles_adaptive - same + SuperTileBatchSampler aligns batches to block boundaries
 """
 
-from __future__ import annotations
 
 import argparse
 import csv

@@ -1,5 +1,4 @@
 """Encoder abstractions for tile-level and slide-level feature extraction."""
-from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Callable
