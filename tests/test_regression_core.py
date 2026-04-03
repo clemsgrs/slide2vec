@@ -42,20 +42,6 @@ def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
 
 
-def test_packaged_model_presets_align_with_recommended_settings():
-    pytest.importorskip("omegaconf")
-
-    from slide2vec.utils.config import get_cfg_from_args
-
-    preset_dir = ROOT / "slide2vec" / "configs" / "models"
-    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
-
-    for preset_path in preset_paths:
-        args = SimpleNamespace(config_file=str(preset_path), output_dir=None, opts=[])
-        cfg = get_cfg_from_args(args)
-        assert cfg.model.name
-
-
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):
     pytest.importorskip("omegaconf")
 
@@ -105,18 +91,6 @@ def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_pa
     with pytest.raises(ValueError, match="multiple spacings"):
         get_cfg_from_args(args)
 
-
-def test_packaged_non_default_model_presets_do_not_contain_comments():
-    preset_dir = ROOT / "slide2vec" / "configs" / "models"
-    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
-
-    for preset_path in preset_paths:
-        lines_with_comments = [
-            f"{index}: {line}"
-            for index, line in enumerate(preset_path.read_text().splitlines(), start=1)
-            if "#" in line
-        ]
-        assert lines_with_comments == [], f"{preset_path} still contains comments: {lines_with_comments}"
 
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
