@@ -81,7 +81,7 @@ def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> Non
     )
 
 
-def write_config(cfg, output_dir, name="config.yaml"):
+def write_config(cfg, output_dir, *, name="config.yaml"):
     logger.info(OmegaConf.to_yaml(cfg))
     saved_cfg_path = os.path.join(output_dir, name)
     with open(saved_cfg_path, "w") as f:

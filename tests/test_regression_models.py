@@ -321,11 +321,10 @@ def test_default_preprocessing_uses_min_spacing_and_warns_when_half_micron_unava
     caplog: pytest.LogCaptureFixture,
 ):
     import slide2vec.api as api
-    import slide2vec.encoders.registry as enc_reg
 
     # Patch resolve_preprocessing_requirements to simulate spacings without 0.5
     monkeypatch.setattr(
-        enc_reg,
+        api,
         "resolve_preprocessing_requirements",
         lambda name, info=None: {"tile_size_px": 224, "spacing_um": [2.0, 1.0, 0.25]},
     )

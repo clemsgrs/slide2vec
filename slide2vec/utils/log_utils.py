@@ -109,8 +109,8 @@ def _configure_logger(
 
 
 def setup_logging(
-    output: Optional[str] = None,
     *,
+    output: Optional[str] = None,
     name: Optional[str] = None,
     level: int = logging.DEBUG,
     capture_warnings: bool = True,

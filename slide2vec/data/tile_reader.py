@@ -15,7 +15,7 @@ class SuperTileBatchSampler:
     so each WSI region is read exactly once.
     """
 
-    def __init__(self, supertile_groups: list[np.ndarray], batch_size: int):
+    def __init__(self, *, supertile_groups: list[np.ndarray], batch_size: int):
         self.batches: list[list[int]] = []
         current: list[int] = []
         for group in supertile_groups:
@@ -229,6 +229,7 @@ class OnTheFlyBatchTileCollator:
 
     def build_batch_sampler(
         self,
+        *,
         batch_size: int,
         dataset_indices: np.ndarray,
     ) -> SuperTileBatchSampler | None:
@@ -252,7 +253,7 @@ class OnTheFlyBatchTileCollator:
                 start = pos
         if start < len(dataset_indices):
             groups.append(np.arange(start, len(dataset_indices), dtype=np.int64))
-        return SuperTileBatchSampler(groups, batch_size)
+        return SuperTileBatchSampler(supertile_groups=groups, batch_size=batch_size)
 
     def __call__(self, batch_indices):
         if not batch_indices:

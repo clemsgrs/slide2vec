@@ -3,6 +3,8 @@
 Requires the ``transformers`` package.
 """
 
+from __future__ import annotations
+
 from typing import Callable
 
 import torch
@@ -52,7 +54,7 @@ class Midnight(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> "Midnight":
+    def to(self, device: torch.device | str) -> Midnight:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

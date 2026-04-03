@@ -1,9 +1,12 @@
 """Encoder abstractions for tile-level and slide-level feature extraction."""
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Callable
 
+import timm
 import torch
+from timm.data import create_transform, resolve_data_config
 from torch import Tensor
 
 
@@ -39,7 +42,7 @@ class Encoder(ABC):
         ...
 
     @abstractmethod
-    def to(self, device: torch.device | str) -> "Encoder":
+    def to(self, device: torch.device | str) -> Encoder:
         """Move encoder to the given device. Returns self."""
         ...
 
@@ -100,8 +103,6 @@ class TimmTileEncoder(TileEncoder):
         output_variant: str | None = None,
         **timm_kwargs,
     ):
-        import timm
-
         defaults = {"pretrained": True, "num_classes": 0}
         defaults.update(timm_kwargs)
         self._model = timm.create_model(model_name, **defaults).eval()
@@ -110,8 +111,6 @@ class TimmTileEncoder(TileEncoder):
             self._output_variant = resolve_requested_output_variant(output_variant)
 
     def get_transform(self) -> Callable:
-        from timm.data import create_transform, resolve_data_config
-
         data_config = resolve_data_config(self._model.pretrained_cfg, model=self._model)
         return create_transform(**data_config)
 
@@ -126,7 +125,7 @@ class TimmTileEncoder(TileEncoder):
     def device(self) -> torch.device:
         return self._device
 
-    def to(self, device: torch.device | str) -> "TimmTileEncoder":
+    def to(self, device: torch.device | str) -> TimmTileEncoder:
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self

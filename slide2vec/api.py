@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import logging
 import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence, overload
+from typing import Any, Mapping, Protocol, Sequence
 
+import torch
 from hs2p import SlideSpec
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
-from slide2vec.encoders.registry import encoder_registry
+from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_requirements
+from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
+from slide2vec.progress import emit_progress
 from slide2vec.runtime_types import LoadedModel
 
 logger = logging.getLogger("slide2vec")
@@ -29,13 +34,7 @@ SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
-def _cfg_num_cucim_workers(cfg: Any) -> int:
-    if cfg.speed.num_cucim_workers is not None:
-        return int(cfg.speed.num_cucim_workers)
-    return 4
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
     backend: str = "auto"
     target_spacing_um: float = 0.5
@@ -57,9 +56,8 @@ class PreprocessingConfig:
     preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg: Any) -> "PreprocessingConfig":
+    def from_config(cls, cfg: Any) -> PreprocessingConfig:
         tiling = cfg.tiling
-        default_read_coordinates_from = Path(cfg.output_dir) / "coordinates"
         read_coordinates_from = tiling.read_coordinates_from
         read_tiles_from = tiling.read_tiles_from
         on_the_fly = bool(tiling.on_the_fly)
@@ -75,9 +73,7 @@ class PreprocessingConfig:
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
             tissue_threshold=float(tiling.params.tissue_threshold),
-            read_coordinates_from=(
-                Path(read_coordinates_from) if read_coordinates_from else default_read_coordinates_from
-            ),
+            read_coordinates_from=Path(read_coordinates_from) if read_coordinates_from else None,
             read_tiles_from=(
                 Path(read_tiles_from) if read_tiles_from else None
             ),
@@ -86,7 +82,7 @@ class PreprocessingConfig:
             adaptive_batching=adaptive_batching,
             use_supertiles=bool(tiling.use_supertiles),
             jpeg_backend=str(tiling.jpeg_backend),
-            num_cucim_workers=_cfg_num_cucim_workers(cfg),
+            num_cucim_workers=int(cfg.speed.num_cucim_workers) if cfg.speed.num_cucim_workers is not None else 4,
             resume=bool(cfg.resume),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
@@ -97,11 +93,12 @@ class PreprocessingConfig:
             },
         )
 
-    def with_backend(self, backend: str) -> "PreprocessingConfig":
+    def with_backend(self, backend: str) -> PreprocessingConfig:
         return replace(self, backend=backend)
 
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, kw_only=True)
 class ExecutionOptions:
     output_dir: Path | None = None
     output_format: str = "pt"
@@ -117,7 +114,7 @@ class ExecutionOptions:
     save_latents: bool = False
 
     @classmethod
-    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
+    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> ExecutionOptions:
         configured_num_gpus = cfg.speed.num_gpus
         requested_precision = normalize_precision_name(cfg.speed.precision)
         num_workers = cfg.speed.num_dataloader_workers
@@ -130,7 +127,7 @@ class ExecutionOptions:
             batch_size=int(cfg.model.batch_size),
             num_workers=int(num_workers),
             num_preprocessing_workers=int(cfg.speed.num_preprocessing_workers),
-            num_gpus=1 if run_on_cpu else _coerce_num_gpus(configured_num_gpus),
+            num_gpus=1 if run_on_cpu else (int(configured_num_gpus) if configured_num_gpus is not None else None),
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=prefetch_factor,
             persistent_workers=persistent_workers,
@@ -159,20 +156,20 @@ class ExecutionOptions:
             object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
             object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
 
-    def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
+    def with_output_dir(self, output_dir: PathLike | None) -> ExecutionOptions:
         if output_dir is None:
             return self
         return replace(self, output_dir=Path(output_dir))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RunResult:
     tile_artifacts: list[TileEmbeddingArtifact]
     slide_artifacts: list[SlideEmbeddingArtifact]
     process_list_path: Path | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EmbeddedSlide:
     sample_id: str
     tile_embeddings: Any
@@ -212,7 +209,7 @@ class Model:
         output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
         device: str = "auto",
-    ) -> "Model":
+    ) -> Model:
         return cls(
             name=name,
             device=device,
@@ -258,32 +255,6 @@ class Model:
         _require_output_dir_for_persistence(resolved, method_name="Model.aggregate_tiles(...)")
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return aggregate_tiles(self, tile_artifacts, execution=resolved, preprocessing=preprocessing)
-
-    @overload
-    def embed_slide(
-        self,
-        slide: PathLike,
-        *,
-        preprocessing: PreprocessingConfig | None = None,
-        execution: ExecutionOptions | None = None,
-        sample_id: str | None = None,
-        mask_path: PathLike | None = None,
-        spacing_at_level_0: float | None = None,
-    ) -> EmbeddedSlide:
-        ...
-
-    @overload
-    def embed_slide(
-        self,
-        slide: Mapping[str, object] | SlideLike | SlideSpec,
-        *,
-        preprocessing: PreprocessingConfig | None = None,
-        execution: ExecutionOptions | None = None,
-        sample_id: None = None,
-        mask_path: None = None,
-        spacing_at_level_0: None = None,
-    ) -> EmbeddedSlide:
-        ...
 
     def embed_slide(
         self,
@@ -335,7 +306,6 @@ class Model:
     def _load_backend(self) -> LoadedModel:
         if self._backend is None:
             from slide2vec.inference import load_model
-            from slide2vec.progress import emit_progress
 
             emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
@@ -393,20 +363,8 @@ def _coerce_execution_options(
     return replace(resolved, precision=recommended)
 
 
-def _coerce_num_gpus(value: Any) -> int | None:
-    if value is None:
-        return None
-    return int(value)
-
-
 def _default_num_gpus() -> int:
-    try:
-        import torch
-    except ImportError:
-        return 1
-    if torch.cuda.is_available():
-        return max(1, int(torch.cuda.device_count()))
-    return 1
+    return max(1, torch.cuda.device_count()) if torch.cuda.is_available() else 1
 
 
 def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_name: str) -> None:
@@ -415,7 +373,6 @@ def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_n
 
 
 def _recommended_execution_precision(model: Model | None) -> str:
-    from slide2vec.encoders.registry import encoder_registry
     name = None if model is None else model.name
     if name and name in encoder_registry:
         info = encoder_registry.info(name)
@@ -430,7 +387,6 @@ def _resolve_direct_api_preprocessing(
     if preprocessing is not None:
         return preprocessing
 
-    from slide2vec.encoders.registry import resolve_preprocessing_requirements
     name = model.name
     target_tile_size_px, target_spacing_um = _default_preprocessing_from_registry(name)
     return PreprocessingConfig(
@@ -441,7 +397,6 @@ def _resolve_direct_api_preprocessing(
 
 
 def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
-    from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_requirements
     if not name or name not in encoder_registry:
         default = PreprocessingConfig()
         return int(default.target_tile_size_px), float(default.target_spacing_um)
@@ -473,8 +428,6 @@ def _validate_model_config(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions | None = None,
 ) -> None:
-    from slide2vec.encoders.registry import encoder_registry
-    from slide2vec.encoders.validation import validate_encoder_config
     name = model.name
     if name not in encoder_registry:
         return
@@ -499,7 +452,6 @@ def _auto_progress_reporting(*, output_dir: PathLike | None):
         create_api_progress_reporter,
         get_progress_reporter,
     )
-
     active = get_progress_reporter()
     if not isinstance(active, NullProgressReporter):
         yield

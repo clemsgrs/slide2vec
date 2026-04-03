@@ -532,7 +532,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
         captured["slides"] = list(slides)
         captured["kwargs"] = kwargs
 
-    monkeypatch.setitem(sys.modules, "hs2p", SimpleNamespace(tile_slides=fake_tile_slides))
+    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
         "_build_hs2p_configs",
@@ -568,7 +568,7 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
         captured["slides"] = list(slides)
         captured["kwargs"] = kwargs
 
-    monkeypatch.setitem(sys.modules, "hs2p", SimpleNamespace(tile_slides=fake_tile_slides))
+    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
         "_build_hs2p_configs",
@@ -604,16 +604,10 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    monkeypatch.setitem(
-        sys.modules,
-        "hs2p",
-        SimpleNamespace(
-            TilingConfig=FakeTilingConfig,
-            SegmentationConfig=FakeSegmentationConfig,
-            FilterConfig=FakeFilterConfig,
-            PreviewConfig=FakePreviewConfig,
-        ),
-    )
+    monkeypatch.setattr(inference, "TilingConfig", FakeTilingConfig)
+    monkeypatch.setattr(inference, "SegmentationConfig", FakeSegmentationConfig)
+    monkeypatch.setattr(inference, "FilterConfig", FakeFilterConfig)
+    monkeypatch.setattr(inference, "PreviewConfig", FakePreviewConfig)
 
     preprocessing = PreprocessingConfig(
         backend="asap",
@@ -662,7 +656,7 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
     )
 
     monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide = make_slide("slide-a", spacing_at_level_0=0.25)
 
@@ -696,7 +690,7 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
     ]
 
     monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: tiling_artifacts)
-    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide = make_slide("slide-a")
 
@@ -731,7 +725,7 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(inference, "_load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide_records, tiling_results = inference.load_successful_tiled_slides(tmp_path)
 
@@ -1650,17 +1644,8 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         def encode_tiles(self, image):
             return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
-    fake_dataset_module = types.SimpleNamespace(
-        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileIndexDataset=lambda tile_indices: list(tile_indices),
-    )
-    fake_data_package = types.ModuleType("slide2vec.data")
-    fake_data_package.__path__ = []
-    fake_data_package.dataset = fake_dataset_module
-
-    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
-
+    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
@@ -1743,16 +1728,8 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         def encode_tiles(self, image):
             return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
-    fake_dataset_module = types.SimpleNamespace(
-        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileIndexDataset=lambda tile_indices: list(tile_indices),
-    )
-    fake_data_package = types.ModuleType("slide2vec.data")
-    fake_data_package.__path__ = []
-    fake_data_package.dataset = fake_dataset_module
-
-    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
@@ -1851,7 +1828,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator))
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
@@ -1940,12 +1917,9 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    fake_dataset_module = types.SimpleNamespace(
-        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileIndexDataset=lambda tile_indices: list(tile_indices),
-    )
-    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCucimCollator))
+    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCucimCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
@@ -2022,7 +1996,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setitem(sys.modules, "slide2vec.data.tile_reader", types.SimpleNamespace(OnTheFlyBatchTileCollator=DummyCollator))
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
@@ -2156,16 +2130,8 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
             assert image.shape[1:] == (4, 3, 2, 2)
             return torch.ones((image.shape[0], image.shape[1], 3), dtype=torch.float32, device=image.device)
 
-    fake_dataset_module = types.SimpleNamespace(
-        BatchTileCollator=lambda **kwargs: ("collator", kwargs),
-        TileIndexDataset=lambda tile_indices: list(tile_indices),
-    )
-    fake_data_package = types.ModuleType("slide2vec.data")
-    fake_data_package.__path__ = []
-    fake_data_package.dataset = fake_dataset_module
-
-    monkeypatch.setitem(sys.modules, "slide2vec.data", fake_data_package)
-    monkeypatch.setitem(sys.modules, "slide2vec.data.dataset", fake_dataset_module)
+    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
 
     class Normalize:

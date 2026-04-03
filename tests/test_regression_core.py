@@ -288,6 +288,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
 def test_preprocessing_config_defaults_backend_to_auto():
     assert PreprocessingConfig().backend == "auto"
 
+
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
     base = ExecutionOptions(
         output_dir=None,
@@ -379,8 +380,8 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         captured["model_kwargs"] = model_kwargs
         return "MODEL"
 
-    monkeypatch.setattr(cli, "_setup_cli_config", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
-    monkeypatch.setattr(cli, "_hf_login", lambda: None)
+    monkeypatch.setattr(cli, "setup", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
+    monkeypatch.setattr(cli, "hf_login", lambda: None)
     monkeypatch.setattr(cli.Model, "from_preset", staticmethod(fake_from_preset))
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
 
@@ -559,48 +560,6 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
     assert cfg.speed.precision == "fp32"
 
 
-def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():
-    cfg = SimpleNamespace(
-        resume=True,
-        output_dir="/tmp/run-001",
-        speed=SimpleNamespace(num_cucim_workers=4),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
-                tolerance=0.07,
-                overlap=0.0,
-                tissue_threshold=0.1,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=False, downsample=32),
-        ),
-    )
-
-    preprocessing = PreprocessingConfig.from_config(cfg)
-
-    assert preprocessing.backend == "asap"
-    assert preprocessing.target_tile_size_px == 224
-    assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
-    assert preprocessing.read_tiles_from is None
-    assert preprocessing.resume is True
-    assert preprocessing.segmentation == {"downsample": 64}
-    assert preprocessing.filtering == {"ref_tile_size": 224}
-    assert preprocessing.preview == {
-        "save_mask_preview": False,
-        "save_tiling_preview": False,
-        "downsample": 32,
-    }
-
 
 def test_preprocessing_config_from_config_preserves_tile_store_dir():
     cfg = SimpleNamespace(
@@ -631,7 +590,7 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
 
     preprocessing = PreprocessingConfig.from_config(cfg)
 
-    assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
+    assert preprocessing.read_coordinates_from is None
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
     assert preprocessing.num_cucim_workers == 6
 

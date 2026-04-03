@@ -2,6 +2,7 @@ import os
 import random
 import subprocess
 import numpy as np
+import torch
 
 from typing import Any, Optional
 
@@ -10,8 +11,6 @@ def fix_random_seeds(seed=31):
     """
     Fix random seeds.
     """
-    import torch
-
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
@@ -39,6 +38,7 @@ def get_sha():
     return message
 def initialize_wandb(
     cfg: Any,
+    *,
     key: Optional[str] = "",
 ):
     import wandb

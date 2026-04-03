@@ -18,12 +18,12 @@ model:
 
 tiling:
   on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
-  gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it
+  gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it (experimental, may not be stable across all environments)
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)
   jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
-  read_coordinates_from: # path to HS2P `.coordinates.npz` / `.coordinates.meta.json` artifacts; defaults to <output_dir>/coordinates when left empty
-  read_tiles_from: # path to an existing directory containing HS2P `.tiles.tar` tile stores to reuse instead of writing new stores during tiling
+  read_coordinates_from: # path to an existing directory containing pre-extracted `.coordinates.npz` / `.coordinates.meta.json` artifacts to reuse instead of starting tiling from scratch
+  read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
   backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
   params:
     target_spacing_um: 0.5 # spacing at which to tile the slide, in microns per pixel
@@ -63,21 +63,21 @@ tiling:
     mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
 
 speed:
-  precision: fp32 # model inference precision ["fp32", "fp16", "bf16"]
+  precision: # model inference precision ["fp32", "fp16", "bf16"]; if not set, determined automatically based on model recommendations
   num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // speed.num_cucim_workers
   num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
   num_preprocessing_workers: 8 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing)
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
   prefetch_factor_embedding: 4 # prefetch factor for tile embedding dataloaders
   persistent_workers_embedding: true # keep DataLoader workers alive across epochs/batches
-  gpu_batch_preprocessing: true # run batch preprocessing on the GPU when available
+  gpu_batch_preprocessing: false # run batch preprocessing on the GPU when available
 
 wandb:
   enable: false
   project: "" # wandb project name
   username: "" # wandb username
   exp_name: "" # wandb experiment name
-  tags: ["features", "${tiling.params.target_tile_size_px}"] # wandb tags
+  tags: ["features", "${model.name}", "${tiling.params.target_tile_size_px}"] # wandb tags
   dir: "/home/user/"
   group:
   resume_id: "${resume_dirname}"
