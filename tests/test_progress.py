@@ -10,6 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from slide2vec.api import PreprocessingConfig
+
+DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
+
 
 class RecordingReporter:
     def __init__(self):
@@ -178,7 +182,7 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
         result = inference.run_pipeline(
             model,
             slides=[slide],
-            preprocessing=inference.PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
             execution=inference.ExecutionOptions(output_dir=tmp_path, num_gpus=1, save_tile_embeddings=True),
         )
 
@@ -217,7 +221,7 @@ def test_run_forward_pass_reports_processed_tile_counts():
         (torch.tensor([2, 3]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
         (torch.tensor([4]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
     ]
-    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel())
+    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
 
     with progress.activate_progress_reporter(reporter):
         outputs = inference._run_forward_pass(
@@ -252,7 +256,7 @@ def test_run_forward_pass_emits_batch_timing_events():
         (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
         (torch.tensor([2]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
     ]
-    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel())
+    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
 
     with progress.activate_progress_reporter(reporter):
         inference._run_forward_pass(
@@ -307,6 +311,7 @@ def test_run_forward_pass_prefers_tile_encoder_when_present():
         feature_dim=1280,
         tile_feature_dim=3,
         model=SlideModel(),
+        transforms=lambda image: image,
     )
 
     with progress.activate_progress_reporter(reporter):
@@ -350,7 +355,7 @@ def test_build_direct_embed_worker_request_payload_includes_progress_events_path
 
     payload = inference._build_direct_embed_worker_request_payload(
         model=SimpleNamespace(name="virchow2", level="tile", _model_kwargs={}),
-        preprocessing=inference.PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=inference.ExecutionOptions(output_dir=tmp_path),
         coordination_dir=tmp_path / "coord",
         strategy="slide_shard",

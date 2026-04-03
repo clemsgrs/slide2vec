@@ -110,6 +110,38 @@ def resolve_preprocessing_requirements(
     raise AssertionError("unreachable")
 
 
+def resolve_preprocessing_defaults(
+    encoder_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve a single unambiguous preprocessing default for an encoder.
+
+    This is stricter than :func:`resolve_preprocessing_requirements`: it only
+    succeeds when the encoder advertises exactly one supported spacing.
+    """
+    reqs = resolve_preprocessing_requirements(encoder_name, metadata)
+    spacing_um = reqs["spacing_um"]
+    if isinstance(spacing_um, list):
+        unique_spacings = []
+        for spacing in spacing_um:
+            spacing_value = float(spacing)
+            if not any(abs(spacing_value - existing) <= 1e-8 for existing in unique_spacings):
+                unique_spacings.append(spacing_value)
+        if len(unique_spacings) != 1:
+            supported_text = ", ".join(f"{s:g}" for s in unique_spacings)
+            raise ValueError(
+                f"Encoder '{encoder_name}' supports multiple spacings [{supported_text}]; "
+                "cannot infer a default target_spacing_um. "
+                "Pass preprocessing.target_spacing_um explicitly."
+            )
+        spacing_um = unique_spacings[0]
+    return {
+        "tile_size_px": int(reqs["tile_size_px"]),
+        "spacing_um": float(spacing_um),
+        "source_encoder": reqs["source_encoder"],
+    }
+
+
 def resolve_encoder_output(
     encoder_name: str,
     *,

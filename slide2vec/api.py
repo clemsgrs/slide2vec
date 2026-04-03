@@ -1,5 +1,4 @@
 
-import logging
 import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
@@ -10,13 +9,14 @@ import torch
 from hs2p import SlideSpec
 
 from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
-from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_requirements
+from slide2vec.encoders.registry import (
+    encoder_registry,
+    resolve_preprocessing_defaults,
+)
 from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
 from slide2vec.progress import emit_progress
 from slide2vec.runtime_types import LoadedModel
-
-logger = logging.getLogger("slide2vec")
 
 PathLike = str | Path
 
@@ -36,8 +36,8 @@ TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 @dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
     backend: str = "auto"
-    target_spacing_um: float = 0.5
-    target_tile_size_px: int = 224
+    target_spacing_um: float | None = None
+    target_tile_size_px: int | None = None
     tolerance: float = 0.05
     overlap: float = 0.0
     tissue_threshold: float = 0.01
@@ -55,7 +55,7 @@ class PreprocessingConfig:
     preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, cfg: Any) -> PreprocessingConfig:
+    def from_config(cls, cfg: Any) -> "PreprocessingConfig":
         tiling = cfg.tiling
         read_coordinates_from = tiling.read_coordinates_from
         read_tiles_from = tiling.read_tiles_from
@@ -92,7 +92,7 @@ class PreprocessingConfig:
             },
         )
 
-    def with_backend(self, backend: str) -> PreprocessingConfig:
+    def with_backend(self, backend: str) -> "PreprocessingConfig":
         return replace(self, backend=backend)
 
 
@@ -108,18 +108,16 @@ class ExecutionOptions:
     precision: str | None = None
     prefetch_factor: int = 4
     persistent_workers: bool = True
-    gpu_batch_preprocessing: bool = True
     save_tile_embeddings: bool = False
     save_latents: bool = False
 
     @classmethod
-    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> ExecutionOptions:
+    def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
         configured_num_gpus = cfg.speed.num_gpus
         requested_precision = normalize_precision_name(cfg.speed.precision)
         num_workers = cfg.speed.num_dataloader_workers
         prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
         persistent_workers = bool(cfg.speed.persistent_workers_embedding)
-        gpu_batch_preprocessing = bool(cfg.speed.gpu_batch_preprocessing)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
@@ -130,7 +128,6 @@ class ExecutionOptions:
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=prefetch_factor,
             persistent_workers=persistent_workers,
-            gpu_batch_preprocessing=gpu_batch_preprocessing,
             save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
             save_latents=bool(cfg.model.save_latents),
         )
@@ -155,7 +152,7 @@ class ExecutionOptions:
             object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
             object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
 
-    def with_output_dir(self, output_dir: PathLike | None) -> ExecutionOptions:
+    def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
             return self
         return replace(self, output_dir=Path(output_dir))
@@ -208,7 +205,7 @@ class Model:
         output_variant: str | None = None,
         allow_non_recommended_settings: bool = False,
         device: str = "auto",
-    ) -> Model:
+    ) -> "Model":
         return cls(
             name=name,
             device=device,
@@ -236,10 +233,16 @@ class Model:
 
         resolved = _coerce_execution_options(execution, model=self)
         _require_output_dir_for_persistence(resolved, method_name="Model.embed_tiles(...)")
-        if preprocessing is not None:
-            _validate_model_config(self, preprocessing, resolved)
+        resolved_preprocessing = _resolve_direct_api_preprocessing(self, preprocessing)
+        _validate_model_config(self, resolved_preprocessing, resolved)
         with _auto_progress_reporting(output_dir=resolved.output_dir):
-            return embed_tiles(self, slides, tiling_results, execution=resolved, preprocessing=preprocessing)
+            return embed_tiles(
+                self,
+                slides,
+                tiling_results,
+                execution=resolved,
+                preprocessing=resolved_preprocessing,
+            )
 
     def aggregate_tiles(
         self,
@@ -338,13 +341,14 @@ class Pipeline:
         from slide2vec.inference import run_pipeline
 
         with _auto_progress_reporting(output_dir=self.execution.output_dir):
+            resolved_preprocessing = _resolve_direct_api_preprocessing(self.model, self.preprocessing)
             if not tiling_only:
-                _validate_model_config(self.model, self.preprocessing, self.execution)
+                _validate_model_config(self.model, resolved_preprocessing, self.execution)
             return run_pipeline(
                 self.model,
                 slides=slides,
                 manifest_path=manifest_path,
-                preprocessing=self.preprocessing,
+                preprocessing=resolved_preprocessing,
                 tiling_only=tiling_only,
                 execution=self.execution,
             )
@@ -383,13 +387,33 @@ def _resolve_direct_api_preprocessing(
     model: Model,
     preprocessing: PreprocessingConfig | None,
 ) -> PreprocessingConfig:
-    if preprocessing is not None:
-        return preprocessing
-
     name = model.name
-    target_tile_size_px, target_spacing_um = _default_preprocessing_from_registry(name)
-    return PreprocessingConfig(
-        backend="auto",
+    defaults = None
+
+    def ensure_defaults() -> tuple[int, float]:
+        nonlocal defaults
+        if defaults is None:
+            defaults = _default_preprocessing_from_registry(name)
+        return defaults
+
+    if preprocessing is None:
+        target_tile_size_px, target_spacing_um = ensure_defaults()
+        return PreprocessingConfig(
+            backend="auto",
+            target_spacing_um=target_spacing_um,
+            target_tile_size_px=target_tile_size_px,
+        )
+
+    target_spacing_um = preprocessing.target_spacing_um
+    target_tile_size_px = preprocessing.target_tile_size_px
+    if target_spacing_um is None or target_tile_size_px is None:
+        default_tile_size_px, default_spacing_um = ensure_defaults()
+        if target_spacing_um is None:
+            target_spacing_um = default_spacing_um
+        if target_tile_size_px is None:
+            target_tile_size_px = default_tile_size_px
+    return replace(
+        preprocessing,
         target_spacing_um=target_spacing_um,
         target_tile_size_px=target_tile_size_px,
     )
@@ -397,29 +421,13 @@ def _resolve_direct_api_preprocessing(
 
 def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
     if not name or name not in encoder_registry:
-        default = PreprocessingConfig()
-        return int(default.target_tile_size_px), float(default.target_spacing_um)
-
-    reqs = resolve_preprocessing_requirements(name)
-    tile_size_px = int(reqs["tile_size_px"])
-    spacing_um = reqs["spacing_um"]
-
-    if isinstance(spacing_um, list):
-        if any(abs(s - 0.5) <= 1e-8 for s in spacing_um):
-            chosen = 0.5
-        else:
-            chosen = min(spacing_um)
-        supported_text = ", ".join(f"{s:g}" for s in spacing_um)
-        logger.warning(
-            "Model '%s' supports multiple spacings [%s]; defaulting direct API calls to target_spacing_um=%g. "
-            "Pass PreprocessingConfig(target_spacing_um=...) to choose another supported spacing.",
-            name,
-            supported_text,
-            chosen,
+        raise ValueError(
+            "Cannot infer preprocessing defaults without a registered model. "
+            "Pass preprocessing.target_spacing_um and preprocessing.target_tile_size_px explicitly."
         )
-        return tile_size_px, chosen
 
-    return tile_size_px, float(spacing_um)
+    defaults = resolve_preprocessing_defaults(name)
+    return int(defaults["tile_size_px"]), float(defaults["spacing_um"])
 
 
 def _validate_model_config(

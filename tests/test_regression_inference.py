@@ -1,5 +1,6 @@
 import ast
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import types
@@ -13,7 +14,7 @@ from slide2vec.api import (
     ExecutionOptions,
     Model,
     Pipeline,
-    PreprocessingConfig,
+    PreprocessingConfig as BasePreprocessingConfig,
 )
 from slide2vec.artifacts import (
     load_array,
@@ -24,6 +25,15 @@ from slide2vec.artifacts import (
 from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def PreprocessingConfig(*args, **kwargs):
+    kwargs.setdefault("target_spacing_um", 0.5)
+    kwargs.setdefault("target_tile_size_px", 224)
+    return BasePreprocessingConfig(*args, **kwargs)
+
+
+DEFAULT_PREPROCESSING = PreprocessingConfig()
 
 
 def make_slide(
@@ -77,7 +87,7 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     result = inference.run_pipeline(
         model,
         slides=[slide],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
     )
 
@@ -115,13 +125,13 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     result = inference.run_pipeline(
         Model.from_preset("virchow2"),
         slides=[slide],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
     )
 
     assert captured["successful_slides"] == [slide]
     assert captured["process_list_path"] == tmp_path / "process_list.csv"
-    assert isinstance(captured["preprocessing"], PreprocessingConfig)
+    assert isinstance(captured["preprocessing"], BasePreprocessingConfig)
     assert captured["output_dir"] == tmp_path
     assert captured["execution"].num_gpus == 2
     assert result.tile_artifacts == ["tile-artifact"]
@@ -182,7 +192,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
         model=model,
         successful_slides=[slide],
         process_list_path=process_list_path,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=execution,
         output_dir=tmp_path,
     )
@@ -244,7 +254,7 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
         model=SimpleNamespace(),
         embedded_slides=embedded_slides,
         tiling_results=tiling_results,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=Path("/tmp")),
     )
 
@@ -328,8 +338,8 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
     result = inference.run_pipeline(
         Model.from_preset("virchow2"),
         slides=[slide_record],
-        preprocessing=PreprocessingConfig(),
-        execution=ExecutionOptions(output_dir=tmp_path),
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1),
     )
 
     assert captured["process_list_path"] == tmp_path / "process_list.csv"
@@ -379,7 +389,7 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
         inference.run_pipeline(
             model,
             slides=slides,
-            preprocessing=PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
             execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
         )
 
@@ -436,7 +446,7 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     result = inference.run_pipeline(
         model,
         slides=slides,
-        preprocessing=PreprocessingConfig(resume=True),
+        preprocessing=replace(DEFAULT_PREPROCESSING, resume=True),
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
     )
 
@@ -505,7 +515,7 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
         inference.run_pipeline(
             model,
             slides=slides,
-            preprocessing=PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
             execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
         )
 
@@ -549,7 +559,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
 
     inference._tile_slides(
         [slide],
-        PreprocessingConfig(on_the_fly=False),
+        replace(DEFAULT_PREPROCESSING, on_the_fly=False),
         output_dir=tmp_path,
         num_workers=0,
     )
@@ -577,7 +587,7 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
 
     inference._tile_slides(
         [make_slide("slide-a")],
-        PreprocessingConfig(read_tiles_from=Path("/tmp/existing-tiles")),
+        replace(DEFAULT_PREPROCESSING, read_tiles_from=Path("/tmp/existing-tiles")),
         output_dir=tmp_path,
         num_workers=0,
     )
@@ -662,7 +672,7 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     inference._prepare_tiled_slides(
         [slide],
-        PreprocessingConfig(),
+        DEFAULT_PREPROCESSING,
         output_dir=tmp_path,
         num_workers=0,
     )
@@ -696,7 +706,7 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
 
     inference._prepare_tiled_slides(
         [slide],
-        PreprocessingConfig(),
+        DEFAULT_PREPROCESSING,
         output_dir=tmp_path,
         num_workers=0,
     )
@@ -709,10 +719,33 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
 def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():
     import slide2vec.inference as inference
 
-    assert inference._resolve_slide_backend(PreprocessingConfig(backend="auto"), SimpleNamespace(backend="cucim")) == "cucim"
-    assert inference._resolve_slide_backend(PreprocessingConfig(backend="auto"), SimpleNamespace(backend="asap")) == "asap"
-    assert inference._resolve_slide_backend(PreprocessingConfig(backend="auto"), SimpleNamespace()) == "asap"
-    assert inference._resolve_slide_backend(PreprocessingConfig(backend="cucim"), SimpleNamespace(backend="asap")) == "cucim"
+    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="cucim")) == "cucim"
+    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="asap")) == "asap"
+    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace()) == "asap"
+    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="cucim"), SimpleNamespace(backend="asap")) == "cucim"
+
+
+def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd):
+    import os
+
+    import slide2vec.inference as inference
+
+    calls: list[str] = []
+
+    def fake_import_module(name: str):
+        calls.append(name)
+        if name == "wholeslidedata":
+            os.write(2, b"cuFile initialization failed\n")
+            return SimpleNamespace()
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(inference.importlib, "import_module", fake_import_module)
+
+    inference._preload_asap_wholeslidedata(replace(DEFAULT_PREPROCESSING, backend="asap"))
+
+    captured = capfd.readouterr()
+    assert captured.err == ""
+    assert calls == ["wholeslidedata"]
 
 
 def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, tmp_path: Path):
@@ -764,7 +797,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     )
 
     loaded = SimpleNamespace(device="cpu", model=SimpleNamespace())
-    model = SimpleNamespace(_load_backend=lambda: loaded)
+    model = SimpleNamespace(level="slide", _load_backend=lambda: loaded)
     captured = {}
 
     def fake_aggregate(loaded_arg, model_arg, slide_arg, tiling_result_arg, tile_embeddings_arg, *, preprocessing, execution):
@@ -782,7 +815,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
         model,
         slide=slide,
         tiling_result=tiling_result,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(num_gpus=2),
         work_dir=tmp_path,
     )
@@ -794,6 +827,66 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     assert captured["tile_embeddings_shape"] == (2, 2)
     assert captured["execution_num_gpus"] == 2
     np.testing.assert_array_equal(embedded.slide_embedding, np.array([9.0, 8.0], dtype=np.float32))
+    np.testing.assert_array_equal(embedded.x, np.array([0, 1], dtype=np.int64))
+    np.testing.assert_array_equal(embedded.y, np.array([2, 3], dtype=np.int64))
+
+def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_models(monkeypatch, tmp_path: Path):
+    from contextlib import contextmanager
+
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 1]),
+        y=np.array([2, 3]),
+        tile_size_lv0=224,
+        target_spacing_um=0.5,
+    )
+
+    @contextmanager
+    def fake_coordination_dir(work_dir: Path):
+        yield work_dir / "coord"
+
+    monkeypatch.setattr(inference, "_distributed_coordination_dir", fake_coordination_dir)
+    monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_load_tile_embedding_shards",
+        lambda *_args, **_kwargs: [
+            {
+                "tile_index": np.array([0, 1], dtype=np.int64),
+                "tile_embeddings": np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        inference,
+        "_merge_tile_embedding_shards",
+        lambda shard_payloads: shard_payloads[0]["tile_embeddings"],
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("tile encoders should not load the parent backend or aggregate slide features")
+
+    model = SimpleNamespace(
+        name="h0-mini",
+        level="tile",
+        _load_backend=fail_if_called,
+    )
+    monkeypatch.setattr(inference, "_aggregate_tile_embeddings_for_slide", fail_if_called)
+
+    embedded = inference._embed_single_slide_distributed(
+        model,
+        slide=slide,
+        tiling_result=tiling_result,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(num_gpus=2),
+        work_dir=tmp_path,
+    )
+
+    np.testing.assert_array_equal(embedded.tile_embeddings, np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32))
+    assert embedded.slide_embedding is None
+    assert embedded.latents is None
     np.testing.assert_array_equal(embedded.x, np.array([0, 1], dtype=np.int64))
     np.testing.assert_array_equal(embedded.y, np.array([2, 3], dtype=np.int64))
 
@@ -831,7 +924,7 @@ def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
         model=Model.from_preset("virchow2"),
         slide_records=[slide],
         tiling_results=[tiling_result],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=Path("/tmp"), num_gpus=1),
         work_dir=Path("/tmp"),
     )
@@ -870,7 +963,7 @@ def test_select_embedding_path_uses_single_slide_distributed_when_one_slide(monk
         model=Model.from_preset("virchow2"),
         slide_records=[slide],
         tiling_results=[tiling_result],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
         work_dir=tmp_path,
     )
@@ -906,7 +999,7 @@ def test_select_embedding_path_uses_multi_slide_distributed_when_multiple_slides
         model=Model.from_preset("virchow2"),
         slide_records=slides,
         tiling_results=tiling_results,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
         work_dir=tmp_path,
     )
@@ -1053,20 +1146,21 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
     in_memory = inference.embed_slides(
         model,
         [slide_record],
-        preprocessing=PreprocessingConfig(),
-        execution=ExecutionOptions(),
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(num_gpus=1),
     )
     assert in_memory == [embedded]
 
     persisted = inference.embed_slides(
         model,
         [slide_record],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(
             output_dir=tmp_path,
             output_format="npz",
             save_latents=True,
             save_tile_embeddings=True,
+            num_gpus=1,
         ),
     )
     assert persisted == [embedded]
@@ -1134,8 +1228,8 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
         inference.embed_slides(
             model,
             slides,
-            preprocessing=PreprocessingConfig(),
-            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+            preprocessing=DEFAULT_PREPROCESSING,
+            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True, num_gpus=1),
         )
 
     assert (tmp_path / "tile_embeddings" / "slide-a.pt").is_file()
@@ -1191,8 +1285,13 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
     result = inference.run_pipeline(
         Model.from_preset("prism"),
         slides=[slide_record],
-        preprocessing=PreprocessingConfig(),
-        execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", save_tile_embeddings=False),
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(
+            output_dir=tmp_path,
+            output_format="npz",
+            save_tile_embeddings=False,
+            num_gpus=1,
+        ),
     )
 
     assert result.tile_artifacts == []
@@ -1241,7 +1340,7 @@ def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tm
     result = inference.embed_slides(
         Model.from_preset("virchow2"),
         [slide_record],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
     )
 
@@ -1303,7 +1402,7 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
     result = inference.embed_slides(
         Model.from_preset("virchow2"),
         slides,
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=2),
     )
 
@@ -1409,13 +1508,10 @@ def test_region_batch_preprocessor_resizes_whole_region_before_unfolding():
         requested_tile_size_px=4,
         effective_tile_size_px=2,
     )
-    execution = ExecutionOptions(gpu_batch_preprocessing=False)
-
     preprocess = inference._build_batch_preprocessor(
         loaded,
         SimpleNamespace(level="region"),
         tiling_result,
-        execution=execution,
     )
 
     batch = torch.full((1, 3, 2, 2), 255, dtype=torch.uint8)
@@ -1446,13 +1542,10 @@ def test_region_batch_preprocessor_unfolds_then_applies_tile_transforms():
         requested_tile_size_px=4,
         effective_tile_size_px=4,
     )
-    execution = ExecutionOptions(gpu_batch_preprocessing=False)
-
     preprocess = inference._build_batch_preprocessor(
         loaded,
         SimpleNamespace(level="region"),
         tiling_result,
-        execution=execution,
     )
 
     quadrant_values = torch.tensor(
@@ -1512,6 +1605,87 @@ def test_build_batch_transform_spec_supports_nested_region_unfolding_transform()
     assert spec.std == (0.2, 0.3, 0.4)
 
 
+def test_build_batch_preprocessor_falls_back_for_unsupported_transform_stack(caplog):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class UnsupportedTransform:
+        pass
+
+    loaded = inference.LoadedModel(
+        name="h0-mini",
+        level="tile",
+        model=SimpleNamespace(),
+        transforms=SimpleNamespace(transforms=[UnsupportedTransform()]),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+    tiling_result = SimpleNamespace(requested_tile_size_px=224)
+
+    with caplog.at_level("WARNING", logger="slide2vec.inference"):
+        preprocess = inference._build_batch_preprocessor(
+            loaded,
+            SimpleNamespace(level="tile"),
+            tiling_result,
+        )
+
+    assert preprocess is None
+    assert "falling back to per-item preprocessing" in caplog.text
+
+
+def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_is_unavailable():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+    from contextlib import nullcontext
+
+    class UnsupportedTransform:
+        pass
+
+    class ItemwiseTransform:
+        def __init__(self):
+            self.transforms = [UnsupportedTransform()]
+
+        def __call__(self, image):
+            return image.float().div(255.0)
+
+    class DummyLoader:
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.full((2, 3, 4, 4), 255, dtype=torch.uint8),
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyModel:
+        def encode_tiles(self, image):
+            assert image.dtype == torch.float32
+            assert torch.allclose(image, torch.ones_like(image))
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
+
+    loaded = inference.LoadedModel(
+        name="h0-mini",
+        level="tile",
+        model=DummyModel(),
+        transforms=ItemwiseTransform(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+
+    result = inference._run_forward_pass(
+        DummyLoader(),
+        loaded,
+        nullcontext(),
+        batch_preprocessor=None,
+        sample_id="slide-a",
+        total_items=2,
+    )
+
+    assert result.shape == (2, 3)
+    assert torch.allclose(result, torch.ones((2, 3), dtype=torch.float32))
+
+
 def test_region_batch_preprocessor_uses_region_unfolding_from_transform_stack():
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
@@ -1541,7 +1715,6 @@ def test_region_batch_preprocessor_uses_region_unfolding_from_transform_stack():
         loaded,
         SimpleNamespace(level="region"),
         tiling_result,
-        execution=ExecutionOptions(gpu_batch_preprocessing=False),
     )
 
     batch = torch.ones((1, 3, 8, 8), dtype=torch.uint8)
@@ -1579,7 +1752,6 @@ def test_region_batch_preprocessor_rejects_mismatched_region_unfolding_tile_size
         loaded,
         SimpleNamespace(level="region"),
         tiling_result,
-        execution=ExecutionOptions(gpu_batch_preprocessing=False),
     )
 
     with pytest.raises(ValueError, match="tile_size"):
@@ -1597,7 +1769,6 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         precision="bf16",
         prefetch_factor=7,
         persistent_workers=False,
-        gpu_batch_preprocessing=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -1607,11 +1778,9 @@ def test_serialize_execution_preserves_loader_optimization_fields():
 
     assert payload["prefetch_factor"] == 7
     assert payload["persistent_workers"] is False
-    assert payload["gpu_batch_preprocessing"] is False
     assert payload["precision"] == "bf16"
     assert restored.prefetch_factor == 7
     assert restored.persistent_workers is False
-    assert restored.gpu_batch_preprocessing is False
     assert restored.precision == "bf16"
 
 
@@ -1674,7 +1843,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         num_gpus=1,
         prefetch_factor=9,
         persistent_workers=True,
-        gpu_batch_preprocessing=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -1682,7 +1850,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         SimpleNamespace(level="tile"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(on_the_fly=False),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=False),
         execution=execution,
     )
 
@@ -1758,7 +1926,7 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         SimpleNamespace(level="tile"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(read_tiles_from=Path("/tmp/external-tiles")),
+        preprocessing=replace(DEFAULT_PREPROCESSING, read_tiles_from=Path("/tmp/external-tiles")),
         execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
     )
 
@@ -1778,6 +1946,7 @@ def test_resolve_on_the_fly_num_workers_caps_to_slurm_allocation(monkeypatch):
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
     monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
     monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+    monkeypatch.delenv("SLURM_CPUS_ON_NODE", raising=False)
 
     workers, details = inference._resolve_on_the_fly_num_workers(4)
 
@@ -1834,6 +2003,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
     monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
     monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+    monkeypatch.delenv("SLURM_CPUS_ON_NODE", raising=False)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -1859,7 +2029,6 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
         num_gpus=1,
         prefetch_factor=9,
         persistent_workers=True,
-        gpu_batch_preprocessing=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -1867,7 +2036,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
         SimpleNamespace(level="tile"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(on_the_fly=True, backend="cucim", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
         execution=execution,
     )
 
@@ -1947,7 +2116,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             read_tile_size_px=4,
             tile_size_lv0=224,
         ),
-        preprocessing=PreprocessingConfig(on_the_fly=True, backend="auto", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
         execution=ExecutionOptions(batch_size=2, num_workers=8, num_gpus=1),
     )
 
@@ -2024,7 +2193,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             read_tile_size_px=4,
             tile_size_lv0=224,
         ),
-        preprocessing=PreprocessingConfig(on_the_fly=True, backend="auto", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
         execution=ExecutionOptions(batch_size=2, num_workers=8, num_gpus=1),
     )
 
@@ -2062,7 +2231,7 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
             coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
             tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
         ),
-        preprocessing=PreprocessingConfig(backend="auto"),
+        preprocessing=replace(DEFAULT_PREPROCESSING, backend="auto"),
         execution=ExecutionOptions(output_dir=tmp_path),
     )
 
@@ -2097,7 +2266,7 @@ def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_witho
                 tile_size_lv0=224,
                 tiles_tar_path=None,
             ),
-            preprocessing=PreprocessingConfig(on_the_fly=False),
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=False),
             execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
         )
 
@@ -2164,7 +2333,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         num_gpus=1,
         prefetch_factor=9,
         persistent_workers=True,
-        gpu_batch_preprocessing=False,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -2172,7 +2340,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_for_region_models
         SimpleNamespace(level="region"),
         slide,
         tiling_result,
-        preprocessing=PreprocessingConfig(on_the_fly=False),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=False),
         execution=execution,
     )
 

@@ -819,7 +819,6 @@ def _build_model_pipeline_from_config(config: dict[str, Any]):
         precision=str(speed_cfg.get("precision", "fp32")),
         prefetch_factor=int(speed_cfg.get("prefetch_factor_embedding", 4)),
         persistent_workers=bool(speed_cfg.get("persistent_workers_embedding", True)),
-        gpu_batch_preprocessing=bool(speed_cfg.get("gpu_batch_preprocessing", True)),
         save_tile_embeddings=bool(model_cfg.get("save_tile_embeddings", False)),
         save_latents=bool(model_cfg.get("save_latents", False)),
     )
