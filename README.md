@@ -10,13 +10,7 @@
 pip install slide2vec
 ```
 
-Install the full model runtime only when you need embedding/model execution:
-
-```shell
-pip install "slide2vec[models]"
-```
-
-`slide2vec` now keeps the base install focused on the core package surface and moves the heavier model stack into the optional `models` extra.
+`slide2vec` keeps the base install focused on the core package surface. Preset-specific optional dependencies are declared in `pyproject.toml` alongside the relevant model families.
 
 ## Python API
 

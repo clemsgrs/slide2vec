@@ -20,6 +20,7 @@ from slide2vec.artifacts import (
 from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
 
 
 def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch):
@@ -46,7 +47,7 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
 
     result = model.embed_slide(
         "/tmp/slide-a.svs",
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         sample_id="slide-a",
     )
 
@@ -71,7 +72,7 @@ def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
 
     result = model.embed_slide(
         "/tmp/slide-a.svs",
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(num_gpus=2),
     )
 
@@ -114,7 +115,7 @@ def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monke
 
     result = model.embed_slides(
         ["/tmp/slide-a.svs", "/tmp/slide-b.svs"],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
     )
 
     assert result == expected
@@ -159,7 +160,7 @@ def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monk
 
     result = model.embed_slides(
         ["/tmp/slide-a.svs", "/tmp/slide-b.svs"],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(num_gpus=2),
     )
 
@@ -198,7 +199,7 @@ def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
 
     result = model.embed_slides(
         ["/tmp/slide-a.svs"],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
     )
 
     assert result == expected
@@ -237,15 +238,15 @@ def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
     with progress.activate_progress_reporter(outer_reporter):
         result = model.embed_slides(
             ["/tmp/slide-a.svs"],
-            preprocessing=PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
         )
 
     assert result == expected
     assert captured["reporter"] is outer_reporter
 
 
-def test_model_embed_slide_infers_preprocessing_from_model_defaults(monkeypatch):
-    model = Model.from_preset("virchow2")
+def test_model_embed_slide_infers_preprocessing_from_single_spacing_model(monkeypatch):
+    model = Model.from_preset("virchow")
     expected = EmbeddedSlide(
         sample_id="slide-a",
         tile_embeddings=np.zeros((2, 3), dtype=np.float32),
@@ -278,11 +279,43 @@ def test_model_embed_slide_infers_preprocessing_from_model_defaults(monkeypatch)
     assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
 
 
-def test_model_embed_slides_warns_when_default_spacing_is_selected_from_multiple_recommendations(
+def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_preprocessing(
     monkeypatch,
-    caplog: pytest.LogCaptureFixture,
 ):
-    # virchow2 supports [0.5, 1.0, 2.0]; direct API should default to 0.5 and warn
+    model = Model.from_preset("virchow")
+    expected = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((2, 3), dtype=np.float32),
+        slide_embedding=None,
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([0, 1], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+    )
+    captured = {}
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["preprocessing"] = kwargs["preprocessing"]
+        return [expected]
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    result = model.embed_slide(
+        "/tmp/slide-a.svs",
+        preprocessing=PreprocessingConfig(backend="asap"),
+    )
+
+    assert result is expected
+    assert captured["preprocessing"].backend == "asap"
+    assert captured["preprocessing"].target_tile_size_px == 224
+    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
+
+
+def test_model_embed_slides_rejects_ambiguous_default_spacing(
+    monkeypatch,
+):
+    # virchow2 supports multiple spacings; direct API should require an explicit choice.
     model = Model.from_preset("virchow2")
     expected = [
         EmbeddedSlide(
@@ -304,39 +337,17 @@ def test_model_embed_slides_warns_when_default_spacing_is_selected_from_multiple
 
     monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
 
-    with caplog.at_level("WARNING", logger="slide2vec"):
-        result = model.embed_slides(
+    with pytest.raises(ValueError, match="supports multiple spacings"):
+        model.embed_slides(
             ["/tmp/slide-a.svs"],
         )
 
-    assert result == expected
-    assert captured["preprocessing"].target_tile_size_px == 224
-    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
-    assert "supports multiple spacings" in caplog.text
-    assert "target_spacing_um" in caplog.text
 
-
-def test_default_preprocessing_uses_min_spacing_and_warns_when_half_micron_unavailable(
-    monkeypatch,
-    caplog: pytest.LogCaptureFixture,
-):
+def test_default_preprocessing_raises_for_multiple_supported_spacings():
     import slide2vec.api as api
-    import slide2vec.encoders.registry as enc_reg
 
-    # Patch resolve_preprocessing_requirements to simulate spacings without 0.5
-    monkeypatch.setattr(
-        enc_reg,
-        "resolve_preprocessing_requirements",
-        lambda name, info=None: {"tile_size_px": 224, "spacing_um": [2.0, 1.0, 0.25]},
-    )
-
-    with caplog.at_level("WARNING", logger="slide2vec"):
-        tile_size, spacing = api._default_preprocessing_from_registry("virchow2")
-
-    assert tile_size == 224
-    assert spacing == pytest.approx(0.25)
-    assert "supports multiple spacings" in caplog.text
-    assert "0.25" in caplog.text
+    with pytest.raises(ValueError, match="supports multiple spacings"):
+        api._default_preprocessing_from_registry("virchow2")
 
 
 def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
@@ -386,7 +397,7 @@ def test_model_embed_slides_rejects_non_recommended_precision_by_default():
     with pytest.raises(ValueError, match="precision=fp32"):
         model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
             execution=ExecutionOptions(precision="fp32"),
         )
 
@@ -414,7 +425,7 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
     with caplog.at_level("WARNING", logger="slide2vec"):
         result = model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(),
+            preprocessing=DEFAULT_PREPROCESSING,
             execution=ExecutionOptions(precision="fp32"),
         )
 
@@ -441,7 +452,7 @@ def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch
 
     result = model.embed_slides(
         [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-        preprocessing=PreprocessingConfig(),
+        preprocessing=DEFAULT_PREPROCESSING,
         execution=ExecutionOptions(precision="fp32"),
     )
 
@@ -474,7 +485,7 @@ def test_model_embed_tiles_forwards_preprocessing(monkeypatch, tmp_path: Path):
     result = model.embed_tiles(
         slides=[{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
         tiling_results=[SimpleNamespace(x=np.array([0]), y=np.array([0]), tile_size_lv0=224)],
-        preprocessing=PreprocessingConfig(backend="openslide"),
+        preprocessing=DEFAULT_PREPROCESSING.with_backend("openslide"),
         execution=ExecutionOptions(output_dir=tmp_path),
     )
 
@@ -508,7 +519,7 @@ def test_model_aggregate_tiles_forwards_preprocessing(monkeypatch, tmp_path: Pat
 
     result = model.aggregate_tiles(
         tile_artifacts=[],
-        preprocessing=PreprocessingConfig(backend="openslide"),
+        preprocessing=DEFAULT_PREPROCESSING.with_backend("openslide"),
         execution=ExecutionOptions(output_dir=tmp_path),
     )
 

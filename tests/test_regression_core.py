@@ -21,6 +21,7 @@ from slide2vec.artifacts import (
 from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
 
 def test_resource_loading_uses_packaged_configs():
     pytest.importorskip("omegaconf")
@@ -41,31 +42,55 @@ def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
 
 
-def test_packaged_model_presets_align_with_recommended_settings():
+def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):
     pytest.importorskip("omegaconf")
 
     from slide2vec.utils.config import get_cfg_from_args
 
-    preset_dir = ROOT / "slide2vec" / "configs" / "models"
-    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+                "model:",
+                "  name: conchv15",
+                "tiling:",
+                "  params: {}",
+            ]
+        )
+    )
+    args = SimpleNamespace(config_file=str(cfg_path), output_dir=None, opts=[], run_on_cpu=False)
 
-    for preset_path in preset_paths:
-        args = SimpleNamespace(config_file=str(preset_path), output_dir=None, opts=[])
-        cfg = get_cfg_from_args(args)
-        assert cfg.model.name
+    cfg = get_cfg_from_args(args)
+
+    assert cfg.tiling.params.target_spacing_um == pytest.approx(0.5)
+    assert cfg.tiling.params.target_tile_size_px == 448
 
 
-def test_packaged_non_default_model_presets_do_not_contain_comments():
-    preset_dir = ROOT / "slide2vec" / "configs" / "models"
-    preset_paths = sorted(path for path in preset_dir.glob("*.yaml") if path.name != "default.yaml")
+def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_path: Path):
+    pytest.importorskip("omegaconf")
 
-    for preset_path in preset_paths:
-        lines_with_comments = [
-            f"{index}: {line}"
-            for index, line in enumerate(preset_path.read_text().splitlines(), start=1)
-            if "#" in line
-        ]
-        assert lines_with_comments == [], f"{preset_path} still contains comments: {lines_with_comments}"
+    from slide2vec.utils.config import get_cfg_from_args
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+                "model:",
+                    "  name: virchow2",
+                "tiling:",
+                "  params: {}",
+            ]
+        )
+    )
+    args = SimpleNamespace(config_file=str(cfg_path), output_dir=None, opts=[], run_on_cpu=False)
+
+    with pytest.raises(ValueError, match="multiple spacings"):
+        get_cfg_from_args(args)
+
 
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
@@ -107,7 +132,7 @@ def test_pt_artifacts_round_trip(tmp_path: Path):
 
 def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
     model = Model.from_preset("virchow2")
-    preprocessing = PreprocessingConfig()
+    preprocessing = DEFAULT_PREPROCESSING
     pipeline = Pipeline(model, preprocessing, execution=ExecutionOptions(output_dir=tmp_path))
     captured = {}
 
@@ -123,11 +148,13 @@ def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
     assert result == "ok"
     assert captured["model"] is model
     assert captured["kwargs"]["manifest_path"] == "/tmp/slides.csv"
-    assert captured["kwargs"]["preprocessing"] is preprocessing
+    assert captured["kwargs"]["preprocessing"].backend == preprocessing.backend
+    assert captured["kwargs"]["preprocessing"].target_spacing_um == preprocessing.target_spacing_um
+    assert captured["kwargs"]["preprocessing"].target_tile_size_px == preprocessing.target_tile_size_px
 
 def test_pipeline_run_requires_output_dir():
     model = Model.from_preset("virchow2")
-    pipeline = Pipeline(model, PreprocessingConfig(), execution=ExecutionOptions())
+    pipeline = Pipeline(model, DEFAULT_PREPROCESSING, execution=ExecutionOptions())
 
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir"):
         pipeline.run(slides=[{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}])
@@ -181,7 +208,6 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
             num_gpus=3,
             prefetch_factor_embedding=5,
             persistent_workers_embedding=False,
-            gpu_batch_preprocessing=False,
         ),
     )
 
@@ -195,7 +221,6 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.precision == "bf16"
     assert execution.prefetch_factor == 5
     assert execution.persistent_workers is False
-    assert execution.gpu_batch_preprocessing is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -217,7 +242,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
             num_gpus=None,
             prefetch_factor_embedding=3,
             persistent_workers_embedding=True,
-            gpu_batch_preprocessing=True,
         ),
     )
 
@@ -227,7 +251,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     assert execution.precision == "fp32"
     assert execution.prefetch_factor == 3
     assert execution.persistent_workers is True
-    assert execution.gpu_batch_preprocessing is True
 
 def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -247,7 +270,6 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
             num_gpus=1,
             prefetch_factor_embedding=4,
             persistent_workers_embedding=True,
-            gpu_batch_preprocessing=True,
         ),
     )
 
@@ -286,7 +308,16 @@ def test_preprocessing_with_backend_preserves_other_fields():
 
 
 def test_preprocessing_config_defaults_backend_to_auto():
-    assert PreprocessingConfig().backend == "auto"
+    assert DEFAULT_PREPROCESSING.backend == "auto"
+
+
+def test_preprocessing_config_defaults_spacing_and_tile_size_to_none():
+    cfg = PreprocessingConfig(backend="asap")
+
+    assert cfg.backend == "asap"
+    assert cfg.target_spacing_um is None
+    assert cfg.target_tile_size_px is None
+
 
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
     base = ExecutionOptions(
@@ -298,7 +329,6 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         precision="bf16",
         prefetch_factor=6,
         persistent_workers=False,
-        gpu_batch_preprocessing=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -313,7 +343,6 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.precision == base.precision
     assert updated.prefetch_factor == base.prefetch_factor
     assert updated.persistent_workers == base.persistent_workers
-    assert updated.gpu_batch_preprocessing == base.gpu_batch_preprocessing
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base
@@ -341,7 +370,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             num_gpus=2,
             prefetch_factor_embedding=4,
             persistent_workers_embedding=True,
-            gpu_batch_preprocessing=True,
             num_cucim_workers=4,
         ),
         tiling=SimpleNamespace(
@@ -379,8 +407,8 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         captured["model_kwargs"] = model_kwargs
         return "MODEL"
 
-    monkeypatch.setattr(cli, "_setup_cli_config", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
-    monkeypatch.setattr(cli, "_hf_login", lambda: None)
+    monkeypatch.setattr(cli, "setup", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
+    monkeypatch.setattr(cli, "hf_login", lambda: None)
     monkeypatch.setattr(cli.Model, "from_preset", staticmethod(fake_from_preset))
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
 
@@ -412,7 +440,7 @@ def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp
                 "    target_spacing_um: 1.0",
                 "    target_tile_size_px: 256",
                 "model:",
-                "  name: virchow2",
+                "  name: virchow",
             ]
         )
     )
@@ -442,7 +470,7 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
                 "    target_spacing_um: 1.0",
                 "    target_tile_size_px: 256",
                 "model:",
-                "  name: virchow2",
+                "  name: virchow",
                 "  allow_non_recommended_settings: true",
             ]
         )
@@ -454,7 +482,7 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
         cfg = get_cfg_from_args(args)
 
     assert cfg.model.allow_non_recommended_settings is True
-    assert "virchow2" in caplog.text
+    assert "virchow" in caplog.text
     assert "recommended" in caplog.text
 
 
@@ -474,7 +502,7 @@ def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tm
                 "    target_spacing_um: 0.5",
                 "    target_tile_size_px: 224",
                 "model:",
-                "  name: virchow2",
+                "  name: virchow",
                 "speed:",
                 "  precision: fp32",
             ]
@@ -506,7 +534,7 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
                 "    target_spacing_um: 0.5",
                 "    target_tile_size_px: 224",
                 "model:",
-                "  name: virchow2",
+                "  name: virchow",
                 "  allow_non_recommended_settings: true",
                 "speed:",
                 "  precision: fp32",
@@ -559,48 +587,6 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
     assert cfg.speed.precision == "fp32"
 
 
-def test_preprocessing_config_from_config_defaults_read_coordinates_from_output_dir():
-    cfg = SimpleNamespace(
-        resume=True,
-        output_dir="/tmp/run-001",
-        speed=SimpleNamespace(num_cucim_workers=4),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
-                tolerance=0.07,
-                overlap=0.0,
-                tissue_threshold=0.1,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=False, downsample=32),
-        ),
-    )
-
-    preprocessing = PreprocessingConfig.from_config(cfg)
-
-    assert preprocessing.backend == "asap"
-    assert preprocessing.target_tile_size_px == 224
-    assert preprocessing.read_coordinates_from == Path("/tmp/run-001/coordinates")
-    assert preprocessing.read_tiles_from is None
-    assert preprocessing.resume is True
-    assert preprocessing.segmentation == {"downsample": 64}
-    assert preprocessing.filtering == {"ref_tile_size": 224}
-    assert preprocessing.preview == {
-        "save_mask_preview": False,
-        "save_tiling_preview": False,
-        "downsample": 32,
-    }
-
 
 def test_preprocessing_config_from_config_preserves_tile_store_dir():
     cfg = SimpleNamespace(
@@ -631,7 +617,7 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
 
     preprocessing = PreprocessingConfig.from_config(cfg)
 
-    assert preprocessing.read_coordinates_from == Path("/tmp/run-002/coordinates")
+    assert preprocessing.read_coordinates_from is None
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
     assert preprocessing.num_cucim_workers == 6
 

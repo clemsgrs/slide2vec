@@ -1,6 +1,7 @@
 import argparse
 
 from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+from slide2vec.utils.config import setup, hf_login
 import slide2vec.progress as progress
 
 
@@ -21,8 +22,8 @@ def get_args_parser(add_help: bool = True):
 
 
 def build_model_and_pipeline(args):
-    cfg, _cfg_path = _setup_cli_config(args)
-    _hf_login()
+    cfg, _cfg_path = setup(args)
+    hf_login()
     model = Model.from_preset(
         cfg.model.name,
         output_variant=getattr(cfg.model, "output_variant", None),
@@ -49,13 +50,3 @@ def main(argv=None):
         )
 
 
-def _setup_cli_config(args):
-    from slide2vec.utils.config import setup
-
-    return setup(args)
-
-
-def _hf_login():
-    from slide2vec.utils.config import hf_login
-
-    return hf_login()

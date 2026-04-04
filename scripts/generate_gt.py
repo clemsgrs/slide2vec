@@ -9,7 +9,6 @@ Usage:
   HF_TOKEN=<token> python scripts/generate_gt.py
   HF_TOKEN=<token> python scripts/generate_gt.py --output-dir tests/fixtures/gt
 """
-from __future__ import annotations
 
 import argparse
 import shutil

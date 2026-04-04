@@ -3,7 +3,9 @@
 from abc import ABC, abstractmethod
 from typing import Callable
 
+import timm
 import torch
+from timm.data import create_transform, resolve_data_config
 from torch import Tensor
 
 
@@ -100,8 +102,6 @@ class TimmTileEncoder(TileEncoder):
         output_variant: str | None = None,
         **timm_kwargs,
     ):
-        import timm
-
         defaults = {"pretrained": True, "num_classes": 0}
         defaults.update(timm_kwargs)
         self._model = timm.create_model(model_name, **defaults).eval()
@@ -110,8 +110,6 @@ class TimmTileEncoder(TileEncoder):
             self._output_variant = resolve_requested_output_variant(output_variant)
 
     def get_transform(self) -> Callable:
-        from timm.data import create_transform, resolve_data_config
-
         data_config = resolve_data_config(self._model.pretrained_cfg, model=self._model)
         return create_transform(**data_config)
 

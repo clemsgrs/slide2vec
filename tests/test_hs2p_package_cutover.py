@@ -6,11 +6,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from slide2vec.resources import load_config
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
 
 def test_package_root_exports_api_without_importing_wandb():
     for name in list(sys.modules):
@@ -29,15 +24,6 @@ def test_package_root_exports_api_without_importing_wandb():
     assert hasattr(package, "TileEmbeddingArtifact")
     assert hasattr(package, "SlideEmbeddingArtifact")
     assert "wandb" not in sys.modules
-
-
-def test_slide2vec_code_does_not_import_vendored_hs2p_paths():
-    for rel_path in [
-        "slide2vec/main.py",
-        "slide2vec/data/dataset.py",
-    ]:
-        source = (ROOT / rel_path).read_text(encoding="utf-8")
-        assert "slide2vec.hs2p" not in source
 
 
 def test_load_slide_manifest_requires_hs2p_schema(tmp_path: Path):
@@ -202,10 +188,3 @@ def test_model_from_preset_uses_public_factory(monkeypatch):
     assert model.level == "tile"
     assert model.feature_dim == 1280
     assert captured["name"] == "virchow2"
-
-
-def test_load_config_returns_omegaconf_object():
-    pytest.importorskip("omegaconf")
-    cfg = load_config("default")
-
-    assert "model" in cfg

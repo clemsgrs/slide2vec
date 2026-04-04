@@ -86,5 +86,5 @@ jobs:
             -e HF_TOKEN="$HF_TOKEN" \
             -v "$GITHUB_WORKSPACE:/opt/app" \
             slide2vec-ci:${{ github.sha }} \
-            bash -lc "python -m pip install --no-cache-dir '/opt/app[models,asap]' pytest pytest-cov && python -m pytest -q tests"
+            bash -lc "python -m pip install --no-cache-dir '/opt/app[prism,asap]' pytest pytest-cov && python -m pytest -q tests"
 

@@ -10,13 +10,13 @@ from typing import Any, Iterable
 import pandas as pd
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ProgressEvent:
     kind: str
     payload: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class TilingProgressSnapshot:
     total: int
     completed: int
@@ -46,7 +46,7 @@ class JsonlProgressReporter:
         progress_label: str | None = None,
     ) -> None:
         base_path = Path(path)
-        self.path = ranked_progress_events_path(base_path, rank) if rank is not None else base_path
+        self.path = ranked_progress_events_path(base_path, rank=rank) if rank is not None else base_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._handle = self.path.open("a", encoding="utf-8", buffering=1)
         self.progress_label = progress_label
@@ -419,7 +419,7 @@ def emit_progress_log(message: str, *, stream=None) -> None:
     print(message, file=target, flush=True)
 
 
-def ranked_progress_events_path(base_path: str | Path, rank: int) -> Path:
+def ranked_progress_events_path(base_path: str | Path, *, rank: int) -> Path:
     path = Path(base_path)
     return path.with_name(f"{path.stem}.rank{rank}{path.suffix}")
 
@@ -487,7 +487,7 @@ def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
     completed = int(payload["slides_completed"])
     failed = max(0, slide_count - completed)
     return [
-        ("Slides", str(slide_count)),
+        ("Slides w/ tiles", str(slide_count)),
         ("Completed", str(completed)),
         ("Failed", str(failed)),
     ]
@@ -495,6 +495,7 @@ def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
 
 def read_progress_events(
     base_path: str | Path,
+    *,
     offsets: dict[Path, int] | None = None,
 ) -> tuple[list[ProgressEvent], dict[Path, int]]:
     path = Path(base_path)
