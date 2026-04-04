@@ -61,6 +61,26 @@ def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _build_tile_embedding_metadata(
+    sample_id: str,
+    *,
+    output_format: str,
+    feature_dim: int | None,
+    num_tiles: int,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    tile_metadata = {
+        "sample_id": sample_id,
+        "artifact_type": "tile_embeddings",
+        "format": output_format,
+        "feature_dim": feature_dim,
+        "num_tiles": num_tiles,
+    }
+    if metadata:
+        tile_metadata.update(metadata)
+    return tile_metadata
+
+
 def load_metadata(metadata_path: str | Path) -> dict[str, Any]:
     return json.loads(Path(metadata_path).read_text(encoding="utf-8"))
 
@@ -101,15 +121,13 @@ def write_tile_embeddings(
             payload["tile_index"] = _ensure_array(tile_index)
         np.savez_compressed(artifact_path, **payload)
 
-    tile_metadata = {
-        "sample_id": sample_id,
-        "artifact_type": "tile_embeddings",
-        "format": output_format,
-        "feature_dim": int(feature_array.shape[-1]) if feature_array.ndim else 1,
-        "num_tiles": int(feature_array.shape[0]) if feature_array.ndim else 1,
-    }
-    if metadata:
-        tile_metadata.update(metadata)
+    tile_metadata = _build_tile_embedding_metadata(
+        sample_id,
+        output_format=output_format,
+        feature_dim=int(feature_array.shape[-1]) if feature_array.ndim else 1,
+        num_tiles=int(feature_array.shape[0]) if feature_array.ndim else 1,
+        metadata=metadata,
+    )
     _write_metadata(metadata_path, tile_metadata)
     return TileEmbeddingArtifact(
         sample_id=sample_id,
@@ -119,6 +137,30 @@ def write_tile_embeddings(
         feature_dim=tile_metadata["feature_dim"],
         num_tiles=tile_metadata["num_tiles"],
     )
+
+
+def write_tile_embedding_metadata(
+    sample_id: str,
+    *,
+    output_dir: str | Path,
+    output_format: str = "pt",
+    feature_dim: int | None = None,
+    num_tiles: int = 0,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    output_format = _validate_output_format(output_format)
+    base_dir = Path(output_dir) / "tile_embeddings"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    metadata_path = base_dir / f"{sample_id}.meta.json"
+    tile_metadata = _build_tile_embedding_metadata(
+        sample_id,
+        output_format=output_format,
+        feature_dim=feature_dim,
+        num_tiles=num_tiles,
+        metadata=metadata,
+    )
+    _write_metadata(metadata_path, tile_metadata)
+    return metadata_path
 
 
 def write_slide_embeddings(

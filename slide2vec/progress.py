@@ -487,7 +487,7 @@ def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
     completed = int(payload["slides_completed"])
     failed = max(0, slide_count - completed)
     return [
-        ("Slides", str(slide_count)),
+        ("Slides w/ tiles", str(slide_count)),
         ("Completed", str(completed)),
         ("Failed", str(failed)),
     ]

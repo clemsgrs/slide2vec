@@ -540,3 +540,21 @@ def test_progress_aware_log_handler_routes_logs_through_active_reporter():
 
     assert reporter.log_lines == ["INFO hello from logger"]
 
+
+def test_embedding_summary_rows_match_tiling_style():
+    import slide2vec.progress as progress
+
+    rows = progress._embedding_summary_rows(
+        {
+            "slide_count": 20,
+            "slides_completed": 20,
+            "tile_artifacts": 20,
+            "slide_artifacts": 0,
+        }
+    )
+
+    assert rows == [
+        ("Slides w/ tiles", "20"),
+        ("Completed", "20"),
+        ("Failed", "0"),
+    ]

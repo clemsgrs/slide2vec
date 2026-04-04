@@ -20,6 +20,7 @@ from slide2vec.artifacts import (
     load_array,
     load_metadata,
     write_slide_embeddings,
+    write_tile_embedding_metadata,
     write_tile_embeddings,
 )
 from slide2vec.resources import config_resource, load_config
@@ -216,6 +217,130 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
 
     assert tile_artifacts == ["tile-artifact"]
     assert slide_artifacts == ["slide-artifact"]
+
+
+def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+
+    class RecordingReporter:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event):
+            self.events.append(event)
+
+        def close(self):
+            return None
+
+        def write_log(self, message, *, stream=None):
+            return None
+
+    reporter = RecordingReporter()
+    slide_zero = make_slide("slide-zero")
+    slide_full = make_slide("slide-full")
+    zero_tiling = SimpleNamespace(
+        x=np.array([], dtype=np.int64),
+        y=np.array([], dtype=np.int64),
+        tile_size_lv0=224,
+        backend="asap",
+        coordinates_npz_path=Path("/tmp/slide-zero.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-zero.coordinates.meta.json"),
+    )
+    full_tiling = SimpleNamespace(
+        x=np.array([0, 1], dtype=np.int64),
+        y=np.array([2, 3], dtype=np.int64),
+        tile_size_lv0=224,
+        backend="asap",
+        coordinates_npz_path=Path("/tmp/slide-full.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-full.coordinates.meta.json"),
+    )
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-zero,/tmp/slide-zero.svs,,,success,0,/tmp/slide-zero.coordinates.npz,/tmp/slide-zero.coordinates.meta.json,,\n"
+        "slide-full,/tmp/slide-full.svs,,,success,2,/tmp/slide-full.coordinates.npz,/tmp/slide-full.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    embedded_full = EmbeddedSlide(
+        sample_id="slide-full",
+        tile_embeddings=np.array([[1.0, 2.0]], dtype=np.float32),
+        slide_embedding=np.array([9.0, 10.0], dtype=np.float32),
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-full.svs"),
+        mask_path=None,
+        num_tiles=1,
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide_zero, slide_full], [zero_tiling, full_tiling], process_list_path),
+    )
+
+    def fake_compute_embedded_slides(model, slide_records, tiling_results, *, preprocessing, execution, on_embedded_slide=None):
+        captured["slide_records"] = [slide.sample_id for slide in slide_records]
+        captured["tiling_results"] = [result.x.shape[0] for result in tiling_results]
+        if on_embedded_slide is not None:
+            on_embedded_slide(slide_full, full_tiling, embedded_full)
+        return [embedded_full]
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(inference, "_collect_pipeline_artifacts", lambda *args, **kwargs: (["tile-artifact"], ["slide-artifact"]))
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        result = inference.run_pipeline(
+            model,
+            slides=[slide_zero, slide_full],
+            preprocessing=DEFAULT_PREPROCESSING,
+            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+        )
+
+    zero_meta = load_metadata(tmp_path / "tile_embeddings" / "slide-zero.meta.json")
+    assert not (tmp_path / "tile_embeddings" / "slide-zero.pt").exists()
+    assert zero_meta["num_tiles"] == 0
+    assert zero_meta["feature_dim"] is None
+    assert captured["slide_records"] == ["slide-full"]
+    assert captured["tiling_results"] == [2]
+    assert result.tile_artifacts == ["tile-artifact"]
+    assert result.slide_artifacts == ["slide-artifact"]
+
+    embedding_finished = [event for event in reporter.events if event.kind == "embedding.finished"]
+    assert embedding_finished
+    assert embedding_finished[-1].payload["slide_count"] == 1
+    assert embedding_finished[-1].payload["slides_completed"] == 1
+
+
+def test_write_tile_embedding_metadata_creates_sidecar_without_tensor(tmp_path: Path):
+    metadata_path = write_tile_embedding_metadata(
+        "slide-zero",
+        output_dir=tmp_path,
+        output_format="pt",
+        feature_dim=None,
+        num_tiles=0,
+        metadata={"image_path": "/tmp/slide-zero.svs"},
+    )
+
+    assert metadata_path.is_file()
+    assert not (tmp_path / "tile_embeddings" / "slide-zero.pt").exists()
+    metadata = load_metadata(metadata_path)
+    assert metadata["sample_id"] == "slide-zero"
+    assert metadata["num_tiles"] == 0
+    assert metadata["feature_dim"] is None
+    assert metadata["image_path"] == "/tmp/slide-zero.svs"
+
 
 def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
     import slide2vec.inference as inference

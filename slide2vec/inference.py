@@ -33,6 +33,7 @@ from slide2vec.artifacts import (
     load_array,
     load_metadata,
     write_slide_embeddings,
+    write_tile_embedding_metadata,
     write_tile_embeddings,
 )
 from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_defaults
@@ -210,7 +211,18 @@ def embed_slides(
                 successful_slides=prepared_slides,
                 tiling_results=tiling_results,
             )
-            emit_progress("embedding.started", slide_count=len(prepared_slides))
+            embeddable_slides, embeddable_tiling_results, zero_tile_pairs = _partition_slides_by_tile_count(
+                prepared_slides,
+                tiling_results,
+            )
+            _write_zero_tile_embedding_sidecars(
+                zero_tile_pairs,
+                model=model,
+                preprocessing=preprocessing,
+                output_dir=execution.output_dir,
+                output_format=execution.output_format,
+            )
+            emit_progress("embedding.started", slide_count=len(embeddable_slides))
             local_persist_callback = None
             if execution.output_dir is not None and execution.num_gpus <= 1:
                 local_persist_callback, _, _ = _build_incremental_persist_callback(
@@ -221,15 +233,15 @@ def embed_slides(
                 )
             embedded_slides = _select_embedding_path(
                 model=model,
-                slide_records=prepared_slides,
-                tiling_results=tiling_results,
+                slide_records=embeddable_slides,
+                tiling_results=embeddable_tiling_results,
                 preprocessing=preprocessing,
                 execution=execution,
                 work_dir=work_dir,
                 on_embedded_slide=local_persist_callback,
             )
             if execution.output_dir is not None and execution.num_gpus > 1:
-                for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
+                for embedded_slide, tiling_result in zip(embedded_slides, embeddable_tiling_results):
                     _persist_embedded_slide(
                         model,
                         embedded_slide,
@@ -239,7 +251,7 @@ def embed_slides(
                     )
             emit_progress(
                 "embedding.finished",
-                slide_count=len(prepared_slides),
+                slide_count=len(embeddable_slides),
                 slides_completed=len(embedded_slides),
                 tile_artifacts=0,
                 slide_artifacts=sum(1 for slide in embedded_slides if slide.slide_embedding is not None),
@@ -439,6 +451,10 @@ def run_pipeline(
             successful_slides=successful_slides,
             tiling_results=tiling_results,
         )
+        embeddable_slides, embeddable_tiling_results, zero_tile_pairs = _partition_slides_by_tile_count(
+            successful_slides,
+            tiling_results,
+        )
 
         if tiling_only:
             emit_progress(
@@ -448,12 +464,19 @@ def run_pipeline(
             )
             return RunResult(tile_artifacts=[], slide_artifacts=[], process_list_path=process_list_path)
 
-        emit_progress("embedding.started", slide_count=len(successful_slides))
+        _write_zero_tile_embedding_sidecars(
+            zero_tile_pairs,
+            model=model,
+            preprocessing=resolved_preprocessing,
+            output_dir=output_dir,
+            output_format=execution.output_format,
+        )
+        emit_progress("embedding.started", slide_count=len(embeddable_slides))
 
         if execution.num_gpus > 1:
             tile_artifacts, slide_artifacts = _collect_distributed_pipeline_artifacts(
                 model=model,
-                successful_slides=successful_slides,
+                successful_slides=embeddable_slides,
                 process_list_path=process_list_path,
                 preprocessing=resolved_preprocessing,
                 execution=execution,
@@ -461,8 +484,8 @@ def run_pipeline(
             )
             emit_progress(
                 "embedding.finished",
-                slide_count=len(successful_slides),
-                slides_completed=len(successful_slides),
+                slide_count=len(embeddable_slides),
+                slides_completed=len(embeddable_slides),
                 tile_artifacts=len(tile_artifacts),
                 slide_artifacts=len(slide_artifacts),
             )
@@ -480,8 +503,8 @@ def run_pipeline(
         persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
         include_slide_embeddings = model.level == "slide"
         pending_slides, pending_tiling_results = _pending_local_embedding_records(
-            successful_slides,
-            tiling_results,
+            embeddable_slides,
+            embeddable_tiling_results,
             process_list_path=process_list_path,
             output_dir=output_dir,
             output_format=execution.output_format,
@@ -507,7 +530,7 @@ def run_pipeline(
                 on_embedded_slide=local_persist_callback,
             )
         tile_artifacts, slide_artifacts = _collect_pipeline_artifacts(
-            successful_slides,
+            embeddable_slides,
             output_dir=output_dir,
             output_format=execution.output_format,
             include_tile_embeddings=persist_tile_embeddings,
@@ -515,7 +538,7 @@ def run_pipeline(
         )
         _update_process_list_after_embedding(
             process_list_path,
-            successful_slides=successful_slides,
+            successful_slides=embeddable_slides,
             persist_tile_embeddings=persist_tile_embeddings,
             include_slide_embeddings=include_slide_embeddings,
             tile_artifacts=tile_artifacts,
@@ -523,8 +546,8 @@ def run_pipeline(
         )
         emit_progress(
             "embedding.finished",
-            slide_count=len(successful_slides),
-            slides_completed=len(successful_slides),
+            slide_count=len(embeddable_slides),
+            slides_completed=len(embeddable_slides),
             tile_artifacts=len(tile_artifacts),
             slide_artifacts=len(slide_artifacts),
         )
@@ -998,6 +1021,23 @@ def _persist_embedded_slide(
 ) -> tuple[TileEmbeddingArtifact | None, SlideEmbeddingArtifact | None]:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist embedded slides")
+    if _num_rows(embedded_slide.tile_embeddings) == 0:
+        write_tile_embedding_metadata(
+            embedded_slide.sample_id,
+            output_dir=execution.output_dir,
+            output_format=execution.output_format,
+            feature_dim=None,
+            num_tiles=0,
+            metadata=_build_tile_embedding_metadata(
+                model,
+                tiling_result=tiling_result,
+                image_path=embedded_slide.image_path,
+                mask_path=embedded_slide.mask_path,
+                tile_size_lv0=embedded_slide.tile_size_lv0,
+                backend=_resolve_slide_backend(preprocessing, tiling_result),
+            ),
+        )
+        return None, None
     tile_artifact = None
     if _should_persist_tile_embeddings(model, execution):
         tile_artifact = _write_tile_embedding_artifact(
@@ -1585,6 +1625,50 @@ def _normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
     if isinstance(tiling_results, dict):
         return [tiling_results[slide.sample_id] for slide in slides]
     return list(tiling_results)
+
+
+def _partition_slides_by_tile_count(
+    slide_records: Sequence[SlideSpec],
+    tiling_results,
+) -> tuple[list[SlideSpec], list[Any], list[tuple[SlideSpec, Any]]]:
+    embeddable_slides: list[SlideSpec] = []
+    embeddable_tiling_results: list[Any] = []
+    zero_tile_pairs: list[tuple[SlideSpec, Any]] = []
+    for slide, tiling_result in zip(slide_records, tiling_results):
+        if _num_tiles(tiling_result) > 0:
+            embeddable_slides.append(slide)
+            embeddable_tiling_results.append(tiling_result)
+        else:
+            zero_tile_pairs.append((slide, tiling_result))
+    return embeddable_slides, embeddable_tiling_results, zero_tile_pairs
+
+
+def _write_zero_tile_embedding_sidecars(
+    zero_tile_pairs: Sequence[tuple[SlideSpec, Any]],
+    *,
+    model,
+    preprocessing: PreprocessingConfig,
+    output_dir: Path | None,
+    output_format: str,
+) -> None:
+    if output_dir is None:
+        return
+    for slide, tiling_result in zero_tile_pairs:
+        write_tile_embedding_metadata(
+            slide.sample_id,
+            output_dir=output_dir,
+            output_format=output_format,
+            feature_dim=None,
+            num_tiles=0,
+            metadata=_build_tile_embedding_metadata(
+                model=model,
+                tiling_result=tiling_result,
+                image_path=slide.image_path,
+                mask_path=slide.mask_path,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+                backend=_resolve_slide_backend(preprocessing, tiling_result),
+            ),
+        )
 
 
 
