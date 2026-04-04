@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "hs2p>=3.1.1",
+    "hs2p>=3.1.2",
     "omegaconf",
     "h5py",
     "matplotlib",
@@ -48,16 +48,16 @@ slide2vec = "slide2vec.cli:main"
 
 [project.optional-dependencies]
 openslide = [
-    "hs2p[openslide]>=3.1.1",
+    "hs2p[openslide]>=3.1.2",
 ]
 asap = [
-    "hs2p[asap]>=3.1.1",
+    "hs2p[asap]>=3.1.2",
 ]
 cucim = [
-    "hs2p[cucim]>=3.1.1",
+    "hs2p[cucim]>=3.1.2",
 ]
 vips = [
-    "hs2p[vips]>=3.1.1",
+    "hs2p[vips]>=3.1.2",
 ]
 hoptimus = [
     "torch>=2.0",
