@@ -3,6 +3,8 @@ from contextlib import nullcontext
 import json
 from pathlib import Path
 
+from slide2vec.inference import _assign_slides_to_ranks
+
 
 def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser("slide2vec.distributed.pipeline_worker", add_help=add_help)
@@ -45,11 +47,16 @@ def main(argv=None) -> int:
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
         slide_records, tiling_results = load_successful_tiled_slides(output_dir)
-        assigned_pairs = list(zip(slide_records, tiling_results))[global_rank::world_size]
-        if not assigned_pairs:
+        assignments = _assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
+        assigned_ids = assignments.get(global_rank, [])
+        if not assigned_ids:
             return 0
-        assigned_slides = [slide for slide, _ in assigned_pairs]
-        assigned_tiling_results = [tiling_result for _, tiling_result in assigned_pairs]
+        paired_by_sample = {
+            slide.sample_id: (slide, tiling_result)
+            for slide, tiling_result in zip(slide_records, tiling_results)
+        }
+        assigned_slides = [paired_by_sample[sample_id][0] for sample_id in assigned_ids]
+        assigned_tiling_results = [paired_by_sample[sample_id][1] for sample_id in assigned_ids]
         progress_events_path = request.get("progress_events_path")
         reporter = (
             JsonlProgressReporter(
