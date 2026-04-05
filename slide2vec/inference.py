@@ -52,7 +52,7 @@ from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
 from slide2vec.utils.coordinates import coordinate_arrays
 from slide2vec.utils.tiling_io import load_process_df, load_slide_manifest, load_tiling_result_from_row, _optional_float
-from slide2vec.utils.utils import slurm_cpu_limit as _slurm_cpu_limit_fn
+from slide2vec.utils.utils import slurm_cpu_limit
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -176,7 +176,7 @@ def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
     cpu_count = os.cpu_count() or 4
     worker_budget = cpu_count
     details = [f"cpu_count={cpu_count}"]
-    slurm_limit = _slurm_cpu_limit_fn()
+    slurm_limit = slurm_cpu_limit()
     if slurm_limit is not None:
         worker_budget = min(worker_budget, slurm_limit)
         details.append(f"slurm_cpu_limit={slurm_limit}")

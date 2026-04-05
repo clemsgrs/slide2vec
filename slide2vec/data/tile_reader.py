@@ -1,13 +1,15 @@
 from collections import defaultdict
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
 
 from hs2p import TilingResult
+from hs2p.wsi.streaming.plans import build_supertile_index
 
 
-class _GroupedBatchSampler:
+class SuperTileBatchSampler:
     """Greedily packs whole groups into batches of approximately ``batch_size`` items.
 
     No group is ever split across batches.
@@ -31,10 +33,6 @@ class _GroupedBatchSampler:
 
     def __len__(self):
         return len(self.batches)
-
-
-SuperTileBatchSampler = _GroupedBatchSampler
-HierarchicalBatchSampler = _GroupedBatchSampler
 
 
 def _open_wsi_backend(image_path: str, backend: str, gpu_decode: bool):
@@ -75,7 +73,7 @@ class WSITileReader:
 
     def __init__(
         self,
-        image_path: "Path",
+        image_path: Path,
         tiling_result: TilingResult,
         *,
         backend: str = "cucim",
@@ -94,8 +92,6 @@ class WSITileReader:
         self._reader = None
 
         if use_supertiles:
-            from hs2p.wsi.streaming.plans import build_supertile_index
-
             index = build_supertile_index(tiling_result)
             self._supertile_plans = index.plans
             self._tile_to_st = index.tile_to_st
@@ -207,7 +203,7 @@ class OnTheFlyBatchTileCollator:
     def __init__(
         self,
         *,
-        image_path: "Path",
+        image_path: Path,
         tiling_result: TilingResult,
         backend: str = "cucim",
         num_cucim_workers: int = 4,
@@ -234,7 +230,7 @@ class OnTheFlyBatchTileCollator:
         *,
         batch_size: int,
         dataset_indices: np.ndarray,
-    ) -> _GroupedBatchSampler | None:
+    ) -> SuperTileBatchSampler | None:
         """Build a batch sampler that never splits super tiles across batches.
 
         ``dataset_indices`` are the tile indices that will be in the dataset
@@ -255,7 +251,7 @@ class OnTheFlyBatchTileCollator:
                 start = pos
         if start < len(dataset_indices):
             groups.append(np.arange(start, len(dataset_indices), dtype=np.int64))
-        return _GroupedBatchSampler(groups=groups, batch_size=batch_size)
+        return SuperTileBatchSampler(groups=groups, batch_size=batch_size)
 
     def __call__(self, batch_indices):
         if not batch_indices:
@@ -271,35 +267,12 @@ class OnTheFlyBatchTileCollator:
         return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing
 
 
-class HierarchicalBatchSampler:
-    """Batch sampler that prefers keeping whole regions together."""
-
-    def __init__(self, *, region_groups: list[np.ndarray], batch_size: int):
-        self.batches: list[list[int]] = []
-        current: list[int] = []
-        for group in region_groups:
-            positions = group.tolist()
-            if current and len(current) + len(positions) > batch_size:
-                self.batches.append(current)
-                current = positions
-            else:
-                current.extend(positions)
-        if current:
-            self.batches.append(current)
-
-    def __iter__(self):
-        return iter(self.batches)
-
-    def __len__(self):
-        return len(self.batches)
-
-
 class WSIRegionReader:
     """Random-access region reader for hierarchical extraction."""
 
     def __init__(
         self,
-        image_path: "Path",
+        image_path: Path,
         *,
         read_level: int,
         region_size_px: int,
@@ -365,7 +338,7 @@ class OnTheFlyHierarchicalBatchCollator:
     def __init__(
         self,
         *,
-        image_path: "Path",
+        image_path: Path,
         tiling_result: TilingResult,
         region_index: np.ndarray,
         subtile_index_within_region: np.ndarray,
@@ -397,13 +370,13 @@ class OnTheFlyHierarchicalBatchCollator:
         *,
         batch_size: int,
         dataset_indices: np.ndarray,
-    ) -> _GroupedBatchSampler:
+    ) -> SuperTileBatchSampler:
         if len(dataset_indices) == 0:
-            return _GroupedBatchSampler(groups=[], batch_size=batch_size)
+            return SuperTileBatchSampler(groups=[], batch_size=batch_size)
         regions = self._region_index[dataset_indices]
         boundaries = np.where(np.concatenate(([True], regions[1:] != regions[:-1], [True])))[0]
         groups = [np.arange(boundaries[i], boundaries[i + 1], dtype=np.int64) for i in range(len(boundaries) - 1)]
-        return _GroupedBatchSampler(groups=groups, batch_size=batch_size)
+        return SuperTileBatchSampler(groups=groups, batch_size=batch_size)
 
     def __call__(self, batch_indices):
         if not batch_indices:
