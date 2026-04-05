@@ -77,7 +77,9 @@ COPY --chown=user:user slide2vec /opt/app/slide2vec
 COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
 COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
-COPY --chown=user:user constraints-cu128.txt /opt/app/constraints-cu128.txt
+RUN printf '%s\n' \
+    'torch' \
+    > /opt/app/constraints-cu128.txt
 
 RUN python -m pip install --no-cache-dir --no-color \
     -c /opt/app/constraints-cu128.txt \
