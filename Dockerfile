@@ -15,12 +15,11 @@ ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Amsterdam
 
 USER root
 
+# create user and I/O dirs
 RUN groupadd --gid ${USER_GID} user \
-    && useradd -m --no-log-init --uid ${USER_UID} --gid ${USER_GID} user
-
-# create input/output directory
-RUN mkdir /input /output && \
-    chown user:user /input /output
+    && useradd -m --no-log-init --uid ${USER_UID} --gid ${USER_GID} user \
+    && mkdir /input /output \
+    && chown user:user /input /output
 
 # set /home/user as working directory
 WORKDIR /home/user
@@ -36,9 +35,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    python3-pip python3-dev python-is-python3 \
+    software-properties-common \
     && mkdir /var/run/sshd \
     && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3.11-venv \
+        python3.11-distutils \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # libjpeg-turbo 3.x (required by PyTurboJPEG>=2)
@@ -53,7 +65,11 @@ RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/
 
 WORKDIR /opt/app/
 
-RUN python -m pip install --upgrade pip setuptools pip-tools \
+ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
+
+RUN python -m ensurepip --upgrade \
+    && python -m pip install --upgrade pip setuptools pip-tools \
+    && python -m pip install hatchling psutil \
     && rm -rf /home/user/.cache/pip
 
 # install slide2vec with all model extras
@@ -61,11 +77,20 @@ COPY --chown=user:user slide2vec /opt/app/slide2vec
 COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
 COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
+COPY --chown=user:user constraints-cu128.txt /opt/app/constraints-cu128.txt
 
-RUN python -m pip install --no-cache-dir --no-color "/opt/app[all]" \
+RUN python -m pip install --no-cache-dir --no-color \
+    -c /opt/app/constraints-cu128.txt \
+    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
+    "/opt/app[fm]"
+
+RUN python -m pip install \
+    --no-cache-dir \
+    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
+    -c /opt/app/constraints-cu128.txt \
+    'flash-attn>=2.7.1,<=2.8.0' \
+    --no-build-isolation \
     && rm -rf /home/user/.cache/pip
-RUN python -m pip install 'flash-attn>=2.7.1,<=2.8.0' --no-build-isolation
-
 
 ##########################
 # Stage 2: runtime stage #
@@ -100,9 +125,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    python3-pip python3-dev python-is-python3 \
+    software-properties-common \
     && mkdir /var/run/sshd \
     && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3.11 \
+        python3.11-dev \
+        python3.11-venv \
+        python3.11-distutils \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # libjpeg-turbo 3.x (copied from build stage)
@@ -119,11 +157,11 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     rm -rf /var/lib/apt/lists/*
 
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
-COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=build /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
-RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+RUN echo "/usr/local/lib/python3.11/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
     ldconfig
 
 # copy app code
