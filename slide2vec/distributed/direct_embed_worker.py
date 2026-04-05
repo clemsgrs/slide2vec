@@ -20,8 +20,11 @@ def main(argv=None) -> int:
     import slide2vec.distributed as distributed
     from slide2vec.api import Model
     from slide2vec.inference import (
+        _build_hierarchical_index,
         _compute_embedded_slides,
+        _compute_hierarchical_embedding_shard_for_slide,
         _compute_tile_embeddings_for_slide,
+        _is_hierarchical_preprocessing,
         deserialize_execution,
         deserialize_preprocessing,
         load_successful_tiled_slides,
@@ -69,23 +72,43 @@ def main(argv=None) -> int:
             if request["strategy"] == "tile_shard":
                 sample_id = request["sample_id"]
                 slide, tiling_result = paired_by_sample[sample_id]
-                num_tiles = len(tiling_result.x)
-                tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
                 loaded = model._load_backend()
-                tile_embeddings = _compute_tile_embeddings_for_slide(
-                    loaded,
-                    model,
-                    slide,
-                    tiling_result,
-                    preprocessing=preprocessing,
-                    execution=execution,
-                    tile_indices=tile_indices,
-                )
-                payload = {
-                    "tile_index": torch.as_tensor(tile_indices, dtype=torch.long),
-                    "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
-                }
-                torch.save(payload, coordination_dir / f"{sample_id}.tiles.rank{global_rank}.pt")
+                if _is_hierarchical_preprocessing(preprocessing):
+                    index = _build_hierarchical_index(
+                        tiling_result,
+                        region_tile_multiple=int(preprocessing.region_tile_multiple),
+                    )
+                    flat_indices = np.array_split(index.flat_index, world_size)[global_rank]
+                    shard_indices, tile_embeddings = _compute_hierarchical_embedding_shard_for_slide(
+                        loaded,
+                        slide,
+                        tiling_result,
+                        preprocessing=preprocessing,
+                        execution=execution,
+                        flat_indices=flat_indices,
+                    )
+                    payload = {
+                        "flat_index": torch.as_tensor(shard_indices, dtype=torch.long),
+                        "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
+                    }
+                    torch.save(payload, coordination_dir / f"{sample_id}.hier.rank{global_rank}.pt")
+                else:
+                    num_tiles = len(tiling_result.x)
+                    tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
+                    tile_embeddings = _compute_tile_embeddings_for_slide(
+                        loaded,
+                        model,
+                        slide,
+                        tiling_result,
+                        preprocessing=preprocessing,
+                        execution=execution,
+                        tile_indices=tile_indices,
+                    )
+                    payload = {
+                        "tile_index": torch.as_tensor(tile_indices, dtype=torch.long),
+                        "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
+                    }
+                    torch.save(payload, coordination_dir / f"{sample_id}.tiles.rank{global_rank}.pt")
                 return 0
 
             assigned_ids = list(request.get("assignments", {}).get(str(global_rank), []))

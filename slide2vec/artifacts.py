@@ -35,6 +35,21 @@ class SlideEmbeddingArtifact:
         return load_metadata(self.metadata_path)
 
 
+@dataclass(frozen=True, kw_only=True)
+class HierarchicalEmbeddingArtifact:
+    sample_id: str
+    path: Path
+    metadata_path: Path
+    format: str
+    feature_dim: int
+    num_regions: int
+    tiles_per_region: int
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return load_metadata(self.metadata_path)
+
+
 def _validate_output_format(output_format: str) -> str:
     normalized = output_format.lower()
     if normalized not in {"pt", "npz"}:
@@ -95,6 +110,10 @@ def load_array(path: str | Path):
                 return payload["features"]
             return {key: payload[key] for key in payload.files}
     raise ValueError(f"Unsupported artifact path: {artifact_path}")
+
+
+def load_hierarchical_array(path: str | Path):
+    return load_array(path)
 
 
 def write_tile_embeddings(
@@ -212,4 +231,50 @@ def write_slide_embeddings(
         format=output_format,
         feature_dim=slide_metadata["feature_dim"],
         latent_path=latent_path,
+    )
+
+
+def write_hierarchical_embeddings(
+    sample_id: str,
+    features,
+    *,
+    output_dir: str | Path,
+    output_format: str = "pt",
+    metadata: dict[str, Any] | None = None,
+) -> HierarchicalEmbeddingArtifact:
+    output_format = _validate_output_format(output_format)
+    base_dir = Path(output_dir) / "hierarchical_embeddings"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = base_dir / f"{sample_id}.{output_format}"
+    metadata_path = base_dir / f"{sample_id}.meta.json"
+
+    feature_array = _ensure_array(features)
+    if feature_array.ndim != 3:
+        raise ValueError(
+            "Hierarchical embeddings must have shape (num_regions, tiles_per_region, feature_dim)"
+        )
+    if output_format == "pt":
+        torch.save(_ensure_tensor(features), artifact_path)
+    else:
+        np.savez_compressed(artifact_path, features=feature_array)
+
+    hierarchical_metadata = {
+        "sample_id": sample_id,
+        "artifact_type": "hierarchical_embeddings",
+        "format": output_format,
+        "feature_dim": int(feature_array.shape[2]),
+        "num_regions": int(feature_array.shape[0]),
+        "tiles_per_region": int(feature_array.shape[1]),
+    }
+    if metadata:
+        hierarchical_metadata.update(metadata)
+    _write_metadata(metadata_path, hierarchical_metadata)
+    return HierarchicalEmbeddingArtifact(
+        sample_id=sample_id,
+        path=artifact_path,
+        metadata_path=metadata_path,
+        format=output_format,
+        feature_dim=int(hierarchical_metadata["feature_dim"]),
+        num_regions=int(hierarchical_metadata["num_regions"]),
+        tiles_per_region=int(hierarchical_metadata["tiles_per_region"]),
     )

@@ -29,6 +29,8 @@ tiling:
     target_spacing_um: # spacing at which to tile the slide, in microns per pixel; filled from a preset model when available
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
     target_tile_size_px: # size of the tiles to extract, in pixels; filled from a preset model when available
+    target_region_size_px: # size of hierarchical parent regions in pixels; when unset and region_tile_multiple is set, derived from target_tile_size_px * region_tile_multiple
+    region_tile_multiple: # hierarchical region grid width/height in tiles; e.g. 6 means 6x6 tiles per region
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
     tissue_threshold: 0.1 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
   seg_params:

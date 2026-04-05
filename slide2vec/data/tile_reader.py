@@ -267,3 +267,195 @@ class OnTheFlyBatchTileCollator:
         tensor, timing = self._reader.read_batch_with_timing(tile_indices)
         timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
         return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing
+
+
+class HierarchicalBatchSampler:
+    """Batch sampler that prefers keeping whole regions together."""
+
+    def __init__(self, *, region_groups: list[np.ndarray], batch_size: int):
+        self.batches: list[list[int]] = []
+        current: list[int] = []
+        for group in region_groups:
+            positions = group.tolist()
+            if current and len(current) + len(positions) > batch_size:
+                self.batches.append(current)
+                current = positions
+            else:
+                current.extend(positions)
+        if current:
+            self.batches.append(current)
+
+    def __iter__(self):
+        return iter(self.batches)
+
+    def __len__(self):
+        return len(self.batches)
+
+
+class WSIRegionReader:
+    """Random-access region reader for hierarchical extraction."""
+
+    def __init__(
+        self,
+        image_path: "Path",
+        *,
+        read_level: int,
+        region_size_px: int,
+        backend: str = "cucim",
+        num_cucim_workers: int = 4,
+        gpu_decode: bool = False,
+    ):
+        self._image_path = str(image_path)
+        self._backend = backend
+        self._num_cucim_workers = num_cucim_workers
+        self._gpu_decode = gpu_decode
+        self._read_level = int(read_level)
+        self._region_size_px = int(region_size_px)
+        self._reader = None
+
+    def _ensure_open(self) -> None:
+        if self._reader is not None:
+            return
+        if self._backend == "cucim":
+            from hs2p.wsi.backends.cucim import CuCIMReader
+
+            self._reader = CuCIMReader(self._image_path, gpu_decode=self._gpu_decode)
+        elif self._backend == "openslide":
+            from hs2p.wsi.backends.openslide import OpenSlideReader
+
+            self._reader = OpenSlideReader(self._image_path)
+        elif self._backend == "vips":
+            from hs2p.wsi.backends.vips import VIPSReader
+
+            self._reader = VIPSReader(self._image_path)
+        elif self._backend == "asap":
+            from hs2p.wsi.backends.asap import ASAPReader
+            from slide2vec.utils.log_utils import suppress_c_stderr
+
+            with suppress_c_stderr():
+                self._reader = ASAPReader(self._image_path)
+        else:
+            raise ValueError(
+                f"Unknown backend: {self._backend!r}. "
+                "Choose from: cucim, openslide, vips, asap"
+            )
+
+    def _read_regions_batch(self, locations: list[tuple[int, int]]) -> list[np.ndarray]:
+        if self._backend == "cucim":
+            return list(
+                self._reader.read_regions(
+                    locations,
+                    self._read_level,
+                    (self._region_size_px, self._region_size_px),
+                    num_workers=self._num_cucim_workers,
+                )
+            )
+        return [
+            self._reader.read_region(
+                loc,
+                self._read_level,
+                (self._region_size_px, self._region_size_px),
+            )
+            for loc in locations
+        ]
+
+    def read_batch_with_timing(
+        self,
+        locations: list[tuple[int, int]],
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        if not locations:
+            return (
+                torch.empty((0, 3, self._region_size_px, self._region_size_px), dtype=torch.uint8),
+                {"reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+        was_closed = self._reader is None
+        open_start = time.perf_counter()
+        self._ensure_open()
+        reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
+        read_start = time.perf_counter()
+        regions = self._read_regions_batch(locations)
+        reader_read_ms = (time.perf_counter() - read_start) * 1000.0
+        batch = np.stack([np.asarray(region)[:, :, :3] for region in regions], axis=0)
+        tensor = torch.from_numpy(batch).permute(0, 3, 1, 2).contiguous()
+        return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
+
+
+class OnTheFlyHierarchicalBatchCollator:
+    """Collator that reads region crops once and unfolds selected subtiles."""
+
+    def __init__(
+        self,
+        *,
+        image_path: "Path",
+        tiling_result: TilingResult,
+        region_index: np.ndarray,
+        subtile_index_within_region: np.ndarray,
+        effective_region_size_px: int,
+        effective_tile_size_px: int,
+        backend: str = "cucim",
+        num_cucim_workers: int = 4,
+        gpu_decode: bool = False,
+    ):
+        self._region_index = np.asarray(region_index, dtype=np.int32)
+        self._subtile_index_within_region = np.asarray(subtile_index_within_region, dtype=np.int32)
+        self._tiles_per_region = int(self._subtile_index_within_region.max()) + 1 if len(self._subtile_index_within_region) else 0
+        self._tile_size = int(effective_tile_size_px)
+        self._reader = WSIRegionReader(
+            image_path,
+            read_level=int(tiling_result.read_level),
+            region_size_px=int(effective_region_size_px),
+            backend=backend,
+            num_cucim_workers=num_cucim_workers,
+            gpu_decode=gpu_decode,
+        )
+        self._region_locations = [
+            (int(x), int(y))
+            for x, y in zip(np.asarray(tiling_result.x), np.asarray(tiling_result.y))
+        ]
+
+    def build_batch_sampler(
+        self,
+        *,
+        batch_size: int,
+        dataset_indices: np.ndarray,
+    ) -> HierarchicalBatchSampler:
+        if len(dataset_indices) == 0:
+            return HierarchicalBatchSampler(region_groups=[], batch_size=batch_size)
+        regions = self._region_index[dataset_indices]
+        boundaries = np.where(np.concatenate(([True], regions[1:] != regions[:-1], [True])))[0]
+        groups = [np.arange(boundaries[i], boundaries[i + 1], dtype=np.int64) for i in range(len(boundaries) - 1)]
+        return HierarchicalBatchSampler(region_groups=groups, batch_size=batch_size)
+
+    def __call__(self, batch_indices):
+        if not batch_indices:
+            return (
+                torch.empty((0,), dtype=torch.long),
+                torch.empty((0, 3, self._tile_size, self._tile_size), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+        worker_start = time.perf_counter()
+        flat_indices = np.asarray(batch_indices, dtype=np.int64)
+        requested_regions = self._region_index[flat_indices]
+        unique_regions, inverse = np.unique(requested_regions, return_inverse=True)
+        locations = [self._region_locations[int(region)] for region in unique_regions]
+        region_tensor, timing = self._reader.read_batch_with_timing(locations)
+        unfolded = _unfold_region_tensor_uint8(region_tensor, self._tile_size)
+        subtile_indices = self._subtile_index_within_region[flat_indices]
+        out = unfolded[torch.as_tensor(inverse, dtype=torch.long), torch.as_tensor(subtile_indices, dtype=torch.long)]
+        timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
+        return torch.as_tensor(flat_indices, dtype=torch.long), out, timing
+
+
+def _unfold_region_tensor_uint8(region_tensor: torch.Tensor, tile_size: int) -> torch.Tensor:
+    if region_tensor.numel() == 0:
+        return torch.empty((0, 0, 3, tile_size, tile_size), dtype=torch.uint8)
+    if int(region_tensor.shape[-1]) % tile_size != 0 or int(region_tensor.shape[-2]) % tile_size != 0:
+        raise ValueError("Region tensor dimensions must be divisible by the tile size")
+    unfolded = torch.nn.functional.unfold(
+        region_tensor.to(torch.float32),
+        kernel_size=tile_size,
+        stride=tile_size,
+    )
+    unfolded = unfolded.transpose(1, 2)
+    reshaped = unfolded.reshape(region_tensor.shape[0], -1, region_tensor.shape[1], tile_size, tile_size)
+    return reshaped.round().clamp(0, 255).to(torch.uint8)

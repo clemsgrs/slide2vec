@@ -8,7 +8,11 @@ from typing import Any, Mapping, Protocol, Sequence
 import torch
 from hs2p import SlideSpec
 
-from slide2vec.artifacts import SlideEmbeddingArtifact, TileEmbeddingArtifact
+from slide2vec.artifacts import (
+    HierarchicalEmbeddingArtifact,
+    SlideEmbeddingArtifact,
+    TileEmbeddingArtifact,
+)
 from slide2vec.encoders.registry import (
     encoder_registry,
     resolve_preprocessing_defaults,
@@ -38,6 +42,8 @@ class PreprocessingConfig:
     backend: str = "auto"
     target_spacing_um: float | None = None
     target_tile_size_px: int | None = None
+    target_region_size_px: int | None = None
+    region_tile_multiple: int | None = None
     tolerance: float = 0.05
     overlap: float = 0.0
     tissue_threshold: float = 0.01
@@ -69,6 +75,16 @@ class PreprocessingConfig:
             backend=tiling.backend,
             target_spacing_um=float(tiling.params.target_spacing_um),
             target_tile_size_px=int(tiling.params.target_tile_size_px),
+            target_region_size_px=(
+                int(v)
+                if (v := getattr(tiling.params, "target_region_size_px", None)) is not None
+                else None
+            ),
+            region_tile_multiple=(
+                int(v)
+                if (v := getattr(tiling.params, "region_tile_multiple", None)) is not None
+                else None
+            ),
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
             tissue_threshold=float(tiling.params.tissue_threshold),
@@ -161,6 +177,7 @@ class ExecutionOptions:
 @dataclass(frozen=True, kw_only=True)
 class RunResult:
     tile_artifacts: list[TileEmbeddingArtifact]
+    hierarchical_artifacts: list[HierarchicalEmbeddingArtifact]
     slide_artifacts: list[SlideEmbeddingArtifact]
     process_list_path: Path | None = None
 
@@ -228,7 +245,7 @@ class Model:
         *,
         preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
-    ) -> list[TileEmbeddingArtifact]:
+    ) -> list[TileEmbeddingArtifact] | list[HierarchicalEmbeddingArtifact]:
         from slide2vec.inference import embed_tiles
 
         resolved = _coerce_execution_options(execution, model=self)
@@ -353,6 +370,25 @@ class Pipeline:
                 execution=self.execution,
             )
 
+    def run_with_coordinates(
+        self,
+        coordinates_dir: str | Path,
+        *,
+        slides: SlideSequence | None = None,
+    ) -> RunResult:
+        from slide2vec.inference import run_pipeline_with_coordinates
+
+        with _auto_progress_reporting(output_dir=self.execution.output_dir):
+            resolved_preprocessing = _resolve_direct_api_preprocessing(self.model, self.preprocessing)
+            _validate_model_config(self.model, resolved_preprocessing, self.execution)
+            return run_pipeline_with_coordinates(
+                self.model,
+                coordinates_dir=coordinates_dir,
+                slides=slides,
+                preprocessing=resolved_preprocessing,
+                execution=self.execution,
+            )
+
 
 def _coerce_execution_options(
     options: ExecutionOptions | None,
@@ -398,10 +434,12 @@ def _resolve_direct_api_preprocessing(
 
     if preprocessing is None:
         target_tile_size_px, target_spacing_um = ensure_defaults()
-        return PreprocessingConfig(
-            backend="auto",
-            target_spacing_um=target_spacing_um,
-            target_tile_size_px=target_tile_size_px,
+        return _resolve_hierarchical_preprocessing(
+            PreprocessingConfig(
+                backend="auto",
+                target_spacing_um=target_spacing_um,
+                target_tile_size_px=target_tile_size_px,
+            )
         )
 
     target_spacing_um = preprocessing.target_spacing_um
@@ -412,10 +450,12 @@ def _resolve_direct_api_preprocessing(
             target_spacing_um = default_spacing_um
         if target_tile_size_px is None:
             target_tile_size_px = default_tile_size_px
-    return replace(
-        preprocessing,
-        target_spacing_um=target_spacing_um,
-        target_tile_size_px=target_tile_size_px,
+    return _resolve_hierarchical_preprocessing(
+        replace(
+            preprocessing,
+            target_spacing_um=target_spacing_um,
+            target_tile_size_px=target_tile_size_px,
+        )
     )
 
 
@@ -438,6 +478,10 @@ def _validate_model_config(
     name = model.name
     if name not in encoder_registry:
         return
+    if preprocessing.region_tile_multiple is not None or preprocessing.target_region_size_px is not None:
+        info = encoder_registry.info(name)
+        if info["level"] != "tile":
+            raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
     on_cpu = model._requested_device == "cpu"
     precision = None if on_cpu or execution is None else execution.precision
@@ -448,6 +492,38 @@ def _validate_model_config(
         precision=precision,
         output_variant=model._output_variant,
         allow_non_recommended=bool(model.allow_non_recommended_settings),
+    )
+
+
+def _resolve_hierarchical_preprocessing(preprocessing: PreprocessingConfig) -> PreprocessingConfig:
+    multiple = preprocessing.region_tile_multiple
+    target_region_size_px = preprocessing.target_region_size_px
+    if multiple is not None:
+        multiple = int(multiple)
+        if multiple < 2:
+            raise ValueError("region_tile_multiple must be at least 2")
+    if multiple is None and target_region_size_px is None:
+        return preprocessing
+    if preprocessing.target_tile_size_px is None:
+        raise ValueError(
+            "target_tile_size_px must be resolved before deriving hierarchical region geometry"
+        )
+    if target_region_size_px is None:
+        target_region_size_px = int(preprocessing.target_tile_size_px) * int(multiple)
+    elif multiple is None:
+        if int(target_region_size_px) % int(preprocessing.target_tile_size_px) != 0:
+            raise ValueError(
+                "target_region_size_px must be an exact multiple of target_tile_size_px"
+            )
+        multiple = int(target_region_size_px) // int(preprocessing.target_tile_size_px)
+    elif int(target_region_size_px) != int(preprocessing.target_tile_size_px) * int(multiple):
+        raise ValueError(
+            "target_region_size_px must match target_tile_size_px * region_tile_multiple"
+        )
+    return replace(
+        preprocessing,
+        target_region_size_px=int(target_region_size_px),
+        region_tile_multiple=int(multiple),
     )
 
 
