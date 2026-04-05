@@ -1,5 +1,4 @@
 
-import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,6 +20,7 @@ from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
 from slide2vec.progress import emit_progress
 from slide2vec.runtime_types import LoadedModel
+from slide2vec.utils.utils import slurm_cpu_limit
 
 PathLike = str | Path
 
@@ -156,17 +156,10 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
-        slurm_cpu_limit = None
-        for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
-            if env_name not in os.environ:
-                continue
-            value = os.environ[env_name]
-            if value and value.strip().isdigit() and int(value.strip()) > 0:
-                slurm_cpu_limit = int(value.strip())
-                break
-        if slurm_cpu_limit is not None:
-            object.__setattr__(self, "num_workers", min(self.num_workers, slurm_cpu_limit))
-            object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, slurm_cpu_limit))
+        limit = slurm_cpu_limit()
+        if limit is not None:
+            object.__setattr__(self, "num_workers", min(self.num_workers, limit))
+            object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, limit))
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

@@ -1,7 +1,6 @@
 import json
 import importlib
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -52,7 +51,8 @@ from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
 from slide2vec.utils.coordinates import coordinate_arrays
-from slide2vec.utils.tiling_io import load_process_df, load_slide_manifest, load_tiling_result_from_row
+from slide2vec.utils.tiling_io import load_process_df, load_slide_manifest, load_tiling_result_from_row, _optional_float
+from slide2vec.utils.utils import slurm_cpu_limit as _slurm_cpu_limit_fn
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -172,36 +172,11 @@ def _num_embedding_items(tiling_result, preprocessing: PreprocessingConfig | Non
 
 
 
-def _optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        if np.isnan(value):
-            return None
-    except TypeError:
-        pass
-    return float(value)
-
-
-def _slurm_cpu_limit() -> int | None:
-    for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
-        if env_name not in os.environ:
-            continue
-        value = os.environ[env_name]
-        match = re.match(r"\s*(\d+)", value)
-        if match is None:
-            continue
-        limit = int(match.group(1))
-        if limit > 0:
-            return limit
-    return None
-
-
 def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
     cpu_count = os.cpu_count() or 4
     worker_budget = cpu_count
     details = [f"cpu_count={cpu_count}"]
-    slurm_limit = _slurm_cpu_limit()
+    slurm_limit = _slurm_cpu_limit_fn()
     if slurm_limit is not None:
         worker_budget = min(worker_budget, slurm_limit)
         details.append(f"slurm_cpu_limit={slurm_limit}")
@@ -1155,7 +1130,6 @@ def _compute_tile_embeddings_for_slide(
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = _build_batch_preprocessor(
         loaded,
-        model,
         tiling_result,
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
@@ -1623,10 +1597,8 @@ def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOption
 
 def _build_batch_preprocessor(
     loaded: LoadedModel,
-    model,
     tiling_result,
 ):
-    del model
     return _build_batch_preprocessor_for_tile_images(
         loaded,
         target_tile_size_px=int(getattr(tiling_result, "requested_tile_size_px")),

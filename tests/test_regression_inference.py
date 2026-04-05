@@ -1647,7 +1647,6 @@ def test_build_batch_preprocessor_falls_back_for_unsupported_transform_stack(cap
     with caplog.at_level("WARNING", logger="slide2vec.inference"):
         preprocess = inference._build_batch_preprocessor(
             loaded,
-            SimpleNamespace(level="tile"),
             tiling_result,
         )
 

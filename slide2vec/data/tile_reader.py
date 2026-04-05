@@ -7,18 +7,16 @@ import torch
 from hs2p import TilingResult
 
 
-class SuperTileBatchSampler:
-    """Batch sampler that keeps super tiles intact.
+class _GroupedBatchSampler:
+    """Greedily packs whole groups into batches of approximately ``batch_size`` items.
 
-    Greedily packs whole super tiles into batches of approximately
-    ``batch_size`` tiles.  No super tile is ever split across batches,
-    so each WSI region is read exactly once.
+    No group is ever split across batches.
     """
 
-    def __init__(self, *, supertile_groups: list[np.ndarray], batch_size: int):
+    def __init__(self, *, groups: list[np.ndarray], batch_size: int):
         self.batches: list[list[int]] = []
         current: list[int] = []
-        for group in supertile_groups:
+        for group in groups:
             positions = group.tolist()
             if current and len(current) + len(positions) > batch_size:
                 self.batches.append(current)
@@ -33,6 +31,33 @@ class SuperTileBatchSampler:
 
     def __len__(self):
         return len(self.batches)
+
+
+SuperTileBatchSampler = _GroupedBatchSampler
+HierarchicalBatchSampler = _GroupedBatchSampler
+
+
+def _open_wsi_backend(image_path: str, backend: str, gpu_decode: bool):
+    """Open a WSI file with the given backend and return the reader."""
+    if backend == "cucim":
+        from hs2p.wsi.backends.cucim import CuCIMReader
+        return CuCIMReader(image_path, gpu_decode=gpu_decode)
+    elif backend == "openslide":
+        from hs2p.wsi.backends.openslide import OpenSlideReader
+        return OpenSlideReader(image_path)
+    elif backend == "vips":
+        from hs2p.wsi.backends.vips import VIPSReader
+        return VIPSReader(image_path)
+    elif backend == "asap":
+        from hs2p.wsi.backends.asap import ASAPReader
+        from slide2vec.utils.log_utils import suppress_c_stderr
+        with suppress_c_stderr():
+            return ASAPReader(image_path)
+    else:
+        raise ValueError(
+            f"Unknown backend: {backend!r}. "
+            "Choose from: cucim, openslide, vips, asap"
+        )
 
 
 class WSITileReader:
@@ -84,31 +109,8 @@ class WSITileReader:
         self._use_supertiles = use_supertiles
 
     def _ensure_open(self) -> None:
-        if self._reader is not None:
-            return
-        if self._backend == "cucim":
-            from hs2p.wsi.backends.cucim import CuCIMReader
-
-            self._reader = CuCIMReader(self._image_path, gpu_decode=self._gpu_decode)
-        elif self._backend == "openslide":
-            from hs2p.wsi.backends.openslide import OpenSlideReader
-
-            self._reader = OpenSlideReader(self._image_path)
-        elif self._backend == "vips":
-            from hs2p.wsi.backends.vips import VIPSReader
-
-            self._reader = VIPSReader(self._image_path)
-        elif self._backend == "asap":
-            from hs2p.wsi.backends.asap import ASAPReader
-            from slide2vec.utils.log_utils import suppress_c_stderr
-
-            with suppress_c_stderr():
-                self._reader = ASAPReader(self._image_path)
-        else:
-            raise ValueError(
-                f"Unknown backend: {self._backend!r}. "
-                "Choose from: cucim, openslide, vips, asap"
-            )
+        if self._reader is None:
+            self._reader = _open_wsi_backend(self._image_path, self._backend, self._gpu_decode)
 
     def _read_regions_batch(
         self, locations: list[tuple[int, int]], size: int
@@ -232,7 +234,7 @@ class OnTheFlyBatchTileCollator:
         *,
         batch_size: int,
         dataset_indices: np.ndarray,
-    ) -> SuperTileBatchSampler | None:
+    ) -> _GroupedBatchSampler | None:
         """Build a batch sampler that never splits super tiles across batches.
 
         ``dataset_indices`` are the tile indices that will be in the dataset
@@ -253,7 +255,7 @@ class OnTheFlyBatchTileCollator:
                 start = pos
         if start < len(dataset_indices):
             groups.append(np.arange(start, len(dataset_indices), dtype=np.int64))
-        return SuperTileBatchSampler(supertile_groups=groups, batch_size=batch_size)
+        return _GroupedBatchSampler(groups=groups, batch_size=batch_size)
 
     def __call__(self, batch_indices):
         if not batch_indices:
@@ -314,31 +316,8 @@ class WSIRegionReader:
         self._reader = None
 
     def _ensure_open(self) -> None:
-        if self._reader is not None:
-            return
-        if self._backend == "cucim":
-            from hs2p.wsi.backends.cucim import CuCIMReader
-
-            self._reader = CuCIMReader(self._image_path, gpu_decode=self._gpu_decode)
-        elif self._backend == "openslide":
-            from hs2p.wsi.backends.openslide import OpenSlideReader
-
-            self._reader = OpenSlideReader(self._image_path)
-        elif self._backend == "vips":
-            from hs2p.wsi.backends.vips import VIPSReader
-
-            self._reader = VIPSReader(self._image_path)
-        elif self._backend == "asap":
-            from hs2p.wsi.backends.asap import ASAPReader
-            from slide2vec.utils.log_utils import suppress_c_stderr
-
-            with suppress_c_stderr():
-                self._reader = ASAPReader(self._image_path)
-        else:
-            raise ValueError(
-                f"Unknown backend: {self._backend!r}. "
-                "Choose from: cucim, openslide, vips, asap"
-            )
+        if self._reader is None:
+            self._reader = _open_wsi_backend(self._image_path, self._backend, self._gpu_decode)
 
     def _read_regions_batch(self, locations: list[tuple[int, int]]) -> list[np.ndarray]:
         if self._backend == "cucim":
@@ -418,13 +397,13 @@ class OnTheFlyHierarchicalBatchCollator:
         *,
         batch_size: int,
         dataset_indices: np.ndarray,
-    ) -> HierarchicalBatchSampler:
+    ) -> _GroupedBatchSampler:
         if len(dataset_indices) == 0:
-            return HierarchicalBatchSampler(region_groups=[], batch_size=batch_size)
+            return _GroupedBatchSampler(groups=[], batch_size=batch_size)
         regions = self._region_index[dataset_indices]
         boundaries = np.where(np.concatenate(([True], regions[1:] != regions[:-1], [True])))[0]
         groups = [np.arange(boundaries[i], boundaries[i + 1], dtype=np.int64) for i in range(len(boundaries) - 1)]
-        return HierarchicalBatchSampler(region_groups=groups, batch_size=batch_size)
+        return _GroupedBatchSampler(groups=groups, batch_size=batch_size)
 
     def __call__(self, batch_indices):
         if not batch_indices:

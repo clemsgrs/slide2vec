@@ -23,13 +23,10 @@ classifiers = [
 dependencies = [
     "hs2p>=3.1.2",
     "omegaconf",
-    "h5py",
-    "matplotlib",
     "numpy<2",
     "pandas",
     "pillow",
     "rich",
-    "tqdm",
     "torch",
     "torchvision",
     "transformers",

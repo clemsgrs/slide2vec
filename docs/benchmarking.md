@@ -5,7 +5,7 @@
 The script samples a balanced subset of your manifest, runs untimed warmups plus repeated measured trials, tunes only:
 
 - `model.batch_size`
-- `speed.num_workers_embedding`
+- `speed.num_dataloader_workers`
 
 It keeps the rest of each model config fixed, disables previews / resume / Weights & Biases, and writes:
 

@@ -6,28 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  regression-guards:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run regression guard tests
-        run: |
-          set -euo pipefail
-          python -m unittest discover -s test -p 'test_regression_bugfixes.py'
-
   docker-test:
-    needs: regression-guards
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

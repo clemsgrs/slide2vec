@@ -79,7 +79,7 @@ Common overrides:
 
 - `output_dir=/path/to/output`
 - `speed.num_gpus=4`
-- `speed.num_workers_embedding=8`
+- `speed.num_dataloader_workers=8`
 - `tiling.preview.save=true`
 - `model.name=...`
 - `model.output_variant=...`

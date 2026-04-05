@@ -125,9 +125,9 @@ def main(argv=None) -> int:
             )
             for embedded_slide in embedded_slides:
                 payload = {
-                    "tile_embeddings": _to_cpu_payload(torch, embedded_slide.tile_embeddings),
-                    "slide_embedding": _to_cpu_payload(torch, embedded_slide.slide_embedding),
-                    "latents": _to_cpu_payload(torch, embedded_slide.latents),
+                    "tile_embeddings": _to_cpu_payload(embedded_slide.tile_embeddings),
+                    "slide_embedding": _to_cpu_payload(embedded_slide.slide_embedding),
+                    "latents": _to_cpu_payload(embedded_slide.latents),
                 }
                 torch.save(payload, coordination_dir / f"{embedded_slide.sample_id}.embedded.pt")
             return 0
@@ -136,7 +136,8 @@ def main(argv=None) -> int:
             dist.destroy_process_group()
 
 
-def _to_cpu_payload(torch, value):
+def _to_cpu_payload(value):
+    import torch
     if value is None:
         return None
     if torch.is_tensor(value):
