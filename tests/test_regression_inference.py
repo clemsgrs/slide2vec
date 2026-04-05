@@ -1544,6 +1544,29 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
     assert result == expected
     assert captured["multi"]["slide_records"] == slides
 
+def test_pipeline_worker_assigns_slides_by_tile_count():
+    from slide2vec.distributed import pipeline_worker
+
+    slides = [
+        make_slide("slide-a"),
+        make_slide("slide-b"),
+        make_slide("slide-c"),
+        make_slide("slide-d"),
+    ]
+    tiling_results = [
+        SimpleNamespace(x=np.arange(9), y=np.arange(9), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(8), y=np.arange(8), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(7), y=np.arange(7), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(6), y=np.arange(6), tile_size_lv0=224),
+    ]
+
+    assignments = pipeline_worker._assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+
+    assert assignments == {
+        0: ["slide-a", "slide-d"],
+        1: ["slide-b", "slide-c"],
+    }
+
 def test_assign_slides_to_ranks_balances_by_tile_count():
     import slide2vec.inference as inference
 
