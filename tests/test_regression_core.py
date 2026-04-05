@@ -13,7 +13,6 @@ from slide2vec.api import (
     PreprocessingConfig,
 )
 from slide2vec.artifacts import (
-    load_hierarchical_array,
     load_array,
     load_metadata,
     write_hierarchical_embeddings,
@@ -150,7 +149,7 @@ def test_hierarchical_npz_artifacts_round_trip(tmp_path: Path):
         },
     )
 
-    loaded = load_hierarchical_array(artifact.path)
+    loaded = load_array(artifact.path)
     metadata = load_metadata(artifact.metadata_path)
 
     np.testing.assert_array_equal(loaded, features)

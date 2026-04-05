@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 import time
-from typing import Any, Iterable
+from typing import Any
 
 import pandas as pd
 

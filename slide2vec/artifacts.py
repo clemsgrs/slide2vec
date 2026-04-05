@@ -76,6 +76,14 @@ def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _setup_artifact_paths(
+    output_dir: str | Path, subdir: str, sample_id: str, output_format: str
+) -> tuple[Path, Path]:
+    base_dir = Path(output_dir) / subdir
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir / f"{sample_id}.{output_format}", base_dir / f"{sample_id}.meta.json"
+
+
 def _build_tile_embedding_metadata(
     sample_id: str,
     *,
@@ -112,10 +120,6 @@ def load_array(path: str | Path):
     raise ValueError(f"Unsupported artifact path: {artifact_path}")
 
 
-def load_hierarchical_array(path: str | Path):
-    return load_array(path)
-
-
 def write_tile_embeddings(
     sample_id: str,
     features,
@@ -126,11 +130,7 @@ def write_tile_embeddings(
     tile_index: Any | None = None,
 ) -> TileEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    base_dir = Path(output_dir) / "tile_embeddings"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    artifact_path = base_dir / f"{sample_id}.{output_format}"
-    metadata_path = base_dir / f"{sample_id}.meta.json"
-
+    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "tile_embeddings", sample_id, output_format)
     feature_array = _ensure_array(features)
     if output_format == "pt":
         torch.save(_ensure_tensor(features), artifact_path)
@@ -168,9 +168,7 @@ def write_tile_embedding_metadata(
     metadata: dict[str, Any] | None = None,
 ) -> Path:
     output_format = _validate_output_format(output_format)
-    base_dir = Path(output_dir) / "tile_embeddings"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = base_dir / f"{sample_id}.meta.json"
+    _, metadata_path = _setup_artifact_paths(output_dir, "tile_embeddings", sample_id, output_format)
     tile_metadata = _build_tile_embedding_metadata(
         sample_id,
         output_format=output_format,
@@ -192,27 +190,18 @@ def write_slide_embeddings(
     latents: Any | None = None,
 ) -> SlideEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    base_dir = Path(output_dir) / "slide_embeddings"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    artifact_path = base_dir / f"{sample_id}.{output_format}"
-    metadata_path = base_dir / f"{sample_id}.meta.json"
-
+    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "slide_embeddings", sample_id, output_format)
     embedding_array = _ensure_array(embedding)
     latent_path = None
     if output_format == "pt":
         torch.save(_ensure_tensor(embedding), artifact_path)
-        if latents is not None:
-            latents_dir = Path(output_dir) / "slide_latents"
-            latents_dir.mkdir(parents=True, exist_ok=True)
-            latent_path = latents_dir / f"{sample_id}.pt"
-            torch.save(_ensure_tensor(latents), latent_path)
     else:
-        payload = {"features": embedding_array}
-        np.savez_compressed(artifact_path, **payload)
-        if latents is not None:
-            latents_dir = Path(output_dir) / "slide_latents"
-            latents_dir.mkdir(parents=True, exist_ok=True)
-            latent_path = latents_dir / f"{sample_id}.npz"
+        np.savez_compressed(artifact_path, features=embedding_array)
+    if latents is not None:
+        latent_path, _ = _setup_artifact_paths(output_dir, "slide_latents", sample_id, output_format)
+        if output_format == "pt":
+            torch.save(_ensure_tensor(latents), latent_path)
+        else:
             np.savez_compressed(latent_path, latents=_ensure_array(latents))
 
     slide_metadata = {
@@ -243,11 +232,7 @@ def write_hierarchical_embeddings(
     metadata: dict[str, Any] | None = None,
 ) -> HierarchicalEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    base_dir = Path(output_dir) / "hierarchical_embeddings"
-    base_dir.mkdir(parents=True, exist_ok=True)
-    artifact_path = base_dir / f"{sample_id}.{output_format}"
-    metadata_path = base_dir / f"{sample_id}.meta.json"
-
+    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "hierarchical_embeddings", sample_id, output_format)
     feature_array = _ensure_array(features)
     if feature_array.ndim != 3:
         raise ValueError(
