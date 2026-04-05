@@ -21,6 +21,7 @@ EXPECTED_TILE_ENCODERS = {
     "midnight",
     "phikon",
     "phikonv2",
+    "prost40m",
 }
 
 EXPECTED_SLIDE_ENCODERS = {
@@ -102,6 +103,12 @@ def test_uni2_input_size_is_224():
 def test_conchv15_input_size_is_448():
     info = encoder_registry.info("conchv15")
     assert info["input_size"] == 448
+
+
+def test_prost40m_input_size_is_224_and_encode_dim_is_384():
+    info = encoder_registry.info("prost40m")
+    assert info["input_size"] == 224
+    assert info["output_variants"]["default"]["encode_dim"] == 384
 
 
 def test_resolve_preprocessing_requirements_for_tile_encoder():
