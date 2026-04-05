@@ -20,6 +20,7 @@ Preset-specific behavior lives in registry metadata and, where supported, `model
 | `kaiko-midnight` | [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | `tile` | `2.0`, `1.0`, `0.5`, `0.25` | |
 | `musk` | [MUSK](https://huggingface.co/xiangjx/musk) | `tile` | `1.0`, `0.5`, `0.25` | |
 | `phikonv2` | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | `tile` | `0.5` |  |
+| `prost40m` | [Prost40M](https://huggingface.co/waticlems/Prost40M) | `tile` | `0.5` | |
 | `uni` | [UNI](https://huggingface.co/MahmoodLab/UNI) | `tile` | `0.5` | |
 | `uni2` | [UNI2](https://huggingface.co/MahmoodLab/UNI2-h) | `tile` | `0.5` | |
 | `virchow` | [Virchow](https://huggingface.co/paige-ai/Virchow) | `tile` | `0.5` | Supports `output_variant="cls"` or `output_variant="cls_patch_mean"` |
