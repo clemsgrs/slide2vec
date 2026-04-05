@@ -30,6 +30,8 @@ def _optional_float(value: Any) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value)
+
+
 def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     manifest_path = Path(csv_path).resolve()
     df = pd.read_csv(manifest_path)

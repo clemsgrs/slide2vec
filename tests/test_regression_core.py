@@ -15,6 +15,7 @@ from slide2vec.api import (
 from slide2vec.artifacts import (
     load_array,
     load_metadata,
+    write_hierarchical_embeddings,
     write_slide_embeddings,
     write_tile_embeddings,
 )
@@ -129,6 +130,85 @@ def test_pt_artifacts_round_trip(tmp_path: Path):
     assert artifact.path == tmp_path / "slide_embeddings" / "sample-b.pt"
     assert torch.equal(loaded, features)
     assert metadata["image_path"] == "/tmp/sample-b.svs"
+
+
+def test_hierarchical_npz_artifacts_round_trip(tmp_path: Path):
+    features = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    artifact = write_hierarchical_embeddings(
+        "sample-h",
+        features,
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={
+            "coordinates_npz_path": "/tmp/sample-h.coordinates.npz",
+            "target_tile_size_px": 224,
+            "effective_tile_size_px": 224,
+            "target_region_size_px": 672,
+            "effective_region_size_px": 672,
+            "tiles_per_region": 3,
+        },
+    )
+
+    loaded = load_array(artifact.path)
+    metadata = load_metadata(artifact.metadata_path)
+
+    np.testing.assert_array_equal(loaded, features)
+    assert artifact.path == tmp_path / "hierarchical_embeddings" / "sample-h.npz"
+    assert metadata["artifact_type"] == "hierarchical_embeddings"
+    assert metadata["num_regions"] == 2
+    assert metadata["tiles_per_region"] == 3
+    assert metadata["feature_dim"] == 4
+    assert metadata["target_region_size_px"] == 672
+
+
+def test_resolve_direct_api_preprocessing_derives_target_region_size_from_multiple():
+    import slide2vec.api as api
+
+    model = Model.from_preset("uni")
+    resolved = api._resolve_direct_api_preprocessing(
+        model,
+        PreprocessingConfig(
+            target_spacing_um=0.5,
+            target_tile_size_px=224,
+            region_tile_multiple=6,
+        ),
+    )
+
+    assert resolved.target_tile_size_px == 224
+    assert resolved.target_region_size_px == 1344
+
+
+def test_resolve_direct_api_preprocessing_uses_model_defaults_before_region_derivation():
+    import slide2vec.api as api
+
+    model = Model.from_preset("conchv15")
+    resolved = api._resolve_direct_api_preprocessing(
+        model,
+        PreprocessingConfig(
+            region_tile_multiple=6,
+        ),
+    )
+
+    assert resolved.target_spacing_um == pytest.approx(0.5)
+    assert resolved.target_tile_size_px == 448
+    assert resolved.target_region_size_px == 2688
+
+
+def test_resolve_direct_api_preprocessing_rejects_mismatched_region_size_and_multiple():
+    import slide2vec.api as api
+
+    model = Model.from_preset("uni")
+
+    with pytest.raises(ValueError, match="target_region_size_px"):
+        api._resolve_direct_api_preprocessing(
+            model,
+            PreprocessingConfig(
+                target_spacing_um=0.5,
+                target_tile_size_px=224,
+                target_region_size_px=1024,
+                region_tile_multiple=6,
+            ),
+        )
 
 def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
     model = Model.from_preset("virchow2")

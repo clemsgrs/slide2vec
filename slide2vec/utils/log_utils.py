@@ -3,7 +3,6 @@ import functools
 import logging
 import os
 import sys
-from typing import Optional
 
 import slide2vec.distributed as distributed
 from slide2vec.progress import emit_progress_log
@@ -43,10 +42,10 @@ class _ProgressAwareStreamHandler(logging.Handler):
 # So that calling _configure_logger multiple times won't add many handlers
 @functools.lru_cache()
 def _configure_logger(
-    name: Optional[str] = None,
+    name: str | None = None,
     *,
     level: int = logging.DEBUG,
-    output: Optional[str] = None,
+    output: str | None = None,
 ):
     """
     Configure a logger.
@@ -110,8 +109,8 @@ def _configure_logger(
 
 def setup_logging(
     *,
-    output: Optional[str] = None,
-    name: Optional[str] = None,
+    output: str | None = None,
+    name: str | None = None,
     level: int = logging.DEBUG,
     capture_warnings: bool = True,
 ) -> None:

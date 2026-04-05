@@ -167,7 +167,7 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     monkeypatch.setattr(
         inference,
         "_collect_pipeline_artifacts",
-        lambda *args, **kwargs: (["tile-artifact"], ["slide-artifact"]),
+        lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 

@@ -1,9 +1,7 @@
 import datetime
 import os
 import random
-import re
 import socket
-from typing import Dict, List
 
 import torch
 import torch.distributed as dist
@@ -93,17 +91,6 @@ def _restrict_print_to_main_process() -> None:
     __builtin__.print = print
 
 
-def _get_master_port(seed: int = 0) -> int:
-    MIN_MASTER_PORT, MAX_MASTER_PORT = (20_000, 60_000)
-
-    master_port_str = os.environ.get("MASTER_PORT")
-    if master_port_str is None:
-        rng = random.Random(seed)
-        return rng.randint(MIN_MASTER_PORT, MAX_MASTER_PORT)
-
-    return int(master_port_str)
-
-
 def _get_available_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         # A "" host address means INADDR_ANY i.e. binding to all interfaces.
@@ -123,33 +110,12 @@ _TORCH_DISTRIBUTED_ENV_VARS = (
 )
 
 
-def _collect_env_vars() -> Dict[str, str]:
+def _collect_env_vars() -> dict[str, str]:
     return {
         env_var: os.environ[env_var]
         for env_var in _TORCH_DISTRIBUTED_ENV_VARS
         if env_var in os.environ
     }
-
-
-def _is_slurm_job_process() -> bool:
-    return "SLURM_JOB_ID" in os.environ
-
-
-def _parse_slurm_node_list(s: str) -> List[str]:
-    nodes = []
-    # Extract "hostname", "hostname[1-2,3,4-5]," substrings
-    p = re.compile(r"(([^\[]+)(?:\[([^\]]+)\])?),?")
-    for m in p.finditer(s):
-        prefix, suffixes = s[m.start(2) : m.end(2)], s[m.start(3) : m.end(3)]
-        for suffix in suffixes.split(","):
-            span = suffix.split("-")
-            if len(span) == 1:
-                nodes.append(prefix + suffix)
-            else:
-                width = len(span[0])
-                start, end = int(span[0]), int(span[1]) + 1
-                nodes.extend([prefix + f"{i:0{width}}" for i in range(start, end)])
-    return nodes
 
 
 def _check_env_variable(key: str, new_value: str):
@@ -169,9 +135,6 @@ class _TorchDistributedEnvironment:
         self.local_rank = -1
         self.local_world_size = -1
 
-        # if _is_slurm_job_process():
-        #     return self._set_from_slurm_env()
-
         env_vars = _collect_env_vars()
         if not env_vars:
             # Environment is not set
@@ -188,23 +151,6 @@ class _TorchDistributedEnvironment:
             return self._set_from_local()
 
         raise RuntimeError("Can't initialize PyTorch distributed environment")
-
-    # Slurm job created with sbatch, submitit, etc...
-    def _set_from_slurm_env(self):
-        # logger.info("Initialization from Slurm environment")
-        job_id = int(os.environ["SLURM_JOB_ID"])
-        node_count = int(os.environ["SLURM_JOB_NUM_NODES"])
-        nodes = _parse_slurm_node_list(os.environ["SLURM_JOB_NODELIST"])
-        assert len(nodes) == node_count
-
-        self.master_addr = nodes[0]
-        self.master_port = _get_master_port(seed=job_id)
-        self.rank = int(os.environ["SLURM_PROCID"])
-        self.world_size = int(os.environ["SLURM_NTASKS"])
-        assert self.rank < self.world_size
-        self.local_rank = int(os.environ["SLURM_LOCALID"])
-        self.local_world_size = self.world_size // node_count
-        assert self.local_rank < self.local_world_size
 
     # Single node job with preset environment (i.e. torchrun)
     def _set_from_preset_env(self):
