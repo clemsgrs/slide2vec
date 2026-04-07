@@ -19,6 +19,7 @@ EXPECTED_TILE_ENCODERS = {
     "hibou-b",
     "hibou-l",
     "midnight",
+    "musk",
     "phikon",
     "phikonv2",
     "prost40m",

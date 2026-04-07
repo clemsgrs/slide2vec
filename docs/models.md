@@ -8,7 +8,7 @@ The canonical model presets are registered in code and documented below. Use the
 
 Preset-specific behavior lives in registry metadata and, where supported, `model.output_variant`.
 
-## Tile-level models (16)
+## Tile-level models (17)
 
 | Preset | Model | Supported Spacing (um) | Notes |
 | --- | --- | --- | --- |
@@ -21,6 +21,7 @@ Preset-specific behavior lives in registry metadata and, where supported, `model
 | `hibou-b` | [Hibou-B](https://huggingface.co/histai/hibou-b) | `0.5` | |
 | `hibou-l` | [Hibou-L](https://huggingface.co/histai/hibou-L) | `0.5` | |
 | `midnight` | [MidNight12k](https://huggingface.co/kaiko-ai/midnight) | `0.25`, `0.5`, `1.0`, `2.0` | Alias: `kaiko-midnight` |
+| `musk` | [MUSK](https://huggingface.co/xiangjx/musk) | `0.25`, `0.5`, `1.0` | Supports `output_variant="ms_aug"` (2048-dim, default) or `"cls"` (1024-dim). |
 | `phikon` | [Phikon](https://huggingface.co/owkin/phikon) | `0.5` | |
 | `phikonv2` | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | `0.5` | |
 | `prost40m` | [Prost40M](https://huggingface.co/waticlems/Prost40M) | `0.5` | |
