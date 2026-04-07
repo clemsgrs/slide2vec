@@ -81,6 +81,7 @@ Common overrides:
 - `speed.num_gpus=4`
 - `speed.num_dataloader_workers=8`
 - `tiling.preview.save=true`
+- `tiling.params.region_tile_multiple=6` (hierarchical extraction)
 - `model.name=...`
 - `model.output_variant=...`
 
@@ -144,6 +145,8 @@ The CLI writes explicit artifact directories under the run output directory:
 
 - `tile_embeddings/<sample_id>.pt` or `.npz`
 - `tile_embeddings/<sample_id>.meta.json`
+- `hierarchical_embeddings/<sample_id>.pt` or `.npz` (when `region_tile_multiple` is set)
+- `hierarchical_embeddings/<sample_id>.meta.json`
 - `slide_embeddings/<sample_id>.pt` or `.npz`
 - `slide_embeddings/<sample_id>.meta.json`
 - optional `slide_latents/<sample_id>.pt` or `.npz`
