@@ -263,6 +263,36 @@ def test_model_from_preset_keeps_slide_default_for_slide_models():
     assert model.name == "prism"
     assert model.level == "slide"
 
+
+def test_preferred_default_device_prefers_cuda_when_available(monkeypatch):
+    import torch
+    import slide2vec.encoders.base as base
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+
+    assert base.preferred_default_device() == torch.device("cuda")
+
+
+def test_h0mini_defaults_to_preferred_device(monkeypatch):
+    import torch
+    import slide2vec.encoders.base as base
+    from slide2vec.encoders.models.hoptimus import H0Mini
+
+    class FakeModel:
+        def eval(self):
+            return self
+
+        def to(self, device):
+            self.device = torch.device(device)
+            return self
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(base.timm, "create_model", lambda *args, **kwargs: FakeModel())
+
+    model = H0Mini()
+
+    assert model.device == torch.device("cuda")
+
 def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
     import slide2vec.api as api
 

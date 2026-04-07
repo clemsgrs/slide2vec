@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     zlib1g-dev \
     libnuma1 \
+    libspatialindex-dev \
     curl \
     vim screen \
     zip unzip \

@@ -19,6 +19,7 @@ from slide2vec.api import (
 from slide2vec.artifacts import (
     load_array,
     load_metadata,
+    write_hierarchical_embeddings,
     write_slide_embeddings,
     write_tile_embedding_metadata,
     write_tile_embeddings,
@@ -226,6 +227,197 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
     assert tile_artifacts == ["tile-artifact"]
     assert hierarchical_artifacts == []
     assert slide_artifacts == ["slide-artifact"]
+
+
+def test_collect_distributed_pipeline_artifacts_uses_hierarchical_artifacts_for_hierarchical_preprocessing(
+    monkeypatch,
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/slide-a.svs"},
+    )
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        target_region_size_px=448,
+        region_tile_multiple=2,
+    )
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="virchow2", level="tile")
+
+    monkeypatch.setattr(inference, "_run_distributed_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    tile_artifacts, hierarchical_artifacts, slide_artifacts = inference._collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=tmp_path / "process_list.csv",
+        preprocessing=preprocessing,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    assert tile_artifacts == []
+    assert [artifact.sample_id for artifact in hierarchical_artifacts] == ["slide-a"]
+    assert slide_artifacts == []
+
+
+def test_has_complete_local_embedding_outputs_uses_hierarchical_artifacts_for_hierarchical_preprocessing(
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/slide-a.svs"},
+    )
+
+    assert inference._has_complete_local_embedding_outputs(
+        "slide-a",
+        output_dir=tmp_path,
+        output_format="pt",
+        persist_tile_embeddings=True,
+        persist_hierarchical_embeddings=True,
+        include_slide_embeddings=False,
+        save_latents=False,
+    )
+
+
+@pytest.mark.parametrize("persist_hierarchical_embeddings", [False, True])
+def test_update_process_list_after_embedding_writes_feature_path(
+    persist_hierarchical_embeddings: bool,
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
+        encoding="utf-8",
+    )
+    if persist_hierarchical_embeddings:
+        artifact = write_hierarchical_embeddings(
+            "slide-a",
+            np.zeros((1, 2, 4), dtype=np.float32),
+            output_dir=tmp_path,
+            output_format="pt",
+            metadata={"image_path": "/tmp/slide-a.svs"},
+        )
+        tile_artifacts = []
+        hierarchical_artifacts = [artifact]
+    else:
+        artifact = write_tile_embeddings(
+            "slide-a",
+            np.zeros((1, 4), dtype=np.float32),
+            output_dir=tmp_path,
+            output_format="pt",
+            metadata={"image_path": "/tmp/slide-a.svs"},
+        )
+        tile_artifacts = [artifact]
+        hierarchical_artifacts = []
+
+    inference._update_process_list_after_embedding(
+        process_list_path,
+        successful_slides=[slide],
+        persist_tile_embeddings=not persist_hierarchical_embeddings,
+        persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+        include_slide_embeddings=False,
+        tile_artifacts=tile_artifacts,
+        hierarchical_artifacts=hierarchical_artifacts,
+        slide_artifacts=[],
+    )
+
+    recorded = pd.read_csv(process_list_path).set_index("sample_id")
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "feature_path"] == str(artifact.path)
+
+
+def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distributed_path(
+    monkeypatch,
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    monkeypatch.chdir(tmp_path)
+    output_dir = Path("relative-output")
+    slide_path = tmp_path / "slide-a.svs"
+    process_list_path = output_dir / "process_list.csv"
+    process_list_path.parent.mkdir(parents=True, exist_ok=True)
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+    slide_record = make_slide("slide-a", image_path=slide_path)
+    tiling_result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+        coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+        coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
+    )
+    embedded = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((1, 4), dtype=np.float32),
+        slide_embedding=np.zeros((8,), dtype=np.float32),
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=slide_path,
+        mask_path=None,
+        num_tiles=1,
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide_record], [tiling_result], process_list_path),
+    )
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_select_embedding_path", lambda **kwargs: [embedded])
+
+    def fake_persist_embedded_slide(model, embedded_slide, tiling_result, *, preprocessing, execution):
+        run_dir = Path(execution.output_dir)
+        tile_artifact = write_tile_embeddings(
+            embedded_slide.sample_id,
+            embedded_slide.tile_embeddings,
+            output_dir=run_dir,
+            output_format=execution.output_format,
+            metadata={"image_path": str(embedded_slide.image_path)},
+        )
+        slide_artifact = write_slide_embeddings(
+            embedded_slide.sample_id,
+            embedded_slide.slide_embedding,
+            output_dir=run_dir,
+            output_format=execution.output_format,
+            metadata={"image_path": str(embedded_slide.image_path)},
+        )
+        return tile_artifact, slide_artifact
+
+    monkeypatch.setattr(inference, "_persist_embedded_slide", fake_persist_embedded_slide)
+
+    model = Model.from_preset("prism")
+    result = model.embed_slide(
+        slide_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=output_dir, num_gpus=2),
+    )
+
+    assert result.sample_id == "slide-a"
+    recorded = pd.read_csv(process_list_path).set_index("sample_id")
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "feature_path"] == str((tmp_path / "relative-output" / "slide_embeddings" / "slide-a.pt").resolve())
 
 
 def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(monkeypatch, tmp_path: Path):
@@ -2427,6 +2619,28 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         ),
     )
     assert "collator_kwargs" in captured
+
+
+def test_load_model_auto_prefers_cuda_when_available(monkeypatch):
+    import torch
+    import slide2vec.inference as inference
+    import slide2vec.encoders.base as base
+
+    class FakeModel:
+        def eval(self):
+            return self
+
+        def to(self, device):
+            self.device = torch.device(device)
+            return self
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(base.timm, "create_model", lambda *args, **kwargs: FakeModel())
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    loaded = inference.load_model(name="h0-mini", device="auto")
+
+    assert loaded.device == torch.device("cuda")
 
 
 def test_scale_coordinates_scales_down():

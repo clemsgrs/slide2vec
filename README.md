@@ -48,6 +48,23 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 
 By default, `ExecutionOptions()` uses all available GPUs. Set `ExecutionOptions(num_gpus=4)` when you want to cap the sharding explicitly.
 
+### Hierarchical Feature Extraction
+
+Tile embeddings can be spatially grouped into regions for downstream models that consume region-level structure. Enable it by setting `region_tile_multiple` on `PreprocessingConfig`:
+
+```python
+preprocessing = PreprocessingConfig(
+    target_spacing_um=0.5,
+    target_tile_size_px=224,
+    region_tile_multiple=6,  # 6x6 tiles per region
+)
+embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
+```
+
+Hierarchical outputs have shape `(num_regions, tiles_per_region, feature_dim)` and are written to `hierarchical_embeddings/` when persisted.
+
+See [`docs/python-api.md`](docs/python-api.md) for details.
+
 ### Input Manifest
 
 Manifest-driven runs use the schema below. `mask_path` and `spacing_at_level_0` are optional.
@@ -68,6 +85,8 @@ The package writes explicit artifact directories:
 
 - `tile_embeddings/<sample_id>.pt` or `.npz`
 - `tile_embeddings/<sample_id>.meta.json`
+- `hierarchical_embeddings/<sample_id>.pt` or `.npz` (when `region_tile_multiple` is set)
+- `hierarchical_embeddings/<sample_id>.meta.json`
 - `slide_embeddings/<sample_id>.pt` or `.npz`
 - `slide_embeddings/<sample_id>.meta.json`
 - optional `slide_latents/<sample_id>.pt` or `.npz`
@@ -76,7 +95,7 @@ The package writes explicit artifact directories:
 
 ### Supported Models
 
-`slide2vec` currently ships preset configs for 20 tile-level models and 3 slide-level models.  
+`slide2vec` currently ships preset configs for 16 tile-level models and 3 slide-level models.  
 For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
 
 ## CLI

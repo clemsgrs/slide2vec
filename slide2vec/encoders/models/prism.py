@@ -3,7 +3,7 @@
 import torch
 from transformers import AutoModel
 
-from slide2vec.encoders.base import SlideEncoder, resolve_requested_output_variant
+from slide2vec.encoders.base import SlideEncoder, preferred_default_device, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
 
 
@@ -21,7 +21,7 @@ from slide2vec.encoders.registry import register_encoder
 class PrismSlideEncoder(SlideEncoder):
     def __init__(self, *, output_variant: str | None = None):
         self._model = AutoModel.from_pretrained("paige-ai/Prism", trust_remote_code=True).eval()
-        self._device = torch.device("cpu")
+        self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
     @property
