@@ -2,7 +2,12 @@
 
 import torch
 
-from slide2vec.encoders.base import SlideEncoder, TimmTileEncoder, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    SlideEncoder,
+    TimmTileEncoder,
+    preferred_default_device,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
 
 
@@ -43,7 +48,7 @@ class GigaPathSlideEncoder(SlideEncoder):
             "gigapath_slide_enc12l768d",
             1536,
         )
-        self._device = torch.device("cpu")
+        self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
     @property

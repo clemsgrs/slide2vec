@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 
@@ -82,7 +83,7 @@ def test_load_slide_manifest_rejects_legacy_mask_columns(tmp_path: Path):
         helper.load_slide_manifest(manifest)
 
 
-def test_load_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
+def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 
     process_list = tmp_path / "process_list.csv"
@@ -91,11 +92,35 @@ def test_load_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
         "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
-    df = helper.load_process_df(
-        process_list,
-        include_feature_status=True,
-        include_aggregation_status=True,
+    df = helper.load_tiling_process_df(process_list)
+    assert list(df.columns) == [
+        "sample_id",
+        "image_path",
+        "mask_path",
+        "spacing_at_level_0",
+        "tiling_status",
+        "num_tiles",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
+        "mask_preview_path",
+        "tiling_preview_path",
+        "error",
+        "traceback",
+    ]
+    assert df.loc[0, "mask_path"] == "/data/slide-1-mask.png"
+
+
+def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    process_list = tmp_path / "process_list.csv"
+    process_list.write_text(
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        encoding="utf-8",
     )
+    df = helper.load_embedding_process_df(process_list, include_aggregation_status=True)
     assert list(df.columns) == [
         "sample_id",
         "image_path",
@@ -109,14 +134,16 @@ def test_load_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
         "mask_preview_path",
         "tiling_preview_path",
         "feature_status",
+        "feature_path",
         "aggregation_status",
         "error",
         "traceback",
     ]
-    assert df.loc[0, "mask_path"] == "/data/slide-1-mask.png"
+    assert df.loc[0, "feature_status"] == "tbp"
+    assert pd.isna(df.loc[0, "feature_path"])
 
 
-def test_load_process_df_rejects_legacy_mask_columns(tmp_path: Path):
+def test_load_tiling_process_df_rejects_legacy_mask_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 
     process_list = tmp_path / "legacy-process_list.csv"
@@ -127,7 +154,7 @@ def test_load_process_df_rejects_legacy_mask_columns(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="Unsupported process_list.csv schema"):
-        helper.load_process_df(process_list)
+        helper.load_tiling_process_df(process_list)
 
 
 def test_load_tiling_result_from_row_restores_preview_paths(monkeypatch):

@@ -1,4 +1,6 @@
 
+import logging
+import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
@@ -156,10 +158,23 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
-        limit = slurm_cpu_limit()
-        if limit is not None:
-            object.__setattr__(self, "num_workers", min(self.num_workers, limit))
-            object.__setattr__(self, "num_preprocessing_workers", min(self.num_preprocessing_workers, limit))
+        cpu_count = os.cpu_count() or 1
+        slurm_limit = slurm_cpu_limit()
+        cap = min(cpu_count, slurm_limit) if slurm_limit is not None else cpu_count
+        capped_num_workers = min(self.num_workers, cap)
+        capped_num_preprocessing_workers = min(self.num_preprocessing_workers, cap)
+        object.__setattr__(self, "num_workers", capped_num_workers)
+        object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
+        logger = logging.getLogger(__name__)
+        cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
+        logger.info(
+            "ExecutionOptions: num_workers=%d, num_preprocessing_workers=%d "
+            "(cap=%d via %s)",
+            capped_num_workers,
+            capped_num_preprocessing_workers,
+            cap,
+            cap_source,
+        )
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

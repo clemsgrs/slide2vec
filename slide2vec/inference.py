@@ -51,7 +51,13 @@ from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
 from slide2vec.utils.coordinates import coordinate_arrays
-from slide2vec.utils.tiling_io import load_process_df, load_slide_manifest, load_tiling_result_from_row, _optional_float
+from slide2vec.utils.tiling_io import (
+    load_embedding_process_df,
+    load_slide_manifest,
+    load_tiling_process_df,
+    load_tiling_result_from_row,
+    _optional_float,
+)
 from slide2vec.utils.utils import slurm_cpu_limit
 
 
@@ -167,7 +173,7 @@ def _num_embedding_items(tiling_result, preprocessing: PreprocessingConfig | Non
 
 
 def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
-    cpu_count = os.cpu_count() or 4
+    cpu_count = os.cpu_count() or 1
     worker_budget = cpu_count
     details = [f"cpu_count={cpu_count}"]
     slurm_limit = slurm_cpu_limit()
@@ -262,6 +268,10 @@ def embed_slides(
         slide_count=len(slide_records),
         output_dir=str(execution.output_dir or ""),
     )
+    if execution.output_dir is not None:
+        out = Path(execution.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        _write_embedding_request(model, preprocessing, execution, out)
     with _embedding_work_dir(execution.output_dir) as work_dir:
         try:
             emit_progress("tiling.started", slide_count=len(slide_records))
@@ -307,13 +317,36 @@ def embed_slides(
                 on_embedded_slide=local_persist_callback,
             )
             if execution.output_dir is not None and execution.num_gpus > 1:
+                tile_artifacts: list[TileEmbeddingArtifact] = []
+                hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
+                slide_artifacts: list[SlideEmbeddingArtifact] = []
                 for embedded_slide, tiling_result in zip(embedded_slides, embeddable_tiling_results):
-                    _persist_embedded_slide(
+                    tile_artifact, slide_artifact = _persist_embedded_slide(
                         model,
                         embedded_slide,
                         tiling_result,
                         preprocessing=preprocessing,
                         execution=execution,
+                    )
+                    if isinstance(tile_artifact, HierarchicalEmbeddingArtifact):
+                        hierarchical_artifacts.append(tile_artifact)
+                    elif tile_artifact is not None:
+                        tile_artifacts.append(tile_artifact)
+                    if slide_artifact is not None:
+                        slide_artifacts.append(slide_artifact)
+                if process_list_path.is_file():
+                    persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
+                    persist_hierarchical_embeddings = _is_hierarchical_preprocessing(preprocessing)
+                    include_slide_embeddings = model.level == "slide"
+                    _update_process_list_after_embedding(
+                        process_list_path,
+                        successful_slides=embeddable_slides,
+                        persist_tile_embeddings=persist_tile_embeddings,
+                        persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+                        include_slide_embeddings=include_slide_embeddings,
+                        tile_artifacts=tile_artifacts,
+                        hierarchical_artifacts=hierarchical_artifacts,
+                        slide_artifacts=slide_artifacts,
                     )
             emit_progress(
                 "embedding.finished",
@@ -518,6 +551,7 @@ def run_pipeline(
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_preprocessing = _resolve_model_preprocessing(model, preprocessing)
+    _write_embedding_request(model, resolved_preprocessing, execution, output_dir)
     emit_progress(
         "run.started",
         model_name=model.name,
@@ -598,6 +632,7 @@ def run_pipeline(
         persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
         persist_hierarchical_embeddings = _is_hierarchical_preprocessing(resolved_preprocessing)
         include_slide_embeddings = model.level == "slide"
+        include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
         pending_slides, pending_tiling_results = _pending_local_embedding_records(
             embeddable_slides,
             embeddable_tiling_results,
@@ -630,7 +665,7 @@ def run_pipeline(
             embeddable_slides,
             output_dir=output_dir,
             output_format=execution.output_format,
-            include_tile_embeddings=persist_tile_embeddings,
+            include_tile_embeddings=include_tile_embeddings,
             include_hierarchical_embeddings=persist_hierarchical_embeddings,
             include_slide_embeddings=include_slide_embeddings,
         )
@@ -683,6 +718,7 @@ def run_pipeline_with_coordinates(
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_preprocessing = _resolve_model_preprocessing(model, preprocessing)
+    _write_embedding_request(model, resolved_preprocessing, execution, output_dir)
     available_slides, available_tilings = load_successful_tiled_slides(coordinates_dir)
     if slides is None:
         slide_records = available_slides
@@ -878,9 +914,8 @@ def _completed_local_embedding_sample_ids(
     include_slide_embeddings: bool,
     save_latents: bool,
 ) -> set[str]:
-    process_df = load_process_df(
+    process_df = load_embedding_process_df(
         process_list_path,
-        include_feature_status=persist_tile_embeddings or persist_hierarchical_embeddings or include_slide_embeddings,
         include_aggregation_status=include_slide_embeddings,
     )
     completed_ids: set[str] = set()
@@ -916,15 +951,15 @@ def _has_complete_local_embedding_outputs(
     include_slide_embeddings: bool,
     save_latents: bool,
 ) -> bool:
-    if persist_tile_embeddings:
-        tile_artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
-        tile_metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
-        if not tile_artifact_path.is_file() or not tile_metadata_path.is_file():
-            return False
     if persist_hierarchical_embeddings:
         hierarchical_artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
         hierarchical_metadata_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.meta.json"
         if not hierarchical_artifact_path.is_file() or not hierarchical_metadata_path.is_file():
+            return False
+    elif persist_tile_embeddings:
+        tile_artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
+        tile_metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
+        if not tile_artifact_path.is_file() or not tile_metadata_path.is_file():
             return False
     if include_slide_embeddings:
         slide_artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
@@ -955,6 +990,7 @@ def _collect_distributed_pipeline_artifacts(
     persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
     persist_hierarchical_embeddings = _is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
+    include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
     _run_distributed_embedding_stage(
         model=model,
         successful_slides=successful_slides,
@@ -966,7 +1002,7 @@ def _collect_distributed_pipeline_artifacts(
         successful_slides,
         output_dir=output_dir,
         output_format=execution.output_format,
-        include_tile_embeddings=persist_tile_embeddings,
+        include_tile_embeddings=include_tile_embeddings,
         include_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
     )
@@ -2151,7 +2187,7 @@ def _prepare_tiled_slides(
         slide_records,
         tiling_artifacts=tiling_artifacts,
     )
-    process_df = load_process_df(process_list_path)
+    process_df = load_tiling_process_df(process_list_path)
     tiling_results = []
     successful_slides = []
     for slide in slide_records:
@@ -2162,6 +2198,12 @@ def _prepare_tiled_slides(
         if "tiling_status" not in row_dict or row_dict["tiling_status"] != "success":
             error_message = row_dict["error"] if "error" in row_dict else ""
             raise RuntimeError(f"Tiling failed for {slide.sample_id}: {error_message}")
+        num_tiles = row_dict.get("num_tiles", 0)
+        if num_tiles == 0 or pd.isna(row_dict.get("coordinates_npz_path")):
+            logging.getLogger(__name__).warning(
+                f"Skipping {slide.sample_id}: no tiles extracted"
+            )
+            continue
         successful_slides.append(slide)
         tiling_results.append(load_tiling_result_from_row(row_dict))
     return successful_slides, tiling_results, process_list_path
@@ -2258,17 +2300,22 @@ def _record_slide_metadata_in_process_list(
     *,
     tiling_artifacts: Sequence[Any],
 ) -> None:
+    def _resolve_path_str(value: Any) -> str | None:
+        if value is None or pd.isna(value):
+            return None
+        return str(Path(value).resolve())
+
     spacing_by_sample_id = {
         slide.sample_id: slide.spacing_at_level_0
         for slide in slide_records
         if slide.spacing_at_level_0 is not None
     }
     mask_preview_by_sample_id = {
-        str(artifact.sample_id): artifact.mask_preview_path
+        str(artifact.sample_id): _resolve_path_str(artifact.mask_preview_path)
         for artifact in tiling_artifacts
     }
     tiling_preview_by_sample_id = {
-        str(artifact.sample_id): artifact.tiling_preview_path
+        str(artifact.sample_id): _resolve_path_str(artifact.tiling_preview_path)
         for artifact in tiling_artifacts
     }
     process_df = pd.read_csv(process_list_path)
@@ -2425,7 +2472,7 @@ def _run_distributed_embedding_stage(
 ) -> None:
     if not successful_slides:
         return
-    request_path = output_dir / "distributed_embedding_request.json"
+    request_path = output_dir / "embedding_request.json"
     progress_events_path = output_dir / "logs" / "pipeline_worker.progress.jsonl"
     _reset_progress_event_logs(progress_events_path)
     request_payload = _build_pipeline_worker_request_payload(
@@ -2654,9 +2701,24 @@ def _build_pipeline_worker_request_payload(
     return {
         "model": _serialize_model(model),
         "preprocessing": _serialize_preprocessing(preprocessing),
-        "execution": _serialize_execution(execution),
+        "execution": _serialize_execution(execution, preprocessing=preprocessing),
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
+
+
+def _write_embedding_request(
+    model,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    output_dir: Path,
+) -> None:
+    payload = {
+        "model": _serialize_model(model),
+        "preprocessing": _serialize_preprocessing(preprocessing),
+        "execution": _serialize_execution(execution, preprocessing=preprocessing),
+    }
+    request_path = output_dir / "embedding_request.json"
+    request_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _build_direct_embed_worker_request_payload(
@@ -2674,7 +2736,7 @@ def _build_direct_embed_worker_request_payload(
         "strategy": strategy,
         "model": _serialize_model(model),
         "preprocessing": _serialize_preprocessing(preprocessing),
-        "execution": _serialize_execution(execution),
+        "execution": _serialize_execution(execution, preprocessing=preprocessing),
         "coordination_dir": str(coordination_dir),
         "sample_id": sample_id,
         "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
@@ -2816,12 +2878,20 @@ def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, An
     }
 
 
-def _serialize_execution(execution: ExecutionOptions) -> dict[str, Any]:
+def _serialize_execution(
+    execution: ExecutionOptions,
+    *,
+    preprocessing: PreprocessingConfig | None = None,
+) -> dict[str, Any]:
+    effective_num_workers = execution.num_workers
+    if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
     return {
         "output_dir": str(execution.output_dir) if execution.output_dir is not None else None,
         "output_format": execution.output_format,
         "batch_size": execution.batch_size,
-        "num_workers": execution.num_workers,
+        "num_workers": effective_num_workers,
+        "num_preprocessing_workers": execution.num_preprocessing_workers,
         "num_gpus": execution.num_gpus,
         "precision": execution.precision,
         "prefetch_factor": execution.prefetch_factor,
@@ -2995,27 +3065,45 @@ def _update_process_list_after_embedding(
     hierarchical_artifacts: Sequence[HierarchicalEmbeddingArtifact],
     slide_artifacts: Sequence[SlideEmbeddingArtifact],
 ) -> None:
+    def _resolve_path_str(value: Any) -> str | None:
+        if value is None or pd.isna(value):
+            return None
+        return str(Path(value).resolve())
+
     df = pd.read_csv(process_list_path)
     if "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
+    if "feature_path" not in df.columns:
+        df["feature_path"] = [None] * len(df)
     if include_slide_embeddings and "aggregation_status" not in df.columns:
         df["aggregation_status"] = ["tbp"] * len(df)
     tile_success_ids = {artifact.sample_id for artifact in tile_artifacts}
     hierarchical_success_ids = {artifact.sample_id for artifact in hierarchical_artifacts}
     slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
+    if slide_artifacts:
+        feature_path_by_sample_id = {artifact.sample_id: _resolve_path_str(artifact.path) for artifact in slide_artifacts}
+    elif persist_hierarchical_embeddings:
+        feature_path_by_sample_id = {
+            artifact.sample_id: _resolve_path_str(artifact.path) for artifact in hierarchical_artifacts
+        }
+    elif persist_tile_embeddings:
+        feature_path_by_sample_id = {
+            artifact.sample_id: _resolve_path_str(artifact.path) for artifact in tile_artifacts
+        }
+    else:
+        feature_path_by_sample_id = {}
     for slide in successful_slides:
         mask = df["sample_id"].astype(str) == slide.sample_id
-        df.loc[mask, "feature_status"] = (
-            "success"
-            if (
-                (not persist_tile_embeddings or slide.sample_id in tile_success_ids)
-                and (
-                    not persist_hierarchical_embeddings
-                    or slide.sample_id in hierarchical_success_ids
-                )
-            )
-            else "error"
-        )
+        if persist_hierarchical_embeddings:
+            feature_status = "success" if slide.sample_id in hierarchical_success_ids else "error"
+        elif persist_tile_embeddings:
+            feature_status = "success" if slide.sample_id in tile_success_ids else "error"
+        else:
+            feature_status = "success"
+        df.loc[mask, "feature_status"] = feature_status
+        mapped_feature_path = feature_path_by_sample_id.get(slide.sample_id)
+        if mapped_feature_path is not None:
+            df.loc[mask, "feature_path"] = mapped_feature_path
         if include_slide_embeddings:
             df.loc[mask, "aggregation_status"] = (
                 "success" if slide.sample_id in slide_success_ids else "error"
@@ -3025,11 +3113,17 @@ def _update_process_list_after_embedding(
 
 def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:
     base_dir = Path(output_dir)
-    process_df = load_process_df(base_dir / "process_list.csv")
+    process_df = load_tiling_process_df(base_dir / "process_list.csv")
     successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
     slide_records: list[SlideSpec] = []
     tiling_results: list[Any] = []
     for row in successful_rows.to_dict("records"):
+        num_tiles = row.get("num_tiles", 0)
+        if num_tiles == 0 or pd.isna(row.get("coordinates_npz_path")):
+            logging.getLogger(__name__).warning(
+                f"Skipping {row['sample_id']}: no tiles extracted"
+            )
+            continue
         mask_path = row["mask_path"] if "mask_path" in row else None
         spacing_at_level_0 = row["spacing_at_level_0"] if "spacing_at_level_0" in row else None
         slide_records.append(

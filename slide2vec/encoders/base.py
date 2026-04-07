@@ -9,6 +9,10 @@ from timm.data import create_transform, resolve_data_config
 from torch import Tensor
 
 
+def preferred_default_device() -> torch.device:
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def resolve_requested_output_variant(
     output_variant: str | None,
     *,
@@ -105,7 +109,7 @@ class TimmTileEncoder(TileEncoder):
         defaults = {"pretrained": True, "num_classes": 0}
         defaults.update(timm_kwargs)
         self._model = timm.create_model(model_name, **defaults).eval()
-        self._device = torch.device("cpu")
+        self._device = preferred_default_device()
         if not hasattr(self, "_output_variant"):
             self._output_variant = resolve_requested_output_variant(output_variant)
 

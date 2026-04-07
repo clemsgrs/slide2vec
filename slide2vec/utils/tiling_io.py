@@ -18,6 +18,38 @@ BASE_PROCESS_COLUMNS = (
     "error",
     "traceback",
 )
+BASE_TILING_ORDERED_COLUMNS = (
+    "sample_id",
+    "image_path",
+    "mask_path",
+    "spacing_at_level_0",
+    "tiling_status",
+    "num_tiles",
+    "coordinates_npz_path",
+    "coordinates_meta_path",
+    "tiles_tar_path",
+    "mask_preview_path",
+    "tiling_preview_path",
+    "error",
+    "traceback",
+)
+BASE_EMBEDDING_ORDERED_COLUMNS = (
+    "sample_id",
+    "image_path",
+    "mask_path",
+    "spacing_at_level_0",
+    "tiling_status",
+    "num_tiles",
+    "coordinates_npz_path",
+    "coordinates_meta_path",
+    "tiles_tar_path",
+    "mask_preview_path",
+    "tiling_preview_path",
+    "feature_status",
+    "feature_path",
+    "error",
+    "traceback",
+)
 
 
 def _optional_path(value: Any) -> Path | None:
@@ -77,12 +109,7 @@ def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     ]
 
 
-def load_process_df(
-    process_list_path: str | Path,
-    *,
-    include_feature_status: bool = False,
-    include_aggregation_status: bool = False,
-) -> pd.DataFrame:
+def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
     process_list_path = Path(process_list_path)
     df = pd.read_csv(process_list_path)
     legacy_mask_columns = sorted(
@@ -96,7 +123,6 @@ def load_process_df(
             "Unsupported process_list.csv schema in "
             f"{process_list_path}; missing required columns: {', '.join(missing)}"
         )
-    needs_feature_status = include_feature_status or include_aggregation_status
     if "spacing_at_level_0" not in df.columns:
         df["spacing_at_level_0"] = [None] * len(df)
     if "tiles_tar_path" not in df.columns:
@@ -105,28 +131,31 @@ def load_process_df(
         df["mask_preview_path"] = [None] * len(df)
     if "tiling_preview_path" not in df.columns:
         df["tiling_preview_path"] = [None] * len(df)
-    if needs_feature_status and "feature_status" not in df.columns:
+    return df
+
+
+def load_tiling_process_df(
+    process_list_path: str | Path,
+) -> pd.DataFrame:
+    df = _load_base_process_df(process_list_path)
+    return df[list(BASE_TILING_ORDERED_COLUMNS)]
+
+
+def load_embedding_process_df(
+    process_list_path: str | Path,
+    *,
+    include_aggregation_status: bool = False,
+) -> pd.DataFrame:
+    df = _load_base_process_df(process_list_path)
+    if "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
+    if "feature_path" not in df.columns:
+        df["feature_path"] = [None] * len(df)
     if include_aggregation_status and "aggregation_status" not in df.columns:
         df["aggregation_status"] = ["tbp"] * len(df)
-    ordered_columns = [
-        "sample_id",
-        "image_path",
-        "mask_path",
-        "spacing_at_level_0",
-        "tiling_status",
-        "num_tiles",
-        "coordinates_npz_path",
-        "coordinates_meta_path",
-    ]
-    ordered_columns.append("tiles_tar_path")
-    ordered_columns.append("mask_preview_path")
-    ordered_columns.append("tiling_preview_path")
-    if needs_feature_status:
-        ordered_columns.append("feature_status")
+    ordered_columns = list(BASE_EMBEDDING_ORDERED_COLUMNS)
     if include_aggregation_status:
-        ordered_columns.append("aggregation_status")
-    ordered_columns.extend(["error", "traceback"])
+        ordered_columns.insert(-2, "aggregation_status")
     return df[ordered_columns]
 
 

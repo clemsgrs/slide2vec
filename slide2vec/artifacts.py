@@ -79,7 +79,7 @@ def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
 def _setup_artifact_paths(
     output_dir: str | Path, subdir: str, sample_id: str, output_format: str
 ) -> tuple[Path, Path]:
-    base_dir = Path(output_dir) / subdir
+    base_dir = (Path(output_dir) / subdir).resolve()
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / f"{sample_id}.{output_format}", base_dir / f"{sample_id}.meta.json"
 

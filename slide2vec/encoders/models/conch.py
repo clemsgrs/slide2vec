@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 from transformers import AutoModel
 
-from slide2vec.encoders.base import TileEncoder, resolve_requested_output_variant
+from slide2vec.encoders.base import TileEncoder, preferred_default_device, resolve_requested_output_variant
 from slide2vec.encoders.registry import register_encoder
 
 
@@ -33,7 +33,7 @@ class CONCH(TileEncoder):
             "conch_ViT-B-16", "hf_hub:MahmoodLab/conch"
         )
         self._model.eval()
-        self._device = torch.device("cpu")
+        self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
     def get_transform(self) -> Callable:
@@ -70,7 +70,7 @@ class CONCHv15(TileEncoder):
         titan = AutoModel.from_pretrained("MahmoodLab/TITAN", trust_remote_code=True)
         self._model, self._transform = titan.return_conch()
         self._model.eval()
-        self._device = torch.device("cpu")
+        self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
     def get_transform(self) -> Callable:

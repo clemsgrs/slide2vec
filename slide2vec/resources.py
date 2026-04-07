@@ -5,7 +5,10 @@ from contextlib import contextmanager
 
 
 def config_resource(*parts: str):
-    return files("slide2vec").joinpath("configs", *parts).with_suffix(".yaml")
+    path = files("slide2vec").joinpath("configs")
+    for part in parts:
+        path = path.joinpath(part)
+    return path.with_suffix(".yaml")
 
 
 def load_config(*parts: str):
