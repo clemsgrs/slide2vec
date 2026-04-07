@@ -21,8 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "hs2p>=3.1.2",
+    "hs2p[asap,cucim,openslide,vips]>=3.1.2",
     "omegaconf",
+    "matplotlib",
     "numpy<2",
     "pandas",
     "pillow",
@@ -44,18 +45,6 @@ Homepage = "https://github.com/clemsgrs/slide2vec"
 slide2vec = "slide2vec.cli:main"
 
 [project.optional-dependencies]
-openslide = [
-    "hs2p[openslide]>=3.1.2",
-]
-asap = [
-    "hs2p[asap]>=3.1.2",
-]
-cucim = [
-    "hs2p[cucim]>=3.1.2",
-]
-vips = [
-    "hs2p[vips]>=3.1.2",
-]
 hoptimus = [
     "torch>=2.0",
     "torchvision>=0.15.0",
@@ -107,6 +96,41 @@ titan = [
     "einops==0.6.1",
     "einops-exts==0.0.4",
     "transformers==4.46.0",
+]
+fm = [
+    "omegaconf>=2.3.0",
+    "matplotlib",
+    "numpy<2",
+    "pandas",
+    "pillow",
+    "rich",
+    "hs2p[asap,cucim,openslide,vips]>=3.1.2",
+    "wandb",
+    "torch>=2.3,<2.8",
+    "torchvision>=0.18.0",
+    "einops>=0.8.0",
+    "timm>=1.0.3",
+    "huggingface_hub>=0.30.0,<1.0",
+    "environs",
+    "einops-exts>=0.0.4",
+    "transformers>=4.53",
+    "sacremoses",
+    "xformers>=0.0.31",
+    "scipy>=1.8.1",
+    "scikit-image>=0.19.3",
+    "musk @ git+https://github.com/lilab-stanford/MUSK.git",
+    "conch @ git+https://github.com/Mahmoodlab/CONCH.git",
+    "torchmetrics>=0.10.3",
+    "fvcore",
+    "iopath",
+    "webdataset",
+    "scikit-survival",
+    "scikit-learn",
+    "fairscale",
+    "packaging==23.2",
+    "ninja==1.11.1.1",
+    "psutil<6",
+    "gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
 ]
 testing = [
     "pytest>=6.0",

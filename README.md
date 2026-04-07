@@ -8,9 +8,10 @@
 
 ```shell
 pip install slide2vec
+pip install "slide2vec[fm]"
 ```
 
-`slide2vec` keeps the base install focused on the core package surface. Preset-specific optional dependencies are declared in `pyproject.toml` alongside the relevant model families.
+`slide2vec` keeps the base install focused on the core package surface. Use `slide2vec[fm]` when you want FM-specific dependencies.
 
 ## Python API
 
