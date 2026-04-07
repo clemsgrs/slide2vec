@@ -105,10 +105,6 @@ def _resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_re
     multiple = int(preprocessing.region_tile_multiple)
     if target_region_size_px % multiple != 0:
         raise ValueError("target_region_size_px must be divisible by region_tile_multiple")
-    if effective_region_size_px % multiple != 0:
-        raise ValueError("effective_region_size_px must be divisible by region_tile_multiple")
-    if tile_size_lv0 % multiple != 0:
-        raise ValueError("tile_size_lv0 must be divisible by region_tile_multiple")
     return {
         "region_tile_multiple": multiple,
         "tiles_per_region": multiple * multiple,
@@ -131,8 +127,6 @@ def _build_hierarchical_index(
     if multiple < 2:
         raise ValueError("region_tile_multiple must be at least 2")
     tile_size_lv0 = int(getattr(tiling_result, "tile_size_lv0"))
-    if tile_size_lv0 % multiple != 0:
-        raise ValueError("tile_size_lv0 must be divisible by region_tile_multiple")
     subtile_size_lv0 = tile_size_lv0 // multiple
     tiles_per_region = multiple * multiple
     if num_regions == 0:
