@@ -160,12 +160,14 @@ def load_embedding_process_df(
 
 
 def load_tiling_result_from_row(row):
+    coordinates_npz_path = _optional_path(row.get("coordinates_npz_path"))
+    coordinates_meta_path = Path(row["coordinates_meta_path"])
     tiling_result = load_tiling_result(
-        coordinates_npz_path=Path(row["coordinates_npz_path"]),
-        coordinates_meta_path=Path(row["coordinates_meta_path"]),
+        coordinates_npz_path=coordinates_npz_path,
+        coordinates_meta_path=coordinates_meta_path,
     )
-    setattr(tiling_result, "coordinates_npz_path", Path(row["coordinates_npz_path"]))
-    setattr(tiling_result, "coordinates_meta_path", Path(row["coordinates_meta_path"]))
+    setattr(tiling_result, "coordinates_npz_path", coordinates_npz_path)
+    setattr(tiling_result, "coordinates_meta_path", coordinates_meta_path)
     setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
     setattr(tiling_result, "mask_preview_path", _optional_path(row.get("mask_preview_path")))
     setattr(tiling_result, "tiling_preview_path", _optional_path(row.get("tiling_preview_path")))

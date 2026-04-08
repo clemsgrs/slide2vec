@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextlib import nullcontext
 import time
 from pathlib import Path
 
@@ -6,7 +7,9 @@ import numpy as np
 import torch
 
 from hs2p import TilingResult
+from hs2p.utils.stderr import run_with_filtered_stderr
 from hs2p.wsi.streaming.plans import build_supertile_index
+from slide2vec.utils.log_utils import suppress_c_stderr
 
 
 class SuperTileBatchSampler:
@@ -139,15 +142,17 @@ class WSITileReader:
                 torch.empty((0, 3, ts, ts), dtype=torch.uint8),
                 {"reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
-        was_closed = self._reader is None
-        open_start = time.perf_counter()
-        self._ensure_open()
-        reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
-        read_start = time.perf_counter()
-        if self._use_supertiles:
-            tensor = self._read_batch_supertiles(tile_indices)
-        else:
-            tensor = self._read_batch_simple(tile_indices)
+        stderr_context = suppress_c_stderr() if self._backend == "cucim" else nullcontext()
+        with stderr_context:
+            was_closed = self._reader is None
+            open_start = time.perf_counter()
+            self._ensure_open()
+            reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
+            read_start = time.perf_counter()
+            if self._use_supertiles:
+                tensor = self._read_batch_supertiles(tile_indices)
+            else:
+                tensor = self._read_batch_simple(tile_indices)
         reader_read_ms = (time.perf_counter() - read_start) * 1000.0
         return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
 
@@ -260,11 +265,16 @@ class OnTheFlyBatchTileCollator:
                 torch.empty((0, 3, self.tile_size, self.tile_size), dtype=torch.uint8),
                 {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
-        worker_start = time.perf_counter()
-        tile_indices = np.asarray(batch_indices, dtype=np.int64)
-        tensor, timing = self._reader.read_batch_with_timing(tile_indices)
-        timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
-        return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing
+        def _run_batch():
+            worker_start = time.perf_counter()
+            tile_indices = np.asarray(batch_indices, dtype=np.int64)
+            tensor, timing = self._reader.read_batch_with_timing(tile_indices)
+            timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
+            return torch.as_tensor(tile_indices, dtype=torch.long), tensor, timing
+
+        if getattr(self._reader, "_backend", None) == "cucim":
+            return run_with_filtered_stderr(_run_batch)
+        return _run_batch()
 
 
 class WSIRegionReader:
@@ -320,12 +330,14 @@ class WSIRegionReader:
                 torch.empty((0, 3, self._region_size_px, self._region_size_px), dtype=torch.uint8),
                 {"reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
-        was_closed = self._reader is None
-        open_start = time.perf_counter()
-        self._ensure_open()
-        reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
-        read_start = time.perf_counter()
-        regions = self._read_regions_batch(locations)
+        stderr_context = suppress_c_stderr() if self._backend == "cucim" else nullcontext()
+        with stderr_context:
+            was_closed = self._reader is None
+            open_start = time.perf_counter()
+            self._ensure_open()
+            reader_open_ms = (time.perf_counter() - open_start) * 1000.0 if was_closed else 0.0
+            read_start = time.perf_counter()
+            regions = self._read_regions_batch(locations)
         reader_read_ms = (time.perf_counter() - read_start) * 1000.0
         batch = np.stack([np.asarray(region)[:, :, :3] for region in regions], axis=0)
         tensor = torch.from_numpy(batch).permute(0, 3, 1, 2).contiguous()
@@ -385,17 +397,22 @@ class OnTheFlyHierarchicalBatchCollator:
                 torch.empty((0, 3, self._tile_size, self._tile_size), dtype=torch.uint8),
                 {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
-        worker_start = time.perf_counter()
-        flat_indices = np.asarray(batch_indices, dtype=np.int64)
-        requested_regions = self._region_index[flat_indices]
-        unique_regions, inverse = np.unique(requested_regions, return_inverse=True)
-        locations = [self._region_locations[int(region)] for region in unique_regions]
-        region_tensor, timing = self._reader.read_batch_with_timing(locations)
-        unfolded = _unfold_region_tensor_uint8(region_tensor, self._tile_size)
-        subtile_indices = self._subtile_index_within_region[flat_indices]
-        out = unfolded[torch.as_tensor(inverse, dtype=torch.long), torch.as_tensor(subtile_indices, dtype=torch.long)]
-        timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
-        return torch.as_tensor(flat_indices, dtype=torch.long), out, timing
+        def _run_batch():
+            worker_start = time.perf_counter()
+            flat_indices = np.asarray(batch_indices, dtype=np.int64)
+            requested_regions = self._region_index[flat_indices]
+            unique_regions, inverse = np.unique(requested_regions, return_inverse=True)
+            locations = [self._region_locations[int(region)] for region in unique_regions]
+            region_tensor, timing = self._reader.read_batch_with_timing(locations)
+            unfolded = _unfold_region_tensor_uint8(region_tensor, self._tile_size)
+            subtile_indices = self._subtile_index_within_region[flat_indices]
+            out = unfolded[torch.as_tensor(inverse, dtype=torch.long), torch.as_tensor(subtile_indices, dtype=torch.long)]
+            timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
+            return torch.as_tensor(flat_indices, dtype=torch.long), out, timing
+
+        if getattr(self._reader, "_backend", None) == "cucim":
+            return run_with_filtered_stderr(_run_batch)
+        return _run_batch()
 
 
 def _unfold_region_tensor_uint8(region_tensor: torch.Tensor, tile_size: int) -> torch.Tensor:
