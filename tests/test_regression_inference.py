@@ -302,8 +302,8 @@ def test_update_process_list_after_embedding_writes_feature_path(
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     if persist_hierarchical_embeddings:
@@ -684,9 +684,9 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
+        "slide-b,/tmp/slide-b.svs,,asap,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
 
@@ -735,9 +735,9 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
-        "slide-b,/tmp/slide-b.svs,,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
+        "slide-b,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     write_tile_embeddings(
