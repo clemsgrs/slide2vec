@@ -7,25 +7,6 @@ from hs2p import SlideSpec, load_tiling_result
 
 
 REQUIRED_MANIFEST_COLUMNS = ("sample_id", "image_path")
-REQUIRED_PROCESS_COLUMNS = (
-    "sample_id",
-    "image_path",
-    "mask_path",
-    "tiling_status",
-    "num_tiles",
-    "coordinates_npz_path",
-    "coordinates_meta_path",
-    "error",
-    "traceback",
-)
-OPTIONAL_PROCESS_COLUMNS = (
-    "requested_backend",
-    "backend",
-    "spacing_at_level_0",
-    "tiles_tar_path",
-    "mask_preview_path",
-    "tiling_preview_path",
-)
 BASE_PROCESS_COLUMNS = (
     "sample_id",
     "image_path",
@@ -142,15 +123,20 @@ def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
     )
     if legacy_mask_columns:
         raise ValueError(f"Unsupported process_list.csv schema in {process_list_path}")
-    missing = sorted(set(REQUIRED_PROCESS_COLUMNS) - set(df.columns))
+    missing = sorted(set(BASE_PROCESS_COLUMNS) - set(df.columns))
     if missing:
         raise ValueError(
             "Unsupported process_list.csv schema in "
             f"{process_list_path}; missing required columns: {', '.join(missing)}"
         )
-    for column in OPTIONAL_PROCESS_COLUMNS:
-        if column not in df.columns:
-            df[column] = [None] * len(df)
+    if "spacing_at_level_0" not in df.columns:
+        df["spacing_at_level_0"] = [None] * len(df)
+    if "tiles_tar_path" not in df.columns:
+        df["tiles_tar_path"] = [None] * len(df)
+    if "mask_preview_path" not in df.columns:
+        df["mask_preview_path"] = [None] * len(df)
+    if "tiling_preview_path" not in df.columns:
+        df["tiling_preview_path"] = [None] * len(df)
     return df
 
 

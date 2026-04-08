@@ -987,8 +987,8 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1013,8 +1013,8 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1041,6 +1041,36 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
     recorded = pd.read_csv(process_list_path)
     assert Path(recorded.loc[0, "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png").resolve()
     assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png").resolve()
+
+
+def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,auto,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        inference,
+        "load_tiling_result_from_row",
+        lambda row: SimpleNamespace(backend="asap"),
+    )
+
+    inference._record_slide_metadata_in_process_list(
+        process_list_path,
+        [make_slide("slide-a")],
+        preprocessing=DEFAULT_PREPROCESSING,
+        tiling_artifacts=[],
+    )
+
+    recorded = pd.read_csv(process_list_path)
+    assert "requested_backend" in recorded.columns
+    assert "backend" in recorded.columns
+    assert recorded.loc[0, "requested_backend"] == DEFAULT_PREPROCESSING.backend
+    assert recorded.loc[0, "backend"] == "asap"
 
 
 def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():
@@ -1135,8 +1165,8 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,/tmp/slide-a.svs,,auto,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 

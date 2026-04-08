@@ -2263,6 +2263,7 @@ def _prepare_tiled_slides(
     _record_slide_metadata_in_process_list(
         process_list_path,
         slide_records,
+        preprocessing=preprocessing,
         tiling_artifacts=tiling_artifacts,
     )
     process_df = load_tiling_process_df(process_list_path)
@@ -2376,6 +2377,7 @@ def _record_slide_metadata_in_process_list(
     process_list_path: Path,
     slide_records: Sequence[SlideSpec],
     *,
+    preprocessing: PreprocessingConfig,
     tiling_artifacts: Sequence[Any],
 ) -> None:
     def _resolve_path_str(value: Any) -> str | None:
@@ -2397,18 +2399,40 @@ def _record_slide_metadata_in_process_list(
         for artifact in tiling_artifacts
     }
     process_df = pd.read_csv(process_list_path)
+    if "requested_backend" not in process_df.columns:
+        process_df["requested_backend"] = [None] * len(process_df)
+    if "backend" not in process_df.columns:
+        process_df["backend"] = [None] * len(process_df)
     if "spacing_at_level_0" not in process_df.columns:
         process_df["spacing_at_level_0"] = [None] * len(process_df)
     if "mask_preview_path" not in process_df.columns:
         process_df["mask_preview_path"] = [None] * len(process_df)
     if "tiling_preview_path" not in process_df.columns:
         process_df["tiling_preview_path"] = [None] * len(process_df)
+    requested_backend = str(preprocessing.backend)
+    process_df["requested_backend"] = process_df["requested_backend"].where(
+        process_df["requested_backend"].notna(),
+        requested_backend,
+    )
     if spacing_by_sample_id:
         mapped_spacing = process_df["sample_id"].astype(str).map(spacing_by_sample_id)
         process_df["spacing_at_level_0"] = process_df["spacing_at_level_0"].where(
             process_df["spacing_at_level_0"].notna(),
             mapped_spacing,
         )
+    backend_by_sample_id = {}
+    for row in process_df.to_dict("records"):
+        sample_id = str(row["sample_id"])
+        try:
+            tiling_result = load_tiling_result_from_row(row)
+        except Exception:
+            continue
+        backend = getattr(tiling_result, "backend", None)
+        if backend is not None:
+            backend_by_sample_id[sample_id] = backend
+    if backend_by_sample_id:
+        mapped_backend = process_df["sample_id"].astype(str).map(backend_by_sample_id)
+        process_df["backend"] = process_df["backend"].where(process_df["backend"].notna(), mapped_backend)
     mapped_mask_preview_paths = process_df["sample_id"].astype(str).map(mask_preview_by_sample_id)
     process_df["mask_preview_path"] = process_df["mask_preview_path"].where(
         process_df["mask_preview_path"].notna(),
