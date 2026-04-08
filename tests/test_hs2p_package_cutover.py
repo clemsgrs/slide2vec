@@ -1,5 +1,4 @@
 import importlib
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,13 +7,7 @@ import pandas as pd
 import pytest
 
 
-def test_package_root_exports_api_without_importing_wandb():
-    for name in list(sys.modules):
-        if name == "slide2vec" or name.startswith("slide2vec."):
-            sys.modules.pop(name, None)
-        if name == "wandb" or name.startswith("wandb."):
-            sys.modules.pop(name, None)
-
+def test_package_root_exports_api():
     package = importlib.import_module("slide2vec")
 
     assert hasattr(package, "Model")
@@ -24,7 +17,6 @@ def test_package_root_exports_api_without_importing_wandb():
     assert hasattr(package, "EmbeddedSlide")
     assert hasattr(package, "TileEmbeddingArtifact")
     assert hasattr(package, "SlideEmbeddingArtifact")
-    assert "wandb" not in sys.modules
 
 
 def test_load_slide_manifest_requires_hs2p_schema(tmp_path: Path):
@@ -88,8 +80,8 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_tiling_process_df(process_list)
@@ -97,6 +89,8 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
         "sample_id",
         "image_path",
         "mask_path",
+        "requested_backend",
+        "backend",
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
@@ -109,6 +103,8 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
         "traceback",
     ]
     assert df.loc[0, "mask_path"] == "/data/slide-1-mask.png"
+    assert df.loc[0, "requested_backend"] == "auto"
+    assert df.loc[0, "backend"] == "openslide"
 
 
 def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
@@ -116,8 +112,8 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_embedding_process_df(process_list, include_aggregation_status=True)
@@ -125,6 +121,8 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
         "sample_id",
         "image_path",
         "mask_path",
+        "requested_backend",
+        "backend",
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",

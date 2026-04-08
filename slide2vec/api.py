@@ -22,7 +22,7 @@ from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
 from slide2vec.progress import emit_progress
 from slide2vec.runtime_types import LoadedModel
-from slide2vec.utils.utils import slurm_cpu_limit
+from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path
 
@@ -121,7 +121,7 @@ class ExecutionOptions:
     output_format: str = "pt"
     batch_size: int = 1
     num_workers: int = 0
-    num_preprocessing_workers: int = 8
+    num_preprocessing_workers: int | None = None
     num_gpus: int | None = None
     precision: str | None = None
     prefetch_factor: int = 4
@@ -141,7 +141,11 @@ class ExecutionOptions:
             output_format="pt",
             batch_size=int(cfg.model.batch_size),
             num_workers=int(num_workers),
-            num_preprocessing_workers=int(cfg.speed.num_preprocessing_workers),
+            num_preprocessing_workers=(
+                int(cfg.speed.num_preprocessing_workers)
+                if cfg.speed.num_preprocessing_workers is not None
+                else None
+            ),
             num_gpus=1 if run_on_cpu else (int(configured_num_gpus) if configured_num_gpus is not None else None),
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=prefetch_factor,
@@ -158,11 +162,13 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
+        cap = cpu_worker_limit()
         cpu_count = os.cpu_count() or 1
         slurm_limit = slurm_cpu_limit()
-        cap = min(cpu_count, slurm_limit) if slurm_limit is not None else cpu_count
         capped_num_workers = min(self.num_workers, cap)
-        capped_num_preprocessing_workers = min(self.num_preprocessing_workers, cap)
+        capped_num_preprocessing_workers = (
+            cap if self.num_preprocessing_workers is None else min(self.num_preprocessing_workers, cap)
+        )
         object.__setattr__(self, "num_workers", capped_num_workers)
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)

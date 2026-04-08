@@ -59,7 +59,7 @@ from slide2vec.utils.tiling_io import (
     load_tiling_result_from_row,
     _optional_float,
 )
-from slide2vec.utils.utils import slurm_cpu_limit
+from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -175,11 +175,10 @@ def _num_embedding_items(tiling_result, preprocessing: PreprocessingConfig | Non
 
 def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
     cpu_count = os.cpu_count() or 1
-    worker_budget = cpu_count
+    worker_budget = cpu_worker_limit()
     details = [f"cpu_count={cpu_count}"]
     slurm_limit = slurm_cpu_limit()
     if slurm_limit is not None:
-        worker_budget = min(worker_budget, slurm_limit)
         details.append(f"slurm_cpu_limit={slurm_limit}")
     effective_num_workers = max(1, worker_budget // num_cucim_workers)
     details.append(f"num_cucim_workers={num_cucim_workers}")

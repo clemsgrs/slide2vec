@@ -31,6 +31,7 @@ def test_resource_loading_uses_packaged_configs():
     assert "tiling" in cfg
     assert hasattr(cfg.model, "output_variant")
     assert config_resource("default").name == "default.yaml"
+    assert cfg.speed.num_preprocessing_workers is None
 
 
 def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
@@ -300,6 +301,15 @@ def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
 
     assert api.ExecutionOptions().num_gpus == 4
 
+
+def test_execution_options_defaults_preprocessing_workers_to_cpu_budget(monkeypatch):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
+
+    assert api.ExecutionOptions().num_preprocessing_workers == 24
+
 def test_execution_options_default_batch_size_is_one():
     assert ExecutionOptions().batch_size == 1
 
@@ -333,6 +343,30 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.persistent_workers is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
+
+
+def test_execution_options_from_config_defaults_preprocessing_workers_to_cpu_budget(monkeypatch, tmp_path: Path):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
+
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(batch_size=4, save_tile_embeddings=False, save_latents=False),
+        speed=SimpleNamespace(
+            precision="fp16",
+            num_dataloader_workers=2,
+            num_preprocessing_workers=None,
+            num_gpus=3,
+            prefetch_factor_embedding=5,
+            persistent_workers_embedding=False,
+        ),
+    )
+
+    execution = ExecutionOptions.from_config(cfg)
+
+    assert execution.num_preprocessing_workers == 18
 
 def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
