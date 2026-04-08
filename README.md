@@ -11,7 +11,15 @@ pip install slide2vec
 pip install "slide2vec[fm]"
 ```
 
-`slide2vec` keeps the base install focused on the core package surface. Use `slide2vec[fm]` when you want FM-specific dependencies.
+`slide2vec` keeps the base install focused on the core package surface. Use `slide2vec[fm]` when you want the PyPI-hosted FM dependencies.
+
+Some model backends still rely on upstream Git repositories that PyPI will not accept as package metadata. Install those separately when needed:
+
+```shell
+pip install git+https://github.com/lilab-stanford/MUSK.git
+pip install git+https://github.com/Mahmoodlab/CONCH.git
+pip install git+https://github.com/prov-gigapath/prov-gigapath.git
+```
 
 ## Python API
 
