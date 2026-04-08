@@ -3,6 +3,7 @@ FROM ubuntu:22.04
 
 ARG USER_UID=1001
 ARG USER_GID=1001
+ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git"
 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
@@ -75,6 +76,8 @@ RUN python -m ensurepip --upgrade \
     && python -m pip install --upgrade pip setuptools pip-tools \
     && python -m pip install hatchling psutil \
     && rm -rf /home/user/.cache/pip
+
+RUN python -m pip install --no-cache-dir --no-color ${GIT_MODEL_DEPENDENCIES}
 
 USER user
 WORKDIR /opt/app

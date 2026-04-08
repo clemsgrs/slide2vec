@@ -67,6 +67,7 @@ RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/
 WORKDIR /opt/app/
 
 ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
+ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git"
 
 RUN python -m ensurepip --upgrade \
     && python -m pip install --upgrade pip setuptools pip-tools \
@@ -86,6 +87,11 @@ RUN python -m pip install --no-cache-dir --no-color \
     -c /opt/app/constraints-cu128.txt \
     --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
     "/opt/app[fm]"
+
+RUN python -m pip install --no-cache-dir --no-color \
+    -c /opt/app/constraints-cu128.txt \
+    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
+    ${GIT_MODEL_DEPENDENCIES}
 
 RUN python -m pip install \
     --no-cache-dir \
