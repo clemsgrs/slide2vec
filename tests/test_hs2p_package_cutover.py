@@ -107,6 +107,37 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
     assert df.loc[0, "backend"] == "openslide"
 
 
+def test_load_tiling_process_df_accepts_legacy_optional_process_columns(tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    process_list = tmp_path / "process_list.csv"
+    process_list.write_text(
+        "sample_id,image_path,mask_path,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+    df = helper.load_tiling_process_df(process_list)
+    assert list(df.columns) == [
+        "sample_id",
+        "image_path",
+        "mask_path",
+        "requested_backend",
+        "backend",
+        "spacing_at_level_0",
+        "tiling_status",
+        "num_tiles",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
+        "mask_preview_path",
+        "tiling_preview_path",
+        "error",
+        "traceback",
+    ]
+    assert pd.isna(df.loc[0, "requested_backend"])
+    assert pd.isna(df.loc[0, "backend"])
+
+
 def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 

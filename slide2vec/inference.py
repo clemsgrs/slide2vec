@@ -223,6 +223,10 @@ def _should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
     return getattr(reader, "_backend", None) == "cucim"
 
 
+def _uses_cuda_runtime(device) -> bool:
+    return str(device).startswith("cuda") and torch.cuda.is_available()
+
+
 def _make_slide_spec(
     *,
     sample_id: str,
@@ -1143,7 +1147,7 @@ def _compute_tile_embeddings_for_slide(
     autocast_dtype = _autocast_dtype(torch, execution.precision)
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=autocast_dtype)
-        if autocast_dtype is not None and str(loaded.device).startswith("cuda")
+        if autocast_dtype is not None and _uses_cuda_runtime(loaded.device)
         else nullcontext()
     )
     resolved_indices = np.arange(_num_tiles(tiling_result), dtype=np.int64)
@@ -1201,6 +1205,7 @@ def _compute_tile_embeddings_for_slide(
         tiling_result,
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
+    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         if effective_num_workers != execution.num_workers:
@@ -1312,7 +1317,7 @@ def _compute_hierarchical_embeddings_for_slide(
     autocast_dtype = _autocast_dtype(torch, execution.precision)
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=autocast_dtype)
-        if autocast_dtype is not None and str(loaded.device).startswith("cuda")
+        if autocast_dtype is not None and _uses_cuda_runtime(loaded.device)
         else nullcontext()
     )
     def _compute_embeddings():
@@ -1389,7 +1394,7 @@ def _compute_hierarchical_embedding_shard_for_slide(
     autocast_dtype = _autocast_dtype(torch, execution.precision)
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=autocast_dtype)
-        if autocast_dtype is not None and str(loaded.device).startswith("cuda")
+        if autocast_dtype is not None and _uses_cuda_runtime(loaded.device)
         else nullcontext()
     )
     def _compute_embeddings():
@@ -1683,7 +1688,7 @@ def _write_hierarchical_embedding_artifact(
 def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOptions) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
         "num_workers": execution.num_workers,
-        "pin_memory": str(loaded.device).startswith("cuda"),
+        "pin_memory": _uses_cuda_runtime(loaded.device),
     }
     if execution.num_workers > 0:
         kwargs["persistent_workers"] = bool(execution.persistent_workers)
@@ -1903,7 +1908,7 @@ class _BatchPrefetcher:
         raise ValueError("Expected the embedding dataloader to yield (indices, image) or (indices, image, timing)")
 
     def _make_copy_stream(self):
-        if not str(self.loaded.device).startswith("cuda"):
+        if not _uses_cuda_runtime(self.loaded.device):
             return None
         return torch.cuda.Stream(device=self.loaded.device)
 
@@ -1934,7 +1939,7 @@ class _BatchPrefetcher:
             if torch.is_tensor(prepared) and prepared.device != self.loaded.device:
                 prepared = prepared.to(
                     self.loaded.device,
-                    non_blocking=str(self.loaded.device).startswith("cuda"),
+                    non_blocking=_uses_cuda_runtime(self.loaded.device),
                 )
         preprocess_ms = (time.perf_counter() - preprocess_start) * 1000.0
         return prepared, preprocess_ms

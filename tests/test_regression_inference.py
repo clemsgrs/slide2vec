@@ -1039,8 +1039,8 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
     )
 
     recorded = pd.read_csv(process_list_path)
-    assert Path(recorded.loc[0, "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png")
-    assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png")
+    assert Path(recorded.loc[0, "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png").resolve()
+    assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png").resolve()
 
 
 def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():
@@ -2308,6 +2308,7 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
     monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 32)
 
     def _fake_run_with_filtered_stderr(func, **kwargs):
         del kwargs
