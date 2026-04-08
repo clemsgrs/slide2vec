@@ -17,6 +17,7 @@ import logging
 import pandas as pd
 import torch
 from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
+from hs2p.utils.stderr import run_with_filtered_stderr
 import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
 
@@ -183,6 +184,44 @@ def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
     effective_num_workers = max(1, worker_budget // num_cucim_workers)
     details.append(f"num_cucim_workers={num_cucim_workers}")
     return effective_num_workers, " // ".join(details)
+
+
+def _redirect_worker_output() -> None:
+    worker_log_path = os.path.join(
+        tempfile.gettempdir(),
+        "slide2vec-cucim-workers.log",
+    )
+    worker_log_fd = os.open(
+        worker_log_path,
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+        0o644,
+    )
+    try:
+        os.dup2(worker_log_fd, 1)
+        os.dup2(worker_log_fd, 2)
+    finally:
+        os.close(worker_log_fd)
+
+
+def _configure_cucim_worker_stderr(loader_kwargs: dict[str, Any], *, backend: str) -> None:
+    if backend != "cucim" or int(loader_kwargs.get("num_workers", 0)) <= 0:
+        return
+    existing_worker_init = loader_kwargs.get("worker_init_fn")
+
+    def _worker_init(worker_id: int) -> None:
+        _redirect_worker_output()
+        if existing_worker_init is not None:
+            existing_worker_init(worker_id)
+
+    loader_kwargs["worker_init_fn"] = _worker_init
+
+
+def _should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
+    if int(getattr(dataloader, "num_workers", 0)) <= 0:
+        return False
+    collate_fn = getattr(dataloader, "collate_fn", None)
+    reader = getattr(collate_fn, "_reader", None)
+    return getattr(reader, "_backend", None) == "cucim"
 
 
 def _make_slide_spec(
@@ -1175,6 +1214,7 @@ def _compute_tile_embeddings_for_slide(
         if effective_num_workers == 0:
             loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
+        _configure_cucim_worker_stderr(loader_kwargs, backend=resolved_backend)
     if batch_sampler is not None:
         loader_kwargs["batch_sampler"] = batch_sampler
     else:
@@ -1185,15 +1225,21 @@ def _compute_tile_embeddings_for_slide(
         collate_fn=collate_fn,
         **loader_kwargs,
     )
-    tile_embeddings = _run_forward_pass(
-        dataloader,
-        loaded,
-        autocast_context,
-        batch_preprocessor=batch_preprocessor,
-        sample_id=slide.sample_id,
-        total_items=len(dataset),
-        unit_label="tile",
-    )
+    def _compute_embeddings():
+        return _run_forward_pass(
+            dataloader,
+            loaded,
+            autocast_context,
+            batch_preprocessor=batch_preprocessor,
+            sample_id=slide.sample_id,
+            total_items=len(dataset),
+            unit_label="tile",
+        )
+
+    if resolved_backend == "cucim":
+        tile_embeddings = run_with_filtered_stderr(_compute_embeddings)
+    else:
+        tile_embeddings = _compute_embeddings()
     if _supertile_reorder is not None:
         inverse = np.argsort(_supertile_reorder, kind="stable")
         tile_embeddings = tile_embeddings[torch.as_tensor(inverse, dtype=torch.long)]
@@ -1240,6 +1286,7 @@ def _compute_hierarchical_embeddings_for_slide(
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
     if effective_num_workers != execution.num_workers:
         logging.getLogger(__name__).info(
             f"on-the-fly hierarchical mode: setting DataLoader num_workers={effective_num_workers} "
@@ -1250,6 +1297,10 @@ def _compute_hierarchical_embeddings_for_slide(
     if effective_num_workers == 0:
         loader_kwargs.pop("persistent_workers", None)
         loader_kwargs.pop("prefetch_factor", None)
+    _configure_cucim_worker_stderr(
+        loader_kwargs,
+        backend=resolved_backend,
+    )
     loader_kwargs["batch_sampler"] = collate_fn.build_batch_sampler(
         batch_size=execution.batch_size,
         dataset_indices=np.asarray(resolved_indices, dtype=np.int64),
@@ -1265,16 +1316,22 @@ def _compute_hierarchical_embeddings_for_slide(
         if autocast_dtype is not None and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    batch_flat_indices, flat_embeddings = _run_forward_pass(
-        dataloader,
-        loaded,
-        autocast_context,
-        batch_preprocessor=batch_preprocessor,
-        sample_id=slide.sample_id,
-        total_items=len(dataset),
-        unit_label="tile",
-        return_indices=True,
-    )
+    def _compute_embeddings():
+        return _run_forward_pass(
+            dataloader,
+            loaded,
+            autocast_context,
+            batch_preprocessor=batch_preprocessor,
+            sample_id=slide.sample_id,
+            total_items=len(dataset),
+            unit_label="tile",
+            return_indices=True,
+        )
+
+    if resolved_backend == "cucim":
+        batch_flat_indices, flat_embeddings = run_with_filtered_stderr(_compute_embeddings)
+    else:
+        batch_flat_indices, flat_embeddings = _compute_embeddings()
     result = torch.empty(
         (index.num_regions * index.tiles_per_region, int(flat_embeddings.shape[-1])),
         dtype=flat_embeddings.dtype,
@@ -1316,10 +1373,15 @@ def _compute_hierarchical_embedding_shard_for_slide(
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
     loader_kwargs["num_workers"] = effective_num_workers
     if effective_num_workers == 0:
         loader_kwargs.pop("persistent_workers", None)
         loader_kwargs.pop("prefetch_factor", None)
+    _configure_cucim_worker_stderr(
+        loader_kwargs,
+        backend=resolved_backend,
+    )
     loader_kwargs["batch_sampler"] = collate_fn.build_batch_sampler(
         batch_size=execution.batch_size,
         dataset_indices=resolved_indices,
@@ -1331,16 +1393,22 @@ def _compute_hierarchical_embedding_shard_for_slide(
         if autocast_dtype is not None and str(loaded.device).startswith("cuda")
         else nullcontext()
     )
-    batch_flat_indices, flat_embeddings = _run_forward_pass(
-        dataloader,
-        loaded,
-        autocast_context,
-        batch_preprocessor=batch_preprocessor,
-        sample_id=slide.sample_id,
-        total_items=len(dataset),
-        unit_label="tile",
-        return_indices=True,
-    )
+    def _compute_embeddings():
+        return _run_forward_pass(
+            dataloader,
+            loaded,
+            autocast_context,
+            batch_preprocessor=batch_preprocessor,
+            sample_id=slide.sample_id,
+            total_items=len(dataset),
+            unit_label="tile",
+            return_indices=True,
+        )
+
+    if resolved_backend == "cucim":
+        batch_flat_indices, flat_embeddings = run_with_filtered_stderr(_compute_embeddings)
+    else:
+        batch_flat_indices, flat_embeddings = _compute_embeddings()
     return batch_flat_indices.numpy(), flat_embeddings
 
 
@@ -1947,7 +2015,13 @@ def _run_forward_pass(
     batch_indices = [] if return_indices else None
     processed = 0
     batch_index = 0
-    prefetcher = _BatchPrefetcher(dataloader, loaded, batch_preprocessor)
+    prefetcher_context = (
+        suppress_c_stderr()
+        if _should_suppress_cucim_dataloader_stderr(dataloader)
+        else nullcontext()
+    )
+    with prefetcher_context:
+        prefetcher = _BatchPrefetcher(dataloader, loaded, batch_preprocessor)
     with torch.inference_mode(), autocast_context:
         for prepared_batch in prefetcher:
             image = prepared_batch.image

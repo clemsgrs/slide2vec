@@ -1075,6 +1075,61 @@ def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd)
     assert calls == ["wholeslidedata"]
 
 
+def test_configure_cucim_worker_stderr_wraps_existing_worker_init(monkeypatch):
+    import slide2vec.inference as inference
+
+    calls: list[tuple[str, int] | str] = []
+
+    monkeypatch.setattr(inference, "_redirect_worker_output", lambda: calls.append("redirected"))
+
+    def _existing(worker_id: int):
+        calls.append(("existing", worker_id))
+
+    loader_kwargs = {"num_workers": 3, "worker_init_fn": _existing}
+
+    inference._configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
+
+    worker_init = loader_kwargs["worker_init_fn"]
+    worker_init(5)
+
+    assert calls == ["redirected", ("existing", 5)]
+
+
+def test_configure_cucim_worker_stderr_skips_non_cucim_or_single_process_loader():
+    import slide2vec.inference as inference
+
+    loader_kwargs = {"num_workers": 0}
+    inference._configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
+    assert "worker_init_fn" not in loader_kwargs
+
+    loader_kwargs = {"num_workers": 4}
+    inference._configure_cucim_worker_stderr(loader_kwargs, backend="asap")
+    assert "worker_init_fn" not in loader_kwargs
+
+
+def test_should_suppress_cucim_dataloader_stderr_only_for_multi_worker_cucim_collators():
+    import slide2vec.inference as inference
+
+    dataloader = SimpleNamespace(
+        num_workers=4,
+        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
+    )
+    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is True
+
+    dataloader = SimpleNamespace(
+        num_workers=0,
+        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
+    )
+    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is False
+
+
+    dataloader = SimpleNamespace(
+        num_workers=4,
+        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="asap")),
+    )
+    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is False
+
+
 def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -2208,6 +2263,99 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     assert captured["kwargs"]["num_workers"] == 8
     assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 9
+
+
+def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_without_changing_workers(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.zeros((2, 3, 4, 4), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32)
+
+    class DummyCollator:
+        ordered_indices = None
+
+        def __init__(self, **kwargs):
+            captured["collator_kwargs"] = kwargs
+
+        def __call__(self, batch_indices):
+            tile_indices = torch.as_tensor(batch_indices, dtype=torch.long)
+            batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
+            return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
+
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+
+    def _fake_run_with_filtered_stderr(func, **kwargs):
+        del kwargs
+        captured["filtered_calls"] = captured.get("filtered_calls", 0) + 1
+        return func()
+
+    monkeypatch.setattr(inference, "run_with_filtered_stderr", _fake_run_with_filtered_stderr)
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cuda"),
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0, 10]),
+        y=np.array([5, 15]),
+        target_spacing_um=0.5,
+        requested_tile_size_px=4,
+        read_spacing_um=0.5,
+        effective_tile_size_px=4,
+        tile_size_lv0=224,
+    )
+    execution = ExecutionOptions(
+        batch_size=2,
+        num_workers=99,
+        num_gpus=1,
+        prefetch_factor=9,
+        persistent_workers=True,
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        slide,
+        tiling_result,
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
+        execution=execution,
+    )
+
+    assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 8
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 9
+    assert captured["filtered_calls"] == 1
 
 
 def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto(monkeypatch):
