@@ -67,25 +67,6 @@ prism = [
     "sacremoses==0.1.1",
     "xformers==0.0.31",
 ]
-musk = [
-    "musk @ git+https://github.com/lilab-stanford/MUSK.git",
-]
-conch = [
-    "conch @ git+https://github.com/Mahmoodlab/CONCH.git",
-]
-gigapath = [
-    "torchmetrics>=0.10.3",
-    "fvcore",
-    "iopath",
-    "webdataset",
-    "scikit-survival",
-    "scikit-learn",
-    "fairscale",
-    "packaging==23.2",
-    "ninja==1.11.1.1",
-    "psutil<6",
-    "gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
-]
 hibou = [
     "scipy~=1.8.1",
     "scikit-image~=0.19.3",
@@ -118,8 +99,6 @@ fm = [
     "xformers>=0.0.31",
     "scipy>=1.8.1",
     "scikit-image>=0.19.3",
-    "musk @ git+https://github.com/lilab-stanford/MUSK.git",
-    "conch @ git+https://github.com/Mahmoodlab/CONCH.git",
     "torchmetrics>=0.10.3",
     "fvcore",
     "iopath",
@@ -130,7 +109,6 @@ fm = [
     "packaging==23.2",
     "ninja==1.11.1.1",
     "psutil<6",
-    "gigapath @ git+https://github.com/prov-gigapath/prov-gigapath.git",
 ]
 testing = [
     "pytest>=6.0",
