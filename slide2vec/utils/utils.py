@@ -1,6 +1,7 @@
 import os
 import random
 import subprocess
+import re
 import numpy as np
 import torch
 
@@ -79,6 +80,28 @@ def slurm_cpu_limit() -> int | None:
     """Return the CPU limit imposed by SLURM, or None if not running under SLURM."""
     for env_name in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "SLURM_JOB_CPUS_PER_NODE"):
         value = os.environ.get(env_name, "")
-        if value.strip().isdigit() and int(value.strip()) > 0:
-            return int(value.strip())
+        parsed = _parse_positive_cpu_value(value)
+        if parsed is not None:
+            return parsed
     return None
+
+
+def cpu_worker_limit() -> int:
+    """Return the largest safe worker count for CPU-bound tiling work."""
+    cpu_count = os.cpu_count() or 1
+    slurm_limit = slurm_cpu_limit()
+    return min(cpu_count, slurm_limit) if slurm_limit is not None else cpu_count
+
+
+def _parse_positive_cpu_value(value: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    if value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    match = re.match(r"^(\d+)", value)
+    if match is None:
+        return None
+    parsed = int(match.group(1))
+    return parsed if parsed > 0 else None
