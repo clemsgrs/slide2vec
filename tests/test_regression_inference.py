@@ -176,6 +176,8 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
         persist_tile_embeddings,
         persist_hierarchical_embeddings,
         include_slide_embeddings,
+        encoder_name,
+        output_variant,
         tile_artifacts,
         hierarchical_artifacts,
         slide_artifacts,
@@ -186,6 +188,8 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "persist_tile_embeddings": persist_tile_embeddings,
             "persist_hierarchical_embeddings": persist_hierarchical_embeddings,
             "include_slide_embeddings": include_slide_embeddings,
+            "encoder_name": encoder_name,
+            "output_variant": output_variant,
             "tile_artifacts": tile_artifacts,
             "hierarchical_artifacts": hierarchical_artifacts,
             "slide_artifacts": slide_artifacts,
@@ -220,6 +224,8 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
     assert captured["update"]["persist_tile_embeddings"] is True
     assert captured["update"]["persist_hierarchical_embeddings"] is False
     assert captured["update"]["include_slide_embeddings"] is True
+    assert captured["update"]["encoder_name"] == "prism"
+    assert captured["update"]["output_variant"] == "default"
     assert captured["update"]["tile_artifacts"] == ["tile-artifact"]
     assert captured["update"]["hierarchical_artifacts"] == []
     assert captured["update"]["slide_artifacts"] == ["slide-artifact"]

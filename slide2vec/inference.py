@@ -2261,11 +2261,12 @@ def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
 
 
 def _resolved_process_list_output_variant(model) -> str | None:
+    requested_output_variant = getattr(model, "_output_variant", None)
     if not hasattr(model, "name") or model.name not in encoder_registry:
-        return model._output_variant if hasattr(model, "_output_variant") else None
+        return requested_output_variant
     resolved = resolve_encoder_output(
         model.name,
-        requested_output_variant=model._output_variant,
+        requested_output_variant=requested_output_variant,
     )
     return str(resolved["output_variant"])
 
