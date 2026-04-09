@@ -39,7 +39,11 @@ from slide2vec.artifacts import (
     write_tile_embedding_metadata,
     write_tile_embeddings,
 )
-from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_defaults
+from slide2vec.encoders.registry import (
+    encoder_registry,
+    resolve_encoder_output,
+    resolve_preprocessing_defaults,
+)
 from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.runtime_types import LoadedModel
 from slide2vec.progress import (
@@ -386,6 +390,8 @@ def embed_slides(
                         persist_tile_embeddings=persist_tile_embeddings,
                         persist_hierarchical_embeddings=persist_hierarchical_embeddings,
                         include_slide_embeddings=include_slide_embeddings,
+                        encoder_name=model.name,
+                        output_variant=_resolved_process_list_output_variant(model),
                         tile_artifacts=tile_artifacts,
                         hierarchical_artifacts=hierarchical_artifacts,
                         slide_artifacts=slide_artifacts,
@@ -717,6 +723,8 @@ def run_pipeline(
             persist_tile_embeddings=persist_tile_embeddings,
             persist_hierarchical_embeddings=persist_hierarchical_embeddings,
             include_slide_embeddings=include_slide_embeddings,
+            encoder_name=model.name,
+            output_variant=_resolved_process_list_output_variant(model),
             tile_artifacts=tile_artifacts,
             hierarchical_artifacts=hierarchical_artifacts,
             slide_artifacts=slide_artifacts,
@@ -903,6 +911,8 @@ def _build_incremental_persist_callback(
                 persist_tile_embeddings=persist_tile_embeddings,
                 persist_hierarchical_embeddings=persist_hierarchical_embeddings,
                 include_slide_embeddings=include_slide_embeddings,
+                encoder_name=model.name,
+                output_variant=_resolved_process_list_output_variant(model),
                 tile_artifacts=[tile_artifact] if isinstance(tile_artifact, TileEmbeddingArtifact) else [],
                 hierarchical_artifacts=[tile_artifact] if isinstance(tile_artifact, HierarchicalEmbeddingArtifact) else [],
                 slide_artifacts=[slide_artifact] if slide_artifact is not None else [],
@@ -1054,6 +1064,8 @@ def _collect_distributed_pipeline_artifacts(
         persist_tile_embeddings=persist_tile_embeddings,
         persist_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
+        encoder_name=model.name,
+        output_variant=_resolved_process_list_output_variant(model),
         tile_artifacts=tile_artifacts,
         hierarchical_artifacts=hierarchical_artifacts,
         slide_artifacts=slide_artifacts,
@@ -2248,6 +2260,16 @@ def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
     return True
 
 
+def _resolved_process_list_output_variant(model) -> str | None:
+    if not hasattr(model, "name") or model.name not in encoder_registry:
+        return model._output_variant if hasattr(model, "_output_variant") else None
+    resolved = resolve_encoder_output(
+        model.name,
+        requested_output_variant=model._output_variant,
+    )
+    return str(resolved["output_variant"])
+
+
 def _prepare_tiled_slides(
     slide_records: Sequence[SlideSpec],
     preprocessing: PreprocessingConfig,
@@ -3166,6 +3188,8 @@ def _update_process_list_after_embedding(
     persist_tile_embeddings: bool,
     persist_hierarchical_embeddings: bool,
     include_slide_embeddings: bool,
+    encoder_name: str,
+    output_variant: str | None,
     tile_artifacts: Sequence[TileEmbeddingArtifact],
     hierarchical_artifacts: Sequence[HierarchicalEmbeddingArtifact],
     slide_artifacts: Sequence[SlideEmbeddingArtifact],
@@ -3180,6 +3204,12 @@ def _update_process_list_after_embedding(
         df["feature_status"] = ["tbp"] * len(df)
     if "feature_path" not in df.columns:
         df["feature_path"] = [None] * len(df)
+    if "encoder_name" not in df.columns:
+        df["encoder_name"] = [None] * len(df)
+    if "output_variant" not in df.columns:
+        df["output_variant"] = [None] * len(df)
+    if "feature_kind" not in df.columns:
+        df["feature_kind"] = [None] * len(df)
     if include_slide_embeddings and "aggregation_status" not in df.columns:
         df["aggregation_status"] = ["tbp"] * len(df)
     tile_success_ids = {artifact.sample_id for artifact in tile_artifacts}
@@ -3187,28 +3217,34 @@ def _update_process_list_after_embedding(
     slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
     if slide_artifacts:
         feature_path_by_sample_id = {artifact.sample_id: _resolve_path_str(artifact.path) for artifact in slide_artifacts}
+        feature_kind = "slide"
+        feature_success_ids = slide_success_ids
     elif persist_hierarchical_embeddings:
         feature_path_by_sample_id = {
             artifact.sample_id: _resolve_path_str(artifact.path) for artifact in hierarchical_artifacts
         }
+        feature_kind = "hierarchical"
+        feature_success_ids = hierarchical_success_ids
     elif persist_tile_embeddings:
         feature_path_by_sample_id = {
             artifact.sample_id: _resolve_path_str(artifact.path) for artifact in tile_artifacts
         }
+        feature_kind = "tile"
+        feature_success_ids = tile_success_ids
     else:
         feature_path_by_sample_id = {}
+        feature_kind = None
+        feature_success_ids = {slide.sample_id for slide in successful_slides}
     for slide in successful_slides:
         mask = df["sample_id"].astype(str) == slide.sample_id
-        if persist_hierarchical_embeddings:
-            feature_status = "success" if slide.sample_id in hierarchical_success_ids else "error"
-        elif persist_tile_embeddings:
-            feature_status = "success" if slide.sample_id in tile_success_ids else "error"
-        else:
-            feature_status = "success"
+        feature_status = "success" if slide.sample_id in feature_success_ids else "error"
         df.loc[mask, "feature_status"] = feature_status
         mapped_feature_path = feature_path_by_sample_id.get(slide.sample_id)
         if mapped_feature_path is not None:
             df.loc[mask, "feature_path"] = mapped_feature_path
+            df.loc[mask, "encoder_name"] = encoder_name
+            df.loc[mask, "output_variant"] = output_variant
+            df.loc[mask, "feature_kind"] = feature_kind
         if include_slide_embeddings:
             df.loc[mask, "aggregation_status"] = (
                 "success" if slide.sample_id in slide_success_ids else "error"

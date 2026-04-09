@@ -53,6 +53,9 @@ BASE_EMBEDDING_ORDERED_COLUMNS = (
     "tiling_preview_path",
     "feature_status",
     "feature_path",
+    "encoder_name",
+    "output_variant",
+    "feature_kind",
     "error",
     "traceback",
 )
@@ -157,6 +160,12 @@ def load_embedding_process_df(
         df["feature_status"] = ["tbp"] * len(df)
     if "feature_path" not in df.columns:
         df["feature_path"] = [None] * len(df)
+    if "encoder_name" not in df.columns:
+        df["encoder_name"] = [None] * len(df)
+    if "output_variant" not in df.columns:
+        df["output_variant"] = [None] * len(df)
+    if "feature_kind" not in df.columns:
+        df["feature_kind"] = [None] * len(df)
     if include_aggregation_status and "aggregation_status" not in df.columns:
         df["aggregation_status"] = ["tbp"] * len(df)
     ordered_columns = list(BASE_EMBEDDING_ORDERED_COLUMNS)
