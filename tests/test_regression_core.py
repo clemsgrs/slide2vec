@@ -335,6 +335,20 @@ def test_execution_options_default_batch_size_is_one():
 def test_execution_options_default_num_workers_is_auto():
     assert ExecutionOptions().num_workers is None
 
+def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
+    monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
+
+    with caplog.at_level("INFO"):
+        execution = api.ExecutionOptions()
+
+    assert execution.num_workers is None
+    assert "ExecutionOptions: num_workers=18 (requested=auto)" in caplog.text
+    assert "num_workers=auto" not in caplog.text
+
 def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),

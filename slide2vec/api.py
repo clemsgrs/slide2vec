@@ -171,7 +171,12 @@ class ExecutionOptions:
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)
         cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
-        num_workers_label = "auto" if self.num_workers is None else str(self.num_workers)
+        resolved_num_workers = self.resolved_num_workers()
+        num_workers_label = (
+            f"{resolved_num_workers} (requested=auto)"
+            if self.num_workers is None
+            else str(resolved_num_workers)
+        )
         logger.info(
             "ExecutionOptions: num_workers=%s, num_preprocessing_workers=%d "
             "(preprocessing cap=%d via %s)",
@@ -180,6 +185,9 @@ class ExecutionOptions:
             cap,
             cap_source,
         )
+
+    def resolved_num_workers(self) -> int:
+        return cpu_worker_limit() if self.num_workers is None else int(self.num_workers)
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

@@ -1688,7 +1688,7 @@ def _write_hierarchical_embedding_artifact(
 
 
 def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOptions) -> dict[str, Any]:
-    resolved_num_workers = cpu_worker_limit() if execution.num_workers is None else int(execution.num_workers)
+    resolved_num_workers = execution.resolved_num_workers()
     kwargs: dict[str, Any] = {
         "num_workers": resolved_num_workers,
         "pin_memory": _uses_cuda_runtime(loaded.device),
