@@ -150,7 +150,7 @@ The CLI writes explicit artifact directories under the run output directory:
 - `slide_embeddings/<sample_id>.pt` or `.npz`
 - `slide_embeddings/<sample_id>.meta.json`
 - optional `slide_latents/<sample_id>.pt` or `.npz`
-- `process_list.csv` with backend provenance columns (`requested_backend`, `backend`) carried through from hs2p
+- `process_list.csv` with backend provenance columns (`requested_backend`, `backend`) carried through from hs2p, plus embedding provenance columns (`encoder_name`, `output_variant`, `feature_kind`) once feature artifacts are written
 - the resolved saved config file for the run
 - `logs/` with the main log plus distributed worker stdout/stderr captures when multi-GPU workers are used
 

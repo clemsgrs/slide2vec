@@ -133,12 +133,18 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
         "tiling_preview_path",
         "feature_status",
         "feature_path",
+        "encoder_name",
+        "output_variant",
+        "feature_kind",
         "aggregation_status",
         "error",
         "traceback",
     ]
     assert df.loc[0, "feature_status"] == "tbp"
     assert pd.isna(df.loc[0, "feature_path"])
+    assert pd.isna(df.loc[0, "encoder_name"])
+    assert pd.isna(df.loc[0, "output_variant"])
+    assert pd.isna(df.loc[0, "feature_kind"])
 
 
 def test_load_tiling_process_df_rejects_legacy_mask_columns(tmp_path: Path):

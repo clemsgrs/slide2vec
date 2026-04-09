@@ -292,9 +292,18 @@ def test_has_complete_local_embedding_outputs_uses_hierarchical_artifacts_for_hi
     )
 
 
-@pytest.mark.parametrize("persist_hierarchical_embeddings", [False, True])
-def test_update_process_list_after_embedding_writes_feature_path(
+@pytest.mark.parametrize(
+    ("persist_hierarchical_embeddings", "include_slide_embeddings", "expected_feature_kind"),
+    [
+        (False, False, "tile"),
+        (True, False, "hierarchical"),
+        (False, True, "slide"),
+    ],
+)
+def test_update_process_list_after_embedding_writes_feature_provenance(
     persist_hierarchical_embeddings: bool,
+    include_slide_embeddings: bool,
+    expected_feature_kind: str,
     tmp_path: Path,
 ):
     import slide2vec.inference as inference
@@ -306,7 +315,19 @@ def test_update_process_list_after_embedding_writes_feature_path(
         "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
-    if persist_hierarchical_embeddings:
+    slide_artifacts = []
+    if include_slide_embeddings:
+        artifact = write_slide_embeddings(
+            "slide-a",
+            np.zeros((4,), dtype=np.float32),
+            output_dir=tmp_path,
+            output_format="pt",
+            metadata={"image_path": "/tmp/slide-a.svs"},
+        )
+        tile_artifacts = []
+        hierarchical_artifacts = []
+        slide_artifacts = [artifact]
+    elif persist_hierarchical_embeddings:
         artifact = write_hierarchical_embeddings(
             "slide-a",
             np.zeros((1, 2, 4), dtype=np.float32),
@@ -332,15 +353,20 @@ def test_update_process_list_after_embedding_writes_feature_path(
         successful_slides=[slide],
         persist_tile_embeddings=not persist_hierarchical_embeddings,
         persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-        include_slide_embeddings=False,
+        include_slide_embeddings=include_slide_embeddings,
+        encoder_name="virchow2" if not include_slide_embeddings else "prism",
+        output_variant="cls" if not include_slide_embeddings else "default",
         tile_artifacts=tile_artifacts,
         hierarchical_artifacts=hierarchical_artifacts,
-        slide_artifacts=[],
+        slide_artifacts=slide_artifacts,
     )
 
     recorded = pd.read_csv(process_list_path).set_index("sample_id")
     assert recorded.loc["slide-a", "feature_status"] == "success"
     assert recorded.loc["slide-a", "feature_path"] == str(artifact.path)
+    assert recorded.loc["slide-a", "encoder_name"] == ("virchow2" if not include_slide_embeddings else "prism")
+    assert recorded.loc["slide-a", "output_variant"] == ("cls" if not include_slide_embeddings else "default")
+    assert recorded.loc["slide-a", "feature_kind"] == expected_feature_kind
 
 
 def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distributed_path(
