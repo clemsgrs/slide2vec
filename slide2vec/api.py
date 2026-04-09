@@ -120,7 +120,7 @@ class ExecutionOptions:
     output_dir: Path | None = None
     output_format: str = "pt"
     batch_size: int = 1
-    num_workers: int = 0
+    num_workers: int | None = None
     num_preprocessing_workers: int | None = None
     num_gpus: int | None = None
     precision: str | None = None
@@ -140,7 +140,7 @@ class ExecutionOptions:
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(cfg.model.batch_size),
-            num_workers=int(num_workers),
+            num_workers=int(num_workers) if num_workers is not None else None,
             num_preprocessing_workers=(
                 int(cfg.speed.num_preprocessing_workers)
                 if cfg.speed.num_preprocessing_workers is not None
@@ -171,10 +171,11 @@ class ExecutionOptions:
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)
         cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
+        num_workers_label = "auto" if self.num_workers is None else str(self.num_workers)
         logger.info(
-            "ExecutionOptions: num_workers=%d, num_preprocessing_workers=%d "
+            "ExecutionOptions: num_workers=%s, num_preprocessing_workers=%d "
             "(preprocessing cap=%d via %s)",
-            self.num_workers,
+            num_workers_label,
             capped_num_preprocessing_workers,
             cap,
             cap_source,

@@ -66,7 +66,7 @@ tiling:
 
 speed:
   precision: # model inference precision ["fp32", "fp16", "bf16"]; if not set, determined automatically based on model recommendations
-  num_dataloader_workers: 8 # number of DataLoader worker processes for reading tiles during embedding (tar path); on-the-fly path derives this automatically from cpu_count // speed.num_cucim_workers
+  num_dataloader_workers: # number of DataLoader worker processes for reading tiles during embedding; defaults to auto (job CPU budget, except cuCIM on-the-fly uses cpu_budget // speed.num_cucim_workers)
   num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
   num_preprocessing_workers: # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing); defaults to the runtime CPU budget capped at 64
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers

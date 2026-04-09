@@ -2033,6 +2033,126 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     assert restored.precision == "bf16"
 
 
+def test_deserialize_execution_defaults_num_workers_to_auto():
+    import slide2vec.inference as inference
+
+    restored = inference.deserialize_execution({"batch_size": 4, "num_gpus": 1})
+
+    assert restored.num_workers is None
+
+
+def test_deserialize_execution_preserves_auto_num_workers():
+    import slide2vec.inference as inference
+
+    restored = inference.deserialize_execution({"batch_size": 4, "num_workers": None, "num_gpus": 1})
+
+    assert restored.num_workers is None
+
+
+def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+
+    loaded = inference.LoadedModel(
+        name="test",
+        level="tile",
+        model=object(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+
+    kwargs = inference._embedding_dataloader_kwargs(
+        loaded,
+        ExecutionOptions(num_workers=None, num_gpus=1),
+    )
+
+    assert kwargs["num_workers"] == 24
+    assert kwargs["persistent_workers"] is True
+    assert kwargs["prefetch_factor"] == 4
+
+
+def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_non_cucim_on_the_fly(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    captured = {}
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0, 1], dtype=torch.long),
+                torch.zeros((2, 3, 4, 4), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
+
+    class DummyCollator:
+        ordered_indices = None
+
+        def __init__(self, **kwargs):
+            captured["wsd_collator_kwargs"] = kwargs
+
+        def __call__(self, batch_indices):
+            tile_indices = torch.as_tensor(batch_indices, dtype=torch.long)
+            batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
+            return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
+
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+
+    result = inference._compute_tile_embeddings_for_slide(
+        loaded,
+        SimpleNamespace(level="tile"),
+        make_slide("slide-a"),
+        SimpleNamespace(
+            x=np.array([0, 10]),
+            y=np.array([5, 15]),
+            backend="asap",
+            target_spacing_um=0.5,
+            target_tile_size_px=4,
+            read_spacing_um=0.5,
+            read_tile_size_px=4,
+            tile_size_lv0=224,
+        ),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
+        execution=ExecutionOptions(batch_size=2, num_workers=None, num_gpus=1),
+    )
+
+    assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 24
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 4
+    assert captured["wsd_collator_kwargs"]["backend"] == "asap"
+
+
 def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch):
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
@@ -2541,6 +2661,9 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
     )
 
     assert result.shape == (2, 3)
+    assert captured["kwargs"]["num_workers"] == 8
+    assert captured["kwargs"]["persistent_workers"] is True
+    assert captured["kwargs"]["prefetch_factor"] == 4
     assert captured["wsd_collator_kwargs"]["backend"] == "asap"
 
 

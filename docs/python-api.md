@@ -101,7 +101,7 @@ Common fields:
 - `batch_size`
 - `num_gpus`
 - `precision` — `"fp16"`, `"bf16"`, `"fp32"`, or `None` (auto-determined from model)
-- `num_workers` — DataLoader workers (default `0`)
+- `num_workers` — DataLoader workers (`None` means auto; this resolves to the job CPU budget, capped by SLURM and 64, except cuCIM on-the-fly mode derives `cpu_budget // num_cucim_workers`)
 - `num_preprocessing_workers` — hs2p tiling workers (default: all CPUs available to the job, capped by SLURM when present and limited to 64)
 - `prefetch_factor` — DataLoader prefetch factor (default `4`)
 - `persistent_workers` — keep DataLoader workers alive across batches (default `True`)
