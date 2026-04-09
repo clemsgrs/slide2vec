@@ -102,7 +102,7 @@ Common fields:
 - `num_gpus`
 - `precision` — `"fp16"`, `"bf16"`, `"fp32"`, or `None` (auto-determined from model)
 - `num_workers` — DataLoader workers (default `0`)
-- `num_preprocessing_workers` — hs2p tiling workers (default: all available CPUs, capped by SLURM when present)
+- `num_preprocessing_workers` — hs2p tiling workers (default: all CPUs available to the job, capped by SLURM when present and limited to 64)
 - `prefetch_factor` — DataLoader prefetch factor (default `4`)
 - `persistent_workers` — keep DataLoader workers alive across batches (default `True`)
 - `output_dir`

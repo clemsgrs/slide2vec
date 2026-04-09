@@ -165,18 +165,16 @@ class ExecutionOptions:
         cap = cpu_worker_limit()
         cpu_count = os.cpu_count() or 1
         slurm_limit = slurm_cpu_limit()
-        capped_num_workers = min(self.num_workers, cap)
         capped_num_preprocessing_workers = (
             cap if self.num_preprocessing_workers is None else min(self.num_preprocessing_workers, cap)
         )
-        object.__setattr__(self, "num_workers", capped_num_workers)
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)
         cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
         logger.info(
             "ExecutionOptions: num_workers=%d, num_preprocessing_workers=%d "
-            "(cap=%d via %s)",
-            capped_num_workers,
+            "(preprocessing cap=%d via %s)",
+            self.num_workers,
             capped_num_preprocessing_workers,
             cap,
             cap_source,

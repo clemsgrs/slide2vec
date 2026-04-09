@@ -90,7 +90,8 @@ def cpu_worker_limit() -> int:
     """Return the largest safe worker count for CPU-bound tiling work."""
     cpu_count = os.cpu_count() or 1
     slurm_limit = slurm_cpu_limit()
-    return min(cpu_count, slurm_limit) if slurm_limit is not None else cpu_count
+    available = min(cpu_count, slurm_limit) if slurm_limit is not None else cpu_count
+    return min(available, 64)
 
 
 def _parse_positive_cpu_value(value: str) -> int | None:

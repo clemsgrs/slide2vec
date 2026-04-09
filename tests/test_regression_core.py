@@ -310,6 +310,25 @@ def test_execution_options_defaults_preprocessing_workers_to_cpu_budget(monkeypa
 
     assert api.ExecutionOptions().num_preprocessing_workers == 24
 
+def test_execution_options_preserves_explicit_dataloader_workers(monkeypatch):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 2)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 2)
+
+    execution = api.ExecutionOptions(num_workers=3)
+
+    assert execution.num_workers == 3
+    assert execution.num_preprocessing_workers == 2
+
+def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
+    import slide2vec.utils.utils as utils
+
+    monkeypatch.setattr(utils.os, "cpu_count", lambda: 128)
+    monkeypatch.setattr(utils, "slurm_cpu_limit", lambda: 96)
+
+    assert utils.cpu_worker_limit() == 64
+
 def test_execution_options_default_batch_size_is_one():
     assert ExecutionOptions().batch_size == 1
 
