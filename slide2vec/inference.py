@@ -1206,7 +1206,7 @@ def _compute_tile_embeddings_for_slide(
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
-    if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+    if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
         effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         if effective_num_workers != execution.num_workers:
             logging.getLogger(__name__).info(
@@ -1289,18 +1289,19 @@ def _compute_hierarchical_embeddings_for_slide(
         target_tile_size_px=int(geometry["target_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
-    effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
-    if effective_num_workers != execution.num_workers:
-        logging.getLogger(__name__).info(
-            f"on-the-fly hierarchical mode: setting DataLoader num_workers={effective_num_workers} "
-            f"({worker_context}); "
-            f"ignoring speed.num_dataloader_workers={execution.num_workers}"
-        )
-    loader_kwargs["num_workers"] = effective_num_workers
-    if effective_num_workers == 0:
-        loader_kwargs.pop("persistent_workers", None)
-        loader_kwargs.pop("prefetch_factor", None)
+    if resolved_backend == "cucim":
+        effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        if effective_num_workers != execution.num_workers:
+            logging.getLogger(__name__).info(
+                f"on-the-fly hierarchical mode: setting DataLoader num_workers={effective_num_workers} "
+                f"({worker_context}); "
+                f"ignoring speed.num_dataloader_workers={execution.num_workers}"
+            )
+        loader_kwargs["num_workers"] = effective_num_workers
+        if effective_num_workers == 0:
+            loader_kwargs.pop("persistent_workers", None)
+            loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,
         backend=resolved_backend,
@@ -1376,12 +1377,13 @@ def _compute_hierarchical_embedding_shard_for_slide(
         target_tile_size_px=int(geometry["target_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
-    effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
-    loader_kwargs["num_workers"] = effective_num_workers
-    if effective_num_workers == 0:
-        loader_kwargs.pop("persistent_workers", None)
-        loader_kwargs.pop("prefetch_factor", None)
+    if resolved_backend == "cucim":
+        effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        loader_kwargs["num_workers"] = effective_num_workers
+        if effective_num_workers == 0:
+            loader_kwargs.pop("persistent_workers", None)
+            loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,
         backend=resolved_backend,
@@ -1686,11 +1688,12 @@ def _write_hierarchical_embedding_artifact(
 
 
 def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOptions) -> dict[str, Any]:
+    resolved_num_workers = execution.resolved_num_workers()
     kwargs: dict[str, Any] = {
-        "num_workers": execution.num_workers,
+        "num_workers": resolved_num_workers,
         "pin_memory": _uses_cuda_runtime(loaded.device),
     }
-    if execution.num_workers > 0:
+    if resolved_num_workers > 0:
         kwargs["persistent_workers"] = bool(execution.persistent_workers)
         kwargs["prefetch_factor"] = int(execution.prefetch_factor)
     return kwargs
@@ -3043,7 +3046,7 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
 def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
     output_dir = payload["output_dir"] if "output_dir" in payload else None
     batch_size = payload["batch_size"] if "batch_size" in payload else None
-    num_workers = payload["num_workers"] if "num_workers" in payload else 0
+    num_workers = payload["num_workers"] if "num_workers" in payload else None
     num_gpus = payload["num_gpus"] if "num_gpus" in payload else 1
     precision = payload["precision"] if "precision" in payload else "fp32"
     prefetch_factor = payload["prefetch_factor"] if "prefetch_factor" in payload else 4
@@ -3058,7 +3061,7 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         output_dir=Path(output_dir) if output_dir is not None else None,
         output_format=payload["output_format"] if "output_format" in payload else "pt",
         batch_size=batch_size,
-        num_workers=int(num_workers),
+        num_workers=int(num_workers) if num_workers is not None else None,
         num_gpus=int(num_gpus),
         precision=precision,
         prefetch_factor=int(prefetch_factor),

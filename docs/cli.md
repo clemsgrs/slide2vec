@@ -79,7 +79,7 @@ Common overrides:
 
 - `output_dir=/path/to/output`
 - `speed.num_gpus=4`
-- `speed.num_dataloader_workers=8`
+- `speed.num_dataloader_workers=8` (`null` keeps auto mode)
 - `tiling.preview.save=true`
 - `tiling.params.region_tile_multiple=6` (hierarchical extraction)
 - `model.name=...`

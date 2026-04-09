@@ -2,6 +2,7 @@
 
 ## 2026-04-01
 
+- When the user says backward compatibility is not needed, do not add compatibility-preserving behavior or messaging; implement the simpler direct behavior instead.
 - Before declaring a module missing from the repo, check `git ls-files` and ignore rules as well as the filesystem; a local file can exist in the workspace while still being absent from the committed branch.
 - When integrating with hs2p 3.x tiling artifacts, treat `tissue_mask_path` as the upstream CSV field and normalize it to the legacy `mask_path` alias inside slide2vec instead of hard-coding the old name everywhere.
 - When hs2p moves a config flag into a nested field, update slide2vec to read the nested value directly and remove the root-level compatibility key from configs, docs, and tests at the same time.

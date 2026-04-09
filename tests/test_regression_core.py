@@ -310,8 +310,44 @@ def test_execution_options_defaults_preprocessing_workers_to_cpu_budget(monkeypa
 
     assert api.ExecutionOptions().num_preprocessing_workers == 24
 
+def test_execution_options_preserves_explicit_dataloader_workers(monkeypatch):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 2)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 2)
+
+    execution = api.ExecutionOptions(num_workers=3)
+
+    assert execution.num_workers == 3
+    assert execution.num_preprocessing_workers == 2
+
+def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
+    import slide2vec.utils.utils as utils
+
+    monkeypatch.setattr(utils.os, "cpu_count", lambda: 128)
+    monkeypatch.setattr(utils, "slurm_cpu_limit", lambda: 96)
+
+    assert utils.cpu_worker_limit() == 64
+
 def test_execution_options_default_batch_size_is_one():
     assert ExecutionOptions().batch_size == 1
+
+def test_execution_options_default_num_workers_is_auto():
+    assert ExecutionOptions().num_workers is None
+
+def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
+    monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
+
+    with caplog.at_level("INFO"):
+        execution = api.ExecutionOptions()
+
+    assert execution.num_workers is None
+    assert "ExecutionOptions: num_workers=18 (requested=auto)" in caplog.text
+    assert "num_workers=auto" not in caplog.text
 
 def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     cfg = SimpleNamespace(
@@ -367,6 +403,24 @@ def test_execution_options_from_config_defaults_preprocessing_workers_to_cpu_bud
     execution = ExecutionOptions.from_config(cfg)
 
     assert execution.num_preprocessing_workers == 18
+
+def test_execution_options_from_config_preserves_auto_num_workers(tmp_path: Path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(batch_size=4, save_tile_embeddings=False, save_latents=False),
+        speed=SimpleNamespace(
+            precision="fp16",
+            num_dataloader_workers=None,
+            num_preprocessing_workers=None,
+            num_gpus=3,
+            prefetch_factor_embedding=5,
+            persistent_workers_embedding=False,
+        ),
+    )
+
+    execution = ExecutionOptions.from_config(cfg)
+
+    assert execution.num_workers is None
 
 def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset(monkeypatch, tmp_path: Path):
     import slide2vec.api as api

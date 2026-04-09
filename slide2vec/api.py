@@ -120,7 +120,7 @@ class ExecutionOptions:
     output_dir: Path | None = None
     output_format: str = "pt"
     batch_size: int = 1
-    num_workers: int = 0
+    num_workers: int | None = None
     num_preprocessing_workers: int | None = None
     num_gpus: int | None = None
     precision: str | None = None
@@ -140,7 +140,7 @@ class ExecutionOptions:
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(cfg.model.batch_size),
-            num_workers=int(num_workers),
+            num_workers=int(num_workers) if num_workers is not None else None,
             num_preprocessing_workers=(
                 int(cfg.speed.num_preprocessing_workers)
                 if cfg.speed.num_preprocessing_workers is not None
@@ -165,22 +165,29 @@ class ExecutionOptions:
         cap = cpu_worker_limit()
         cpu_count = os.cpu_count() or 1
         slurm_limit = slurm_cpu_limit()
-        capped_num_workers = min(self.num_workers, cap)
         capped_num_preprocessing_workers = (
             cap if self.num_preprocessing_workers is None else min(self.num_preprocessing_workers, cap)
         )
-        object.__setattr__(self, "num_workers", capped_num_workers)
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)
         cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
+        resolved_num_workers = self.resolved_num_workers()
+        num_workers_label = (
+            f"{resolved_num_workers} (requested=auto)"
+            if self.num_workers is None
+            else str(resolved_num_workers)
+        )
         logger.info(
-            "ExecutionOptions: num_workers=%d, num_preprocessing_workers=%d "
-            "(cap=%d via %s)",
-            capped_num_workers,
+            "ExecutionOptions: num_workers=%s, num_preprocessing_workers=%d "
+            "(preprocessing cap=%d via %s)",
+            num_workers_label,
             capped_num_preprocessing_workers,
             cap,
             cap_source,
         )
+
+    def resolved_num_workers(self) -> int:
+        return cpu_worker_limit() if self.num_workers is None else int(self.num_workers)
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
