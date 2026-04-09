@@ -60,8 +60,7 @@ MODEL_PARAMS = dict(
 # -- speed --
 SPEED_PARAMS = dict(
     precision="fp16",       # override (default: fp32)
-    num_workers=4,           # override (default: 8)
-    num_workers_embedding=4, # override (default: 8)
+    num_dataloader_workers=0,  # keep the Prism subprocess path single-process to avoid worker SHM pressure
 )
 
 # ---------------------------------------------------------------------------

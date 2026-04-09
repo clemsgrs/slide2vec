@@ -2050,10 +2050,11 @@ def test_deserialize_execution_preserves_auto_num_workers():
 
 
 def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch):
+    import slide2vec.api as api
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
 
-    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
 
     loaded = inference.LoadedModel(
         name="test",
@@ -2075,6 +2076,7 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
 
 
 def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_non_cucim_on_the_fly(monkeypatch):
+    import slide2vec.api as api
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
 
@@ -2117,7 +2119,7 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
     monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
-    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
