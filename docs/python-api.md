@@ -137,6 +137,8 @@ Config fields:
 - `region_tile_multiple` — region grid width/height in tiles (e.g., `6` means 6x6 = 36 tiles per region; must be >= 2)
 - `target_region_size_px` — explicit parent region size in pixels; auto-derived from `target_tile_size_px * region_tile_multiple` if omitted
 
+When the selected read spacing differs from `target_spacing_um`, hierarchical extraction resolves effective geometry tile-first: it scales `target_tile_size_px` to the effective read spacing, then derives the effective parent region as `effective_tile_size_px * region_tile_multiple`. This keeps unrolled subtile geometry aligned with the model-facing tile size contract under spacing-driven rounding.
+
 When persisted via `Pipeline`, hierarchical artifacts are written to `hierarchical_embeddings/` and `RunResult` includes a `hierarchical_artifacts` list.
 
 Hierarchical extraction is supported for all tile-level models.

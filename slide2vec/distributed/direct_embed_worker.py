@@ -25,6 +25,7 @@ def main(argv=None) -> int:
         _compute_hierarchical_embedding_shard_for_slide,
         _compute_tile_embeddings_for_slide,
         _is_hierarchical_preprocessing,
+        _resolve_hierarchical_geometry,
         deserialize_execution,
         deserialize_preprocessing,
         load_successful_tiled_slides,
@@ -74,9 +75,11 @@ def main(argv=None) -> int:
                 slide, tiling_result = paired_by_sample[sample_id]
                 loaded = model._load_backend()
                 if _is_hierarchical_preprocessing(preprocessing):
+                    geometry = _resolve_hierarchical_geometry(preprocessing, tiling_result)
                     index = _build_hierarchical_index(
                         tiling_result,
                         region_tile_multiple=int(preprocessing.region_tile_multiple),
+                        tile_size_lv0=int(geometry["tile_size_lv0"]),
                     )
                     flat_indices = np.array_split(index.flat_index, world_size)[global_rank]
                     shard_indices, tile_embeddings = _compute_hierarchical_embedding_shard_for_slide(

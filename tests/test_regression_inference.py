@@ -2808,6 +2808,49 @@ def test_build_hierarchical_index_is_region_major_and_row_major_within_region():
     )
 
 
+def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch():
+    import slide2vec.inference as inference
+
+    preprocessing = PreprocessingConfig(
+        target_spacing_um=0.5,
+        target_tile_size_px=224,
+        target_region_size_px=1792,
+        region_tile_multiple=8,
+    )
+    tiling_result = SimpleNamespace(
+        effective_tile_size_px=3319,
+        effective_spacing_um=0.27,
+        tile_size_lv0=3319,
+        base_spacing_um=0.27,
+    )
+
+    geometry = inference._resolve_hierarchical_geometry(preprocessing, tiling_result)
+
+    assert geometry["effective_tile_size_px"] == 415
+    assert geometry["effective_region_size_px"] == 3320
+    assert geometry["tile_size_lv0"] == 415
+    assert geometry["tiles_per_region"] == 64
+
+
+def test_build_hierarchical_index_uses_tile_first_level0_offsets_under_spacing_mismatch():
+    import slide2vec.inference as inference
+
+    tiling_result = SimpleNamespace(
+        x=np.array([100], dtype=np.int64),
+        y=np.array([200], dtype=np.int64),
+    )
+
+    index = inference._build_hierarchical_index(
+        tiling_result,
+        region_tile_multiple=8,
+        tile_size_lv0=415,
+    )
+
+    assert index.tiles_per_region == 64
+    np.testing.assert_array_equal(index.subtile_x[:8], np.array([100, 515, 930, 1345, 1760, 2175, 2590, 3005], dtype=np.int64))
+    np.testing.assert_array_equal(index.subtile_y[::8], np.array([200, 615, 1030, 1445, 1860, 2275, 2690, 3105], dtype=np.int64))
+
+
 def test_merge_hierarchical_embedding_shards_restores_original_region_shape():
     import slide2vec.inference as inference
 
@@ -2932,6 +2975,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         tile_size_lv0=448,
         target_spacing_um=0.5,
         effective_spacing_um=0.5,
+        base_spacing_um=0.5,
         read_level=0,
     )
 
