@@ -112,23 +112,14 @@ def _resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_re
     target_tile_size_px = int(preprocessing.target_tile_size_px)
     target_region_size_px = int(preprocessing.target_region_size_px)
     target_spacing_um = float(preprocessing.target_spacing_um)
-    effective_spacing_value = getattr(tiling_result, "effective_spacing_um", None)
-    base_spacing_value = getattr(tiling_result, "base_spacing_um", None)
     multiple = int(preprocessing.region_tile_multiple)
     if target_region_size_px % multiple != 0:
         raise ValueError("target_region_size_px must be divisible by region_tile_multiple")
-    if effective_spacing_value is None:
-        effective_region_size_px = int(getattr(tiling_result, "effective_tile_size_px"))
-        effective_tile_size_px = effective_region_size_px // multiple
-    else:
-        effective_spacing_um = float(effective_spacing_value)
-        effective_tile_size_px = int(round(target_tile_size_px * target_spacing_um / effective_spacing_um))
-        effective_region_size_px = effective_tile_size_px * multiple
-    if base_spacing_value is None:
-        tile_size_lv0 = int(getattr(tiling_result, "tile_size_lv0")) // multiple
-    else:
-        base_spacing_um = float(base_spacing_value)
-        tile_size_lv0 = int(round(target_tile_size_px * target_spacing_um / base_spacing_um))
+    effective_spacing_um = float(getattr(tiling_result, "effective_spacing_um"))
+    base_spacing_um = float(getattr(tiling_result, "base_spacing_um"))
+    effective_tile_size_px = int(round(target_tile_size_px * target_spacing_um / effective_spacing_um))
+    effective_region_size_px = effective_tile_size_px * multiple
+    tile_size_lv0 = int(round(target_tile_size_px * target_spacing_um / base_spacing_um))
     return {
         "region_tile_multiple": multiple,
         "tiles_per_region": multiple * multiple,

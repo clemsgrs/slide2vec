@@ -2975,6 +2975,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         tile_size_lv0=448,
         target_spacing_um=0.5,
         effective_spacing_um=0.5,
+        base_spacing_um=0.5,
         read_level=0,
     )
 
