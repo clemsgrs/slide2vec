@@ -1,5 +1,9 @@
 # Lessons Learned
 
+## 2026-04-10
+
+- In this environment, never route `apply_patch` through `exec_command`; use the dedicated `apply_patch` tool directly for file edits.
+
 ## 2026-04-01
 
 - When the user says backward compatibility is not needed, do not add compatibility-preserving behavior or messaging; implement the simpler direct behavior instead.

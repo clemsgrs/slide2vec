@@ -111,19 +111,32 @@ def _resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_re
         raise ValueError("Hierarchical preprocessing requires target_region_size_px")
     target_tile_size_px = int(preprocessing.target_tile_size_px)
     target_region_size_px = int(preprocessing.target_region_size_px)
-    effective_region_size_px = int(getattr(tiling_result, "effective_tile_size_px"))
-    tile_size_lv0 = int(getattr(tiling_result, "tile_size_lv0"))
+    target_spacing_um = float(preprocessing.target_spacing_um)
+    effective_spacing_value = getattr(tiling_result, "effective_spacing_um", None)
+    base_spacing_value = getattr(tiling_result, "base_spacing_um", None)
     multiple = int(preprocessing.region_tile_multiple)
     if target_region_size_px % multiple != 0:
         raise ValueError("target_region_size_px must be divisible by region_tile_multiple")
+    if effective_spacing_value is None:
+        effective_region_size_px = int(getattr(tiling_result, "effective_tile_size_px"))
+        effective_tile_size_px = effective_region_size_px // multiple
+    else:
+        effective_spacing_um = float(effective_spacing_value)
+        effective_tile_size_px = int(round(target_tile_size_px * target_spacing_um / effective_spacing_um))
+        effective_region_size_px = effective_tile_size_px * multiple
+    if base_spacing_value is None:
+        tile_size_lv0 = int(getattr(tiling_result, "tile_size_lv0")) // multiple
+    else:
+        base_spacing_um = float(base_spacing_value)
+        tile_size_lv0 = int(round(target_tile_size_px * target_spacing_um / base_spacing_um))
     return {
         "region_tile_multiple": multiple,
         "tiles_per_region": multiple * multiple,
         "target_tile_size_px": target_tile_size_px,
-        "effective_tile_size_px": effective_region_size_px // multiple,
+        "effective_tile_size_px": effective_tile_size_px,
         "target_region_size_px": target_region_size_px,
         "effective_region_size_px": effective_region_size_px,
-        "tile_size_lv0": tile_size_lv0 // multiple,
+        "tile_size_lv0": tile_size_lv0,
     }
 
 
@@ -131,14 +144,18 @@ def _build_hierarchical_index(
     tiling_result,
     *,
     region_tile_multiple: int,
+    tile_size_lv0: int | None = None,
 ) -> HierarchicalIndex:
     x_values, y_values = coordinate_arrays(tiling_result)
     num_regions = int(len(x_values))
     multiple = int(region_tile_multiple)
     if multiple < 2:
         raise ValueError("region_tile_multiple must be at least 2")
-    tile_size_lv0 = int(getattr(tiling_result, "tile_size_lv0"))
-    subtile_size_lv0 = tile_size_lv0 // multiple
+    subtile_size_lv0 = (
+        int(tile_size_lv0)
+        if tile_size_lv0 is not None
+        else int(getattr(tiling_result, "tile_size_lv0")) // multiple
+    )
     tiles_per_region = multiple * multiple
     if num_regions == 0:
         empty = np.empty(0, dtype=np.int64)
@@ -1275,6 +1292,7 @@ def _compute_hierarchical_embeddings_for_slide(
     index = _build_hierarchical_index(
         tiling_result,
         region_tile_multiple=int(geometry["region_tile_multiple"]),
+        tile_size_lv0=int(geometry["tile_size_lv0"]),
     )
     resolved_indices = index.flat_index
     if flat_indices is not None:
@@ -1370,6 +1388,7 @@ def _compute_hierarchical_embedding_shard_for_slide(
     index = _build_hierarchical_index(
         tiling_result,
         region_tile_multiple=int(geometry["region_tile_multiple"]),
+        tile_size_lv0=int(geometry["tile_size_lv0"]),
     )
     resolved_indices = np.asarray(flat_indices, dtype=np.int64)
     collate_fn = OnTheFlyHierarchicalBatchCollator(
