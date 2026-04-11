@@ -2,7 +2,7 @@
 
 `slide2vec` exposes two main workflows:
 
-- direct in-memory embedding with `Model.embed_slide(...)` and `Model.embed_slides(...)`
+- direct in-memory embedding with `Model.embed_slide(...)`, `Model.embed_slides(...)`, `Model.embed_patient(...)`, and `Model.embed_patients(...)`
 - artifact generation with `Pipeline.run(...)`
 
 ## Minimal interactive usage
@@ -108,11 +108,59 @@ Common fields:
 - `output_dir`
 - `output_format` - `"pt"` (default) or `"npz"`
 - `save_tile_embeddings` - persist tile embeddings for slide-level models (default `False`)
+- `save_slide_embeddings` - persist per-slide embeddings when running a patient-level model (default `False`)
 - `save_latents` - persist latent representations when available (default `False`)
 
 `num_gpus` defaults to all available GPUs. `embed_slide(...)` uses tile sharding for one slide, and `embed_slides(...)` balances whole slides across GPUs while preserving input order.
 
 If you need persisted artifact generation without using `Pipeline.run(...)`, use `Model.embed_tiles(...)` and `Model.aggregate_tiles(...)`.
+
+## Patient-level embedding
+
+For patient-level models (e.g. `moozy`), use `Model.embed_patient(...)` for a single patient or `Model.embed_patients(...)` for a batch of patients.
+
+### Single patient
+
+```python
+from slide2vec import Model
+
+model = Model.from_preset("moozy")
+result = model.embed_patient(
+    ["/data/slide_1a.svs", "/data/slide_1b.svs"],
+    patient_id="patient_1",
+)
+
+print(result.patient_id)              # "patient_1"
+print(result.patient_embedding.shape) # torch.Size([768])
+print(result.slide_embeddings)        # {"slide_1a": tensor, "slide_1b": tensor}
+```
+
+`embed_patient(...)` returns a single `EmbeddedPatient`. The `patient_id` argument is optional — when omitted, it is read from `patient_id` keys in the slide dicts, or falls back to `sample_id`.
+
+### Multiple patients
+
+```python
+results = model.embed_patients(
+    [
+        {"sample_id": "slide_1a", "image_path": "/data/slide_1a.svs", "patient_id": "patient_1"},
+        {"sample_id": "slide_1b", "image_path": "/data/slide_1b.svs", "patient_id": "patient_1"},
+        {"sample_id": "slide_2a", "image_path": "/data/slide_2a.svs", "patient_id": "patient_2"},
+    ]
+)
+
+for r in results:
+    print(r.patient_id, r.patient_embedding.shape)
+```
+
+`embed_patients(...)` returns one `EmbeddedPatient` per unique patient, ordered by first appearance. Pass an explicit `patient_id_map` dict (`{sample_id: patient_id}`) to override the per-slide `patient_id` keys.
+
+Each `EmbeddedPatient` has:
+
+- `patient_id`
+- `patient_embedding` — tensor of shape `(D,)` (768 for MOOZY)
+- `slide_embeddings` — `{sample_id: tensor}` for each contributing slide
+
+Both methods raise a `ValueError` if called on a non-patient-level model.
 
 ## Hierarchical Feature Extraction
 
@@ -170,9 +218,10 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 - `tile_artifacts`
 - `hierarchical_artifacts`
 - `slide_artifacts`
+- `patient_artifacts` — populated when using a patient-level model (e.g. `moozy`); one entry per unique patient, written to `patient_embeddings/` in the output directory
 - `process_list_path`
 
-The manifest schema matches HS2P and accepts optional `mask_path` and `spacing_at_level_0` columns.
+The manifest schema matches HS2P and accepts optional `mask_path` and `spacing_at_level_0` columns. Patient-level models additionally require a `patient_id` column; see [Patient manifest format](models.md#patient-manifest-format).
 
 ### Reusing pre-extracted coordinates
 

@@ -36,6 +36,20 @@ class SlideEmbeddingArtifact:
 
 
 @dataclass(frozen=True, kw_only=True)
+class PatientEmbeddingArtifact:
+    patient_id: str
+    path: Path
+    metadata_path: Path
+    format: str
+    feature_dim: int
+    num_slides: int
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return load_metadata(self.metadata_path)
+
+
+@dataclass(frozen=True, kw_only=True)
 class HierarchicalEmbeddingArtifact:
     sample_id: str
     path: Path
@@ -220,6 +234,45 @@ def write_slide_embeddings(
         format=output_format,
         feature_dim=slide_metadata["feature_dim"],
         latent_path=latent_path,
+    )
+
+
+def write_patient_embeddings(
+    patient_id: str,
+    embedding,
+    *,
+    output_dir: str | Path,
+    output_format: str = "pt",
+    metadata: dict[str, Any] | None = None,
+    num_slides: int = 0,
+) -> PatientEmbeddingArtifact:
+    output_format = _validate_output_format(output_format)
+    artifact_path, metadata_path = _setup_artifact_paths(
+        output_dir, "patient_embeddings", patient_id, output_format
+    )
+    embedding_array = _ensure_array(embedding)
+    if output_format == "pt":
+        torch.save(_ensure_tensor(embedding), artifact_path)
+    else:
+        np.savez_compressed(artifact_path, features=embedding_array)
+
+    patient_metadata = {
+        "patient_id": patient_id,
+        "artifact_type": "patient_embeddings",
+        "format": output_format,
+        "feature_dim": int(embedding_array.shape[-1]) if embedding_array.ndim else 1,
+        "num_slides": num_slides,
+    }
+    if metadata:
+        patient_metadata.update(metadata)
+    _write_metadata(metadata_path, patient_metadata)
+    return PatientEmbeddingArtifact(
+        patient_id=patient_id,
+        path=artifact_path,
+        metadata_path=metadata_path,
+        format=output_format,
+        feature_dim=patient_metadata["feature_dim"],
+        num_slides=num_slides,
     )
 
 

@@ -355,6 +355,7 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
         model=SimpleNamespace(
             batch_size=4,
             save_tile_embeddings=True,
+            save_slide_embeddings=False,
             save_latents=True,
         ),
         speed=SimpleNamespace(
@@ -389,7 +390,12 @@ def test_execution_options_from_config_defaults_preprocessing_workers_to_cpu_bud
 
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
-        model=SimpleNamespace(batch_size=4, save_tile_embeddings=False, save_latents=False),
+        model=SimpleNamespace(
+            batch_size=4,
+            save_tile_embeddings=False,
+            save_slide_embeddings=False,
+            save_latents=False,
+        ),
         speed=SimpleNamespace(
             precision="fp16",
             num_dataloader_workers=2,
@@ -407,7 +413,12 @@ def test_execution_options_from_config_defaults_preprocessing_workers_to_cpu_bud
 def test_execution_options_from_config_preserves_auto_num_workers(tmp_path: Path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
-        model=SimpleNamespace(batch_size=4, save_tile_embeddings=False, save_latents=False),
+        model=SimpleNamespace(
+            batch_size=4,
+            save_tile_embeddings=False,
+            save_slide_embeddings=False,
+            save_latents=False,
+        ),
         speed=SimpleNamespace(
             precision="fp16",
             num_dataloader_workers=None,
@@ -431,6 +442,7 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
         model=SimpleNamespace(
             batch_size=4,
             save_tile_embeddings=False,
+            save_slide_embeddings=False,
             save_latents=False,
         ),
         speed=SimpleNamespace(
@@ -459,6 +471,7 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
         model=SimpleNamespace(
             batch_size=1,
             save_tile_embeddings=False,
+            save_slide_embeddings=False,
             save_latents=False,
         ),
         speed=SimpleNamespace(
@@ -559,6 +572,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             batch_size=4,
             allow_non_recommended_settings=True,
             save_tile_embeddings=False,
+            save_slide_embeddings=False,
             save_latents=False,
         ),
         speed=SimpleNamespace(
