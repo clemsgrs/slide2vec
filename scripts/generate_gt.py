@@ -127,7 +127,7 @@ def main():
         subprocess.run(
             [
                 "slide2vec",
-                "config-file", str(cfg_path),
+                str(cfg_path),
                 "--skip-datetime",
                 "--run-on-cpu",
             ],

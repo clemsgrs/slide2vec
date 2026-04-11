@@ -133,7 +133,7 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     subprocess.run(
         [
             "slide2vec",
-            "config-file", str(cfg_path),
+            str(cfg_path),
             "--skip-datetime",
             "--run-on-cpu",
         ],
