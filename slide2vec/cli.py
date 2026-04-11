@@ -50,3 +50,7 @@ def main(argv=None):
         )
 
 
+def entrypoint(argv=None):
+    main(argv)
+    return 0
+

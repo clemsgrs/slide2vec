@@ -128,6 +128,21 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
 
 
+def test_cli_entrypoint_returns_zero(monkeypatch):
+    import slide2vec.cli as cli
+
+    observed = {}
+
+    def fake_main(argv=None):
+        observed["argv"] = argv
+        return "ok"
+
+    monkeypatch.setattr(cli, "main", fake_main)
+
+    assert cli.entrypoint(["/tmp/config.yaml"]) == 0
+    assert observed["argv"] == ["/tmp/config.yaml"]
+
+
 def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
