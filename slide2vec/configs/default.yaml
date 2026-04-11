@@ -13,6 +13,7 @@ model:
   output_variant: # requested output variant for presets that expose multiple outputs
   batch_size: 32
   save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
+  save_slide_embeddings: false # whether to save per-slide embeddings when level is "patient" (e.g. moozy); requires a 'patient_id' column in the input CSV
   save_latents: false # whether to save the latent representations from the model alongside the slide embedding (only supported for 'prism')
   allow_non_recommended_settings: false # when true, non-recommended spacing / tile size / precision combinations warn instead of erroring
 

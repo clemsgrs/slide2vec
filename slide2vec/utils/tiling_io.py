@@ -118,6 +118,22 @@ def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     ]
 
 
+def load_patient_id_mapping(csv_path: str | Path) -> dict[str, str]:
+    """Return {sample_id: patient_id} from an input CSV with a 'patient_id' column.
+
+    Raises ValueError if the 'patient_id' column is absent.
+    """
+    manifest_path = Path(csv_path).resolve()
+    df = pd.read_csv(manifest_path)
+    if "patient_id" not in df.columns:
+        raise ValueError(
+            f"Input CSV {manifest_path} is missing the required 'patient_id' column "
+            "for patient-level models. Add a 'patient_id' column that groups slides "
+            "belonging to the same patient."
+        )
+    return dict(zip(df["sample_id"].astype(str), df["patient_id"].astype(str)))
+
+
 def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
     process_list_path = Path(process_list_path)
     df = pd.read_csv(process_list_path)

@@ -96,6 +96,33 @@ class SlideEncoder(Encoder):
         return coordinates
 
 
+class PatientEncoder(Encoder):
+    """Base class for encoders that aggregate slide embeddings into patient embeddings."""
+
+    tile_encoder: TileEncoder | None = None
+
+    def encode_tiles(self, batch: Tensor) -> Tensor:
+        if self.tile_encoder is None:
+            raise AttributeError("patient encoders must attach a tile_encoder before encoding tiles")
+        return self.tile_encoder.encode_tiles(batch)
+
+    @abstractmethod
+    def encode_slide(
+        self,
+        tile_features: Tensor,
+        coordinates: Tensor | None = None,
+        *,
+        tile_size_lv0: int | None = None,
+    ) -> Tensor:
+        """Pool tile-level features into a single slide-level embedding."""
+        ...
+
+    @abstractmethod
+    def encode_patient(self, slide_embeddings: Tensor) -> Tensor:
+        """Aggregate slide embeddings [S, D] into a single patient-level embedding [D]."""
+        ...
+
+
 class TimmTileEncoder(TileEncoder):
     """Convenience base for timm-backed tile encoders."""
 

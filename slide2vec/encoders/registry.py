@@ -26,7 +26,7 @@ def resolve_encoder_level(
 ) -> str:
     """Resolve and validate one encoder level contract."""
     level = str(require_encoder_metadata_field(encoder_name, metadata, "level"))
-    if level not in {"tile", "slide"}:
+    if level not in {"tile", "slide", "patient"}:
         raise ValueError(f"Unsupported encoder level '{level}'")
     return level
 
@@ -101,7 +101,7 @@ def resolve_preprocessing_requirements(
             "source_encoder": encoder_name,
         }
 
-    if level == "slide":
+    if level in {"slide", "patient"}:
         tile_encoder_name = str(
             require_encoder_metadata_field(encoder_name, info, "tile_encoder")
         )
@@ -164,10 +164,10 @@ def resolve_encoder_output(
             f"Encoder '{encoder_name}' has invalid default_output_variant "
             f"'{default_output_variant}'"
         )
-    if requested_output_variant is not None and level == "slide":
+    if requested_output_variant is not None and level in {"slide", "patient"}:
         raise ValueError(
-            f"Slide encoder '{encoder_name}' has a fixed output_variant; "
-            "do not override output_variant for slide encoders."
+            f"Encoder '{encoder_name}' (level={level}) has a fixed output_variant; "
+            "do not override output_variant for slide or patient encoders."
         )
 
     output_variant = requested_output_variant or str(default_output_variant)
@@ -196,6 +196,7 @@ def resolve_tile_dependency_output(
         resolved["encoder_name"] = encoder_name
         return resolved
 
+    # Both "slide" and "patient" declare tile_encoder / tile_encoder_output_variant.
     tile_encoder_name = str(
         require_encoder_metadata_field(encoder_name, info, "tile_encoder")
     )

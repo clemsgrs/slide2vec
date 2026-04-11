@@ -11,6 +11,7 @@ from hs2p import SlideSpec
 
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
+    PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
@@ -127,6 +128,7 @@ class ExecutionOptions:
     prefetch_factor: int = 4
     persistent_workers: bool = True
     save_tile_embeddings: bool = False
+    save_slide_embeddings: bool = False
     save_latents: bool = False
 
     @classmethod
@@ -151,6 +153,7 @@ class ExecutionOptions:
             prefetch_factor=prefetch_factor,
             persistent_workers=persistent_workers,
             save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
+            save_slide_embeddings=bool(cfg.model.save_slide_embeddings),
             save_latents=bool(cfg.model.save_latents),
         )
 
@@ -200,7 +203,15 @@ class RunResult:
     tile_artifacts: list[TileEmbeddingArtifact]
     hierarchical_artifacts: list[HierarchicalEmbeddingArtifact]
     slide_artifacts: list[SlideEmbeddingArtifact]
+    patient_artifacts: list[PatientEmbeddingArtifact] = field(default_factory=list)
     process_list_path: Path | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class EmbeddedPatient:
+    patient_id: str
+    patient_embedding: Any  # torch.Tensor [D]
+    slide_embeddings: dict[str, Any]  # {sample_id: torch.Tensor [D]}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -339,6 +350,82 @@ class Model:
             return embed_slides(
                 self,
                 slides,
+                preprocessing=resolved_preprocessing,
+                execution=resolved,
+            )
+
+    def embed_patient(
+        self,
+        slides: SlideSequence,
+        patient_id: str | None = None,
+        *,
+        preprocessing: PreprocessingConfig | None = None,
+        execution: ExecutionOptions | None = None,
+    ) -> "EmbeddedPatient":
+        """Embed a single patient's slides and return one ``EmbeddedPatient``.
+
+        Convenience wrapper around :meth:`embed_patients` for the common case
+        where all *slides* belong to the same patient.
+
+        Args:
+            slides: All slides for this patient.
+            patient_id: Optional patient identifier applied to every slide.
+                When omitted, ``patient_id`` is read from slide dict keys or
+                object attributes; slides that carry no ``patient_id`` fall
+                back to ``sample_id``.
+        """
+        patient_id_map: dict | None = None
+        if patient_id is not None:
+            patient_id_map = {}
+            for s in slides:
+                if isinstance(s, (str, Path)):
+                    patient_id_map[Path(s).stem] = patient_id
+                elif isinstance(s, dict):
+                    patient_id_map[str(s["sample_id"])] = patient_id
+                else:
+                    patient_id_map[str(s.sample_id)] = patient_id
+        return self.embed_patients(
+            slides,
+            patient_id_map=patient_id_map,
+            preprocessing=preprocessing,
+            execution=execution,
+        )[0]
+
+    def embed_patients(
+        self,
+        slides: SlideSequence,
+        patient_id_map: dict | None = None,
+        *,
+        preprocessing: PreprocessingConfig | None = None,
+        execution: ExecutionOptions | None = None,
+    ) -> "list[EmbeddedPatient]":
+        """Embed slides and aggregate them into patient-level embeddings.
+
+        Requires a patient-level model (e.g. ``moozy``).  For each patient
+        all contributing slide embeddings are aggregated by the model's
+        ``encode_patient`` method.
+
+        Args:
+            slides: Slides to process.  Each entry may be a path, a
+                ``SlideSpec``, or a dict with ``sample_id`` / ``image_path``
+                keys.  When *patient_id_map* is ``None`` a ``patient_id``
+                key in each dict is used to group slides.
+            patient_id_map: Optional explicit ``{sample_id: patient_id}``
+                mapping.  When provided it takes precedence over any
+                ``patient_id`` key embedded in the slide dicts.  When
+                omitted and the slide dicts carry no ``patient_id``, each
+                slide is treated as its own patient.
+        """
+        from slide2vec.inference import embed_patients
+
+        resolved = _coerce_execution_options(execution, model=self)
+        resolved_preprocessing = _resolve_direct_api_preprocessing(self, preprocessing)
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            _validate_model_config(self, resolved_preprocessing, resolved)
+            return embed_patients(
+                self,
+                slides,
+                patient_id_map=patient_id_map,
                 preprocessing=resolved_preprocessing,
                 execution=resolved,
             )

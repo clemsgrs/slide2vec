@@ -6,6 +6,7 @@ the ``models`` subpackage.
 
 from slide2vec.encoders.base import (
     Encoder,
+    PatientEncoder,
     SlideEncoder,
     TileEncoder,
     TimmTileEncoder,
@@ -24,6 +25,7 @@ from slide2vec.encoders import models as _models_pkg  # noqa: F401
 
 __all__ = [
     "Encoder",
+    "PatientEncoder",
     "TileEncoder",
     "SlideEncoder",
     "TimmTileEncoder",

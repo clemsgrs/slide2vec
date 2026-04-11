@@ -22,6 +22,7 @@ import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
 
 from slide2vec.api import (
+    EmbeddedPatient,
     EmbeddedSlide,
     ExecutionOptions,
     PreprocessingConfig,
@@ -30,11 +31,13 @@ from slide2vec.api import (
 )
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
+    PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
     write_hierarchical_embeddings,
     load_array,
     load_metadata,
+    write_patient_embeddings,
     write_slide_embeddings,
     write_tile_embedding_metadata,
     write_tile_embeddings,
@@ -58,6 +61,7 @@ from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierar
 from slide2vec.utils.coordinates import coordinate_arrays
 from slide2vec.utils.tiling_io import (
     load_embedding_process_df,
+    load_patient_id_mapping,
     load_slide_manifest,
     load_tiling_process_df,
     load_tiling_result_from_row,
@@ -288,6 +292,7 @@ def load_model(
     if resolved_level == "tile":
         transforms = encoder.get_transform()
     else:
+        # Both "slide" and "patient" declare tile_encoder for transform resolution.
         tile_enc_name = info["tile_encoder"]
         tile_enc_ov = info["tile_encoder_output_variant"]
         tile_enc_cls = encoder_registry.require(tile_enc_name)
@@ -425,6 +430,166 @@ def embed_slides(
                 logs_dir=str(work_dir / "logs"),
             )
             return embedded_slides
+        except Exception as exc:
+            emit_progress("run.failed", stage="embedding", error=str(exc))
+            raise
+
+
+def _encode_slide_from_tiles(
+    loaded: LoadedModel,
+    tile_embeddings: torch.Tensor,
+    tiling_result,
+) -> torch.Tensor:
+    """Run the slide encoder on already-computed tile embeddings.
+
+    Returns a CPU tensor of shape ``(D,)``.
+    """
+    x_values, y_values = coordinate_arrays(tiling_result)
+    coordinates = np.column_stack((x_values, y_values))
+    coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
+    features = tile_embeddings.to(loaded.device)
+    with torch.inference_mode():
+        return loaded.model.encode_slide(
+            features,
+            coordinate_tensor,
+            tile_size_lv0=int(tiling_result.tile_size_lv0),
+        ).detach().cpu()
+
+
+def embed_patients(
+    model,
+    slides,
+    *,
+    patient_id_map: dict[str, str] | None = None,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+) -> list[EmbeddedPatient]:
+    """Tile slides and aggregate them into patient-level embeddings in memory.
+
+    For each slide the tile encoder and slide encoder are run to produce a
+    slide-level embedding.  Once all slides have been processed the slide
+    embeddings are grouped by ``patient_id`` and passed to the model's
+    ``encode_patient`` method.
+
+    Args:
+        model: A patient-level ``Model`` instance (e.g. ``moozy``).
+        slides: Slides to process.
+        patient_id_map: Optional explicit ``{sample_id: patient_id}`` mapping.
+            When omitted, ``patient_id`` is looked up from each slide dict /
+            object attribute; slides without any ``patient_id`` are each
+            treated as their own patient.
+        preprocessing: Tiling and preprocessing configuration.
+        execution: Execution options (batch size, workers, etc.).
+
+    Returns:
+        One :class:`~slide2vec.api.EmbeddedPatient` per unique patient,
+        ordered by first appearance.
+    """
+    if model.level != "patient":
+        raise ValueError(
+            f"embed_patients() requires a patient-level model, but '{model.name}' "
+            f"has level='{model.level}'. Use embed_slides() for slide-level models."
+        )
+    slide_records = [_coerce_slide_spec(slide) for slide in slides]
+    if not slide_records:
+        raise ValueError("At least one slide is required")
+
+    # Resolve patient_id mapping: explicit dict > slide-level attribute > identity.
+    # Use slide_records for sample_id keys (already normalised by _coerce_slide_spec)
+    # but read patient_id from the original slide input (SlideSpec has no patient_id).
+    if patient_id_map is None:
+        patient_id_map = {}
+        for s, sr in zip(slides, slide_records):
+            if isinstance(s, dict) and "patient_id" in s:
+                patient_id_map[sr.sample_id] = str(s["patient_id"])
+            elif hasattr(s, "patient_id"):
+                patient_id_map[sr.sample_id] = str(s.patient_id)
+
+    emit_progress(
+        "run.started",
+        model_name=model.name,
+        level=model.level,
+        device_mode=_describe_device_mode(model, execution),
+        slide_count=len(slide_records),
+        output_dir=str(execution.output_dir or ""),
+    )
+    with _embedding_work_dir(execution.output_dir) as work_dir:
+        try:
+            emit_progress("tiling.started", slide_count=len(slide_records))
+            prepared_slides, tiling_results, process_list_path = _prepare_tiled_slides(
+                slide_records,
+                preprocessing,
+                output_dir=work_dir,
+                num_workers=execution.num_preprocessing_workers,
+            )
+            _emit_tiling_finished(
+                process_list_path,
+                expected_total=len(slide_records),
+                successful_slides=prepared_slides,
+                tiling_results=tiling_results,
+            )
+            embeddable_slides, embeddable_tiling_results, _ = _partition_slides_by_tile_count(
+                prepared_slides,
+                tiling_results,
+            )
+            emit_progress("embedding.started", slide_count=len(embeddable_slides))
+            loaded = model._load_backend()
+
+            # Per-slide: tile encoding → slide encoding, accumulate for patient agg.
+            # Ordered dict preserves first-appearance order of patients.
+            patient_slide_embeddings: dict[str, list[tuple[str, torch.Tensor]]] = {}
+            for slide, tiling_result in zip(embeddable_slides, embeddable_tiling_results):
+                emit_progress(
+                    "embedding.slide.started",
+                    sample_id=slide.sample_id,
+                    total_tiles=_num_embedding_items(tiling_result, preprocessing),
+                )
+                tile_embeddings = _compute_tile_embeddings_for_slide(
+                    loaded,
+                    model,
+                    slide,
+                    tiling_result,
+                    preprocessing=preprocessing,
+                    execution=execution,
+                )
+                slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+                patient_id = patient_id_map.get(slide.sample_id, slide.sample_id)
+                patient_slide_embeddings.setdefault(patient_id, []).append(
+                    (slide.sample_id, slide_emb)
+                )
+                emit_progress(
+                    "embedding.slide.finished",
+                    sample_id=slide.sample_id,
+                    num_tiles=_num_embedding_items(tiling_result, preprocessing),
+                )
+
+            # Patient aggregation.
+            result: list[EmbeddedPatient] = []
+            for patient_id, slide_embs_list in patient_slide_embeddings.items():
+                stacked = torch.stack([emb for _, emb in slide_embs_list], dim=0).to(loaded.device)
+                with torch.inference_mode():
+                    patient_emb = loaded.model.encode_patient(stacked).detach().cpu()
+                result.append(
+                    EmbeddedPatient(
+                        patient_id=patient_id,
+                        patient_embedding=patient_emb,
+                        slide_embeddings={sid: emb for sid, emb in slide_embs_list},
+                    )
+                )
+
+            emit_progress(
+                "embedding.finished",
+                slide_count=len(embeddable_slides),
+                slides_completed=len(embeddable_slides),
+                tile_artifacts=0,
+                slide_artifacts=0,
+            )
+            emit_progress(
+                "run.finished",
+                output_dir=str(work_dir),
+                logs_dir=str(work_dir / "logs"),
+            )
+            return result
         except Exception as exc:
             emit_progress("run.failed", stage="embedding", error=str(exc))
             raise
@@ -604,6 +769,10 @@ def run_pipeline(
     tiling_only: bool = False,
     execution: ExecutionOptions,
 ) -> RunResult:
+    if model.level == "patient" and not tiling_only:
+        patient_id_map = _resolve_patient_id_map(slides=slides, manifest_path=manifest_path)
+    else:
+        patient_id_map = None
     slide_records = _resolve_slides(slides=slides, manifest_path=manifest_path)
     if not slide_records:
         raise ValueError("At least one slide is required")
@@ -664,6 +833,36 @@ def run_pipeline(
             output_format=execution.output_format,
         )
         emit_progress("embedding.started", slide_count=len(embeddable_slides))
+
+        if model.level == "patient":
+            tile_artifacts, slide_artifacts, patient_artifacts = _run_patient_pipeline(
+                model,
+                embeddable_slides=embeddable_slides,
+                embeddable_tiling_results=embeddable_tiling_results,
+                patient_id_map=patient_id_map,
+                preprocessing=resolved_preprocessing,
+                execution=execution,
+                output_dir=output_dir,
+            )
+            emit_progress(
+                "embedding.finished",
+                slide_count=len(embeddable_slides),
+                slides_completed=len(embeddable_slides),
+                tile_artifacts=len(tile_artifacts),
+                slide_artifacts=len(slide_artifacts),
+            )
+            emit_progress(
+                "run.finished",
+                output_dir=str(output_dir),
+                logs_dir=str(output_dir / "logs"),
+            )
+            return RunResult(
+                tile_artifacts=tile_artifacts,
+                hierarchical_artifacts=[],
+                slide_artifacts=slide_artifacts,
+                patient_artifacts=patient_artifacts,
+                process_list_path=process_list_path,
+            )
 
         if execution.num_gpus > 1:
             tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_distributed_pipeline_artifacts(
@@ -858,6 +1057,107 @@ def run_pipeline_with_coordinates(
     except Exception as exc:
         emit_progress("run.failed", stage="pipeline", error=str(exc))
         raise
+
+
+def _run_patient_pipeline(
+    model,
+    *,
+    embeddable_slides: Sequence[SlideSpec],
+    embeddable_tiling_results,
+    patient_id_map: dict[str, str],
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    output_dir: Path,
+) -> tuple[list[TileEmbeddingArtifact], list[SlideEmbeddingArtifact], list[PatientEmbeddingArtifact]]:
+    """Run the patient-level embedding pipeline.
+
+    For each slide: extract tile features and compute a slide-level embedding.
+    After processing all slides for a patient: aggregate slide embeddings into
+    a single patient embedding via the case transformer.
+    """
+    loaded = model._load_backend()
+    tile_artifacts: list[TileEmbeddingArtifact] = []
+    slide_artifacts: list[SlideEmbeddingArtifact] = []
+
+    # Accumulate per-patient: {patient_id: [(sample_id, slide_embedding)]}
+    patient_slide_embeddings: dict[str, list[tuple[str, torch.Tensor]]] = {}
+    patient_slide_counts: dict[str, int] = {}
+
+    for slide, tiling_result in zip(embeddable_slides, embeddable_tiling_results):
+        emit_progress(
+            "embedding.slide.started",
+            sample_id=slide.sample_id,
+            total_tiles=_num_embedding_items(tiling_result, preprocessing),
+        )
+        tile_embeddings = _compute_tile_embeddings_for_slide(
+            loaded,
+            model,
+            slide,
+            tiling_result,
+            preprocessing=preprocessing,
+            execution=execution,
+        )
+
+        if execution.save_tile_embeddings:
+            tile_artifact = _write_tile_embedding_artifact(
+                slide.sample_id,
+                tile_embeddings,
+                execution=execution,
+                metadata=_build_tile_embedding_metadata(
+                    model,
+                    tiling_result=tiling_result,
+                    image_path=slide.image_path,
+                    mask_path=slide.mask_path,
+                    tile_size_lv0=int(tiling_result.tile_size_lv0),
+                    backend=_resolve_slide_backend(preprocessing, tiling_result),
+                ),
+            )
+            tile_artifacts.append(tile_artifact)
+
+        emit_progress(
+            "aggregation.started",
+            sample_id=slide.sample_id,
+            total_tiles=_num_embedding_items(tiling_result, preprocessing),
+        )
+        slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+        emit_progress("aggregation.finished", sample_id=slide.sample_id, has_latents=False)
+
+        if execution.save_slide_embeddings:
+            slide_artifact = _write_slide_embedding_artifact(
+                slide.sample_id,
+                slide_emb,
+                execution=execution,
+                metadata=_build_slide_embedding_metadata(model, image_path=slide.image_path),
+            )
+            slide_artifacts.append(slide_artifact)
+
+        patient_id = patient_id_map.get(slide.sample_id, slide.sample_id)
+        patient_slide_embeddings.setdefault(patient_id, []).append(slide_emb)
+        patient_slide_counts[patient_id] = patient_slide_counts.get(patient_id, 0) + 1
+
+        emit_progress(
+            "embedding.slide.finished",
+            sample_id=slide.sample_id,
+            num_tiles=_num_embedding_items(tiling_result, preprocessing),
+        )
+
+    # Aggregate per patient
+    patient_artifacts: list[PatientEmbeddingArtifact] = []
+    for patient_id, slide_embs in patient_slide_embeddings.items():
+        stacked = torch.stack(slide_embs, dim=0).to(loaded.device)
+        with torch.inference_mode():
+            patient_emb = loaded.model.encode_patient(stacked).detach().cpu()
+        artifact = write_patient_embeddings(
+            patient_id,
+            patient_emb,
+            output_dir=output_dir,
+            output_format=execution.output_format,
+            metadata={"encoder_name": model.name, "encoder_level": model.level},
+            num_slides=patient_slide_counts[patient_id],
+        )
+        patient_artifacts.append(artifact)
+
+    return tile_artifacts, slide_artifacts, patient_artifacts
 
 
 def _collect_local_pipeline_artifacts(
@@ -2140,6 +2440,37 @@ def _resolve_slides(*, slides=None, manifest_path: str | Path | None = None) -> 
     return [_coerce_slide_spec(slide) for slide in load_slide_manifest(manifest_path)]
 
 
+def _resolve_patient_id_map(
+    *,
+    slides=None,
+    manifest_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Return {sample_id: patient_id} for patient-level models.
+
+    Reads the 'patient_id' column from the manifest CSV, or falls back to
+    inspecting slide dicts for a 'patient_id' key. Raises if neither is found.
+    """
+    if manifest_path is not None:
+        return load_patient_id_mapping(manifest_path)
+    if slides is not None:
+        result = {}
+        for slide in slides:
+            if isinstance(slide, dict) and "patient_id" in slide:
+                result[str(slide["sample_id"])] = str(slide["patient_id"])
+            elif hasattr(slide, "patient_id"):
+                result[str(slide.sample_id)] = str(slide.patient_id)
+            else:
+                raise ValueError(
+                    "Patient-level models require a 'patient_id' for every slide. "
+                    "Provide a manifest CSV with a 'patient_id' column, or include "
+                    "'patient_id' in each slide dict when calling programmatically."
+                )
+        return result
+    raise ValueError(
+        "Either slides or manifest_path must be provided for patient-level models."
+    )
+
+
 def _coerce_slide_spec(slide) -> SlideSpec:
     if isinstance(slide, SlideSpec):
         return slide
@@ -2273,7 +2604,7 @@ def _emit_tiling_finished(
 
 
 def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
-    if model.level == "slide":
+    if model.level in {"slide", "patient"}:
         return bool(execution.save_tile_embeddings)
     return True
 
