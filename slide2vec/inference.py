@@ -17,7 +17,7 @@ import logging
 import pandas as pd
 import torch
 from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
-from hs2p.utils.stderr import run_with_filtered_stderr
+from hs2p.utils.stderr import run_with_filtered_stderr, run_with_filtered_stdio
 import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
 
@@ -2383,19 +2383,23 @@ def _tile_slides(
 ) -> list[Any]:
     _preload_asap_wholeslidedata(preprocessing)
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
-    return tile_slides(
-        slides,
-        tiling=tiling_cfg,
-        segmentation=segmentation_cfg,
-        filtering=filtering_cfg,
-        preview=preview_cfg,
-        output_dir=output_dir,
-        num_workers=num_workers,
-        read_coordinates_from=read_coordinates_from,
-        resume=resume,
-        save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
-        jpeg_backend=preprocessing.jpeg_backend,
-    )
+
+    def _run_tile_slides():
+        return tile_slides(
+            slides,
+            tiling=tiling_cfg,
+            segmentation=segmentation_cfg,
+            filtering=filtering_cfg,
+            preview=preview_cfg,
+            output_dir=output_dir,
+            num_workers=num_workers,
+            read_coordinates_from=read_coordinates_from,
+            resume=resume,
+            save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
+            jpeg_backend=preprocessing.jpeg_backend,
+        )
+
+    return run_with_filtered_stdio(_run_tile_slides)
 
 
 def _preload_asap_wholeslidedata(preprocessing: PreprocessingConfig) -> None:
