@@ -4,8 +4,13 @@ import logging
 import os
 import sys
 
-import slide2vec.distributed as distributed
 from slide2vec.progress import emit_progress_log
+
+
+def _distributed_module():
+    import slide2vec.distributed as distributed
+
+    return distributed
 
 
 @contextlib.contextmanager
@@ -66,6 +71,7 @@ def _configure_logger(
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
+    distributed = _distributed_module()
 
     # Loosely match Google glog format:
     #   [IWEF]yyyymmdd hh:mm:ss.uuuuuu threadid file:line] msg

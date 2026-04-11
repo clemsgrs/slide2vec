@@ -281,9 +281,9 @@ def _default_base_config(
             "read_coordinates_from": None,
             "read_tiles_from": None,
             "params": {
-                "target_spacing_um": 0.5,
+                "requested_spacing_um": 0.5,
                 "tolerance": 0.05,
-                "target_tile_size_px": 224,
+                "requested_tile_size_px": 224,
                 "overlap": 0.0,
                 "tissue_threshold": 0.1,
                 "drop_holes": False,
@@ -510,8 +510,8 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
 
     preprocessing = PreprocessingConfig(
         backend=str(tiling_cfg.get("backend", "cucim")),
-        target_spacing_um=float(params.get("target_spacing_um", 0.5)),
-        target_tile_size_px=int(params.get("target_tile_size_px", 256)),
+        requested_spacing_um=float(params.get("requested_spacing_um", 0.5)),
+        requested_tile_size_px=int(params.get("requested_tile_size_px", 256)),
         tolerance=float(params.get("tolerance", 0.05)),
         overlap=float(params.get("overlap", 0.0)),
         tissue_threshold=float(params.get("tissue_threshold", 0.01)),

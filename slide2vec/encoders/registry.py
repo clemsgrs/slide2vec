@@ -131,8 +131,8 @@ def resolve_preprocessing_defaults(
             supported_text = ", ".join(f"{s:g}" for s in unique_spacings)
             raise ValueError(
                 f"Encoder '{encoder_name}' supports multiple spacings [{supported_text}]; "
-                "cannot infer a default target_spacing_um. "
-                "Pass preprocessing.target_spacing_um explicitly."
+                "cannot infer a default requested_spacing_um. "
+                "Pass preprocessing.requested_spacing_um explicitly."
             )
         spacing_um = unique_spacings[0]
     return {

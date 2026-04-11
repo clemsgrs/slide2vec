@@ -45,8 +45,8 @@ from slide2vec import ExecutionOptions, Pipeline, PreprocessingConfig
 pipeline = Pipeline(
     model=model,
     preprocessing=PreprocessingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tissue_threshold=0.1,
     ),
     execution=ExecutionOptions(output_dir="outputs/demo"),
@@ -62,8 +62,8 @@ Tile embeddings can be spatially grouped into regions for downstream models that
 
 ```python
 preprocessing = PreprocessingConfig(
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
+    requested_spacing_um=0.5,
+    requested_tile_size_px=224,
     region_tile_multiple=6,  # 6x6 tiles per region
 )
 embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)

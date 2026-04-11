@@ -90,7 +90,7 @@ class SlideEncoder(Encoder):
         coordinates: Tensor,
         *,
         base_spacing_um: float,
-        target_spacing_um: float,
+        requested_spacing_um: float,
     ) -> Tensor:
         """Hook for model-specific coordinate normalization."""
         return coordinates

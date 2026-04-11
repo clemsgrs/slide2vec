@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import sys
 import types
 from contextlib import nullcontext
@@ -12,7 +13,7 @@ import pytest
 
 from slide2vec.api import PreprocessingConfig
 
-DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 
 class RecordingReporter:
@@ -539,7 +540,6 @@ def test_progress_aware_log_handler_routes_logs_through_active_reporter():
         logger.info("hello from logger")
 
     assert reporter.log_lines == ["INFO hello from logger"]
-
 
 def test_embedding_summary_rows_match_tiling_style():
     import slide2vec.progress as progress

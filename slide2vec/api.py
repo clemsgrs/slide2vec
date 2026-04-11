@@ -42,9 +42,9 @@ TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 @dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
     backend: str = "auto"
-    target_spacing_um: float | None = None
-    target_tile_size_px: int | None = None
-    target_region_size_px: int | None = None
+    requested_spacing_um: float | None = None
+    requested_tile_size_px: int | None = None
+    requested_region_size_px: int | None = None
     region_tile_multiple: int | None = None
     tolerance: float = 0.05
     overlap: float = 0.0
@@ -75,11 +75,11 @@ class PreprocessingConfig:
         preview_downsample = int(preview_cfg.downsample)
         return cls(
             backend=tiling.backend,
-            target_spacing_um=float(tiling.params.target_spacing_um),
-            target_tile_size_px=int(tiling.params.target_tile_size_px),
-            target_region_size_px=(
+            requested_spacing_um=float(tiling.params.requested_spacing_um),
+            requested_tile_size_px=int(tiling.params.requested_tile_size_px),
+            requested_region_size_px=(
                 int(v)
-                if (v := getattr(tiling.params, "target_region_size_px", None)) is not None
+                if (v := getattr(tiling.params, "requested_region_size_px", None)) is not None
                 else None
             ),
             region_tile_multiple=(
@@ -454,28 +454,28 @@ def _resolve_direct_api_preprocessing(
         return defaults
 
     if preprocessing is None:
-        target_tile_size_px, target_spacing_um = ensure_defaults()
+        requested_tile_size_px, requested_spacing_um = ensure_defaults()
         return _resolve_hierarchical_preprocessing(
             PreprocessingConfig(
                 backend="auto",
-                target_spacing_um=target_spacing_um,
-                target_tile_size_px=target_tile_size_px,
+                requested_spacing_um=requested_spacing_um,
+                requested_tile_size_px=requested_tile_size_px,
             )
         )
 
-    target_spacing_um = preprocessing.target_spacing_um
-    target_tile_size_px = preprocessing.target_tile_size_px
-    if target_spacing_um is None or target_tile_size_px is None:
+    requested_spacing_um = preprocessing.requested_spacing_um
+    requested_tile_size_px = preprocessing.requested_tile_size_px
+    if requested_spacing_um is None or requested_tile_size_px is None:
         default_tile_size_px, default_spacing_um = ensure_defaults()
-        if target_spacing_um is None:
-            target_spacing_um = default_spacing_um
-        if target_tile_size_px is None:
-            target_tile_size_px = default_tile_size_px
+        if requested_spacing_um is None:
+            requested_spacing_um = default_spacing_um
+        if requested_tile_size_px is None:
+            requested_tile_size_px = default_tile_size_px
     return _resolve_hierarchical_preprocessing(
         replace(
             preprocessing,
-            target_spacing_um=target_spacing_um,
-            target_tile_size_px=target_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
         )
     )
 
@@ -484,7 +484,7 @@ def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
     if not name or name not in encoder_registry:
         raise ValueError(
             "Cannot infer preprocessing defaults without a registered model. "
-            "Pass preprocessing.target_spacing_um and preprocessing.target_tile_size_px explicitly."
+            "Pass preprocessing.requested_spacing_um and preprocessing.requested_tile_size_px explicitly."
         )
 
     defaults = resolve_preprocessing_defaults(name)
@@ -499,7 +499,7 @@ def _validate_model_config(
     name = model.name
     if name not in encoder_registry:
         return
-    if preprocessing.region_tile_multiple is not None or preprocessing.target_region_size_px is not None:
+    if preprocessing.region_tile_multiple is not None or preprocessing.requested_region_size_px is not None:
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
@@ -508,8 +508,8 @@ def _validate_model_config(
     precision = None if on_cpu or execution is None else execution.precision
     validate_encoder_config(
         name,
-        target_tile_size_px=preprocessing.target_tile_size_px,
-        target_spacing_um=preprocessing.target_spacing_um,
+        requested_tile_size_px=preprocessing.requested_tile_size_px,
+        requested_spacing_um=preprocessing.requested_spacing_um,
         precision=precision,
         output_variant=model._output_variant,
         allow_non_recommended=bool(model.allow_non_recommended_settings),
@@ -518,32 +518,32 @@ def _validate_model_config(
 
 def _resolve_hierarchical_preprocessing(preprocessing: PreprocessingConfig) -> PreprocessingConfig:
     multiple = preprocessing.region_tile_multiple
-    target_region_size_px = preprocessing.target_region_size_px
+    requested_region_size_px = preprocessing.requested_region_size_px
     if multiple is not None:
         multiple = int(multiple)
         if multiple < 2:
             raise ValueError("region_tile_multiple must be at least 2")
-    if multiple is None and target_region_size_px is None:
+    if multiple is None and requested_region_size_px is None:
         return preprocessing
-    if preprocessing.target_tile_size_px is None:
+    if preprocessing.requested_tile_size_px is None:
         raise ValueError(
-            "target_tile_size_px must be resolved before deriving hierarchical region geometry"
+            "requested_tile_size_px must be resolved before deriving hierarchical region geometry"
         )
-    if target_region_size_px is None:
-        target_region_size_px = int(preprocessing.target_tile_size_px) * int(multiple)
+    if requested_region_size_px is None:
+        requested_region_size_px = int(preprocessing.requested_tile_size_px) * int(multiple)
     elif multiple is None:
-        if int(target_region_size_px) % int(preprocessing.target_tile_size_px) != 0:
+        if int(requested_region_size_px) % int(preprocessing.requested_tile_size_px) != 0:
             raise ValueError(
-                "target_region_size_px must be an exact multiple of target_tile_size_px"
+                "requested_region_size_px must be an exact multiple of requested_tile_size_px"
             )
-        multiple = int(target_region_size_px) // int(preprocessing.target_tile_size_px)
-    elif int(target_region_size_px) != int(preprocessing.target_tile_size_px) * int(multiple):
+        multiple = int(requested_region_size_px) // int(preprocessing.requested_tile_size_px)
+    elif int(requested_region_size_px) != int(preprocessing.requested_tile_size_px) * int(multiple):
         raise ValueError(
-            "target_region_size_px must match target_tile_size_px * region_tile_multiple"
+            "requested_region_size_px must match requested_tile_size_px * region_tile_multiple"
         )
     return replace(
         preprocessing,
-        target_region_size_px=int(target_region_size_px),
+        requested_region_size_px=int(requested_region_size_px),
         region_tile_multiple=int(multiple),
     )
 

@@ -20,7 +20,7 @@ from slide2vec.artifacts import (
 from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 
 def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch):
@@ -275,8 +275,8 @@ def test_model_embed_slide_infers_preprocessing_from_single_spacing_model(monkey
     assert captured["slides"][0]["image_path"] == Path("/tmp/slide-a.svs")
     assert isinstance(captured["preprocessing"], PreprocessingConfig)
     assert captured["preprocessing"].backend == "auto"
-    assert captured["preprocessing"].target_tile_size_px == 224
-    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
+    assert captured["preprocessing"].requested_tile_size_px == 224
+    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
 
 
 def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_preprocessing(
@@ -308,8 +308,8 @@ def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_prep
 
     assert result is expected
     assert captured["preprocessing"].backend == "asap"
-    assert captured["preprocessing"].target_tile_size_px == 224
-    assert captured["preprocessing"].target_spacing_um == pytest.approx(0.5)
+    assert captured["preprocessing"].requested_tile_size_px == 224
+    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
 
 
 def test_model_embed_slides_rejects_ambiguous_default_spacing(
@@ -356,7 +356,7 @@ def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
     with pytest.raises(ValueError, match="allow_non_recommended_settings"):
         model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(target_spacing_um=1.0, target_tile_size_px=256),
+            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=256),
         )
 
 
@@ -383,7 +383,7 @@ def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
     with caplog.at_level("WARNING", logger="slide2vec"):
         result = model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(target_spacing_um=1.0, target_tile_size_px=256),
+            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=256),
         )
 
     assert result == expected

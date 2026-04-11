@@ -39,8 +39,8 @@ def _encoder_derived_cfg(model_name: str) -> dict:
     return {
         "tiling": {
             "params": {
-                "target_tile_size_px": reqs["tile_size_px"],
-                "target_spacing_um": float(reqs["spacing_um"]),
+                "requested_tile_size_px": reqs["tile_size_px"],
+                "requested_spacing_um": float(reqs["spacing_um"]),
             }
         },
         "speed": {
@@ -63,15 +63,15 @@ def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> Non
         return
 
     tiling_params = cfg.tiling.params
-    target_spacing_um = tiling_params.target_spacing_um
-    target_tile_size_px = tiling_params.target_tile_size_px
+    requested_spacing_um = tiling_params.requested_spacing_um
+    requested_tile_size_px = tiling_params.requested_tile_size_px
     precision = None if run_on_cpu else cfg.speed.precision
     allow_non_recommended = bool(model_cfg.allow_non_recommended_settings)
 
     validate_encoder_config(
         canonical,
-        target_tile_size_px=target_tile_size_px,
-        target_spacing_um=target_spacing_um,
+        requested_tile_size_px=requested_tile_size_px,
+        requested_spacing_um=requested_spacing_um,
         precision=precision,
         allow_non_recommended=allow_non_recommended,
     )
@@ -96,8 +96,8 @@ def get_cfg_from_args(args):
     cli_cfg = OmegaConf.from_cli(args.opts)
     requested_cfg = OmegaConf.merge(user_cfg, cli_cfg)
     model_name = (OmegaConf.select(requested_cfg, "model.name") or "")
-    spacing_defined = OmegaConf.select(requested_cfg, "tiling.params.target_spacing_um") is not None
-    tile_size_defined = OmegaConf.select(requested_cfg, "tiling.params.target_tile_size_px") is not None
+    spacing_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um") is not None
+    tile_size_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px") is not None
     if model_name and (not spacing_defined or not tile_size_defined):
         encoder_defaults = _encoder_derived_cfg(model_name)
         if encoder_defaults:
