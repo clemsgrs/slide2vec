@@ -23,7 +23,7 @@ The CLI is usually the better fit for:
 ## Basic Command
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml
+slide2vec /path/to/config.yaml
 ```
 
 This command:
@@ -68,8 +68,7 @@ In practice, the config controls:
 You can override config values from the command line with `path.key=value` syntax:
 
 ```shell
-python -m slide2vec \
-  --config-file /path/to/config.yaml \
+slide2vec /path/to/config.yaml \
   output_dir=/tmp/slide2vec-run \
   speed.num_gpus=4 \
   model.name=virchow2
@@ -112,7 +111,7 @@ tiling:
 Or override from the command line:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml tiling.gpu_decode=true
+slide2vec /path/to/config.yaml tiling.gpu_decode=true
 ```
 
 When enabled, two things happen:
@@ -134,7 +133,7 @@ By default, the CLI uses all available GPUs.
 To cap GPU usage, set:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml speed.num_gpus=4
+slide2vec /path/to/config.yaml speed.num_gpus=4
 ```
 
 If you pass `--run-on-cpu`, the CLI uses CPU execution instead.
@@ -170,23 +169,23 @@ When stdout is not interactive, the CLI falls back to plain text stage updates a
 Full batch run:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml
+slide2vec /path/to/config.yaml
 ```
 
 Full batch run with limited GPU count:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml speed.num_gpus=2
+slide2vec /path/to/config.yaml speed.num_gpus=2
 ```
 
 Tiling only:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml --tiling-only
+slide2vec /path/to/config.yaml --tiling-only
 ```
 
 CPU run:
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml --run-on-cpu
+slide2vec /path/to/config.yaml --run-on-cpu
 ```
