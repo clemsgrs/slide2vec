@@ -15,6 +15,13 @@
 - When a user says a file is local-only, never add it to git history or include it in a PR even if they ask to modify it; keep the change local and confine the PR to repository-tracked files.
 - When the user explicitly rejects backward compatibility, remove compatibility shims and update writers/tests to emit the new schema instead of accepting old inputs.
 
+## 2026-04-11
+
+- When a config namespace may come from tests, fixtures, or older CLI payloads, use `getattr(..., default)` for optional flags instead of assuming every field is present.
+- When an upstream helper disappears, add a local wrapper at the call site rather than importing the missing symbol directly from the dependency.
+- When the sibling checkout for a dependency already exports the helper you need, align with that source instead of compensating for an older installed wheel.
+- When a field is part of the current config contract, update the test fixtures to include it rather than adding a backward-compatibility branch in production code.
+
 ## 2026-02-10
 
 - When a git submodule shows unexpected local modifications, explicitly confirm scope with the user before editing.

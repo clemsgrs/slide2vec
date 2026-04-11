@@ -54,6 +54,7 @@ MODEL_PARAMS = dict(
     name="prism",            # override (default: null)
     batch_size=8,            # override (default: 256)
     save_tile_embeddings=True,
+    save_slide_embeddings=False,
     save_latents=False,
 )
 

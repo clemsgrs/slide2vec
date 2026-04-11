@@ -166,7 +166,7 @@ def resolve_encoder_output(
         )
     if requested_output_variant is not None and level in {"slide", "patient"}:
         raise ValueError(
-            f"Encoder '{encoder_name}' (level={level}) has a fixed output_variant; "
+            f"Slide encoder '{encoder_name}' (level={level}) has a fixed output_variant; "
             "do not override output_variant for slide or patient encoders."
         )
 
