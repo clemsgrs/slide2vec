@@ -787,8 +787,8 @@ def _build_model_pipeline_from_config(config: dict[str, Any]):
     preview = dict(tiling_cfg.get("preview", {}))
     preprocessing = PreprocessingConfig(
         backend=str(tiling_cfg.get("backend", "asap")),
-        target_spacing_um=float(params.get("target_spacing_um", 0.5)),
-        target_tile_size_px=int(params.get("target_tile_size_px", 224)),
+        requested_spacing_um=float(params.get("requested_spacing_um", 0.5)),
+        requested_tile_size_px=int(params.get("requested_tile_size_px", 224)),
         tolerance=float(params.get("tolerance", 0.05)),
         overlap=float(params.get("overlap", 0.0)),
         tissue_threshold=float(params.get("tissue_threshold", 0.01)),

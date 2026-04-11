@@ -49,8 +49,8 @@ from slide2vec import Model, PreprocessingConfig
 model = Model.from_preset("virchow2")
 preprocessing = PreprocessingConfig(
     backend="auto",
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
+    requested_spacing_um=0.5,
+    requested_tile_size_px=224,
     tissue_threshold=0.1,
     segmentation={"downsample": 64},
     filtering={"ref_tile_size": 224},
@@ -65,15 +65,15 @@ embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
 Common fields:
 
-- `target_spacing_um`
-- `target_tile_size_px`
+- `requested_spacing_um`
+- `requested_tile_size_px`
 - `tissue_threshold`
-- `backend` — `"auto"`, `"cucim"`, `"openslide"`, `"vips"`, or `"asap"`
-- `on_the_fly` — read tiles directly from WSI during embedding (default `True`)
-- `use_supertiles` — group tiles into spatial blocks to reduce WSI read calls (default `True`)
-- `read_coordinates_from` — reuse pre-extracted coordinates
-- `read_tiles_from` — reuse pre-extracted tile tar archives
-- `resume` — resume from a previous tiling run (default `False`)
+- `backend` - `"auto"`, `"cucim"`, `"openslide"`, `"vips"`, or `"asap"`
+- `on_the_fly` - read tiles directly from WSI during embedding (default `True`)
+- `use_supertiles` - group tiles into spatial blocks to reduce WSI read calls (default `True`)
+- `read_coordinates_from` - reuse pre-extracted coordinates
+- `read_tiles_from` - reuse pre-extracted tile tar archives
+- `resume` - resume from a previous tiling run (default `False`)
 - `preview`
 
 For hierarchical extraction, see the [dedicated section](#hierarchical-feature-extraction) below.
@@ -100,15 +100,15 @@ Common fields:
 
 - `batch_size`
 - `num_gpus`
-- `precision` — `"fp16"`, `"bf16"`, `"fp32"`, or `None` (auto-determined from model)
-- `num_workers` — DataLoader workers (`None` means auto; this resolves to the job CPU budget, capped by SLURM and 64, except cuCIM on-the-fly mode derives `cpu_budget // num_cucim_workers`)
-- `num_preprocessing_workers` — hs2p tiling workers (default: all CPUs available to the job, capped by SLURM when present and limited to 64)
-- `prefetch_factor` — DataLoader prefetch factor (default `4`)
-- `persistent_workers` — keep DataLoader workers alive across batches (default `True`)
+- `precision` - `"fp16"`, `"bf16"`, `"fp32"`, or `None` (auto-determined from model)
+- `num_workers` - DataLoader workers (`None` means auto; this resolves to the job CPU budget, capped by SLURM and 64, except cuCIM on-the-fly mode derives `cpu_budget // num_cucim_workers`)
+- `num_preprocessing_workers` - hs2p tiling workers (default: all CPUs available to the job, capped by SLURM when present and limited to 64)
+- `prefetch_factor` - DataLoader prefetch factor (default `4`)
+- `persistent_workers` - keep DataLoader workers alive across batches (default `True`)
 - `output_dir`
-- `output_format` — `"pt"` (default) or `"npz"`
-- `save_tile_embeddings` — persist tile embeddings for slide-level models (default `False`)
-- `save_latents` — persist latent representations when available (default `False`)
+- `output_format` - `"pt"` (default) or `"npz"`
+- `save_tile_embeddings` - persist tile embeddings for slide-level models (default `False`)
+- `save_latents` - persist latent representations when available (default `False`)
 
 `num_gpus` defaults to all available GPUs. `embed_slide(...)` uses tile sharding for one slide, and `embed_slides(...)` balances whole slides across GPUs while preserving input order.
 
@@ -125,8 +125,8 @@ from slide2vec import Model, PreprocessingConfig
 
 model = Model.from_preset("virchow2")
 preprocessing = PreprocessingConfig(
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
+    requested_spacing_um=0.5,
+    requested_tile_size_px=224,
     region_tile_multiple=6,  # 6x6 tiles per region
 )
 embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
@@ -134,10 +134,10 @@ embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
 Config fields:
 
-- `region_tile_multiple` — region grid width/height in tiles (e.g., `6` means 6x6 = 36 tiles per region; must be >= 2)
-- `target_region_size_px` — explicit parent region size in pixels; auto-derived from `target_tile_size_px * region_tile_multiple` if omitted
+- `region_tile_multiple` - region grid width/height in tiles (e.g., `6` means 6x6 = 36 tiles per region; must be >= 2)
+- `requested_region_size_px` - explicit parent region size in pixels; auto-derived from `requested_tile_size_px * region_tile_multiple` if omitted
 
-When the selected read spacing differs from `target_spacing_um`, hierarchical extraction resolves effective geometry tile-first: it scales `target_tile_size_px` to the effective read spacing, then derives the effective parent region as `effective_tile_size_px * region_tile_multiple`. This keeps unrolled subtile geometry aligned with the model-facing tile size contract under spacing-driven rounding.
+When the selected read spacing differs from `requested_spacing_um`, hierarchical extraction resolves geometry tile-first: it scales `requested_tile_size_px` to the read spacing, then derives the read parent region as `read_tile_size_px * region_tile_multiple`. This keeps unrolled subtile geometry aligned with the model-facing tile size contract under spacing-driven rounding.
 
 When persisted via `Pipeline`, hierarchical artifacts are written to `hierarchical_embeddings/` and `RunResult` includes a `hierarchical_artifacts` list.
 
@@ -152,8 +152,8 @@ from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
 model = Model.from_preset("virchow2")
 preprocessing = PreprocessingConfig(
-    target_spacing_um=0.5,
-    target_tile_size_px=224,
+    requested_spacing_um=0.5,
+    requested_tile_size_px=224,
     tissue_threshold=0.1,
 )
 pipeline = Pipeline(

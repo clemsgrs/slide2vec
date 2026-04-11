@@ -22,7 +22,7 @@ from slide2vec.artifacts import (
 from slide2vec.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 def test_resource_loading_uses_packaged_configs():
     pytest.importorskip("omegaconf")
@@ -66,8 +66,8 @@ def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model
 
     cfg = get_cfg_from_args(args)
 
-    assert cfg.tiling.params.target_spacing_um == pytest.approx(0.5)
-    assert cfg.tiling.params.target_tile_size_px == 448
+    assert cfg.tiling.params.requested_spacing_um == pytest.approx(0.5)
+    assert cfg.tiling.params.requested_tile_size_px == 448
 
 
 def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_path: Path):
@@ -142,10 +142,10 @@ def test_hierarchical_npz_artifacts_round_trip(tmp_path: Path):
         output_format="npz",
         metadata={
             "coordinates_npz_path": "/tmp/sample-h.coordinates.npz",
-            "target_tile_size_px": 224,
-            "effective_tile_size_px": 224,
-            "target_region_size_px": 672,
-            "effective_region_size_px": 672,
+            "requested_tile_size_px": 224,
+            "read_tile_size_px": 224,
+            "requested_region_size_px": 672,
+            "read_region_size_px": 672,
             "tiles_per_region": 3,
         },
     )
@@ -159,24 +159,24 @@ def test_hierarchical_npz_artifacts_round_trip(tmp_path: Path):
     assert metadata["num_regions"] == 2
     assert metadata["tiles_per_region"] == 3
     assert metadata["feature_dim"] == 4
-    assert metadata["target_region_size_px"] == 672
+    assert metadata["requested_region_size_px"] == 672
 
 
-def test_resolve_direct_api_preprocessing_derives_target_region_size_from_multiple():
+def test_resolve_direct_api_preprocessing_derives_requested_region_size_from_multiple():
     import slide2vec.api as api
 
     model = Model.from_preset("uni")
     resolved = api._resolve_direct_api_preprocessing(
         model,
         PreprocessingConfig(
-            target_spacing_um=0.5,
-            target_tile_size_px=224,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=224,
             region_tile_multiple=6,
         ),
     )
 
-    assert resolved.target_tile_size_px == 224
-    assert resolved.target_region_size_px == 1344
+    assert resolved.requested_tile_size_px == 224
+    assert resolved.requested_region_size_px == 1344
 
 
 def test_resolve_direct_api_preprocessing_uses_model_defaults_before_region_derivation():
@@ -190,9 +190,9 @@ def test_resolve_direct_api_preprocessing_uses_model_defaults_before_region_deri
         ),
     )
 
-    assert resolved.target_spacing_um == pytest.approx(0.5)
-    assert resolved.target_tile_size_px == 448
-    assert resolved.target_region_size_px == 2688
+    assert resolved.requested_spacing_um == pytest.approx(0.5)
+    assert resolved.requested_tile_size_px == 448
+    assert resolved.requested_region_size_px == 2688
 
 
 def test_resolve_direct_api_preprocessing_rejects_mismatched_region_size_and_multiple():
@@ -200,13 +200,13 @@ def test_resolve_direct_api_preprocessing_rejects_mismatched_region_size_and_mul
 
     model = Model.from_preset("uni")
 
-    with pytest.raises(ValueError, match="target_region_size_px"):
+    with pytest.raises(ValueError, match="requested_region_size_px"):
         api._resolve_direct_api_preprocessing(
             model,
             PreprocessingConfig(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
-                target_region_size_px=1024,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
+                requested_region_size_px=1024,
                 region_tile_multiple=6,
             ),
         )
@@ -230,8 +230,8 @@ def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
     assert captured["model"] is model
     assert captured["kwargs"]["manifest_path"] == "/tmp/slides.csv"
     assert captured["kwargs"]["preprocessing"].backend == preprocessing.backend
-    assert captured["kwargs"]["preprocessing"].target_spacing_um == preprocessing.target_spacing_um
-    assert captured["kwargs"]["preprocessing"].target_tile_size_px == preprocessing.target_tile_size_px
+    assert captured["kwargs"]["preprocessing"].requested_spacing_um == preprocessing.requested_spacing_um
+    assert captured["kwargs"]["preprocessing"].requested_tile_size_px == preprocessing.requested_tile_size_px
 
 def test_pipeline_run_requires_output_dir():
     model = Model.from_preset("virchow2")
@@ -479,8 +479,8 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
 def test_preprocessing_with_backend_preserves_other_fields():
     base = PreprocessingConfig(
         backend="asap",
-        target_spacing_um=0.75,
-        target_tile_size_px=256,
+        requested_spacing_um=0.75,
+        requested_tile_size_px=256,
         tolerance=0.1,
         overlap=0.2,
         tissue_threshold=0.4,
@@ -495,8 +495,8 @@ def test_preprocessing_with_backend_preserves_other_fields():
     updated = base.with_backend("openslide")
 
     assert updated.backend == "openslide"
-    assert updated.target_spacing_um == base.target_spacing_um
-    assert updated.target_tile_size_px == base.target_tile_size_px
+    assert updated.requested_spacing_um == base.requested_spacing_um
+    assert updated.requested_tile_size_px == base.requested_tile_size_px
     assert updated.segmentation == base.segmentation
     assert updated.filtering == base.filtering
     assert updated.preview == base.preview
@@ -513,8 +513,8 @@ def test_preprocessing_config_defaults_spacing_and_tile_size_to_none():
     cfg = PreprocessingConfig(backend="asap")
 
     assert cfg.backend == "asap"
-    assert cfg.target_spacing_um is None
-    assert cfg.target_tile_size_px is None
+    assert cfg.requested_spacing_um is None
+    assert cfg.requested_tile_size_px is None
 
 
 def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
@@ -580,8 +580,8 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             use_supertiles=True,
             jpeg_backend="turbojpeg",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
                 tolerance=0.05,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -635,8 +635,8 @@ def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp
                 "output_dir: output",
                 "tiling:",
                 "  params:",
-                "    target_spacing_um: 1.0",
-                "    target_tile_size_px: 256",
+                "    requested_spacing_um: 1.0",
+                "    requested_tile_size_px: 256",
                 "model:",
                 "  name: virchow",
             ]
@@ -665,8 +665,8 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
                 "output_dir: output",
                 "tiling:",
                 "  params:",
-                "    target_spacing_um: 1.0",
-                "    target_tile_size_px: 256",
+                "    requested_spacing_um: 1.0",
+                "    requested_tile_size_px: 256",
                 "model:",
                 "  name: virchow",
                 "  allow_non_recommended_settings: true",
@@ -697,8 +697,8 @@ def test_get_cfg_from_args_rejects_non_recommended_model_precision_by_default(tm
                 "output_dir: output",
                 "tiling:",
                 "  params:",
-                "    target_spacing_um: 0.5",
-                "    target_tile_size_px: 224",
+                "    requested_spacing_um: 0.5",
+                "    requested_tile_size_px: 224",
                 "model:",
                 "  name: virchow",
                 "speed:",
@@ -729,8 +729,8 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_precision_is_allowed
                 "output_dir: output",
                 "tiling:",
                 "  params:",
-                "    target_spacing_um: 0.5",
-                "    target_tile_size_px: 224",
+                "    requested_spacing_um: 0.5",
+                "    requested_tile_size_px: 224",
                 "model:",
                 "  name: virchow",
                 "  allow_non_recommended_settings: true",
@@ -762,8 +762,8 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
                 "output_dir: output",
                 "tiling:",
                 "  params:",
-                "    target_spacing_um: 0.5",
-                "    target_tile_size_px: 224",
+                "    requested_spacing_um: 0.5",
+                "    requested_tile_size_px: 224",
                 "model:",
                 "  name: prism",
                 "speed:",
@@ -801,8 +801,8 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
             use_supertiles=True,
             jpeg_backend="turbojpeg",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -835,8 +835,8 @@ def test_preprocessing_config_from_config_uses_explicit_speed_num_cucim_workers(
             use_supertiles=True,
             jpeg_backend="turbojpeg",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,
@@ -867,8 +867,8 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
             use_supertiles=True,
             jpeg_backend="turbojpeg",
             params=SimpleNamespace(
-                target_spacing_um=0.5,
-                target_tile_size_px=224,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
                 tissue_threshold=0.1,

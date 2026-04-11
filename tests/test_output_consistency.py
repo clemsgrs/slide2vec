@@ -16,9 +16,9 @@ OmegaConf = pytest.importorskip("omegaconf").OmegaConf
 
 # -- tiling.params --
 TILING_PARAMS = dict(
-    target_spacing_um=0.5,
+    requested_spacing_um=0.5,
     tolerance=0.07,           # override (default: 0.05)
-    target_tile_size_px=224,  # override (default: 256)
+    requested_tile_size_px=224,  # override (default: 256)
     overlap=0.0,
     tissue_threshold=0.1,     # override (default: 0.01)
 )

@@ -26,10 +26,10 @@ tiling:
   read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
   backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
   params:
-    target_spacing_um: # spacing at which to tile the slide, in microns per pixel; filled from a preset model when available
+    requested_spacing_um: # spacing at which to tile the slide, in microns per pixel; filled from a preset model when available
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
-    target_tile_size_px: # size of the tiles to extract, in pixels; filled from a preset model when available
-    target_region_size_px: # size of hierarchical parent regions in pixels; when unset and region_tile_multiple is set, derived from target_tile_size_px * region_tile_multiple
+    requested_tile_size_px: # size of the tiles to extract, in pixels; filled from a preset model when available
+    requested_region_size_px: # size of hierarchical parent regions in pixels; when unset and region_tile_multiple is set, derived from requested_tile_size_px * region_tile_multiple
     region_tile_multiple: # hierarchical region grid width/height in tiles; e.g. 6 means 6x6 tiles per region
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
     tissue_threshold: 0.1 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
@@ -44,8 +44,8 @@ tiling:
     use_otsu: false # use otsu's method instead of simple binary thresholding
     use_hsv: true # use HSV thresholding instead of simple binary thresholding
   filter_params:
-    ref_tile_size: ${tiling.params.target_tile_size_px} # reference tile size at the target spacing
-    a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.target_spacing_um will be kept)
+    ref_tile_size: ${tiling.params.requested_tile_size_px} # reference tile size at the target spacing
+    a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.requested_spacing_um will be kept)
     a_h: 2 # area filter threshold for holes (positive integer, the minimum size of detected holes/cavities in foreground contours to avoid, once again relative to the reference tile size ref_tile_size)
     filter_white: false # whether to filter out mostly white tiles
     filter_black: false # whether to filter out mostly black tiles
@@ -78,7 +78,7 @@ wandb:
   project: "" # wandb project name
   username: "" # wandb username
   exp_name: "" # wandb experiment name
-  tags: ["features", "${model.name}", "${tiling.params.target_tile_size_px}"] # wandb tags
+  tags: ["features", "${model.name}", "${tiling.params.requested_tile_size_px}"] # wandb tags
   dir: "/home/user/"
   group:
   resume_id: "${resume_dirname}"

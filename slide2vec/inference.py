@@ -101,32 +101,40 @@ class HierarchicalIndex:
 def _is_hierarchical_preprocessing(preprocessing: PreprocessingConfig | None) -> bool:
     if preprocessing is None:
         return False
-    return preprocessing.region_tile_multiple is not None or preprocessing.target_region_size_px is not None
+    return preprocessing.region_tile_multiple is not None or preprocessing.requested_region_size_px is not None
 
 
 def _resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_result) -> dict[str, int]:
     if preprocessing.region_tile_multiple is None:
         raise ValueError("Hierarchical preprocessing requires region_tile_multiple")
-    if preprocessing.target_region_size_px is None:
-        raise ValueError("Hierarchical preprocessing requires target_region_size_px")
-    target_tile_size_px = int(preprocessing.target_tile_size_px)
-    target_region_size_px = int(preprocessing.target_region_size_px)
-    target_spacing_um = float(preprocessing.target_spacing_um)
+    if preprocessing.requested_region_size_px is None:
+        raise ValueError("Hierarchical preprocessing requires requested_region_size_px")
+    requested_tile_size_px = int(preprocessing.requested_tile_size_px)
+    requested_region_size_px = int(preprocessing.requested_region_size_px)
+    requested_spacing_um = float(preprocessing.requested_spacing_um)
     multiple = int(preprocessing.region_tile_multiple)
-    if target_region_size_px % multiple != 0:
-        raise ValueError("target_region_size_px must be divisible by region_tile_multiple")
-    effective_spacing_um = float(getattr(tiling_result, "effective_spacing_um"))
+    if requested_region_size_px % multiple != 0:
+        raise ValueError("requested_region_size_px must be divisible by region_tile_multiple")
+    read_spacing_um = float(getattr(tiling_result, "read_spacing_um"))
     base_spacing_um = float(getattr(tiling_result, "base_spacing_um"))
-    effective_tile_size_px = int(round(target_tile_size_px * target_spacing_um / effective_spacing_um))
-    effective_region_size_px = effective_tile_size_px * multiple
-    tile_size_lv0 = int(round(target_tile_size_px * target_spacing_um / base_spacing_um))
+    if abs(read_spacing_um - requested_spacing_um) / requested_spacing_um <= float(preprocessing.tolerance):
+        read_tile_size_px = requested_tile_size_px
+    else:
+        read_tile_size_px = int(
+            round(requested_tile_size_px * requested_spacing_um / read_spacing_um)
+        )
+    read_region_size_px = read_tile_size_px * multiple
+    # Use the actual read geometry that produced the tile crop. When the
+    # resolved spacing is considered equivalent to the requested spacing,
+    # this keeps the level-0 footprint aligned with the real crop size.
+    tile_size_lv0 = int(round(read_tile_size_px * read_spacing_um / base_spacing_um))
     return {
         "region_tile_multiple": multiple,
         "tiles_per_region": multiple * multiple,
-        "target_tile_size_px": target_tile_size_px,
-        "effective_tile_size_px": effective_tile_size_px,
-        "target_region_size_px": target_region_size_px,
-        "effective_region_size_px": effective_region_size_px,
+        "requested_tile_size_px": requested_tile_size_px,
+        "read_tile_size_px": read_tile_size_px,
+        "requested_region_size_px": requested_region_size_px,
+        "read_region_size_px": read_region_size_px,
         "tile_size_lv0": tile_size_lv0,
     }
 
@@ -562,7 +570,7 @@ def aggregate_tiles(
             coordinates = _scale_coordinates(
                 coordinates,
                 float(tiling_result.base_spacing_um),
-                float(tiling_result.target_spacing_um),
+                float(tiling_result.requested_spacing_um),
             )
         coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
@@ -1298,8 +1306,8 @@ def _compute_hierarchical_embeddings_for_slide(
         tiling_result=tiling_result,
         region_index=index.region_index,
         subtile_index_within_region=index.subtile_index_within_region,
-        effective_region_size_px=int(geometry["effective_region_size_px"]),
-        effective_tile_size_px=int(geometry["effective_tile_size_px"]),
+        read_region_size_px=int(geometry["read_region_size_px"]),
+        read_tile_size_px=int(geometry["read_tile_size_px"]),
         backend=_resolve_slide_backend(preprocessing, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
@@ -1307,7 +1315,7 @@ def _compute_hierarchical_embeddings_for_slide(
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = _build_batch_preprocessor_for_tile_images(
         loaded,
-        target_tile_size_px=int(geometry["target_tile_size_px"]),
+        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
@@ -1387,8 +1395,8 @@ def _compute_hierarchical_embedding_shard_for_slide(
         tiling_result=tiling_result,
         region_index=index.region_index,
         subtile_index_within_region=index.subtile_index_within_region,
-        effective_region_size_px=int(geometry["effective_region_size_px"]),
-        effective_tile_size_px=int(geometry["effective_tile_size_px"]),
+        read_region_size_px=int(geometry["read_region_size_px"]),
+        read_tile_size_px=int(geometry["read_tile_size_px"]),
         backend=_resolve_slide_backend(preprocessing, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
@@ -1396,7 +1404,7 @@ def _compute_hierarchical_embedding_shard_for_slide(
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = _build_batch_preprocessor_for_tile_images(
         loaded,
-        target_tile_size_px=int(geometry["target_tile_size_px"]),
+        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
@@ -1459,7 +1467,7 @@ def _aggregate_tile_embeddings_for_slide(
         coordinates = _scale_coordinates(
             coordinates,
             float(tiling_result.base_spacing_um),
-            float(tiling_result.target_spacing_um),
+            float(tiling_result.requested_spacing_um),
         )
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     if not torch.is_tensor(tile_embeddings):
@@ -1642,11 +1650,11 @@ def _build_hierarchical_embedding_metadata(
         "mask_path": str(mask_path) if mask_path is not None else None,
         "backend": backend,
         "region_tile_multiple": int(geometry["region_tile_multiple"]),
-        "target_tile_size_px": int(geometry["target_tile_size_px"]),
-        "effective_tile_size_px": int(geometry["effective_tile_size_px"]),
-        "target_region_size_px": int(geometry["target_region_size_px"]),
-        "effective_region_size_px": int(geometry["effective_region_size_px"]),
-        "target_spacing_um": float(preprocessing.target_spacing_um),
+        "requested_tile_size_px": int(geometry["requested_tile_size_px"]),
+        "read_tile_size_px": int(geometry["read_tile_size_px"]),
+        "requested_region_size_px": int(geometry["requested_region_size_px"]),
+        "read_region_size_px": int(geometry["read_region_size_px"]),
+        "requested_spacing_um": float(preprocessing.requested_spacing_um),
         "subtile_order": "row_major",
     }
 
@@ -1728,14 +1736,14 @@ def _build_batch_preprocessor(
 ):
     return _build_batch_preprocessor_for_tile_images(
         loaded,
-        target_tile_size_px=int(getattr(tiling_result, "requested_tile_size_px")),
+        requested_tile_size_px=int(getattr(tiling_result, "requested_tile_size_px")),
     )
 
 
 def _build_batch_preprocessor_for_tile_images(
     loaded: LoadedModel,
     *,
-    target_tile_size_px: int,
+    requested_tile_size_px: int,
 ):
     spec = _build_batch_transform_spec(loaded.transforms)
     if spec is None:
@@ -1751,7 +1759,7 @@ def _build_batch_preprocessor_for_tile_images(
         if spec.resize_size is None:
             image = _resize_image_batch(
                 image,
-                (int(target_tile_size_px), int(target_tile_size_px)),
+                (int(requested_tile_size_px), int(requested_tile_size_px)),
             )
         image = _apply_batch_transform_spec(image, spec)
         if image.device != loaded.device:
@@ -2487,15 +2495,15 @@ def _record_slide_metadata_in_process_list(
 
 
 def _build_hs2p_configs(preprocessing: PreprocessingConfig):
-    target_tile_size_px = (
-        preprocessing.target_region_size_px
+    requested_tile_size_px = (
+        preprocessing.requested_region_size_px
         if _is_hierarchical_preprocessing(preprocessing)
-        else preprocessing.target_tile_size_px
+        else preprocessing.requested_tile_size_px
     )
     tiling_cfg = TilingConfig(
         backend=_resolve_tiling_backend(preprocessing),
-        target_spacing_um=preprocessing.target_spacing_um,
-        target_tile_size_px=target_tile_size_px,
+        requested_spacing_um=preprocessing.requested_spacing_um,
+        requested_tile_size_px=requested_tile_size_px,
         tolerance=preprocessing.tolerance,
         overlap=preprocessing.overlap,
         tissue_threshold=preprocessing.tissue_threshold,
@@ -2570,25 +2578,25 @@ def _resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | Non
         return int(defaults["tile_size_px"]), float(defaults["spacing_um"])
 
     if preprocessing is None:
-        target_tile_size_px, target_spacing_um = ensure_defaults()
+        requested_tile_size_px, requested_spacing_um = ensure_defaults()
         return _resolve_hierarchical_preprocessing(PreprocessingConfig(
             backend="auto",
-            target_spacing_um=target_spacing_um,
-            target_tile_size_px=target_tile_size_px,
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
         ))
 
-    target_spacing_um = preprocessing.target_spacing_um
-    target_tile_size_px = preprocessing.target_tile_size_px
-    if target_spacing_um is None or target_tile_size_px is None:
+    requested_spacing_um = preprocessing.requested_spacing_um
+    requested_tile_size_px = preprocessing.requested_tile_size_px
+    if requested_spacing_um is None or requested_tile_size_px is None:
         default_tile_size_px, default_spacing_um = ensure_defaults()
-        if target_spacing_um is None:
-            target_spacing_um = default_spacing_um
-        if target_tile_size_px is None:
-            target_tile_size_px = default_tile_size_px
+        if requested_spacing_um is None:
+            requested_spacing_um = default_spacing_um
+        if requested_tile_size_px is None:
+            requested_tile_size_px = default_tile_size_px
     return _resolve_hierarchical_preprocessing(replace(
         preprocessing,
-        target_spacing_um=target_spacing_um,
-        target_tile_size_px=target_tile_size_px,
+        requested_spacing_um=requested_spacing_um,
+        requested_tile_size_px=requested_tile_size_px,
     ))
 
 
@@ -3004,9 +3012,9 @@ def _serialize_model(model) -> dict[str, Any]:
 def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any]:
     return {
         "backend": preprocessing.backend,
-        "target_spacing_um": preprocessing.target_spacing_um,
-        "target_tile_size_px": preprocessing.target_tile_size_px,
-        "target_region_size_px": preprocessing.target_region_size_px,
+        "requested_spacing_um": preprocessing.requested_spacing_um,
+        "requested_tile_size_px": preprocessing.requested_tile_size_px,
+        "requested_region_size_px": preprocessing.requested_region_size_px,
         "region_tile_multiple": preprocessing.region_tile_multiple,
         "tolerance": preprocessing.tolerance,
         "overlap": preprocessing.overlap,
@@ -3056,11 +3064,11 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
     )
     return PreprocessingConfig(
         backend=payload["backend"],
-        target_spacing_um=float(payload["target_spacing_um"]),
-        target_tile_size_px=int(payload["target_tile_size_px"]),
-        target_region_size_px=(
-            int(payload["target_region_size_px"])
-            if "target_region_size_px" in payload and payload["target_region_size_px"] is not None
+        requested_spacing_um=float(payload["requested_spacing_um"]),
+        requested_tile_size_px=int(payload["requested_tile_size_px"]),
+        requested_region_size_px=(
+            int(payload["requested_region_size_px"])
+            if "requested_region_size_px" in payload and payload["requested_region_size_px"] is not None
             else None
         ),
         region_tile_multiple=(

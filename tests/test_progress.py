@@ -13,7 +13,7 @@ import pytest
 
 from slide2vec.api import PreprocessingConfig
 
-DEFAULT_PREPROCESSING = PreprocessingConfig(target_spacing_um=0.5, target_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 
 class RecordingReporter:

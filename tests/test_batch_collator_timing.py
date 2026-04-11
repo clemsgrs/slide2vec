@@ -47,7 +47,7 @@ def test_on_the_fly_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
         ordered_indices = None
 
         def __init__(self, image_path, tiling_result, *, backend: str, num_cucim_workers: int, gpu_decode: bool, use_supertiles: bool):
-            self.tile_size = int(tiling_result.effective_tile_size_px)
+            self.tile_size = int(tiling_result.read_tile_size_px)
 
         def read_batch_with_timing(self, tile_indices):
             tensor = torch.zeros((len(tile_indices), 3, self.tile_size, self.tile_size), dtype=torch.uint8)
@@ -57,7 +57,7 @@ def test_on_the_fly_collator_emits_worker_and_reader_timing(monkeypatch: pytest.
 
     collator = tile_reader.OnTheFlyBatchTileCollator(
         image_path=Path("/tmp/fake.svs"),
-        tiling_result=SimpleNamespace(effective_tile_size_px=4),
+        tiling_result=SimpleNamespace(read_tile_size_px=4),
         backend="cucim",
         num_cucim_workers=4,
         gpu_decode=False,
@@ -99,7 +99,7 @@ def test_wsi_tile_reader_suppresses_native_stderr_for_cucim(monkeypatch: pytest.
     reader = tile_reader.WSITileReader(
         Path("/tmp/fake.svs"),
         SimpleNamespace(
-            effective_tile_size_px=4,
+            read_tile_size_px=4,
             read_level=0,
             x=np.array([0, 4]),
             y=np.array([0, 0]),
@@ -129,7 +129,7 @@ def test_on_the_fly_collator_filters_native_stderr_for_cucim(monkeypatch: pytest
         _backend = "cucim"
 
         def __init__(self, image_path, tiling_result, *, backend: str, num_cucim_workers: int, gpu_decode: bool, use_supertiles: bool):
-            self.tile_size = int(tiling_result.effective_tile_size_px)
+            self.tile_size = int(tiling_result.read_tile_size_px)
 
         def read_batch_with_timing(self, tile_indices):
             tensor = torch.zeros((len(tile_indices), 3, self.tile_size, self.tile_size), dtype=torch.uint8)
@@ -145,7 +145,7 @@ def test_on_the_fly_collator_filters_native_stderr_for_cucim(monkeypatch: pytest
 
     collator = tile_reader.OnTheFlyBatchTileCollator(
         image_path=Path("/tmp/fake.svs"),
-        tiling_result=SimpleNamespace(effective_tile_size_px=4),
+        tiling_result=SimpleNamespace(read_tile_size_px=4),
         backend="cucim",
         num_cucim_workers=4,
         gpu_decode=False,

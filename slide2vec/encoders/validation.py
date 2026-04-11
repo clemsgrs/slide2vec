@@ -17,8 +17,8 @@ def validate_encoder_config(
     encoder_name: str,
     *,
     info: dict[str, Any] | None = None,
-    target_tile_size_px: int | None = None,
-    target_spacing_um: float | None = None,
+    requested_tile_size_px: int | None = None,
+    requested_spacing_um: float | None = None,
     precision: str | None = None,
     output_variant: str | None = None,
     allow_non_recommended: bool = False,
@@ -44,20 +44,20 @@ def validate_encoder_config(
             )
 
     rec_spacing = info["supported_spacing_um"] if "supported_spacing_um" in info else None
-    if target_spacing_um is not None and rec_spacing is not None:
+    if requested_spacing_um is not None and rec_spacing is not None:
         valid_spacings = rec_spacing if isinstance(rec_spacing, list) else [rec_spacing]
-        if not any(abs(float(target_spacing_um) - float(s)) <= 1e-8 for s in valid_spacings):
+        if not any(abs(float(requested_spacing_um) - float(s)) <= 1e-8 for s in valid_spacings):
             supported_text = ", ".join(f"{s:g}" for s in valid_spacings)
             mismatches.append(
-                f"target_spacing_um={float(target_spacing_um):g} (recommended: [{supported_text}])"
+                f"requested_spacing_um={float(requested_spacing_um):g} (recommended: [{supported_text}])"
             )
 
-    if target_tile_size_px is not None:
+    if requested_tile_size_px is not None:
         reqs = resolve_preprocessing_requirements(encoder_name, info)
         rec_tile_size = reqs["tile_size_px"]
-        if rec_tile_size is not None and int(target_tile_size_px) != int(rec_tile_size):
+        if rec_tile_size is not None and int(requested_tile_size_px) != int(rec_tile_size):
             mismatches.append(
-                f"target_tile_size_px={target_tile_size_px} (recommended: {rec_tile_size})"
+                f"requested_tile_size_px={requested_tile_size_px} (recommended: {rec_tile_size})"
             )
 
     if not mismatches:

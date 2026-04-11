@@ -27,9 +27,9 @@ DEFAULT_GT_DIR = TEST_DIR / "fixtures" / "gt"
 
 # Must stay in sync with test_output_consistency.py
 TILING_PARAMS = dict(
-    target_spacing_um=0.5,
+    requested_spacing_um=0.5,
     tolerance=0.07,
-    target_tile_size_px=224,
+    requested_tile_size_px=224,
     overlap=0.0,
     tissue_threshold=0.1,
     drop_holes=False,

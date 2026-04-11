@@ -30,8 +30,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def PreprocessingConfig(*args, **kwargs):
-    kwargs.setdefault("target_spacing_um", 0.5)
-    kwargs.setdefault("target_tile_size_px", 224)
+    kwargs.setdefault("requested_spacing_um", 0.5)
+    kwargs.setdefault("requested_tile_size_px", 224)
     return BasePreprocessingConfig(*args, **kwargs)
 
 
@@ -251,7 +251,7 @@ def test_collect_distributed_pipeline_artifacts_uses_hierarchical_artifacts_for_
     )
     preprocessing = replace(
         DEFAULT_PREPROCESSING,
-        target_region_size_px=448,
+        requested_region_size_px=448,
         region_tile_multiple=2,
     )
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
@@ -980,8 +980,8 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
 
     preprocessing = PreprocessingConfig(
         backend="asap",
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
@@ -1220,7 +1220,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
     )
 
     @contextmanager
@@ -1284,7 +1284,7 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
         x=np.array([0, 1]),
         y=np.array([2, 3]),
         tile_size_lv0=224,
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
     )
 
     @contextmanager
@@ -2170,8 +2170,8 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
             x=np.array([0, 10]),
             y=np.array([5, 15]),
             backend="asap",
-            target_spacing_um=0.5,
-            target_tile_size_px=4,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=4,
             read_spacing_um=0.5,
             read_tile_size_px=4,
             tile_size_lv0=224,
@@ -2233,10 +2233,10 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     tiling_result = SimpleNamespace(
         x=np.array([0, 10]),
         y=np.array([5, 15]),
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
         requested_tile_size_px=4,
         read_spacing_um=0.5,
-        effective_tile_size_px=4,
+        read_tile_size_px=4,
         tile_size_lv0=224,
         tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
     )
@@ -2316,10 +2316,10 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
     tiling_result = SimpleNamespace(
         x=np.array([0]),
         y=np.array([5]),
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
         requested_tile_size_px=4,
         read_spacing_um=0.5,
-        effective_tile_size_px=4,
+        read_tile_size_px=4,
         tile_size_lv0=224,
         tiles_tar_path=Path("/tmp/current-run.tiles.tar"),
     )
@@ -2420,10 +2420,10 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     tiling_result = SimpleNamespace(
         x=np.array([0, 10]),
         y=np.array([5, 15]),
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
         requested_tile_size_px=4,
         read_spacing_um=0.5,
-        effective_tile_size_px=4,
+        read_tile_size_px=4,
         tile_size_lv0=224,
     )
     execution = ExecutionOptions(
@@ -2513,10 +2513,10 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
     tiling_result = SimpleNamespace(
         x=np.array([0, 10]),
         y=np.array([5, 15]),
-        target_spacing_um=0.5,
+        requested_spacing_um=0.5,
         requested_tile_size_px=4,
         read_spacing_um=0.5,
-        effective_tile_size_px=4,
+        read_tile_size_px=4,
         tile_size_lv0=224,
     )
     execution = ExecutionOptions(
@@ -2607,8 +2607,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             x=np.array([0, 10]),
             y=np.array([5, 15]),
             backend="cucim",
-            target_spacing_um=0.5,
-            target_tile_size_px=4,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=4,
             read_spacing_um=0.5,
             read_tile_size_px=4,
             tile_size_lv0=224,
@@ -2684,8 +2684,8 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             x=np.array([0, 10]),
             y=np.array([5, 15]),
             backend="asap",
-            target_spacing_um=0.5,
-            target_tile_size_px=4,
+            requested_spacing_um=0.5,
+            requested_tile_size_px=4,
             read_spacing_um=0.5,
             read_tile_size_px=4,
             tile_size_lv0=224,
@@ -2759,8 +2759,8 @@ def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_witho
             SimpleNamespace(
                 x=np.array([0]),
                 y=np.array([1]),
-                target_spacing_um=0.5,
-                target_tile_size_px=4,
+                requested_spacing_um=0.5,
+                requested_tile_size_px=4,
                 read_spacing_um=0.5,
                 read_tile_size_px=4,
                 tile_size_lv0=224,
@@ -2778,10 +2778,10 @@ def test_build_hierarchical_index_is_region_major_and_row_major_within_region():
         x=np.array([100, 1000], dtype=np.int64),
         y=np.array([200, 1200], dtype=np.int64),
         tile_size_lv0=672,
-        effective_region_size_px=672,
-        target_region_size_px=672,
-        effective_tile_size_px=224,
-        target_tile_size_px=224,
+        read_region_size_px=672,
+        requested_region_size_px=672,
+        read_tile_size_px=224,
+        requested_tile_size_px=224,
     )
 
     index = inference._build_hierarchical_index(
@@ -2812,24 +2812,46 @@ def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch(
     import slide2vec.inference as inference
 
     preprocessing = PreprocessingConfig(
-        target_spacing_um=0.5,
-        target_tile_size_px=224,
-        target_region_size_px=1792,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        requested_region_size_px=1792,
         region_tile_multiple=8,
     )
     tiling_result = SimpleNamespace(
-        effective_tile_size_px=3319,
-        effective_spacing_um=0.27,
+        read_tile_size_px=3319,
+        read_spacing_um=0.27,
         tile_size_lv0=3319,
         base_spacing_um=0.27,
     )
 
     geometry = inference._resolve_hierarchical_geometry(preprocessing, tiling_result)
 
-    assert geometry["effective_tile_size_px"] == 415
-    assert geometry["effective_region_size_px"] == 3320
+    assert geometry["read_tile_size_px"] == 415
+    assert geometry["read_region_size_px"] == 3320
     assert geometry["tile_size_lv0"] == 415
     assert geometry["tiles_per_region"] == 64
+
+
+def test_resolve_hierarchical_geometry_keeps_level0_footprint_when_spacing_matches_base():
+    import slide2vec.inference as inference
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        requested_region_size_px=448,
+        region_tile_multiple=2,
+    )
+    tiling_result = SimpleNamespace(
+        read_tile_size_px=224,
+        read_spacing_um=0.486187607049942,
+        tile_size_lv0=224,
+        base_spacing_um=0.486187607049942,
+    )
+
+    geometry = inference._resolve_hierarchical_geometry(preprocessing, tiling_result)
+
+    assert geometry["read_tile_size_px"] == 224
+    assert geometry["tile_size_lv0"] == 224
 
 
 def test_build_hierarchical_index_uses_tile_first_level0_offsets_under_spacing_mismatch():
@@ -2968,13 +2990,12 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         x=np.array([0, 100], dtype=np.int64),
         y=np.array([0, 100], dtype=np.int64),
         requested_tile_size_px=224,
-        effective_tile_size_px=224,
-        target_tile_size_px=224,
-        target_region_size_px=448,
-        effective_region_size_px=448,
+        read_tile_size_px=224,
+        requested_region_size_px=448,
+        read_region_size_px=448,
         tile_size_lv0=448,
-        target_spacing_um=0.5,
-        effective_spacing_um=0.5,
+        requested_spacing_um=0.5,
+        read_spacing_um=0.5,
         base_spacing_um=0.5,
         read_level=0,
     )
@@ -2983,7 +3004,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         loaded,
         slide,
         tiling_result,
-        preprocessing=replace(DEFAULT_PREPROCESSING, region_tile_multiple=2, target_region_size_px=448),
+        preprocessing=replace(DEFAULT_PREPROCESSING, region_tile_multiple=2, requested_region_size_px=448),
         execution=ExecutionOptions(batch_size=4, num_workers=0, num_gpus=1),
     )
 

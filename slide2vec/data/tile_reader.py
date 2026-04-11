@@ -89,7 +89,7 @@ class WSITileReader:
         self._num_cucim_workers = num_cucim_workers
         self._gpu_decode = gpu_decode
         self._read_level = int(tiling_result.read_level)
-        self._tile_size_px = int(tiling_result.effective_tile_size_px)
+        self._tile_size_px = int(tiling_result.read_tile_size_px)
         self._x = tiling_result.x
         self._y = tiling_result.y
         self._reader = None
@@ -215,7 +215,7 @@ class OnTheFlyBatchTileCollator:
         gpu_decode: bool = False,
         use_supertiles: bool = True,
     ):
-        self.tile_size = int(tiling_result.effective_tile_size_px)
+        self.tile_size = int(tiling_result.read_tile_size_px)
         self._reader = WSITileReader(
             image_path,
             tiling_result,
@@ -354,8 +354,8 @@ class OnTheFlyHierarchicalBatchCollator:
         tiling_result: TilingResult,
         region_index: np.ndarray,
         subtile_index_within_region: np.ndarray,
-        effective_region_size_px: int,
-        effective_tile_size_px: int,
+        read_region_size_px: int,
+        read_tile_size_px: int,
         backend: str = "cucim",
         num_cucim_workers: int = 4,
         gpu_decode: bool = False,
@@ -363,11 +363,11 @@ class OnTheFlyHierarchicalBatchCollator:
         self._region_index = np.asarray(region_index, dtype=np.int32)
         self._subtile_index_within_region = np.asarray(subtile_index_within_region, dtype=np.int32)
         self._tiles_per_region = int(self._subtile_index_within_region.max()) + 1 if len(self._subtile_index_within_region) else 0
-        self._tile_size = int(effective_tile_size_px)
+        self._tile_size = int(read_tile_size_px)
         self._reader = WSIRegionReader(
             image_path,
             read_level=int(tiling_result.read_level),
-            region_size_px=int(effective_region_size_px),
+            region_size_px=int(read_region_size_px),
             backend=backend,
             num_cucim_workers=num_cucim_workers,
             gpu_decode=gpu_decode,

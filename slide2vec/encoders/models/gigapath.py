@@ -69,9 +69,9 @@ class GigaPathSlideEncoder(SlideEncoder):
         coordinates: torch.Tensor,
         *,
         base_spacing_um: float,
-        target_spacing_um: float,
+        requested_spacing_um: float,
     ) -> torch.Tensor:
-        scale = float(base_spacing_um) / float(target_spacing_um)
+        scale = float(base_spacing_um) / float(requested_spacing_um)
         return torch.floor(coordinates.to(torch.float32) * scale).to(torch.long)
 
     def encode_slide(
