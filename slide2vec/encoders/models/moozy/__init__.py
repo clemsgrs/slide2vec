@@ -3,7 +3,13 @@
 import torch
 
 from slide2vec.encoders.base import PatientEncoder, SlideEncoder, preferred_default_device, resolve_requested_output_variant
+from .loading import load_moozy_inference_components
 from slide2vec.encoders.registry import register_encoder
+
+__all__ = [
+    "MOOZYSlideEncoder",
+    "MOOZYPatientEncoder",
+]
 
 
 @register_encoder(
@@ -19,12 +25,8 @@ from slide2vec.encoders.registry import register_encoder
 )
 class MOOZYSlideEncoder(SlideEncoder):
     def __init__(self, *, output_variant: str | None = None):
-        from moozy.hf_hub import ensure_checkpoint
-        from moozy.models.factory import load_stage2_inference_model
-
-        ckpt_path = ensure_checkpoint()
-        full_model = load_stage2_inference_model(ckpt_path, device=torch.device("cpu"))
-        self._model = full_model.slide_encoder.eval()
+        components = load_moozy_inference_components(device=torch.device("cpu"))
+        self._model = components.slide_encoder.eval()
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
@@ -69,15 +71,13 @@ class MOOZYSlideEncoder(SlideEncoder):
     precision="fp32",
     source="AtlasAnalyticsLab/MOOZY",
 )
+
+
 class MOOZYPatientEncoder(PatientEncoder):
     def __init__(self, *, output_variant: str | None = None):
-        from moozy.hf_hub import ensure_checkpoint
-        from moozy.models.factory import load_stage2_inference_model
-
-        ckpt_path = ensure_checkpoint()
-        full_model = load_stage2_inference_model(ckpt_path, device=torch.device("cpu"))
-        self._slide_model = full_model.slide_encoder.eval()
-        self._case_transformer = full_model.case_transformer.eval()
+        components = load_moozy_inference_components(device=torch.device("cpu"))
+        self._slide_model = components.slide_encoder.eval()
+        self._case_transformer = components.case_transformer.eval()
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
