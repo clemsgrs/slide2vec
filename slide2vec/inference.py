@@ -17,6 +17,7 @@ import logging
 import pandas as pd
 import torch
 from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
+from hs2p.wsi.backend import resolve_backend
 from hs2p.utils.stderr import run_with_filtered_stderr, run_with_filtered_stdio
 import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
@@ -209,6 +210,25 @@ def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
     return effective_num_workers, " // ".join(details)
 
 
+def _log_on_the_fly_worker_override_once(
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    tiling_results: Sequence[Any],
+) -> None:
+    if not preprocessing.on_the_fly or preprocessing.read_tiles_from is not None:
+        return
+    if not any(_resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
+        return
+    effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+    if effective_num_workers == execution.num_workers:
+        return
+    logging.getLogger(__name__).info(
+        f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
+        f"({worker_context}); "
+        f"ignoring speed.num_dataloader_workers={execution.num_workers}"
+    )
+
+
 def _redirect_worker_output() -> None:
     worker_log_path = os.path.join(
         tempfile.gettempdir(),
@@ -357,6 +377,11 @@ def embed_slides(
             embeddable_slides, embeddable_tiling_results, zero_tile_pairs = _partition_slides_by_tile_count(
                 prepared_slides,
                 tiling_results,
+            )
+            _log_on_the_fly_worker_override_once(
+                preprocessing,
+                execution,
+                embeddable_tiling_results,
             )
             _write_zero_tile_embedding_sidecars(
                 zero_tile_pairs,
@@ -532,6 +557,11 @@ def embed_patients(
                 prepared_slides,
                 tiling_results,
             )
+            _log_on_the_fly_worker_override_once(
+                preprocessing,
+                execution,
+                embeddable_tiling_results,
+            )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
             loaded = model._load_backend()
 
@@ -651,6 +681,11 @@ def embed_tiles(
     resolved_tiling_results = _normalize_tiling_results(tiling_results, slide_records)
     resolved_preprocessing = _resolve_model_preprocessing(model, preprocessing)
     hierarchical_mode = _is_hierarchical_preprocessing(resolved_preprocessing)
+    _log_on_the_fly_worker_override_once(
+        resolved_preprocessing,
+        execution,
+        resolved_tiling_results,
+    )
     artifacts: list[TileEmbeddingArtifact] | list[HierarchicalEmbeddingArtifact] = []
     for slide, tiling_result in zip(slide_records, resolved_tiling_results):
         if hierarchical_mode:
@@ -810,6 +845,11 @@ def run_pipeline(
         embeddable_slides, embeddable_tiling_results, zero_tile_pairs = _partition_slides_by_tile_count(
             successful_slides,
             tiling_results,
+        )
+        _log_on_the_fly_worker_override_once(
+            resolved_preprocessing,
+            execution,
+            embeddable_tiling_results,
         )
 
         if tiling_only:
@@ -1010,6 +1050,11 @@ def run_pipeline_with_coordinates(
         embeddable_slides, embeddable_tiling_results, zero_tile_pairs = _partition_slides_by_tile_count(
             slide_records,
             tiling_results,
+        )
+        _log_on_the_fly_worker_override_once(
+            resolved_preprocessing,
+            execution,
+            embeddable_tiling_results,
         )
         _write_zero_tile_embedding_sidecars(
             zero_tile_pairs,
@@ -1535,13 +1580,7 @@ def _compute_tile_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
-        effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
-        if effective_num_workers != execution.num_workers:
-            logging.getLogger(__name__).info(
-                f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
-                f"({worker_context}); "
-                f"ignoring speed.num_dataloader_workers={execution.num_workers}"
-            )
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
             loader_kwargs.pop("persistent_workers", None)
@@ -1620,13 +1659,7 @@ def _compute_hierarchical_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
-        effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
-        if effective_num_workers != execution.num_workers:
-            logging.getLogger(__name__).info(
-                f"on-the-fly hierarchical mode: setting DataLoader num_workers={effective_num_workers} "
-                f"({worker_context}); "
-                f"ignoring speed.num_dataloader_workers={execution.num_workers}"
-            )
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
             loader_kwargs.pop("persistent_workers", None)
@@ -2722,6 +2755,19 @@ def _tile_slides(
 ) -> list[Any]:
     _preload_asap_wholeslidedata(preprocessing)
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
+    for slide in slides:
+        backend_selection = resolve_backend(
+            tiling_cfg.requested_backend,
+            wsi_path=slide.image_path,
+            mask_path=slide.mask_path,
+        )
+        if backend_selection.reason is not None:
+            emit_progress(
+                "backend.selected",
+                sample_id=slide.sample_id,
+                backend=backend_selection.backend,
+                reason=backend_selection.reason,
+            )
 
     def _run_tile_slides():
         return tile_slides(

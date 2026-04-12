@@ -151,14 +151,19 @@ def setup(args):
 def hf_login():
     from huggingface_hub import login
 
-    if "HF_TOKEN" not in os.environ and distributed.is_main_process():
-        hf_token = getpass.getpass(
+    token = os.environ.get("HF_TOKEN")
+    prompted = False
+    if token is None and distributed.is_main_process():
+        token = getpass.getpass(
             "Enter your Hugging Face API token (input will not be visible): "
         )
-        os.environ["HF_TOKEN"] = hf_token
+        os.environ["HF_TOKEN"] = token
+        prompted = True
+    if token is None:
+        return
     if distributed.is_enabled_and_multiple_gpus():
         import torch.distributed as dist
 
         dist.barrier()
-    if distributed.is_main_process():
-        login(os.environ["HF_TOKEN"])
+    if distributed.is_main_process() and prompted:
+        login(token)

@@ -3,6 +3,10 @@
 ## 2026-04-12
 
 - When refactoring CLI parsing to support `parse_known_args()`, prefer updating the test double to match the real parser API instead of adding a production fallback for mocks. Keep the runtime code clean unless the fallback is genuinely needed by real callers.
+- When stdout noise comes from both a local wrapper and an upstream dependency, suppress the common-case message at the upstream boundary and keep the per-item local note at debug level instead of stacking multiple INFO lines.
+- When a diagnostic line is still useful, move it to the run boundary and log it once per run instead of per slide or per worker.
+- When a backend-selection reason is user-relevant, emit it as a structured progress event and let the reporter choose how to render it instead of filtering it out in the API.
+- When a CLI depends on both slide2vec and hs2p progress systems, activate them with a shared reporter bridge so upstream events do not disappear into the default null reporter.
 
 ## 2026-04-10
 

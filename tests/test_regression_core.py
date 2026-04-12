@@ -349,6 +349,26 @@ def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
     assert "ExecutionOptions: num_workers=18 (requested=auto)" in caplog.text
     assert "num_workers=auto" not in caplog.text
 
+
+def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
+    import slide2vec.utils.config as config
+
+    called = False
+
+    def _fake_login(*args, **kwargs):
+        del args, kwargs
+        nonlocal called
+        called = True
+
+    monkeypatch.setenv("HF_TOKEN", "token-from-env")
+    monkeypatch.setattr(config.distributed, "is_main_process", lambda: True)
+    monkeypatch.setattr(config.distributed, "is_enabled_and_multiple_gpus", lambda: False)
+    monkeypatch.setattr("huggingface_hub.login", _fake_login)
+
+    config.hf_login()
+
+    assert called is False
+
 def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
