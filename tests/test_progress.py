@@ -46,6 +46,9 @@ def _install_fake_rich_runtime(monkeypatch):
         def print(self, message, **kwargs):
             self.lines.append((message, kwargs))
 
+        def log(self, message, **kwargs):
+            self.lines.append((message, kwargs))
+
     class FakeProgress:
         def __init__(self, *args, **kwargs):
             self.tasks = {}
@@ -129,6 +132,7 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     assert observed["kwargs"] == {"manifest_path": "/tmp/slides.csv", "tiling_only": False}
     assert observed["reporter"] is reporter
     assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
+
 
 
 def test_cli_entrypoint_returns_zero(monkeypatch):

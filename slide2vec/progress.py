@@ -68,6 +68,13 @@ class JsonlProgressReporter:
         print(message, file=target, flush=True)
 
 
+def _format_backend_selected_message(payload: dict[str, Any]) -> str:
+    reason = payload.get("reason")
+    if reason:
+        return f"[backend] {payload['sample_id']}: {reason}"
+    return f"[backend] {payload['sample_id']}: using {payload['backend']}"
+
+
 class PlainTextCliProgressReporter:
     def __init__(self, *, stream=None) -> None:
         self.stream = stream or sys.stdout
@@ -133,6 +140,8 @@ class PlainTextCliProgressReporter:
                 f"Embedding finished: {payload['slides_completed']}/{payload['slide_count']} slides, "
                 f"{payload['tile_artifacts']} tile artifacts, {payload['slide_artifacts']} slide artifacts"
             )
+        if kind == "backend.selected":
+            return _format_backend_selected_message(payload)
         if kind == "run.finished":
             return f"Run finished successfully. Logs: {payload['logs_dir']}"
         if kind == "run.failed":
@@ -312,6 +321,9 @@ class RichCliProgressReporter:
                 "Embedding Summary",
                 _embedding_summary_rows(payload),
             )
+            return
+        if kind == "backend.selected":
+            self.console.print(_format_backend_selected_message(payload))
             return
         if kind == "run.finished":
             self._print_summary(

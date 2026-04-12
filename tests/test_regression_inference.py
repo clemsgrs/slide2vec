@@ -905,7 +905,14 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
     monkeypatch.setattr(
         inference,
         "_build_hs2p_configs",
-        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="cucim"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
     )
 
     slide = inference._coerce_slide_spec(
@@ -940,8 +947,20 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
+        "resolve_backend",
+        lambda requested_backend, **kwargs: SimpleNamespace(backend="asap", reason=None, tried=("asap",)),
+    )
+    monkeypatch.setattr(
+        inference,
         "_build_hs2p_configs",
-        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="auto"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
     )
 
     inference._tile_slides(
@@ -2359,7 +2378,7 @@ def test_resolve_on_the_fly_num_workers_caps_to_slurm_allocation(monkeypatch):
     assert "num_cucim_workers=4" in details
 
 
-def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monkeypatch):
+def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monkeypatch, caplog):
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
 
@@ -2434,19 +2453,76 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
         persistent_workers=True,
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
-        loaded,
-        SimpleNamespace(level="tile"),
-        slide,
-        tiling_result,
-        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
-        execution=execution,
-    )
+    with caplog.at_level("INFO"):
+        result = inference._compute_tile_embeddings_for_slide(
+            loaded,
+            SimpleNamespace(level="tile"),
+            slide,
+            tiling_result,
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
+            execution=execution,
+        )
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
     assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 9
+    assert "on-the-fly mode: setting DataLoader num_workers=8" not in caplog.text
+
+
+def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path: Path, caplog):
+    import slide2vec.inference as inference
+
+    slides = [
+        make_slide("slide-a"),
+        make_slide("slide-b"),
+    ]
+    tiling_results = [
+        SimpleNamespace(
+            x=np.array([0, 10]),
+            y=np.array([5, 15]),
+            tile_size_lv0=224,
+            backend="cucim",
+        ),
+        SimpleNamespace(
+            x=np.array([20, 30]),
+            y=np.array([25, 35]),
+            tile_size_lv0=224,
+            backend="cucim",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: (slides, tiling_results, tmp_path / "process_list.csv"),
+    )
+    monkeypatch.setattr(inference, "_emit_tiling_finished", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_write_zero_tile_embedding_sidecars", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_compute_embedded_slides",
+        lambda *args, **kwargs: [SimpleNamespace(slide_embedding=None) for _ in slides],
+    )
+    monkeypatch.setattr(
+        inference,
+        "_collect_pipeline_artifacts",
+        lambda *args, **kwargs: ([], [], []),
+    )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    model = SimpleNamespace(name="prov-gigapath", level="tile")
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1)
+
+    with caplog.at_level("INFO"):
+        inference.run_pipeline(
+            model,
+            slides=slides,
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
+            execution=execution,
+        )
+
+    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=") == 1
 
 
 def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_without_changing_workers(monkeypatch):
