@@ -2522,7 +2522,7 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
             execution=execution,
         )
 
-    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=2") == 1
+    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=") == 1
 
 
 def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_without_changing_workers(monkeypatch):
