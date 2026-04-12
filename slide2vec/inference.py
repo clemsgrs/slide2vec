@@ -2458,7 +2458,8 @@ def _resolve_device(device: str, default_device):
 
 
 def _describe_device_mode(model, execution: ExecutionOptions) -> str:
-    if model._requested_device == "cpu":
+    requested_device = getattr(model, "_requested_device", None)
+    if requested_device == "cpu":
         return "cpu"
     if execution.num_gpus and execution.num_gpus > 1:
         return f"{execution.num_gpus} gpus"
@@ -2978,7 +2979,8 @@ def _resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | Non
 
 
 def _validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
-    if model._requested_device == "cpu":
+    requested_device = getattr(model, "_requested_device", None)
+    if requested_device == "cpu":
         raise ValueError("ExecutionOptions.num_gpus > 1 is incompatible with device='cpu'")
     if not torch.cuda.is_available():
         raise RuntimeError("ExecutionOptions.num_gpus > 1 requires CUDA")

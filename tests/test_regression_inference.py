@@ -905,7 +905,14 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
     monkeypatch.setattr(
         inference,
         "_build_hs2p_configs",
-        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="cucim"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
     )
 
     slide = inference._coerce_slide_spec(
@@ -940,8 +947,20 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
+        "resolve_backend",
+        lambda requested_backend, **kwargs: SimpleNamespace(backend="asap", reason=None, tried=("asap",)),
+    )
+    monkeypatch.setattr(
+        inference,
         "_build_hs2p_configs",
-        lambda preprocessing: ("tiling", "segmentation", "filtering", "preview", None, False),
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="auto"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
     )
 
     inference._tile_slides(
@@ -2487,9 +2506,10 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
     )
     monkeypatch.setattr(
         inference,
-        "_collect_local_pipeline_artifacts",
+        "_collect_pipeline_artifacts",
         lambda *args, **kwargs: ([], [], []),
     )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     model = SimpleNamespace(name="prov-gigapath", level="tile")
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1)
@@ -2502,7 +2522,7 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
             execution=execution,
         )
 
-    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=8") == 1
+    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=2") == 1
 
 
 def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_without_changing_workers(monkeypatch):
