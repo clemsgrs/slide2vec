@@ -2,7 +2,7 @@
 
 ## 2026-04-12
 
-- When refactoring CLI parsing to support `parse_known_args()`, keep existing test doubles in mind: if a fake parser only implements `parse_args()`, add a small compatibility fallback instead of forcing every monkeypatch to mirror the full parser API.
+- When refactoring CLI parsing to support `parse_known_args()`, prefer updating the test double to match the real parser API instead of adding a production fallback for mocks. Keep the runtime code clean unless the fallback is genuinely needed by real callers.
 
 ## 2026-04-10
 

@@ -112,6 +112,9 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
         def parse_args(self, argv=None):
             return SimpleNamespace(tiling_only=False)
 
+        def parse_known_args(self, argv=None):
+            return self.parse_args(argv), []
+
     monkeypatch.setattr(cli, "get_args_parser", lambda add_help=True: FakeParser())
     monkeypatch.setattr(
         cli,
