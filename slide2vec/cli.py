@@ -12,13 +12,14 @@ def get_args_parser(add_help: bool = True):
     parser.add_argument("--tiling-only", action="store_true", help="only run slide tiling")
     parser.add_argument("--run-on-cpu", action="store_true", help="run inference on cpu")
     parser.add_argument("--output-dir", type=str, default=None, help="output directory to save artifacts")
-    parser.add_argument(
-        "opts",
-        help='Modify config options at the end of the command using "path.key=value".',
-        default=None,
-        nargs=argparse.REMAINDER,
-    )
     return parser
+
+
+def parse_args(argv=None):
+    parser = get_args_parser(add_help=True)
+    args, opts = parser.parse_known_args(argv)
+    args.opts = opts
+    return args
 
 
 def build_model_and_pipeline(args):
@@ -39,8 +40,7 @@ def build_model_and_pipeline(args):
 
 
 def main(argv=None):
-    parser = get_args_parser(add_help=True)
-    args = parser.parse_args(argv)
+    args = parse_args(argv)
     pipeline, cfg = build_model_and_pipeline(args)
     reporter = progress.create_cli_progress_reporter(output_dir=getattr(cfg, "output_dir", None))
     with progress.activate_progress_reporter(reporter):
@@ -53,4 +53,3 @@ def main(argv=None):
 def entrypoint(argv=None):
     main(argv)
     return 0
-

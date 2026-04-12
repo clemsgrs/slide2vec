@@ -143,6 +143,24 @@ def test_cli_entrypoint_returns_zero(monkeypatch):
     assert observed["argv"] == ["/tmp/config.yaml"]
 
 
+def test_cli_parse_args_preserves_flags_and_config_overrides():
+    import slide2vec.cli as cli
+
+    args = cli.parse_args(
+        [
+            "/tmp/config.yaml",
+            "--skip-datetime",
+            "--run-on-cpu",
+            "speed.num_gpus=4",
+        ]
+    )
+
+    assert args.config_file == "/tmp/config.yaml"
+    assert args.skip_datetime is True
+    assert args.run_on_cpu is True
+    assert args.opts == ["speed.num_gpus=4"]
+
+
 def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
