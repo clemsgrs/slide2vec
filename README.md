@@ -112,7 +112,7 @@ The CLI is a thin wrapper over the package API.
 Bundled configs live under `slide2vec/configs/preprocessing/` and `slide2vec/configs/models/`.
 
 ```shell
-python -m slide2vec --config-file /path/to/config.yaml
+slide2vec /path/to/config.yaml
 ```
 
 By default, manifest-driven CLI runs use all available GPUs. Set `speed.num_gpus=4` when you want to cap the sharding explicitly.

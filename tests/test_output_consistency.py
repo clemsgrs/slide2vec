@@ -133,8 +133,8 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
     # 3. Run the pipeline
     subprocess.run(
         [
-            sys.executable, "-m", "slide2vec",
-            "--config-file", str(cfg_path),
+            "slide2vec",
+            str(cfg_path),
             "--skip-datetime",
             "--run-on-cpu",
         ],

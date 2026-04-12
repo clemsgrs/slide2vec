@@ -112,6 +112,9 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
         def parse_args(self, argv=None):
             return SimpleNamespace(tiling_only=False)
 
+        def parse_known_args(self, argv=None):
+            return self.parse_args(argv), []
+
     monkeypatch.setattr(cli, "get_args_parser", lambda add_help=True: FakeParser())
     monkeypatch.setattr(
         cli,
@@ -126,6 +129,39 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     assert observed["kwargs"] == {"manifest_path": "/tmp/slides.csv", "tiling_only": False}
     assert observed["reporter"] is reporter
     assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
+
+
+def test_cli_entrypoint_returns_zero(monkeypatch):
+    import slide2vec.cli as cli
+
+    observed = {}
+
+    def fake_main(argv=None):
+        observed["argv"] = argv
+        return "ok"
+
+    monkeypatch.setattr(cli, "main", fake_main)
+
+    assert cli.entrypoint(["/tmp/config.yaml"]) == 0
+    assert observed["argv"] == ["/tmp/config.yaml"]
+
+
+def test_cli_parse_args_preserves_flags_and_config_overrides():
+    import slide2vec.cli as cli
+
+    args = cli.parse_args(
+        [
+            "/tmp/config.yaml",
+            "--skip-datetime",
+            "--run-on-cpu",
+            "speed.num_gpus=4",
+        ]
+    )
+
+    assert args.config_file == "/tmp/config.yaml"
+    assert args.skip_datetime is True
+    assert args.run_on_cpu is True
+    assert args.opts == ["speed.num_gpus=4"]
 
 
 def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path: Path):

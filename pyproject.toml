@@ -42,7 +42,7 @@ Homepage = "https://github.com/clemsgrs/slide2vec"
 "Bug Tracker" = "https://github.com/clemsgrs/slide2vec/issues"
 
 [project.scripts]
-slide2vec = "slide2vec.cli:main"
+slide2vec = "slide2vec.cli:entrypoint"
 
 [project.optional-dependencies]
 hoptimus = [

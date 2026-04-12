@@ -7,18 +7,19 @@ import slide2vec.progress as progress
 
 def get_args_parser(add_help: bool = True):
     parser = argparse.ArgumentParser("slide2vec", add_help=add_help)
-    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument("config_file", metavar="CONFIG", help="path to config file")
     parser.add_argument("--skip-datetime", action="store_true", help="skip run id datetime prefix")
     parser.add_argument("--tiling-only", action="store_true", help="only run slide tiling")
     parser.add_argument("--run-on-cpu", action="store_true", help="run inference on cpu")
     parser.add_argument("--output-dir", type=str, default=None, help="output directory to save artifacts")
-    parser.add_argument(
-        "opts",
-        help='Modify config options at the end of the command using "path.key=value".',
-        default=None,
-        nargs=argparse.REMAINDER,
-    )
     return parser
+
+
+def parse_args(argv=None):
+    parser = get_args_parser(add_help=True)
+    args, opts = parser.parse_known_args(argv)
+    args.opts = opts
+    return args
 
 
 def build_model_and_pipeline(args):
@@ -39,8 +40,7 @@ def build_model_and_pipeline(args):
 
 
 def main(argv=None):
-    parser = get_args_parser(add_help=True)
-    args = parser.parse_args(argv)
+    args = parse_args(argv)
     pipeline, cfg = build_model_and_pipeline(args)
     reporter = progress.create_cli_progress_reporter(output_dir=getattr(cfg, "output_dir", None))
     with progress.activate_progress_reporter(reporter):
@@ -50,3 +50,6 @@ def main(argv=None):
         )
 
 
+def entrypoint(argv=None):
+    main(argv)
+    return 0

@@ -126,8 +126,8 @@ def main():
         print("Running pipeline...")
         subprocess.run(
             [
-                sys.executable, "-m", "slide2vec",
-                "--config-file", str(cfg_path),
+                "slide2vec",
+                str(cfg_path),
                 "--skip-datetime",
                 "--run-on-cpu",
             ],
