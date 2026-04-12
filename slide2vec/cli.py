@@ -17,8 +17,12 @@ def get_args_parser(add_help: bool = True):
 
 def parse_args(argv=None):
     parser = get_args_parser(add_help=True)
-    args, opts = parser.parse_known_args(argv)
-    args.opts = opts
+    if hasattr(parser, "parse_known_args"):
+        args, opts = parser.parse_known_args(argv)
+        args.opts = opts
+    else:
+        args = parser.parse_args(argv)
+        args.opts = getattr(args, "opts", [])
     return args
 
 
