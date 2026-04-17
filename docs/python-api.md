@@ -65,7 +65,10 @@ preprocessing = PreprocessingConfig(
     requested_spacing_um=0.5,
     requested_tile_size_px=224,
     tissue_threshold=0.1,
-    segmentation={"downsample": 64},
+    segmentation={
+        "method": "hsv",
+        "downsample": 64,
+    },
     filtering={"ref_tile_size": 224},
     preview={
         "save_mask_preview": False,
@@ -82,6 +85,7 @@ Common fields:
 - `requested_tile_size_px`
 - `tissue_threshold`
 - `backend` - `"auto"`, `"cucim"`, `"openslide"`, `"vips"`, or `"asap"`
+- `segmentation` - forwarded to hs2p's segmentation config; `method` supports `"hsv"`, `"otsu"`, `"threshold"`, or `"sam2"`
 - `on_the_fly` - read tiles directly from WSI during embedding (default `True`)
 - `use_supertiles` - group tiles into spatial blocks to reduce WSI read calls (default `True`)
 - `read_coordinates_from` - reuse pre-extracted coordinates
@@ -235,6 +239,8 @@ result = pipeline.run(manifest_path="/path/to/slides.csv")
 - `process_list_path`
 
 The manifest schema matches HS2P and accepts optional `mask_path` and `spacing_at_level_0` columns. Patient-level models additionally require a `patient_id` column; see [Patient manifest format](models.md#patient-manifest-format).
+
+When you select `segmentation.method="sam2"`, hs2p uses the AtlasPatch tissue segmentation path and can download the default checkpoint/config automatically if you do not provide local paths.
 
 ### Reusing pre-extracted coordinates
 

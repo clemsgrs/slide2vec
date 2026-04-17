@@ -43,6 +43,10 @@ def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
     assert hasattr(cfg.tiling.filter_params, "filter_blur")
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
+    assert hasattr(cfg.tiling.seg_params, "method")
+    assert hasattr(cfg.tiling.seg_params, "sam2_checkpoint_path")
+    assert hasattr(cfg.tiling.seg_params, "sam2_config_path")
+    assert hasattr(cfg.tiling.seg_params, "sam2_device")
 
 
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):

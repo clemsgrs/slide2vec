@@ -138,6 +138,17 @@ slide2vec /path/to/config.yaml speed.num_gpus=4
 
 If you pass `--run-on-cpu`, the CLI uses CPU execution instead.
 
+## Segmentation Notes
+
+`tiling.seg_params.method` controls how hs2p segments tissue before it extracts coordinates:
+
+- `hsv` uses the HSV heuristic
+- `otsu` thresholds the saturation channel with Otsu
+- `threshold` applies a fixed saturation threshold
+- `sam2` runs the AtlasPatch SAM2 tissue segmentation path on an internal `8.0 um/px` thumbnail
+
+When `method: sam2` is selected, `sam2_checkpoint_path` and `sam2_config_path` are optional. If they are left blank, hs2p downloads the default AtlasPatch checkpoint and SAM2 config from Hugging Face.
+
 ## Outputs
 
 The CLI writes explicit artifact directories under the run output directory:

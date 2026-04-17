@@ -38,12 +38,14 @@
     "seg_downsample": 64,
     "seg_level": null,
     "seg_spacing_um": null,
+    "sam2_checkpoint_path": null,
+    "sam2_config_path": null,
+    "sam2_device": "cpu",
+    "method": "hsv",
     "sthresh": 8,
     "sthresh_up": 255,
     "tissue_mask_tissue_value": 1,
-    "tissue_method": "hsv",
-    "use_hsv": true,
-    "use_otsu": false
+    "tissue_method": "hsv"
   },
   "slide": {
     "base_spacing_um": 0.25200000393750005,

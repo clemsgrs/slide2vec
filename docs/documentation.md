@@ -2,6 +2,10 @@
 
 ## 2026-04-17
 
+- Aligned slide2vec's bundled preprocessing schema with hs2p 3.3.0 by switching the default tissue-segmentation config to the new `method`-based SAM2-capable schema and documenting AtlasPatch-backed `sam2` usage.
+
+## 2026-04-17
+
 - Reworked the docs landing page into a product-style hero with action buttons, feature cards, and a summary panel to make the site feel less like a flat index.
 
 ## 2026-04-17

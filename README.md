@@ -24,6 +24,8 @@ pip install git+https://github.com/Mahmoodlab/CONCH.git
 pip install git+https://github.com/prov-gigapath/prov-gigapath.git
 ```
 
+AtlasPatch-backed tissue segmentation is available through hs2p's `sam2` path in the bundled install.
+
 ## Python API
 
 ```python
