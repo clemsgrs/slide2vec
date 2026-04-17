@@ -24,7 +24,18 @@ extensions = [
 ]
 
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "benchmarking.md",
+    "cli.md",
+    "documentation.md",
+    "gpu-throughput-optimization-protocol.md",
+    "models.md",
+    "python-api.md",
+    "optimize-throughput/h0-mini-single-gpu.md",
+]
 autosummary_generate = True
 autodoc_member_order = "bysource"
 autodoc_default_options = {

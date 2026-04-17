@@ -1,6 +1,7 @@
 # slide2vec
 
 [![PyPI version](https://img.shields.io/pypi/v/slide2vec?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/slide2vec/)
+[![Docs](https://img.shields.io/badge/docs-website-blue)](https://clemsgrs.github.io/slide2vec/)
 
 `slide2vec` is a Python package for efficient encoding of whole-slide images using publicly available foundation models. It builds on [`hs2p`](https://pypi.org/project/hs2p/) for fast preprocessing and exposes a focused surface around `Model`, `Pipeline`, and `ExecutionOptions`.
 
