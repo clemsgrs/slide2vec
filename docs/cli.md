@@ -36,7 +36,7 @@ This command:
 
 The manifest must use the hs2p schema. `mask_path` and `spacing_at_level_0` are optional.
 
-```csv
+```text
 sample_id,image_path,mask_path,spacing_at_level_0
 slide-1,/path/to/slide-1.svs,/path/to/mask-1.png,0.25
 slide-2,/path/to/slide-2.svs,,

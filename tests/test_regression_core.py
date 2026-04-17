@@ -12,6 +12,7 @@ from slide2vec.api import (
     Pipeline,
     PreprocessingConfig,
 )
+from slide2vec.encoders.registry import encoder_registry
 from slide2vec.artifacts import (
     load_array,
     load_metadata,
@@ -92,6 +93,57 @@ def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_pa
 
     with pytest.raises(ValueError, match="multiple spacings"):
         get_cfg_from_args(args)
+
+
+def test_list_models_is_public_and_returns_all_registered_models():
+    from slide2vec import list_models
+
+    models = list_models()
+
+    assert models == sorted(models)
+    assert models == sorted(encoder_registry.names())
+    assert "virchow2" in models
+    assert "moozy" in models
+    assert "prism" in models
+
+
+def test_list_models_can_filter_by_level():
+    from slide2vec import list_models
+
+    assert list_models("tile") == [
+        "conch",
+        "conchv15",
+        "gigapath",
+        "h-optimus-0",
+        "h-optimus-1",
+        "h0-mini",
+        "hibou-b",
+        "hibou-l",
+        "lunit",
+        "midnight",
+        "musk",
+        "phikon",
+        "phikonv2",
+        "prost40m",
+        "uni",
+        "uni2",
+        "virchow",
+        "virchow2",
+    ]
+    assert list_models("slide") == [
+        "gigapath-slide",
+        "moozy-slide",
+        "prism",
+        "titan",
+    ]
+    assert list_models("patient") == ["moozy"]
+
+
+def test_list_models_rejects_unknown_level():
+    from slide2vec import list_models
+
+    with pytest.raises(ValueError, match="tile, slide, patient"):
+        list_models("tiles")
 
 
 def test_npz_artifacts_round_trip(tmp_path: Path):

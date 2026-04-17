@@ -1,5 +1,6 @@
 import json
 import importlib
+import heapq
 import os
 import shutil
 import subprocess
@@ -291,6 +292,7 @@ def load_model(
     name: str,
     device: str = "auto",
     output_variant: str | None = None,
+    allow_non_recommended_settings: bool = False,
     token: str | None = None,
 ) -> LoadedModel:
     name = canonicalize_model_name(name)
@@ -391,6 +393,12 @@ def embed_slides(
                 output_format=execution.output_format,
             )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
+            if execution.num_gpus > 1 and len(embeddable_slides) > 1:
+                emit_progress(
+                    "embedding.assignment.started",
+                    slide_count=len(embeddable_slides),
+                    num_gpus=execution.num_gpus,
+                )
             local_persist_callback = None
             if execution.output_dir is not None and execution.num_gpus <= 1:
                 local_persist_callback, _, _ = _build_incremental_persist_callback(
@@ -408,6 +416,12 @@ def embed_slides(
                 work_dir=work_dir,
                 on_embedded_slide=local_persist_callback,
             )
+            if execution.num_gpus > 1 and len(embeddable_slides) > 1:
+                emit_progress(
+                    "embedding.assignment.finished",
+                    slide_count=len(embeddable_slides),
+                    num_gpus=execution.num_gpus,
+                )
             if execution.output_dir is not None and execution.num_gpus > 1:
                 tile_artifacts: list[TileEmbeddingArtifact] = []
                 hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
@@ -3011,6 +3025,11 @@ def _run_distributed_embedding_stage(
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
+    emit_progress(
+        "embedding.assignment.started",
+        slide_count=len(successful_slides),
+        num_gpus=execution.num_gpus,
+    )
     _run_torchrun_worker(
         module="slide2vec.distributed.pipeline_worker",
         execution=execution,
@@ -3018,6 +3037,11 @@ def _run_distributed_embedding_stage(
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
         progress_events_path=progress_events_path,
+    )
+    emit_progress(
+        "embedding.assignment.finished",
+        slide_count=len(successful_slides),
+        num_gpus=execution.num_gpus,
     )
 
 
@@ -3310,14 +3334,15 @@ def _assign_slides_to_ranks(
     num_gpus: int,
 ) -> dict[int, list[str]]:
     assignments: dict[int, list[str]] = {rank: [] for rank in range(num_gpus)}
-    assigned_tiles = [0] * num_gpus
+    assigned_ranks = [(0, rank) for rank in range(num_gpus)]
+    heapq.heapify(assigned_ranks)
     sortable = []
     for slide, tiling_result in zip(slide_records, tiling_results):
         sortable.append((slide.sample_id, _num_tiles(tiling_result)))
     for sample_id, num_tiles in sorted(sortable, key=lambda item: (-item[1], item[0])):
-        rank = min(range(num_gpus), key=lambda idx: (assigned_tiles[idx], idx))
+        assigned_tiles, rank = heapq.heappop(assigned_ranks)
         assignments[rank].append(sample_id)
-        assigned_tiles[rank] += int(num_tiles)
+        heapq.heappush(assigned_ranks, (assigned_tiles + int(num_tiles), rank))
     return assignments
 
 
@@ -3385,6 +3410,9 @@ def _serialize_model(model) -> dict[str, Any]:
     return {
         "name": model.name,
         "output_variant": model._output_variant if hasattr(model, "_output_variant") else None,
+        "allow_non_recommended_settings": bool(
+            getattr(model, "allow_non_recommended_settings", False)
+        ),
     }
 
 

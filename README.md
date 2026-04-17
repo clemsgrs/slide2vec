@@ -4,6 +4,8 @@
 
 `slide2vec` is a Python package for efficient encoding of whole-slide images using publicly available foundation models. It builds on [`hs2p`](https://pypi.org/project/hs2p/) for fast preprocessing and exposes a focused surface around `Model`, `Pipeline`, and `ExecutionOptions`.
 
+Documentation site: [https://clemsgrs.github.io/slide2vec/](https://clemsgrs.github.io/slide2vec/)
+
 ## Installation
 
 ```shell
@@ -35,6 +37,17 @@ embedded = model.embed_slide("/path/to/slide.svs")
 tile_embeddings = embedded.tile_embeddings
 x = embedded.x
 y = embedded.y
+```
+
+Use `list_models()` when you want to inspect the shipped presets programmatically:
+
+```python
+from slide2vec import list_models
+
+all_models = list_models()
+tile_models = list_models("tile")
+slide_models = list_models("slide")
+patient_models = list_models("patient")
 ```
 
 Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:
@@ -135,7 +148,8 @@ docker run --rm -it \
 
 ## Documentation
 
-- [`docs/cli.md`](docs/cli.md) for the config-driven CLI guide
+- [Documentation website](https://clemsgrs.github.io/slide2vec/) for the polished docs site
 - [`docs/python-api.md`](docs/python-api.md) for the detailed API reference
-- [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API
+- [`docs/cli.md`](docs/cli.md) for the config-driven CLI guide
 - [`docs/models.md`](docs/models.md) for the full supported-model catalog
+- [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API
