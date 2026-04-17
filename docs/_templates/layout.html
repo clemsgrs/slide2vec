@@ -1,0 +1,11 @@
+{% extends "!layout.html" %}
+
+{% block body %}
+<script>
+  if (!localStorage.getItem("theme")) {
+    localStorage.setItem("theme", "light");
+  }
+</script>
+{{ super() }}
+{% endblock %}
+

@@ -1,0 +1,9 @@
+{% extends "!base.html" %}
+
+{# Default to light mode instead of auto (system preference) #}
+{% block body %}
+<script>
+  document.body.dataset.theme = localStorage.getItem("theme") || "light";
+</script>
+{% endblock %}
+

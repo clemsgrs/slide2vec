@@ -124,6 +124,13 @@ class PlainTextCliProgressReporter:
             return f"Model {payload['model_name']} ready on {payload['device']}"
         if kind == "embedding.started":
             return f"Embedding slides ({payload['slide_count']} total)..."
+        if kind == "embedding.assignment.started":
+            return f"Assigning slides across {payload['num_gpus']} GPU(s)..."
+        if kind == "embedding.assignment.finished":
+            return (
+                f"Slide assignment complete: {payload['slide_count']} slide(s) across "
+                f"{payload['num_gpus']} GPU(s)"
+            )
         if kind == "embedding.slide.started":
             return f"Embedding {_progress_subject(payload)} ({payload['total_tiles']} tiles)..."
         if kind == "embedding.tile.progress":
@@ -267,6 +274,21 @@ class RichCliProgressReporter:
             return
         if kind == "embedding.started":
             self._task_ids["embedding"] = self.progress.add_task("Embedding slides", total=payload["slide_count"])
+            return
+        if kind == "embedding.assignment.started":
+            self._task_ids["embedding_assignment"] = self.progress.add_task(
+                f"Assigning slides across {payload['num_gpus']} GPUs",
+                total=None,
+            )
+            self.console.print(f"Assigning slides across {payload['num_gpus']} GPUs...")
+            return
+        if kind == "embedding.assignment.finished":
+            task_id = self._task_ids.pop("embedding_assignment", None)
+            if task_id is not None:
+                self.progress.remove_task(task_id)
+            self.console.print(
+                f"Slide assignment complete: {payload['slide_count']} slides across {payload['num_gpus']} GPUs"
+            )
             return
         if kind == "embedding.slide.started":
             tile_task_key = _progress_task_key("tiles", payload)

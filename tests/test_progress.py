@@ -245,6 +245,101 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     ]
 
 
+def test_run_pipeline_emits_assignment_progress_for_multi_gpu_embedding(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+
+    reporter = RecordingReporter()
+
+    slide_a = SimpleNamespace(
+        sample_id="slide-a",
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+        spacing_at_level_0=None,
+    )
+    slide_b = SimpleNamespace(
+        sample_id="slide-b",
+        image_path=Path("/tmp/slide-b.svs"),
+        mask_path=None,
+        spacing_at_level_0=None,
+    )
+    tiling_a = SimpleNamespace(x=np.array([0, 1]), y=np.array([0, 1]), tile_size_lv0=224)
+    tiling_b = SimpleNamespace(x=np.array([0, 1, 2]), y=np.array([0, 1, 2]), tile_size_lv0=224)
+    embedded_a = SimpleNamespace(sample_id="slide-a")
+    embedded_b = SimpleNamespace(sample_id="slide-b")
+
+    monkeypatch.setattr(
+        inference,
+        "_prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide_a, slide_b], [tiling_a, tiling_b], tmp_path / "process_list.csv"),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_select_embedding_path",
+        lambda *args, **kwargs: [embedded_a, embedded_b],
+    )
+    monkeypatch.setattr(inference, "_persist_embedded_slide", lambda *args, **kwargs: (None, None))
+    monkeypatch.setattr(inference, "_run_torchrun_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_collect_pipeline_artifacts",
+        lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
+    )
+    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _requested_device="cuda:0",
+        _load_backend=lambda: SimpleNamespace(),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        result = inference.run_pipeline(
+            model,
+            slides=[slide_a, slide_b],
+            preprocessing=DEFAULT_PREPROCESSING,
+            execution=inference.ExecutionOptions(output_dir=tmp_path, num_gpus=2, save_tile_embeddings=True),
+        )
+
+    kinds = [event.kind for event in reporter.events]
+
+    assert result.tile_artifacts == ["tile-artifact"]
+    assert result.slide_artifacts == ["slide-artifact"]
+    assert kinds == [
+        "run.started",
+        "tiling.started",
+        "tiling.finished",
+        "embedding.started",
+        "embedding.assignment.started",
+        "embedding.assignment.finished",
+        "embedding.finished",
+        "run.finished",
+    ]
+
+
+def test_plain_text_reporter_formats_assignment_progress():
+    import slide2vec.progress as progress
+
+    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
+
+    assert (
+        reporter._format_line(
+            "embedding.assignment.started",
+            {"slide_count": 10, "num_gpus": 4},
+        )
+        == "Assigning slides across 4 GPU(s)..."
+    )
+    assert (
+        reporter._format_line(
+            "embedding.assignment.finished",
+            {"slide_count": 10, "num_gpus": 4},
+        )
+        == "Slide assignment complete: 10 slide(s) across 4 GPU(s)"
+    )
+
+
 def test_run_forward_pass_reports_processed_tile_counts():
     torch = pytest.importorskip("torch")
     import slide2vec.inference as inference
@@ -395,7 +490,12 @@ def test_build_direct_embed_worker_request_payload_includes_progress_events_path
     import slide2vec.inference as inference
 
     payload = inference._build_direct_embed_worker_request_payload(
-        model=SimpleNamespace(name="virchow2", level="tile", _model_kwargs={}),
+        model=SimpleNamespace(
+            name="virchow2",
+            level="tile",
+            _output_variant="cls",
+            allow_non_recommended_settings=True,
+        ),
         preprocessing=DEFAULT_PREPROCESSING,
         execution=inference.ExecutionOptions(output_dir=tmp_path),
         coordination_dir=tmp_path / "coord",
@@ -406,6 +506,7 @@ def test_build_direct_embed_worker_request_payload_includes_progress_events_path
     )
 
     assert payload["progress_events_path"] == str(tmp_path / "logs" / "direct.progress.jsonl")
+    assert payload["model"]["allow_non_recommended_settings"] is True
 
 
 def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeypatch, tmp_path: Path):

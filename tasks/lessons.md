@@ -13,6 +13,10 @@
 
 - In this environment, never route `apply_patch` through `exec_command`; use the dedicated `apply_patch` tool directly for file edits.
 
+## 2026-04-17
+
+- When the workspace contains both `/data/pathology/projects/clement/code/slide2vec` and `/tmp/slide2vec`, treat the `/data/...` checkout as the source of truth for edits and reporting unless the user explicitly says otherwise.
+
 ## 2026-04-01
 
 - When the user says backward compatibility is not needed, do not add compatibility-preserving behavior or messaging; implement the simpler direct behavior instead.

@@ -37,6 +37,19 @@ y = embedded.y
 
 The encoder level is inferred from the preset, so callers do not need to configure it directly. Tile-focused presets and slide-native presets are selected automatically by name.
 
+To inspect the shipped preset names programmatically, call `list_models()`:
+
+```python
+from slide2vec import list_models
+
+models = list_models()
+tile_models = list_models("tile")
+slide_models = list_models("slide")
+patient_models = list_models("patient")
+```
+
+`patient` currently returns only `moozy`.
+
 When you call the direct API from an interactive terminal or a Jupyter notebook, `slide2vec` shows live progress by default. If you already installed a custom reporter with `slide2vec.progress.activate_progress_reporter(...)`, the API leaves it in place.
 
 ## `PreprocessingConfig`

@@ -113,6 +113,13 @@ fm = [
     "ninja==1.11.1.1",
     "psutil<6",
 ]
+docs = [
+    "sphinx>=8.1",
+    "furo",
+    "myst-parser",
+    "sphinx-copybutton",
+    "sphinx-autodoc-typehints",
+]
 testing = [
     "pytest>=6.0",
     "pytest-cov>=2.0",

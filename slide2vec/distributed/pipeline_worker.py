@@ -43,6 +43,7 @@ def main(argv=None) -> int:
             model_spec["name"],
             device=f"cuda:{local_rank}",
             output_variant=model_spec.get("output_variant"),
+            allow_non_recommended_settings=bool(model_spec["allow_non_recommended_settings"]),
         )
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])

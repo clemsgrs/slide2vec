@@ -444,6 +444,27 @@ class Model:
         return self._backend
 
 
+def list_models(level: str | None = None) -> list[str]:
+    """Return the available preset model names in a stable order.
+
+    Args:
+        level: Optional model level filter. Supported values are ``"tile"``,
+            ``"slide"``, and ``"patient"``.
+    """
+    if level is None:
+        return sorted(encoder_registry.names())
+
+    normalized_level = str(level).strip().lower()
+    if normalized_level not in {"tile", "slide", "patient"}:
+        raise ValueError("list_models(level=...) must be one of: tile, slide, patient")
+
+    return sorted(
+        name
+        for name in encoder_registry.names()
+        if encoder_registry.info(name)["level"] == normalized_level
+    )
+
+
 class Pipeline:
     def __init__(
         self,

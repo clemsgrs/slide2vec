@@ -52,7 +52,7 @@ Patient-level models aggregate multiple slide embeddings for the same patient in
 
 Add a `patient_id` column to the standard manifest CSV to group slides by patient:
 
-```csv
+```text
 sample_id,image_path,patient_id
 slide_1a,/data/slide_1a.svs,patient_1
 slide_1b,/data/slide_1b.svs,patient_1
@@ -64,3 +64,181 @@ slide_2a,/data/slide_2a.svs,patient_2
 ### Per-slide embeddings
 
 When running a patient-level model via `Pipeline`, the intermediate per-slide MOOZY embeddings can be saved alongside the patient embeddings by setting `save_slide_embeddings: true` in config (or `ExecutionOptions(save_slide_embeddings=True)` in the Python API). Saved slide embeddings are written to `slide_embeddings/` in the output directory.
+
+## Custom registry-backed encoders
+
+If you want to use a model that is not shipped with `slide2vec`, the recommended path is to wrap it in a normal encoder class and register that class under a new preset name.
+
+The key pieces are:
+
+- subclass the appropriate base class from `slide2vec.encoders`
+- implement the required methods for that level
+- declare registry metadata with `@register_encoder(...)`
+- import the module once so the registration side effect runs before `Model.from_preset(...)`
+
+### Tile encoder example
+
+```python
+import torch
+from torch import Tensor
+
+from slide2vec.encoders import TileEncoder, register_encoder, resolve_requested_output_variant
+
+
+@register_encoder(
+    "my-tile-model",
+    output_variants={"default": {"encode_dim": 768}},
+    default_output_variant="default",
+    input_size=224,
+    supported_spacing_um=0.5,
+    precision="fp16",
+    source="my-org/my-tile-model",
+)
+class MyTileModel(TileEncoder):
+    def __init__(self, *, output_variant: str | None = None):
+        self._output_variant = resolve_requested_output_variant(output_variant)
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._model = self._load_model().eval()
+
+    def _load_model(self):
+        ...
+
+    def get_transform(self):
+        ...
+
+    def encode_tiles(self, batch: Tensor) -> Tensor:
+        return self._model(batch)
+
+    @property
+    def encode_dim(self) -> int:
+        return 768
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def to(self, device: torch.device | str):
+        self._device = torch.device(device)
+        self._model = self._model.to(self._device)
+        return self
+```
+
+### Slide encoder example
+
+```python
+import torch
+from torch import Tensor
+
+from slide2vec.encoders import SlideEncoder, register_encoder, resolve_requested_output_variant
+
+
+@register_encoder(
+    "my-slide-model",
+    level="slide",
+    tile_encoder="my-tile-model",
+    tile_encoder_output_variant="default",
+    output_variants={"default": {"encode_dim": 512}},
+    default_output_variant="default",
+    supported_spacing_um=0.5,
+    precision="fp16",
+    source="my-org/my-slide-model",
+)
+class MySlideModel(SlideEncoder):
+    def __init__(self, *, output_variant: str | None = None):
+        self._output_variant = resolve_requested_output_variant(output_variant)
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._model = self._load_model().eval()
+
+    def _load_model(self):
+        ...
+
+    @property
+    def encode_dim(self) -> int:
+        return 512
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def to(self, device: torch.device | str):
+        self._device = torch.device(device)
+        self._model = self._model.to(self._device)
+        return self
+
+    def encode_slide(
+        self,
+        tile_features: Tensor,
+        coordinates: Tensor | None = None,
+        *,
+        tile_size_lv0: int | None = None,
+    ) -> Tensor:
+        return self._model(tile_features)
+```
+
+### Patient encoder example
+
+```python
+import torch
+from torch import Tensor
+
+from slide2vec.encoders import PatientEncoder, register_encoder, resolve_requested_output_variant
+
+
+@register_encoder(
+    "my-patient-model",
+    level="patient",
+    tile_encoder="my-tile-model",
+    tile_encoder_output_variant="default",
+    output_variants={"default": {"encode_dim": 256}},
+    default_output_variant="default",
+    supported_spacing_um=0.5,
+    precision="fp16",
+    source="my-org/my-patient-model",
+)
+class MyPatientModel(PatientEncoder):
+    def __init__(self, *, output_variant: str | None = None):
+        self._output_variant = resolve_requested_output_variant(output_variant)
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._slide_model = self._load_slide_model().eval()
+        self._patient_model = self._load_patient_model().eval()
+
+    def _load_slide_model(self):
+        ...
+
+    def _load_patient_model(self):
+        ...
+
+    @property
+    def encode_dim(self) -> int:
+        return 256
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def to(self, device: torch.device | str):
+        self._device = torch.device(device)
+        self._slide_model = self._slide_model.to(self._device)
+        self._patient_model = self._patient_model.to(self._device)
+        return self
+
+    def encode_slide(
+        self,
+        tile_features: Tensor,
+        coordinates: Tensor | None = None,
+        *,
+        tile_size_lv0: int | None = None,
+    ) -> Tensor:
+        return self._slide_model(tile_features)
+
+    def encode_patient(self, slide_embeddings: Tensor) -> Tensor:
+        return self._patient_model(slide_embeddings)
+```
+
+Once the module is imported, the preset is available through the existing API:
+
+```python
+from slide2vec import Model
+
+model = Model.from_preset("my-tile-model")
+```

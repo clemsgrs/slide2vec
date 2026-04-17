@@ -1918,6 +1918,34 @@ def test_assign_slides_to_ranks_balances_by_tile_count():
         1: ["slide-b", "slide-c"],
     }
 
+
+def test_assign_slides_to_ranks_tiebreaks_by_rank_deterministically():
+    import slide2vec.inference as inference
+
+    slides = [
+        make_slide("slide-a"),
+        make_slide("slide-b"),
+        make_slide("slide-c"),
+        make_slide("slide-d"),
+        make_slide("slide-e"),
+    ]
+    tiling_results = [
+        SimpleNamespace(x=np.arange(10), y=np.arange(10), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(10), y=np.arange(10), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(10), y=np.arange(10), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(1), y=np.arange(1), tile_size_lv0=224),
+        SimpleNamespace(x=np.arange(1), y=np.arange(1), tile_size_lv0=224),
+    ]
+
+    assignments = inference._assign_slides_to_ranks(slides, tiling_results, num_gpus=3)
+
+    assert assignments == {
+        0: ["slide-a", "slide-d"],
+        1: ["slide-b", "slide-e"],
+        2: ["slide-c"],
+    }
+
+
 def test_merge_tile_embedding_shards_restores_original_tile_order():
     import slide2vec.inference as inference
 
@@ -3118,6 +3146,42 @@ def test_load_model_auto_prefers_cuda_when_available(monkeypatch):
     loaded = inference.load_model(name="h0-mini", device="auto")
 
     assert loaded.device == torch.device("cuda")
+
+
+def test_load_model_accepts_allow_non_recommended_settings_without_forwarding(monkeypatch):
+    import slide2vec.inference as inference
+
+    captured = {}
+
+    class DummyEncoder:
+        def __init__(self, *, output_variant=None):
+            captured["output_variant"] = output_variant
+            self.device = "cpu"
+            self.encode_dim = 8
+
+        def get_transform(self):
+            return SimpleNamespace()
+
+        def to(self, device):
+            self.device = device
+            return self
+
+    monkeypatch.setattr(inference, "canonicalize_model_name", lambda name: name)
+    monkeypatch.setattr(
+        inference.encoder_registry,
+        "info",
+        lambda name: {"level": "tile", "precision": "fp32"},
+    )
+    monkeypatch.setattr(inference.encoder_registry, "require", lambda name: DummyEncoder)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    loaded = inference.load_model(
+        name="dummy-model",
+        allow_non_recommended_settings=True,
+    )
+
+    assert loaded.name == "dummy-model"
+    assert captured["output_variant"] is None
 
 
 def test_scale_coordinates_scales_down():
