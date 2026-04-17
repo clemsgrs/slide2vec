@@ -96,8 +96,8 @@ The docs site is organized around the main ways people use the package:
    python-api
    cli
    models
-   documentation
+   Documentation <documentation>
    benchmarking
    gpu-throughput-optimization-protocol
-   optimize-throughput/h0-mini-single-gpu
+   h0-mini single GPU <optimize-throughput/h0-mini-single-gpu>
    reference
