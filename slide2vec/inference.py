@@ -35,6 +35,15 @@ from slide2vec.runtime.batching import (
     should_suppress_cucim_dataloader_stderr as _should_suppress_cucim_dataloader_stderr,
     uses_cuda_runtime as _uses_cuda_runtime,
 )
+from slide2vec.runtime.embedding import (
+    build_hierarchical_embedding_metadata as _build_hierarchical_embedding_metadata_runtime,
+    build_slide_embedding_metadata as _build_slide_embedding_metadata_runtime,
+    build_tile_embedding_metadata as _build_tile_embedding_metadata_runtime,
+    should_persist_tile_embeddings as _should_persist_tile_embeddings_runtime,
+    write_hierarchical_embedding_artifact as _write_hierarchical_embedding_artifact_runtime,
+    write_slide_embedding_artifact as _write_slide_embedding_artifact_runtime,
+    write_tile_embedding_artifact as _write_tile_embedding_artifact_runtime,
+)
 from slide2vec.runtime.distributed import (
     assign_slides_to_ranks as _assign_slides_to_ranks_runtime,
     distributed_coordination_dir as _distributed_coordination_dir_runtime,
@@ -67,6 +76,16 @@ from slide2vec.runtime.serialization import (
     serialize_model as _serialize_model,
     serialize_preprocessing as _serialize_preprocessing,
 )
+from slide2vec.runtime.tiling import (
+    build_hs2p_configs as _build_hs2p_configs_runtime,
+    build_preview_config as _build_preview_config_runtime,
+    load_tiling_result as _load_tiling_result_runtime,
+    resolve_slide_backend as _resolve_slide_backend_runtime,
+    resolve_tile_store_archive_for_slide as _resolve_tile_store_archive_for_slide_runtime,
+    resolve_tiling_backend as _resolve_tiling_backend_runtime,
+    scale_coordinates as _scale_coordinates_runtime,
+    tile_store_archive_path as _tile_store_archive_path_runtime,
+)
 from slide2vec.api import (
     EmbeddedPatient,
     EmbeddedSlide,
@@ -83,9 +102,7 @@ from slide2vec.artifacts import (
     write_hierarchical_embeddings,
     load_array,
     write_patient_embeddings,
-    write_slide_embeddings,
     write_tile_embedding_metadata,
-    write_tile_embeddings,
 )
 from slide2vec.encoders.registry import (
     encoder_registry,
@@ -1873,32 +1890,18 @@ def _build_tile_embedding_metadata(
     tile_size_lv0: int,
     backend: str,
 ) -> dict[str, Any]:
-    coordinates_npz_path = (
-        tiling_result.coordinates_npz_path if hasattr(tiling_result, "coordinates_npz_path") else None
+    return _build_tile_embedding_metadata_runtime(
+        model,
+        tiling_result=tiling_result,
+        image_path=image_path,
+        mask_path=mask_path,
+        tile_size_lv0=tile_size_lv0,
+        backend=backend,
     )
-    coordinates_meta_path = (
-        tiling_result.coordinates_meta_path if hasattr(tiling_result, "coordinates_meta_path") else None
-    )
-    tiles_tar_path = tiling_result.tiles_tar_path if hasattr(tiling_result, "tiles_tar_path") else None
-    return {
-        "encoder_name": model.name,
-        "encoder_level": model.level,
-        "coordinates_npz_path": str(coordinates_npz_path or ""),
-        "coordinates_meta_path": str(coordinates_meta_path or ""),
-        "tiles_tar_path": str(tiles_tar_path or ""),
-        "image_path": str(image_path),
-        "mask_path": str(mask_path) if mask_path is not None else None,
-        "tile_size_lv0": int(tile_size_lv0),
-        "backend": backend,
-    }
 
 
 def _build_slide_embedding_metadata(model, *, image_path: Path | str) -> dict[str, Any]:
-    return {
-        "encoder_name": model.name,
-        "encoder_level": model.level,
-        "image_path": str(image_path),
-    }
+    return _build_slide_embedding_metadata_runtime(model, image_path=image_path)
 
 
 def _build_hierarchical_embedding_metadata(
@@ -1910,29 +1913,15 @@ def _build_hierarchical_embedding_metadata(
     backend: str,
     preprocessing: PreprocessingConfig,
 ) -> dict[str, Any]:
-    coordinates_npz_path = (
-        tiling_result.coordinates_npz_path if hasattr(tiling_result, "coordinates_npz_path") else None
+    return _build_hierarchical_embedding_metadata_runtime(
+        model,
+        tiling_result=tiling_result,
+        image_path=image_path,
+        mask_path=mask_path,
+        backend=backend,
+        preprocessing=preprocessing,
+        resolve_hierarchical_geometry_fn=_resolve_hierarchical_geometry,
     )
-    coordinates_meta_path = (
-        tiling_result.coordinates_meta_path if hasattr(tiling_result, "coordinates_meta_path") else None
-    )
-    geometry = _resolve_hierarchical_geometry(preprocessing, tiling_result)
-    return {
-        "encoder_name": model.name,
-        "encoder_level": model.level,
-        "coordinates_npz_path": str(coordinates_npz_path or ""),
-        "coordinates_meta_path": str(coordinates_meta_path or ""),
-        "image_path": str(image_path),
-        "mask_path": str(mask_path) if mask_path is not None else None,
-        "backend": backend,
-        "region_tile_multiple": int(geometry["region_tile_multiple"]),
-        "requested_tile_size_px": int(geometry["requested_tile_size_px"]),
-        "read_tile_size_px": int(geometry["read_tile_size_px"]),
-        "requested_region_size_px": int(geometry["requested_region_size_px"]),
-        "read_region_size_px": int(geometry["read_region_size_px"]),
-        "requested_spacing_um": float(preprocessing.requested_spacing_um),
-        "subtile_order": "row_major",
-    }
 
 
 def _write_tile_embedding_artifact(
@@ -1942,15 +1931,12 @@ def _write_tile_embedding_artifact(
     execution: ExecutionOptions,
     metadata: dict[str, Any],
 ) -> TileEmbeddingArtifact:
-    if execution.output_dir is None:
-        raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
-    return write_tile_embeddings(
+    return _write_tile_embedding_artifact_runtime(
         sample_id,
         features,
-        output_dir=execution.output_dir,
-        output_format=execution.output_format,
+        execution=execution,
         metadata=metadata,
-        tile_index=np.arange(_num_rows(features), dtype=np.int64),
+        num_rows_fn=_num_rows,
     )
 
 
@@ -1962,13 +1948,10 @@ def _write_slide_embedding_artifact(
     metadata: dict[str, Any],
     latents=None,
 ) -> SlideEmbeddingArtifact:
-    if execution.output_dir is None:
-        raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
-    return write_slide_embeddings(
+    return _write_slide_embedding_artifact_runtime(
         sample_id,
         embedding,
-        output_dir=execution.output_dir,
-        output_format=execution.output_format,
+        execution=execution,
         metadata=metadata,
         latents=latents,
     )
@@ -1981,13 +1964,10 @@ def _write_hierarchical_embedding_artifact(
     execution: ExecutionOptions,
     metadata: dict[str, Any],
 ) -> HierarchicalEmbeddingArtifact:
-    if execution.output_dir is None:
-        raise ValueError("ExecutionOptions.output_dir is required to persist hierarchical embeddings")
-    return write_hierarchical_embeddings(
+    return _write_hierarchical_embedding_artifact_runtime(
         sample_id,
         features,
-        output_dir=execution.output_dir,
-        output_format=execution.output_format,
+        execution=execution,
         metadata=metadata,
     )
 
@@ -2174,9 +2154,7 @@ def _emit_tiling_summary(
 
 
 def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
-    if model.level in {"slide", "patient"}:
-        return bool(execution.save_tile_embeddings)
-    return True
+    return _should_persist_tile_embeddings_runtime(model, execution)
 
 
 def _resolved_process_list_output_variant(model) -> str | None:
@@ -2397,39 +2375,18 @@ def _record_slide_metadata_in_process_list(
 
 
 def _build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
-    return PreviewConfig(
-        save_mask_preview=bool(preview["save_mask_preview"]),
-        save_tiling_preview=bool(preview["save_tiling_preview"]),
-        downsample=int(preview["downsample"]),
-        tissue_contour_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
-        mask_overlay_alpha=float(preview["mask_overlay_alpha"]),
-    )
+    return _build_preview_config_runtime(preview, preview_config_cls=PreviewConfig)
 
 
 def _build_hs2p_configs(preprocessing: PreprocessingConfig):
-    requested_tile_size_px = (
-        preprocessing.requested_region_size_px
-        if _is_hierarchical_preprocessing(preprocessing)
-        else preprocessing.requested_tile_size_px
-    )
-    tiling_cfg = TilingConfig(
-        backend=_resolve_tiling_backend(preprocessing),
-        requested_spacing_um=preprocessing.requested_spacing_um,
-        requested_tile_size_px=requested_tile_size_px,
-        tolerance=preprocessing.tolerance,
-        overlap=preprocessing.overlap,
-        tissue_threshold=preprocessing.tissue_threshold,
-    )
-    segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
-    filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
-    preview_cfg = _build_preview_config(dict(preprocessing.preview))
-    return (
-        tiling_cfg,
-        segmentation_cfg,
-        filtering_cfg,
-        preview_cfg,
-        preprocessing.read_coordinates_from,
-        preprocessing.resume,
+    return _build_hs2p_configs_runtime(
+        preprocessing,
+        is_hierarchical_preprocessing_fn=_is_hierarchical_preprocessing,
+        resolve_tiling_backend_fn=_resolve_tiling_backend,
+        tiling_config_cls=TilingConfig,
+        segmentation_config_cls=SegmentationConfig,
+        filter_config_cls=FilterConfig,
+        preview_config_cls=PreviewConfig,
     )
 
 
@@ -2439,45 +2396,37 @@ def _resolve_tile_store_archive_for_slide(
     tiling_result,
     preprocessing: PreprocessingConfig,
 ) -> Path | None:
-    if preprocessing.read_tiles_from is not None:
-        return _tile_store_archive_path(preprocessing.read_tiles_from, slide.sample_id)
-    return tiling_result.tiles_tar_path if hasattr(tiling_result, "tiles_tar_path") else None
+    return _resolve_tile_store_archive_for_slide_runtime(
+        slide_sample_id=slide.sample_id,
+        tiling_result=tiling_result,
+        preprocessing=preprocessing,
+    )
 
 
 def _tile_store_archive_path(tile_store_root: Path, sample_id: str) -> Path:
-    root = Path(tile_store_root)
-    if root.is_file():
-        return root
-    if root.suffix == ".tar" and root.exists():
-        return root
-    return root / f"{sample_id}.tiles.tar"
+    return _tile_store_archive_path_runtime(tile_store_root, sample_id)
 
 
 
 def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path):
-    return load_tiling_result(coordinates_npz_path=coordinates_npz_path, coordinates_meta_path=coordinates_meta_path)
+    return _load_tiling_result_runtime(
+        coordinates_npz_path,
+        coordinates_meta_path,
+        load_tiling_result_fn=load_tiling_result,
+    )
 
 
 def _scale_coordinates(coordinates: np.ndarray, base_spacing_um: float, spacing: float) -> np.ndarray:
-    scale = base_spacing_um / spacing
-    return (coordinates * scale).astype(int)
+    return _scale_coordinates_runtime(coordinates, base_spacing_um, spacing)
 
 
 
 def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
-    if preprocessing is None:
-        return "asap"
-    return preprocessing.backend
+    return _resolve_tiling_backend_runtime(preprocessing)
 
 
 def _resolve_slide_backend(preprocessing: PreprocessingConfig | None, tiling_result) -> str:
-    backend = _resolve_tiling_backend(preprocessing)
-    if backend != "auto":
-        return backend
-    resolved_backend = tiling_result.backend if hasattr(tiling_result, "backend") else None
-    if isinstance(resolved_backend, str) and resolved_backend and resolved_backend != "auto":
-        return resolved_backend
-    return "asap"
+    return _resolve_slide_backend_runtime(preprocessing, tiling_result)
 
 
 def _resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | None) -> PreprocessingConfig:
