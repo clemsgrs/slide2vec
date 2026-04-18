@@ -2,6 +2,9 @@
 
 ## 2026-04-18
 
+- Split `slide2vec.inference` into workflow-scoped internal runtime helpers under `slide2vec.runtime` (`batching`, `hierarchical`, `progress_bridge`, `serialization`, `types`) while keeping `slide2vec.inference` as the stable orchestration entrypoint.
+- Added architecture guardrail tests that keep workflow helpers bounded (soft target around 400 lines, enforced ceiling 500) and prevent `slide2vec/inference.py` from regressing toward the previous monolith size.
+
 - Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
 
 - Split the live tiling UI into a coordinates-extraction bar plus a separate preview-generation bar, and moved the final tiling summary into a dedicated `tiling.summary` event so it prints once at the very end.

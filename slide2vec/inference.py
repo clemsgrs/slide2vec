@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
@@ -18,11 +18,43 @@ import logging
 import pandas as pd
 import torch
 from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
-from hs2p import progress as hs2p_progress
 from hs2p.utils.stderr import run_with_filtered_stderr
 import numpy as np
-from transformers.image_processing_utils import BaseImageProcessor
 
+from slide2vec.runtime.batching import (
+    autocast_dtype as _autocast_dtype,
+    build_batch_preprocessor as _build_batch_preprocessor,
+    build_batch_preprocessor_for_tile_images as _build_batch_preprocessor_for_tile_images,
+    build_batch_transform_spec as _build_batch_transform_spec,
+    center_crop_batch as _center_crop_batch,
+    embedding_dataloader_kwargs as _embedding_dataloader_kwargs,
+    interp_mode_to_str as _interp_mode_to_str,
+    iter_transform_steps as _iter_transform_steps,
+    normalize_hw as _normalize_hw,
+    prepare_batch_tensor as _prepare_batch_tensor,
+    resize_image_batch as _resize_image_batch,
+    resolve_device as _resolve_device,
+    run_forward_pass as _run_forward_pass,
+    should_suppress_cucim_dataloader_stderr as _should_suppress_cucim_dataloader_stderr,
+    uses_cuda_runtime as _uses_cuda_runtime,
+)
+from slide2vec.runtime.hierarchical import (
+    build_hierarchical_index as _build_hierarchical_index,
+    is_hierarchical_preprocessing as _is_hierarchical_preprocessing,
+    num_embedding_items as _num_embedding_items,
+    num_tiles as _num_tiles,
+    resolve_hierarchical_geometry as _resolve_hierarchical_geometry,
+)
+from slide2vec.runtime.progress_bridge import (
+    bridge_hs2p_progress_to_slide2vec as _bridge_hs2p_progress_to_slide2vec,
+)
+from slide2vec.runtime.serialization import (
+    deserialize_execution,
+    deserialize_preprocessing,
+    serialize_execution as _serialize_execution_base,
+    serialize_model as _serialize_model,
+    serialize_preprocessing as _serialize_preprocessing,
+)
 from slide2vec.api import (
     EmbeddedPatient,
     EmbeddedSlide,
@@ -52,18 +84,15 @@ from slide2vec.encoders.registry import (
 from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.runtime_types import LoadedModel
 from slide2vec.progress import (
-    NullProgressReporter,
-    ProgressEvent as Slide2VecProgressEvent,
     emit_progress,
     emit_progress_event,
-    get_progress_reporter,
     read_progress_events,
     read_tiling_progress_snapshot,
 )
+from slide2vec.utils.coordinates import coordinate_arrays
 from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
-from slide2vec.utils.coordinates import coordinate_arrays
 from slide2vec.utils.tiling_io import (
     load_embedding_process_df,
     load_patient_id_mapping,
@@ -75,173 +104,18 @@ from slide2vec.utils.tiling_io import (
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 
-@dataclass(frozen=True, kw_only=True)
-class BatchTransformSpec:
-    resize_size: tuple[int, int] | None
-    center_crop_size: tuple[int, int] | None
-    mean: tuple[float, ...] | None
-    std: tuple[float, ...] | None
-    resize_interpolation: str = "bilinear"
-
-
-_BRIDGED_HS2P_PROGRESS_KINDS = {
-    "backend.selected",
-    "tissue.started",
-    "tissue.progress",
-    "tissue.finished",
-    "tiling.progress",
-    "tiling.finished",
-    "preview.started",
-    "preview.progress",
-    "preview.finished",
-}
-
-
-class _Hs2pProgressBridge:
-    def __init__(self, downstream) -> None:
-        self._downstream = downstream
-
-    def emit(self, event) -> None:
-        if event.kind not in _BRIDGED_HS2P_PROGRESS_KINDS:
-            return
-        self._downstream.emit(
-            Slide2VecProgressEvent(kind=event.kind, payload=dict(event.payload))
-        )
-
-    def close(self) -> None:
-        return None
-
-    def write_log(self, message: str, *, stream=None) -> None:
-        if hasattr(self._downstream, "write_log"):
-            self._downstream.write_log(message, stream=stream)
-
-
-@contextmanager
-def _bridge_hs2p_progress_to_slide2vec():
-    downstream = get_progress_reporter()
-    if isinstance(downstream, NullProgressReporter):
-        yield
-        return
-    bridge = _Hs2pProgressBridge(downstream)
-    with hs2p_progress.activate_progress_reporter(bridge):
-        yield
-
-
-@dataclass(kw_only=True)
-class PreparedBatch:
-    indices: Any
-    image: Any
-    loader_wait_ms: float
-    preprocess_ms: float
-    ready_wait_ms: float = 0.0
-    worker_batch_ms: float = 0.0
-    reader_open_ms: float = 0.0
-    reader_read_ms: float = 0.0
-
-
-@dataclass(frozen=True, kw_only=True)
-class HierarchicalIndex:
-    flat_index: np.ndarray
-    region_index: np.ndarray
-    subtile_index_within_region: np.ndarray
-    subtile_x: np.ndarray
-    subtile_y: np.ndarray
-    num_regions: int
-    tiles_per_region: int
-
-
-def _is_hierarchical_preprocessing(preprocessing: PreprocessingConfig | None) -> bool:
-    if preprocessing is None:
-        return False
-    return preprocessing.region_tile_multiple is not None or preprocessing.requested_region_size_px is not None
-
-
-def _resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_result) -> dict[str, int]:
-    if preprocessing.region_tile_multiple is None:
-        raise ValueError("Hierarchical preprocessing requires region_tile_multiple")
-    if preprocessing.requested_region_size_px is None:
-        raise ValueError("Hierarchical preprocessing requires requested_region_size_px")
-    requested_tile_size_px = int(preprocessing.requested_tile_size_px)
-    requested_region_size_px = int(preprocessing.requested_region_size_px)
-    requested_spacing_um = float(preprocessing.requested_spacing_um)
-    multiple = int(preprocessing.region_tile_multiple)
-    if requested_region_size_px % multiple != 0:
-        raise ValueError("requested_region_size_px must be divisible by region_tile_multiple")
-    read_spacing_um = float(getattr(tiling_result, "read_spacing_um"))
-    base_spacing_um = float(getattr(tiling_result, "base_spacing_um"))
-    if abs(read_spacing_um - requested_spacing_um) / requested_spacing_um <= float(preprocessing.tolerance):
-        read_tile_size_px = requested_tile_size_px
-    else:
-        read_tile_size_px = int(
-            round(requested_tile_size_px * requested_spacing_um / read_spacing_um)
-        )
-    read_region_size_px = read_tile_size_px * multiple
-    # Use the actual read geometry that produced the tile crop. When the
-    # resolved spacing is considered equivalent to the requested spacing,
-    # this keeps the level-0 footprint aligned with the real crop size.
-    tile_size_lv0 = int(round(read_tile_size_px * read_spacing_um / base_spacing_um))
-    return {
-        "region_tile_multiple": multiple,
-        "tiles_per_region": multiple * multiple,
-        "requested_tile_size_px": requested_tile_size_px,
-        "read_tile_size_px": read_tile_size_px,
-        "requested_region_size_px": requested_region_size_px,
-        "read_region_size_px": read_region_size_px,
-        "tile_size_lv0": tile_size_lv0,
-    }
-
-
-def _build_hierarchical_index(
-    tiling_result,
+def _serialize_execution(
+    execution: ExecutionOptions,
     *,
-    region_tile_multiple: int,
-    tile_size_lv0: int | None = None,
-) -> HierarchicalIndex:
-    x_values, y_values = coordinate_arrays(tiling_result)
-    num_regions = int(len(x_values))
-    multiple = int(region_tile_multiple)
-    if multiple < 2:
-        raise ValueError("region_tile_multiple must be at least 2")
-    subtile_size_lv0 = (
-        int(tile_size_lv0)
-        if tile_size_lv0 is not None
-        else int(getattr(tiling_result, "tile_size_lv0")) // multiple
+    preprocessing: PreprocessingConfig | None = None,
+) -> dict[str, Any]:
+    effective_num_workers = None
+    if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+    return _serialize_execution_base(
+        execution,
+        effective_num_workers=effective_num_workers,
     )
-    tiles_per_region = multiple * multiple
-    if num_regions == 0:
-        empty = np.empty(0, dtype=np.int64)
-        return HierarchicalIndex(
-            flat_index=empty,
-            region_index=np.empty(0, dtype=np.int32),
-            subtile_index_within_region=np.empty(0, dtype=np.int32),
-            subtile_x=empty,
-            subtile_y=empty,
-            num_regions=0,
-            tiles_per_region=tiles_per_region,
-        )
-    rows, cols = np.divmod(np.arange(tiles_per_region, dtype=np.int32), multiple)
-    offsets_x = cols.astype(np.int64) * subtile_size_lv0
-    offsets_y = rows.astype(np.int64) * subtile_size_lv0
-    region_x = np.asarray(x_values, dtype=np.int64)[:, np.newaxis]
-    region_y = np.asarray(y_values, dtype=np.int64)[:, np.newaxis]
-    subtile_x = (region_x + offsets_x[np.newaxis, :]).reshape(-1)
-    subtile_y = (region_y + offsets_y[np.newaxis, :]).reshape(-1)
-    return HierarchicalIndex(
-        flat_index=np.arange(num_regions * tiles_per_region, dtype=np.int64),
-        region_index=np.repeat(np.arange(num_regions, dtype=np.int32), tiles_per_region),
-        subtile_index_within_region=np.tile(np.arange(tiles_per_region, dtype=np.int32), num_regions),
-        subtile_x=subtile_x,
-        subtile_y=subtile_y,
-        num_regions=num_regions,
-        tiles_per_region=tiles_per_region,
-    )
-
-
-def _num_embedding_items(tiling_result, preprocessing: PreprocessingConfig | None) -> int:
-    if not _is_hierarchical_preprocessing(preprocessing):
-        return _num_tiles(tiling_result)
-    geometry = _resolve_hierarchical_geometry(preprocessing, tiling_result)
-    return _num_tiles(tiling_result) * int(geometry["tiles_per_region"])
 
 
 
@@ -2110,413 +1984,6 @@ def _write_hierarchical_embedding_artifact(
 
 
 
-def _embedding_dataloader_kwargs(loaded: LoadedModel, execution: ExecutionOptions) -> dict[str, Any]:
-    resolved_num_workers = execution.resolved_num_workers()
-    kwargs: dict[str, Any] = {
-        "num_workers": resolved_num_workers,
-        "pin_memory": _uses_cuda_runtime(loaded.device),
-    }
-    if resolved_num_workers > 0:
-        kwargs["persistent_workers"] = bool(execution.persistent_workers)
-        kwargs["prefetch_factor"] = int(execution.prefetch_factor)
-    return kwargs
-
-
-
-def _build_batch_preprocessor(
-    loaded: LoadedModel,
-    tiling_result,
-):
-    return _build_batch_preprocessor_for_tile_images(
-        loaded,
-        requested_tile_size_px=int(getattr(tiling_result, "requested_tile_size_px")),
-    )
-
-
-def _build_batch_preprocessor_for_tile_images(
-    loaded: LoadedModel,
-    *,
-    requested_tile_size_px: int,
-):
-    spec = _build_batch_transform_spec(loaded.transforms)
-    if spec is None:
-        logging.getLogger(__name__).warning(
-            "Batched preprocessing is disabled for %s because the transform stack is not supported; "
-            "falling back to per-item preprocessing",
-            loaded.name,
-        )
-        return None
-
-    def preprocess(batch):
-        image = _prepare_batch_tensor(batch)
-        if spec.resize_size is None:
-            image = _resize_image_batch(
-                image,
-                (int(requested_tile_size_px), int(requested_tile_size_px)),
-            )
-        image = _apply_batch_transform_spec(image, spec)
-        if image.device != loaded.device:
-            image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
-        return image.contiguous()
-
-    return preprocess
-
-
-def _build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
-    if isinstance(transforms, BaseImageProcessor):
-        crop_size = transforms.crop_size if hasattr(transforms, "crop_size") else None
-        size = transforms.size if hasattr(transforms, "size") else None
-        resize_size = _normalize_hw(crop_size or size)
-        if resize_size is None:
-            return None
-        mean = transforms.image_mean if hasattr(transforms, "image_mean") else None
-        std = transforms.image_std if hasattr(transforms, "image_std") else None
-        return BatchTransformSpec(
-            resize_size=resize_size,
-            center_crop_size=None,
-            mean=tuple(float(value) for value in mean) if mean is not None else None,
-            std=tuple(float(value) for value in std) if std is not None else None,
-        )
-
-    transform_steps = _iter_transform_steps(transforms)
-    if transform_steps is None:
-        return None
-
-    resize_size = None
-    resize_interpolation = "bilinear"
-    center_crop_size = None
-    mean = None
-    std = None
-    supported_step_names = {
-        "Resize",
-        "CenterCrop",
-        "Normalize",
-        "ToTensor",
-        "MaybeToTensor",
-        "ToImage",
-        "ConvertImageDtype",
-    }
-    for step in transform_steps:
-        step_name = type(step).__name__
-        if step_name not in supported_step_names:
-            return None
-        if step_name == "Resize":
-            resize_size = _normalize_hw(step.size if hasattr(step, "size") else None)
-            resize_interpolation = _interp_mode_to_str(step.interpolation if hasattr(step, "interpolation") else None)
-        elif step_name == "CenterCrop":
-            center_crop_size = _normalize_hw(step.size if hasattr(step, "size") else None)
-        elif step_name == "Normalize":
-            mean = tuple(float(value) for value in step.mean)
-            std = tuple(float(value) for value in step.std)
-    return BatchTransformSpec(
-        resize_size=resize_size,
-        center_crop_size=center_crop_size,
-        mean=mean,
-        std=std,
-        resize_interpolation=resize_interpolation,
-    )
-
-
-def _iter_transform_steps(transforms):
-    transform_steps = transforms.transforms if hasattr(transforms, "transforms") else None
-    if transform_steps is None:
-        return None
-    flattened = []
-    for step in transform_steps:
-        nested = _iter_transform_steps(step)
-        if nested is not None:
-            flattened.extend(nested)
-        else:
-            flattened.append(step)
-    return flattened
-def _prepare_batch_tensor(image):
-    if image.dtype == torch.uint8:
-        return image.float().div(255.0)
-    return image.float()
-
-
-def _apply_transforms_itemwise(image, transforms):
-    if not torch.is_tensor(image) or image.ndim <= 3:
-        return transforms(image)
-
-    transformed_items = [transforms(sample) for sample in image.cpu()]
-    if not transformed_items:
-        return image.new_empty((0,), dtype=torch.float32)
-    if not all(torch.is_tensor(item) for item in transformed_items):
-        transformed_items = [torch.as_tensor(item) for item in transformed_items]
-    return torch.stack(transformed_items, dim=0)
-
-
-def _interp_mode_to_str(interp_mode) -> str:
-    """Map a torchvision InterpolationMode to the string accepted by F.interpolate."""
-    if interp_mode is None:
-        return "bilinear"
-    name = str(interp_mode).upper()
-    if "BICUBIC" in name:
-        return "bicubic"
-    if "NEAREST" in name:
-        return "nearest"
-    return "bilinear"
-
-
-def _resize_image_batch(image, size: tuple[int, int], *, mode: str = "bilinear"):
-    if tuple(int(dim) for dim in image.shape[-2:]) == size:
-        return image
-
-    align_corners = False if mode in ("bilinear", "bicubic") else None
-    kwargs = {"antialias": True} if mode in ("bilinear", "bicubic") else {}
-    return torch.nn.functional.interpolate(
-        image,
-        size=size,
-        mode=mode,
-        **({"align_corners": align_corners} if align_corners is not None else {}),
-        **kwargs,
-    )
-
-
-def _apply_batch_transform_spec(image, spec: BatchTransformSpec):
-
-    if spec.resize_size is not None:
-        image = _resize_image_batch(image, spec.resize_size, mode=spec.resize_interpolation)
-    if spec.center_crop_size is not None:
-        image = _center_crop_batch(image, spec.center_crop_size)
-    if spec.mean is not None and spec.std is not None:
-        mean = torch.tensor(spec.mean, dtype=image.dtype, device=image.device).view(1, -1, 1, 1)
-        std = torch.tensor(spec.std, dtype=image.dtype, device=image.device).view(1, -1, 1, 1)
-        image = (image - mean) / std
-    return image
-def _normalize_hw(value) -> tuple[int, int] | None:
-    if value is None:
-        return None
-    if isinstance(value, int):
-        return (int(value), int(value))
-    if isinstance(value, (tuple, list)):
-        if len(value) == 1:
-            return (int(value[0]), int(value[0]))
-        if len(value) >= 2:
-            return (int(value[0]), int(value[1]))
-        return None
-    if isinstance(value, dict):
-        if "height" in value and "width" in value:
-            return (int(value["height"]), int(value["width"]))
-        if "shortest_edge" in value:
-            edge = int(value["shortest_edge"])
-            return (edge, edge)
-    return None
-
-
-def _center_crop_batch(image, size: tuple[int, int]):
-    target_h, target_w = size
-    height, width = int(image.shape[-2]), int(image.shape[-1])
-    crop_h = min(target_h, height)
-    crop_w = min(target_w, width)
-    top = max((height - crop_h) // 2, 0)
-    left = max((width - crop_w) // 2, 0)
-    return image[..., top : top + crop_h, left : left + crop_w]
-
-
-class _BatchPrefetcher:
-    def __init__(self, dataloader, loaded: LoadedModel, batch_preprocessor):
-        self.iterator = iter(dataloader)
-        self.loaded = loaded
-        self.batch_preprocessor = batch_preprocessor
-        self.copy_stream = self._make_copy_stream()
-        self._pinned_host_buffer = None
-        self._next_batch: PreparedBatch | None = None
-        self._preload()
-
-    def _unpack_loader_batch(self, batch):
-        if isinstance(batch, (tuple, list)):
-            if len(batch) == 3 and isinstance(batch[2], dict):
-                return batch[0], batch[1], batch[2]
-            if len(batch) == 2:
-                return batch[0], batch[1], {}
-        raise ValueError("Expected the embedding dataloader to yield (indices, image) or (indices, image, timing)")
-
-    def _make_copy_stream(self):
-        if not _uses_cuda_runtime(self.loaded.device):
-            return None
-        return torch.cuda.Stream(device=self.loaded.device)
-
-    def _stage_host_batch(self, image):
-        if self.copy_stream is None or not torch.is_tensor(image):
-            return image
-        if image.device.type != "cpu" or image.is_pinned():
-            return image
-        if (
-            self._pinned_host_buffer is None
-            or tuple(self._pinned_host_buffer.shape) != tuple(image.shape)
-            or self._pinned_host_buffer.dtype != image.dtype
-        ):
-            self._pinned_host_buffer = torch.empty(
-                image.shape,
-                dtype=image.dtype,
-                pin_memory=True,
-            )
-        self._pinned_host_buffer.copy_(image)
-        return self._pinned_host_buffer
-
-    def _prepare_batch(self, image):
-        preprocess_start = time.perf_counter()
-        if self.batch_preprocessor is not None:
-            prepared = self.batch_preprocessor(image)
-        else:
-            prepared = _apply_transforms_itemwise(image, self.loaded.transforms)
-            if torch.is_tensor(prepared) and prepared.device != self.loaded.device:
-                prepared = prepared.to(
-                    self.loaded.device,
-                    non_blocking=_uses_cuda_runtime(self.loaded.device),
-                )
-        preprocess_ms = (time.perf_counter() - preprocess_start) * 1000.0
-        return prepared, preprocess_ms
-
-    def _preload(self) -> None:
-        wait_start = time.perf_counter()
-        try:
-            batch = next(self.iterator)
-        except StopIteration:
-            self._next_batch = None
-            return
-        loader_wait_ms = (time.perf_counter() - wait_start) * 1000.0
-        indices, image, timing = self._unpack_loader_batch(batch)
-        worker_batch_ms = float(timing["worker_batch_ms"]) if "worker_batch_ms" in timing else 0.0
-        reader_open_ms = float(timing["reader_open_ms"]) if "reader_open_ms" in timing else 0.0
-        reader_read_ms = float(timing["reader_read_ms"]) if "reader_read_ms" in timing else 0.0
-        if self.copy_stream is None or self.batch_preprocessor is None:
-            prepared, preprocess_ms = self._prepare_batch(image)
-            self._next_batch = PreparedBatch(
-                indices=indices,
-                image=prepared,
-                loader_wait_ms=loader_wait_ms,
-                preprocess_ms=preprocess_ms,
-                worker_batch_ms=worker_batch_ms,
-                reader_open_ms=reader_open_ms,
-                reader_read_ms=reader_read_ms,
-            )
-            return
-
-        staged = self._stage_host_batch(image)
-        preprocess_start = time.perf_counter()
-        with torch.cuda.stream(self.copy_stream):
-            prepared = self.batch_preprocessor(staged) if self.batch_preprocessor is not None else staged.to(
-                self.loaded.device,
-                non_blocking=True,
-            )
-        preprocess_ms = (time.perf_counter() - preprocess_start) * 1000.0
-        self._next_batch = PreparedBatch(
-            indices=indices,
-            image=prepared,
-            loader_wait_ms=loader_wait_ms,
-            preprocess_ms=preprocess_ms,
-            worker_batch_ms=worker_batch_ms,
-            reader_open_ms=reader_open_ms,
-            reader_read_ms=reader_read_ms,
-        )
-
-    def __iter__(self):
-        return self
-
-    def __next__(self) -> PreparedBatch:
-        if self._next_batch is None:
-            raise StopIteration
-        current = self._next_batch
-        if self.copy_stream is not None:
-            ready_start = time.perf_counter()
-            current_stream = torch.cuda.current_stream(device=self.loaded.device)
-            current_stream.wait_stream(self.copy_stream)
-            current.ready_wait_ms = (time.perf_counter() - ready_start) * 1000.0
-        self._preload()
-        return current
-
-
-def _run_forward_pass(
-    dataloader,
-    loaded: LoadedModel,
-    autocast_context,
-    *,
-    batch_preprocessor=None,
-    sample_id: str | None = None,
-    total_items: int | None = None,
-    unit_label: str = "tile",
-    return_indices: bool = False,
-):
-
-    outputs = []
-    batch_indices = [] if return_indices else None
-    processed = 0
-    batch_index = 0
-    prefetcher_context = (
-        suppress_c_stderr()
-        if _should_suppress_cucim_dataloader_stderr(dataloader)
-        else nullcontext()
-    )
-    with prefetcher_context:
-        prefetcher = _BatchPrefetcher(dataloader, loaded, batch_preprocessor)
-    with torch.inference_mode(), autocast_context:
-        for prepared_batch in prefetcher:
-            image = prepared_batch.image
-            forward_start = time.perf_counter()
-            embedding = loaded.model.encode_tiles(image).detach().cpu()
-            forward_ms = (time.perf_counter() - forward_start) * 1000.0
-            outputs.append(embedding)
-            if batch_indices is not None:
-                batch_indices.append(torch.as_tensor(prepared_batch.indices, dtype=torch.long).detach().cpu())
-            processed += int(embedding.shape[0])
-            batch_index += 1
-            batch_total_ms = (
-                prepared_batch.loader_wait_ms
-                + prepared_batch.ready_wait_ms
-                + prepared_batch.preprocess_ms
-                + forward_ms
-            )
-            gpu_busy_fraction = (
-                (prepared_batch.ready_wait_ms + prepared_batch.preprocess_ms + forward_ms) / batch_total_ms
-                if batch_total_ms > 0
-                else 0.0
-            )
-            emit_progress(
-                "embedding.batch.timing",
-                sample_id=sample_id,
-                batch_index=batch_index,
-                batch_size=int(embedding.shape[0]),
-                loader_wait_ms=round(prepared_batch.loader_wait_ms, 4),
-                ready_wait_ms=round(prepared_batch.ready_wait_ms, 4),
-                preprocess_ms=round(prepared_batch.preprocess_ms, 4),
-                worker_batch_ms=round(prepared_batch.worker_batch_ms, 4),
-                reader_open_ms=round(prepared_batch.reader_open_ms, 4),
-                reader_read_ms=round(prepared_batch.reader_read_ms, 4),
-                forward_ms=round(forward_ms, 4),
-                gpu_busy_fraction=round(gpu_busy_fraction, 4),
-                unit=unit_label,
-            )
-            if sample_id is not None:
-                emit_progress(
-                    "embedding.tile.progress",
-                    sample_id=sample_id,
-                    processed=processed,
-                    total=int(total_items or processed),
-                    unit=unit_label,
-                )
-    if not outputs:
-        feature_dim = loaded.tile_feature_dim if loaded.tile_feature_dim is not None else loaded.feature_dim
-        empty = torch.empty((0, int(feature_dim)), dtype=torch.float32)
-        if batch_indices is not None:
-            return torch.empty((0,), dtype=torch.long), empty
-        return empty
-    embeddings = torch.cat(outputs, dim=0)
-    if batch_indices is not None:
-        return torch.cat(batch_indices, dim=0), embeddings
-    return embeddings
-
-
-
-def _resolve_device(device: str, default_device):
-
-    if device == "auto":
-        return default_device
-    return torch.device(device)
-
-
 def _describe_device_mode(model, execution: ExecutionOptions) -> str:
     requested_device = getattr(model, "_requested_device", None)
     if requested_device == "cpu":
@@ -3443,136 +2910,6 @@ def _load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
 
     payload_path = coordination_dir / f"{sample_id}.embedded.pt"
     return torch.load(payload_path, map_location="cpu", weights_only=True)
-
-
-def _num_tiles(tiling_result) -> int:
-    x_values, _y_values = coordinate_arrays(tiling_result)
-    return int(len(x_values))
-
-
-def _serialize_model(model) -> dict[str, Any]:
-    return {
-        "name": model.name,
-        "output_variant": model._output_variant if hasattr(model, "_output_variant") else None,
-        "allow_non_recommended_settings": bool(
-            getattr(model, "allow_non_recommended_settings", False)
-        ),
-    }
-
-
-def _serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any]:
-    return {
-        "backend": preprocessing.backend,
-        "requested_spacing_um": preprocessing.requested_spacing_um,
-        "requested_tile_size_px": preprocessing.requested_tile_size_px,
-        "requested_region_size_px": preprocessing.requested_region_size_px,
-        "region_tile_multiple": preprocessing.region_tile_multiple,
-        "tolerance": preprocessing.tolerance,
-        "overlap": preprocessing.overlap,
-        "tissue_threshold": preprocessing.tissue_threshold,
-        "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
-        "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
-        "resume": preprocessing.resume,
-        "segmentation": dict(preprocessing.segmentation),
-        "filtering": dict(preprocessing.filtering),
-        "preview": dict(preprocessing.preview),
-    }
-
-
-def _serialize_execution(
-    execution: ExecutionOptions,
-    *,
-    preprocessing: PreprocessingConfig | None = None,
-) -> dict[str, Any]:
-    effective_num_workers = execution.num_workers
-    if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
-    return {
-        "output_dir": str(execution.output_dir) if execution.output_dir is not None else None,
-        "output_format": execution.output_format,
-        "batch_size": execution.batch_size,
-        "num_workers": effective_num_workers,
-        "num_preprocessing_workers": execution.num_preprocessing_workers,
-        "num_gpus": execution.num_gpus,
-        "precision": execution.precision,
-        "prefetch_factor": execution.prefetch_factor,
-        "persistent_workers": execution.persistent_workers,
-        "save_tile_embeddings": execution.save_tile_embeddings,
-        "save_latents": execution.save_latents,
-    }
-
-
-def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
-    read_coordinates_from = (
-        Path(payload["read_coordinates_from"])
-        if "read_coordinates_from" in payload and payload["read_coordinates_from"]
-        else None
-    )
-    read_tiles_from = (
-        Path(payload["read_tiles_from"])
-        if "read_tiles_from" in payload and payload["read_tiles_from"]
-        else None
-    )
-    return PreprocessingConfig(
-        backend=payload["backend"],
-        requested_spacing_um=float(payload["requested_spacing_um"]),
-        requested_tile_size_px=int(payload["requested_tile_size_px"]),
-        requested_region_size_px=(
-            int(payload["requested_region_size_px"])
-            if "requested_region_size_px" in payload and payload["requested_region_size_px"] is not None
-            else None
-        ),
-        region_tile_multiple=(
-            int(payload["region_tile_multiple"])
-            if "region_tile_multiple" in payload and payload["region_tile_multiple"] is not None
-            else None
-        ),
-        tolerance=float(payload["tolerance"]),
-        overlap=float(payload["overlap"]),
-        tissue_threshold=float(payload["tissue_threshold"]),
-        read_coordinates_from=read_coordinates_from,
-        read_tiles_from=read_tiles_from,
-        resume=bool(payload["resume"]) if "resume" in payload else False,
-        segmentation=dict(payload["segmentation"]) if "segmentation" in payload else {},
-        filtering=dict(payload["filtering"]) if "filtering" in payload else {},
-        preview=dict(payload["preview"]) if "preview" in payload else {},
-    )
-
-
-def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
-    output_dir = payload["output_dir"] if "output_dir" in payload else None
-    batch_size = payload["batch_size"] if "batch_size" in payload else None
-    num_workers = payload["num_workers"] if "num_workers" in payload else None
-    num_gpus = payload["num_gpus"] if "num_gpus" in payload else 1
-    precision = payload["precision"] if "precision" in payload else "fp32"
-    prefetch_factor = payload["prefetch_factor"] if "prefetch_factor" in payload else 4
-    persistent_workers = (
-        bool(payload["persistent_workers"]) if "persistent_workers" in payload else True
-    )
-    save_tile_embeddings = (
-        bool(payload["save_tile_embeddings"]) if "save_tile_embeddings" in payload else False
-    )
-    save_latents = bool(payload["save_latents"]) if "save_latents" in payload else False
-    return ExecutionOptions(
-        output_dir=Path(output_dir) if output_dir is not None else None,
-        output_format=payload["output_format"] if "output_format" in payload else "pt",
-        batch_size=batch_size,
-        num_workers=int(num_workers) if num_workers is not None else None,
-        num_gpus=int(num_gpus),
-        precision=precision,
-        prefetch_factor=int(prefetch_factor),
-        persistent_workers=persistent_workers,
-        save_tile_embeddings=save_tile_embeddings,
-        save_latents=save_latents,
-    )
-
-
-def _autocast_dtype(torch, precision: str):
-    if precision == "fp16":
-        return torch.float16
-    if precision == "bf16":
-        return torch.bfloat16
-    return None
 
 
 def _collect_pipeline_artifacts(

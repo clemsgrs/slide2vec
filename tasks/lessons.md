@@ -2,6 +2,8 @@
 
 ## 2026-04-18
 
+- Prefer neutral package names like `runtime/` for internal implementation modules unless the user explicitly wants a private-style namespace; leading underscores in directory names read as accidental or overly internal.
+
 - When slide2vec depends on bridged HS2P progress events, keep the bridge whitelist in sync with every reporter stage the UI renders; otherwise the code can define a preview bar and still never receive preview events.
 
 ## 2026-04-18
