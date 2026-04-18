@@ -80,13 +80,14 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_tiling_process_df(process_list)
     assert list(df.columns) == [
         "sample_id",
+        "annotation",
         "image_path",
         "mask_path",
         "requested_backend",
@@ -112,13 +113,14 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_embedding_process_df(process_list, include_aggregation_status=True)
     assert list(df.columns) == [
         "sample_id",
+        "annotation",
         "image_path",
         "mask_path",
         "requested_backend",

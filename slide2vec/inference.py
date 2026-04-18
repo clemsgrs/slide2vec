@@ -2920,6 +2920,16 @@ def _record_slide_metadata_in_process_list(
     process_df.to_csv(process_list_path, index=False)
 
 
+def _build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
+    return PreviewConfig(
+        save_mask_preview=bool(preview["save_mask_preview"]),
+        save_tiling_preview=bool(preview["save_tiling_preview"]),
+        downsample=int(preview["downsample"]),
+        tissue_contour_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
+        mask_overlay_alpha=float(preview["mask_overlay_alpha"]),
+    )
+
+
 def _build_hs2p_configs(preprocessing: PreprocessingConfig):
     requested_tile_size_px = (
         preprocessing.requested_region_size_px
@@ -2936,7 +2946,7 @@ def _build_hs2p_configs(preprocessing: PreprocessingConfig):
     )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
-    preview_cfg = PreviewConfig(**dict(preprocessing.preview))
+    preview_cfg = _build_preview_config(dict(preprocessing.preview))
     return (
         tiling_cfg,
         segmentation_cfg,

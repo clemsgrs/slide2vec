@@ -2,6 +2,8 @@
 
 ## 2026-04-18
 
+- Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
+
 - Split the live tiling UI into a coordinates-extraction bar plus a separate preview-generation bar, and moved the final tiling summary into a dedicated `tiling.summary` event so it prints once at the very end.
 
 ## 2026-04-17

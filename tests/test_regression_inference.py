@@ -1117,7 +1117,13 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         tissue_threshold=0.1,
         segmentation={"downsample": 64},
         filtering={"ref_tile_size": 224},
-        preview={"save_mask_preview": True, "save_tiling_preview": False, "downsample": 32},
+        preview={
+            "save_mask_preview": True,
+            "save_tiling_preview": False,
+            "downsample": 32,
+            "tissue_contour_color": (157, 219, 129),
+            "mask_overlay_alpha": 0.5,
+        },
     )
 
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = (
@@ -1131,6 +1137,8 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         "save_mask_preview": True,
         "save_tiling_preview": False,
         "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
+        "mask_overlay_alpha": 0.5,
     }
     assert read_coordinates_from is None
     assert resume is False

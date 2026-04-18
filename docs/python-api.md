@@ -74,6 +74,7 @@ preprocessing = PreprocessingConfig(
         "save_mask_preview": False,
         "save_tiling_preview": False,
         "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
     },
 )
 embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
@@ -91,7 +92,7 @@ Common fields:
 - `read_coordinates_from` - reuse pre-extracted coordinates
 - `read_tiles_from` - reuse pre-extracted tile tar archives
 - `resume` - resume from a previous tiling run (default `False`)
-- `preview`
+- `preview` - forwarded to hs2p's preview config; `save_mask_preview` and `save_tiling_preview` control whether hs2p writes the two preview images, and `tissue_contour_color` controls the tissue contour RGB color
 
 For hierarchical extraction, see the [dedicated section](#hierarchical-feature-extraction) below.
 
