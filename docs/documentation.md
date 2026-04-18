@@ -4,6 +4,8 @@
 
 - Split `slide2vec.inference` into workflow-scoped internal runtime helpers under `slide2vec.runtime` (`batching`, `hierarchical`, `progress_bridge`, `serialization`, `types`) while keeping `slide2vec.inference` as the stable orchestration entrypoint.
 - Removed remaining pass-through wrappers from `slide2vec.inference` (tiling/embedding/distributed helpers) and switched workers/tests to import `slide2vec.runtime.*` directly, with simplified runtime helper signatures replacing callback/class injection patterns.
+- Removed the leftover distributed orchestration pass-through layer in `slide2vec.inference` (`_distributed_coordination_dir`, `_run_torchrun_worker`, `_reset_progress_event_logs`) so torchrun/progress coordination now calls `slide2vec.runtime.distributed` directly.
+- Dropped the temporary preview-key compatibility branch in `runtime.tiling.build_preview_config`; preview config now uses the canonical `tissue_contour_color` input only.
 - Added architecture guardrail tests that keep workflow helpers bounded (soft target around 400 lines, enforced ceiling 500) and prevent `slide2vec/inference.py` from regressing toward the previous monolith size.
 - Extracted distributed torchrun orchestration, shard merge/loading, and rank-assignment helpers into `slide2vec.runtime.distributed`, with inference-level compatibility shims preserved for existing tests and monkeypatch patterns.
 - Moved artifact collection/loading and process-list embedding status updates into `slide2vec.runtime.persistence` so the pipeline orchestration flow in `slide2vec.inference` stays focused on control flow.

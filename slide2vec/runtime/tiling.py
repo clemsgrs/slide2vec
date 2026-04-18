@@ -27,14 +27,11 @@ def resolve_slide_backend(preprocessing: PreprocessingConfig | None, tiling_resu
 
 
 def build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
-    overlay_color = preview.get("mask_overlay_color")
-    if overlay_color is None:
-        overlay_color = preview["tissue_contour_color"]
     return PreviewConfig(
         save_mask_preview=bool(preview["save_mask_preview"]),
         save_tiling_preview=bool(preview["save_tiling_preview"]),
         downsample=int(preview["downsample"]),
-        mask_overlay_color=tuple(int(channel) for channel in overlay_color),
+        mask_overlay_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
         mask_overlay_alpha=float(preview["mask_overlay_alpha"]),
     )
 

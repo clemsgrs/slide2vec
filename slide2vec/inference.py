@@ -1,7 +1,6 @@
 import json
 import importlib
 import os
-import subprocess
 import tempfile
 import threading
 import time
@@ -2299,7 +2298,7 @@ def _run_distributed_embedding_stage(
         return
     request_path = output_dir / "embedding_request.json"
     progress_events_path = output_dir / "logs" / "pipeline_worker.progress.jsonl"
-    _reset_progress_event_logs(progress_events_path)
+    runtime_distributed.reset_progress_event_logs(progress_events_path)
     request_payload = _build_pipeline_worker_request_payload(
         model,
         preprocessing,
@@ -2312,13 +2311,14 @@ def _run_distributed_embedding_stage(
         slide_count=len(successful_slides),
         num_gpus=execution.num_gpus,
     )
-    _run_torchrun_worker(
+    runtime_distributed.run_torchrun_worker(
         module="slide2vec.distributed.pipeline_worker",
-        execution=execution,
+        num_gpus=execution.num_gpus,
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
         progress_events_path=progress_events_path,
+        popen_factory=runtime_distributed.subprocess.Popen,
     )
     emit_progress(
         "embedding.assignment.finished",
@@ -2336,7 +2336,7 @@ def _embed_single_slide_distributed(
     execution: ExecutionOptions,
     work_dir: Path,
 ) -> EmbeddedSlide:
-    with _distributed_coordination_dir(work_dir) as coordination_dir:
+    with runtime_distributed.distributed_coordination_dir(work_dir) as coordination_dir:
         _run_distributed_direct_embedding_stage(
             model,
             preprocessing=preprocessing,
@@ -2396,7 +2396,7 @@ def _embed_multi_slides_distributed(
         tiling_results,
         num_gpus=execution.num_gpus,
     )
-    with _distributed_coordination_dir(work_dir) as coordination_dir:
+    with runtime_distributed.distributed_coordination_dir(work_dir) as coordination_dir:
         _run_distributed_direct_embedding_stage(
             model,
             preprocessing=preprocessing,
@@ -2423,12 +2423,6 @@ def _embed_multi_slides_distributed(
         return results
 
 
-@contextmanager
-def _distributed_coordination_dir(work_dir: Path):
-    with runtime_distributed.distributed_coordination_dir(work_dir) as coordination_dir:
-        yield coordination_dir
-
-
 def _run_distributed_direct_embedding_stage(
     model,
     *,
@@ -2442,7 +2436,7 @@ def _run_distributed_direct_embedding_stage(
 ) -> None:
     request_path = coordination_dir / "direct_embedding_request.json"
     progress_events_path = output_dir / "logs" / "direct_embed_worker.progress.jsonl"
-    _reset_progress_event_logs(progress_events_path)
+    runtime_distributed.reset_progress_event_logs(progress_events_path)
     request_payload = _build_direct_embed_worker_request_payload(
         model=model,
         preprocessing=preprocessing,
@@ -2454,33 +2448,14 @@ def _run_distributed_direct_embedding_stage(
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
-    _run_torchrun_worker(
+    runtime_distributed.run_torchrun_worker(
         module="slide2vec.distributed.direct_embed_worker",
-        execution=execution,
+        num_gpus=execution.num_gpus,
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed direct embedding failed",
         progress_events_path=progress_events_path,
-    )
-
-
-def _run_torchrun_worker(
-    *,
-    module: str,
-    execution: ExecutionOptions,
-    output_dir: Path,
-    request_path: Path,
-    failure_title: str,
-    progress_events_path: Path | None = None,
-) -> None:
-    runtime_distributed.run_torchrun_worker(
-        module=module,
-        num_gpus=execution.num_gpus,
-        output_dir=output_dir,
-        request_path=request_path,
-        failure_title=failure_title,
-        progress_events_path=progress_events_path,
-        popen_factory=subprocess.Popen,
+        popen_factory=runtime_distributed.subprocess.Popen,
     )
 
 
@@ -2535,12 +2510,6 @@ def _build_direct_embed_worker_request_payload(
         "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
-
-
-def _reset_progress_event_logs(progress_events_path: Path) -> None:
-    runtime_distributed.reset_progress_event_logs(progress_events_path)
-
-
 def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:
     base_dir = Path(output_dir)
     process_df = load_tiling_process_df(base_dir / "process_list.csv")

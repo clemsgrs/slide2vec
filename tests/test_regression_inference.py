@@ -1342,7 +1342,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     def fake_coordination_dir(work_dir: Path):
         yield work_dir / "coord"
 
-    monkeypatch.setattr(inference, "_distributed_coordination_dir", fake_coordination_dir)
+    monkeypatch.setattr(inference.runtime_distributed, "distributed_coordination_dir", fake_coordination_dir)
     monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference.runtime_distributed,
@@ -1406,7 +1406,7 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
     def fake_coordination_dir(work_dir: Path):
         yield work_dir / "coord"
 
-    monkeypatch.setattr(inference, "_distributed_coordination_dir", fake_coordination_dir)
+    monkeypatch.setattr(inference.runtime_distributed, "distributed_coordination_dir", fake_coordination_dir)
     monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference.runtime_distributed,
