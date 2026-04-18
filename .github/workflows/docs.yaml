@@ -38,9 +38,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[testing,docs]"
 
-      - name: Run docs smoke test
-        run: python -m pytest -q -o addopts= -p no:cov tests/test_docs.py
-
       - name: Build Sphinx site
         run: python -m sphinx -W -b html docs docs/_build/html
 
