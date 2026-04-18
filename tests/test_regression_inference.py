@@ -1076,6 +1076,11 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
         "tissue.progress",
         "tissue.finished",
         "backend.selected",
+        "tiling.progress",
+        "tiling.finished",
+        "preview.started",
+        "preview.progress",
+        "preview.finished",
     ]
 
 
