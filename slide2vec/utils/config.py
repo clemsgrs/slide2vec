@@ -7,7 +7,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 
 import slide2vec.distributed as distributed
-from slide2vec.model_settings import canonicalize_model_name
+from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
 

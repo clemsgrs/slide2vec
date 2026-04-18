@@ -2,6 +2,17 @@
 
 ## 2026-04-18
 
+- Split `slide2vec.inference` into workflow-scoped internal runtime helpers under `slide2vec.runtime` (`batching`, `hierarchical`, `progress_bridge`, `serialization`, `types`) while keeping `slide2vec.inference` as the stable orchestration entrypoint.
+- Removed remaining pass-through wrappers from `slide2vec.inference` (tiling/embedding/distributed helpers) and switched workers/tests to import `slide2vec.runtime.*` directly, with simplified runtime helper signatures replacing callback/class injection patterns.
+- Removed the leftover distributed orchestration pass-through layer in `slide2vec.inference` (`_distributed_coordination_dir`, `_run_torchrun_worker`, `_reset_progress_event_logs`) so torchrun/progress coordination now calls `slide2vec.runtime.distributed` directly.
+- Dropped the temporary preview-key compatibility branch in `runtime.tiling.build_preview_config`; preview config now uses the canonical `tissue_contour_color` input only.
+- Added architecture guardrail tests that keep workflow helpers bounded (soft target around 400 lines, enforced ceiling 500) and prevent `slide2vec/inference.py` from regressing toward the previous monolith size.
+- Extracted distributed torchrun orchestration, shard merge/loading, and rank-assignment helpers into `slide2vec.runtime.distributed`, with inference-level compatibility shims preserved for existing tests and monkeypatch patterns.
+- Moved artifact collection/loading and process-list embedding status updates into `slide2vec.runtime.persistence` so the pipeline orchestration flow in `slide2vec.inference` stays focused on control flow.
+- Extracted pure tiling and embedding metadata/writer helpers into `slide2vec.runtime.tiling` and `slide2vec.runtime.embedding`, keeping inference-level wrappers so existing monkeypatch-based regression tests remain stable.
+- Moved root-level internal helpers (`runtime_types.py`, `model_settings.py`, `registry.py`, `resources.py`) into clearer homes: `slide2vec.runtime.*` and `slide2vec.configs.resources`, and added a guardrail test that keeps the root package module list intentionally minimal.
+- Trimmed secondary/low-signal tests (docs build, packaging metadata smoke, collator timing micro-tests, and heavyweight output-consistency smoke) to keep the test suite focused on high-signal core regression coverage.
+
 - Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
 
 - Split the live tiling UI into a coordinates-extraction bar plus a separate preview-generation bar, and moved the final tiling summary into a dedicated `tiling.summary` event so it prints once at the very end.

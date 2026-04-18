@@ -68,3 +68,4 @@ class _Entry:
     def __init__(self, cls: type, metadata: dict[str, Any]) -> None:
         self.cls = cls
         self.metadata = metadata
+

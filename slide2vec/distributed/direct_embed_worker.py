@@ -26,11 +26,10 @@ def main(argv=None) -> int:
         _compute_tile_embeddings_for_slide,
         _is_hierarchical_preprocessing,
         _resolve_hierarchical_geometry,
-        deserialize_execution,
-        deserialize_preprocessing,
         load_successful_tiled_slides,
     )
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
+    from slide2vec.runtime.serialization import deserialize_execution, deserialize_preprocessing
 
     parser = get_args_parser(add_help=True)
     args = parser.parse_args(argv)

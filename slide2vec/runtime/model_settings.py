@@ -45,3 +45,4 @@ def normalize_precision_name(value: Any) -> str | None:
 def canonicalize_model_name(name: str) -> str:
     normalized = name.strip().lower()
     return MODEL_NAME_ALIASES.get(normalized, normalized)
+

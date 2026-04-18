@@ -20,9 +20,9 @@ from slide2vec.encoders.registry import (
     resolve_preprocessing_defaults,
 )
 from slide2vec.encoders.validation import validate_encoder_config
-from slide2vec.model_settings import canonicalize_model_name, normalize_precision_name
+from slide2vec.runtime.model_settings import canonicalize_model_name, normalize_precision_name
 from slide2vec.progress import emit_progress
-from slide2vec.runtime_types import LoadedModel
+from slide2vec.runtime.types import LoadedModel
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path

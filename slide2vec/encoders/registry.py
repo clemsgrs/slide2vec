@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from slide2vec.registry import Registry
+from slide2vec.runtime.registry import Registry
 
 encoder_registry = Registry("encoders")
 

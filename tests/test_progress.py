@@ -329,7 +329,7 @@ def test_run_pipeline_emits_assignment_progress_for_multi_gpu_embedding(monkeypa
         lambda *args, **kwargs: [embedded_a, embedded_b],
     )
     monkeypatch.setattr(inference, "_persist_embedded_slide", lambda *args, **kwargs: (None, None))
-    monkeypatch.setattr(inference, "_run_torchrun_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference.runtime_distributed, "run_torchrun_worker", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference,
         "_collect_pipeline_artifacts",
@@ -636,17 +636,18 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
             self.returncode = 0
             return 0
 
-    monkeypatch.setattr(inference.subprocess, "Popen", FakePopen)
-    monkeypatch.setattr(inference.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(inference.runtime_distributed.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(inference.runtime_distributed.time, "sleep", lambda _seconds: None)
 
     with progress.activate_progress_reporter(reporter):
-        inference._run_torchrun_worker(
+        inference.runtime_distributed.run_torchrun_worker(
             module="slide2vec.distributed.direct_embed_worker",
-            execution=inference.ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+            num_gpus=2,
             output_dir=tmp_path,
             request_path=request_path,
             failure_title="boom",
             progress_events_path=progress_events_path,
+            popen_factory=FakePopen,
         )
 
     assert [event.kind for event in reporter.events] == ["embedding.slide.started"]
