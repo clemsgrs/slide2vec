@@ -1,5 +1,15 @@
 # Lessons Learned
 
+## 2026-04-18
+
+- When slide2vec depends on bridged HS2P progress events, keep the bridge whitelist in sync with every reporter stage the UI renders; otherwise the code can define a preview bar and still never receive preview events.
+
+## 2026-04-18
+
+- Keep `tiling.finished` for closing the live bar and emit the final summary on a separate `tiling.summary` event; otherwise the reporter ends up printing the same panel twice.
+- Split coordinate extraction and preview flushing into separate progress stages so the tiling bar stays live through the actual slide work instead of going stale at 0% during preview cleanup.
+- When a live progress renderer needs to stay readable, keep backend-selection notices on plain console output and avoid buffering them behind a broad stdout/stderr capture wrapper.
+
 ## 2026-04-12
 
 - When refactoring CLI parsing to support `parse_known_args()`, prefer updating the test double to match the real parser API instead of adding a production fallback for mocks. Keep the runtime code clean unless the fallback is genuinely needed by real callers.

@@ -947,11 +947,6 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
-        "resolve_backend",
-        lambda requested_backend, **kwargs: SimpleNamespace(backend="asap", reason=None, tried=("asap",)),
-    )
-    monkeypatch.setattr(
-        inference,
         "_build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
@@ -971,6 +966,117 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     )
 
     assert captured["kwargs"]["save_tiles"] is False
+
+
+def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+    from hs2p import progress as hs2p_progress
+
+    class Reporter:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event):
+            self.events.append(event)
+
+        def close(self):
+            return None
+
+    reporter = Reporter()
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["slides"] = list(slides)
+        captured["kwargs"] = kwargs
+        hs2p_progress.emit_progress("tissue.started", total=1)
+        hs2p_progress.emit_progress(
+            "tissue.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "tissue.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "backend.selected",
+            sample_id="slide-a",
+            backend="asap",
+            reason="selected asap for auto backend",
+        )
+        hs2p_progress.emit_progress("tiling.started", total=1)
+        hs2p_progress.emit_progress(
+            "tiling.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+            discovered_tiles=1,
+        )
+        hs2p_progress.emit_progress(
+            "tiling.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+            discovered_tiles=1,
+            output_dir=str(tmp_path),
+            process_list_path=str(tmp_path / "process_list.csv"),
+            zero_tile_successes=0,
+        )
+        hs2p_progress.emit_progress("preview.started", total=1)
+        hs2p_progress.emit_progress(
+            "preview.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "preview.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+
+    assert not hasattr(inference, "resolve_backend")
+    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(
+        inference,
+        "_build_hs2p_configs",
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="auto"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        inference._tile_slides(
+            [make_slide("slide-a")],
+            replace(DEFAULT_PREPROCESSING, backend="auto", on_the_fly=False),
+            output_dir=tmp_path,
+            num_workers=0,
+        )
+
+    assert captured["slides"][0].sample_id == "slide-a"
+    assert captured["kwargs"]["preview"] == "preview"
+    assert [event.kind for event in reporter.events] == [
+        "tissue.started",
+        "tissue.progress",
+        "tissue.finished",
+        "backend.selected",
+    ]
 
 
 def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
@@ -2525,7 +2631,7 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
         "_prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_emit_tiling_finished", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_emit_tiling_summary", lambda *args, **kwargs: None)
     monkeypatch.setattr(inference, "_write_zero_tile_embedding_sidecars", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference,

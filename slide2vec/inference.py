@@ -18,8 +18,8 @@ import logging
 import pandas as pd
 import torch
 from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
-from hs2p.wsi.backend import resolve_backend
-from hs2p.utils.stderr import run_with_filtered_stderr, run_with_filtered_stdio
+from hs2p import progress as hs2p_progress
+from hs2p.utils.stderr import run_with_filtered_stderr
 import numpy as np
 from transformers.image_processing_utils import BaseImageProcessor
 
@@ -52,8 +52,11 @@ from slide2vec.encoders.registry import (
 from slide2vec.model_settings import canonicalize_model_name
 from slide2vec.runtime_types import LoadedModel
 from slide2vec.progress import (
+    NullProgressReporter,
+    ProgressEvent as Slide2VecProgressEvent,
     emit_progress,
     emit_progress_event,
+    get_progress_reporter,
     read_progress_events,
     read_tiling_progress_snapshot,
 )
@@ -79,6 +82,49 @@ class BatchTransformSpec:
     mean: tuple[float, ...] | None
     std: tuple[float, ...] | None
     resize_interpolation: str = "bilinear"
+
+
+_BRIDGED_HS2P_PROGRESS_KINDS = {
+    "backend.selected",
+    "tissue.started",
+    "tissue.progress",
+    "tissue.finished",
+    "tiling.progress",
+    "tiling.finished",
+    "preview.started",
+    "preview.progress",
+    "preview.finished",
+}
+
+
+class _Hs2pProgressBridge:
+    def __init__(self, downstream) -> None:
+        self._downstream = downstream
+
+    def emit(self, event) -> None:
+        if event.kind not in _BRIDGED_HS2P_PROGRESS_KINDS:
+            return
+        self._downstream.emit(
+            Slide2VecProgressEvent(kind=event.kind, payload=dict(event.payload))
+        )
+
+    def close(self) -> None:
+        return None
+
+    def write_log(self, message: str, *, stream=None) -> None:
+        if hasattr(self._downstream, "write_log"):
+            self._downstream.write_log(message, stream=stream)
+
+
+@contextmanager
+def _bridge_hs2p_progress_to_slide2vec():
+    downstream = get_progress_reporter()
+    if isinstance(downstream, NullProgressReporter):
+        yield
+        return
+    bridge = _Hs2pProgressBridge(downstream)
+    with hs2p_progress.activate_progress_reporter(bridge):
+        yield
 
 
 @dataclass(kw_only=True)
@@ -370,7 +416,7 @@ def embed_slides(
                 output_dir=work_dir,
                 num_workers=execution.num_preprocessing_workers,
             )
-            _emit_tiling_finished(
+            _emit_tiling_summary(
                 process_list_path,
                 expected_total=len(slide_records),
                 successful_slides=prepared_slides,
@@ -561,7 +607,7 @@ def embed_patients(
                 output_dir=work_dir,
                 num_workers=execution.num_preprocessing_workers,
             )
-            _emit_tiling_finished(
+            _emit_tiling_summary(
                 process_list_path,
                 expected_total=len(slide_records),
                 successful_slides=prepared_slides,
@@ -850,7 +896,7 @@ def run_pipeline(
             output_dir=output_dir,
             num_workers=execution.num_preprocessing_workers,
         )
-        _emit_tiling_finished(
+        _emit_tiling_summary(
             process_list_path,
             expected_total=len(slide_records),
             successful_slides=successful_slides,
@@ -2624,7 +2670,7 @@ def _num_rows(data) -> int:
     return len(data)
 
 
-def _emit_tiling_finished(
+def _emit_tiling_summary(
     process_list_path: Path,
     *,
     expected_total: int,
@@ -2642,7 +2688,7 @@ def _emit_tiling_finished(
             discovered_tiles=discovered_tiles,
         )
     emit_progress(
-        "tiling.finished",
+        "tiling.summary",
         total=int(snapshot.total),
         completed=int(snapshot.completed),
         failed=int(snapshot.failed),
@@ -2770,19 +2816,6 @@ def _tile_slides(
 ) -> list[Any]:
     _preload_asap_wholeslidedata(preprocessing)
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
-    for slide in slides:
-        backend_selection = resolve_backend(
-            tiling_cfg.requested_backend,
-            wsi_path=slide.image_path,
-            mask_path=slide.mask_path,
-        )
-        if backend_selection.reason is not None:
-            emit_progress(
-                "backend.selected",
-                sample_id=slide.sample_id,
-                backend=backend_selection.backend,
-                reason=backend_selection.reason,
-            )
 
     def _run_tile_slides():
         return tile_slides(
@@ -2799,7 +2832,8 @@ def _tile_slides(
             jpeg_backend=preprocessing.jpeg_backend,
         )
 
-    return run_with_filtered_stdio(_run_tile_slides)
+    with _bridge_hs2p_progress_to_slide2vec():
+        return run_with_filtered_stderr(_run_tile_slides)
 
 
 def _preload_asap_wholeslidedata(preprocessing: PreprocessingConfig) -> None:
