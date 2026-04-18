@@ -903,8 +903,8 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference,
-        "_build_hs2p_configs",
+        inference.runtime_tiling,
+        "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="cucim"),
             "segmentation",
@@ -946,8 +946,8 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
 
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference,
-        "_build_hs2p_configs",
+        inference.runtime_tiling,
+        "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
             "segmentation",
@@ -1049,8 +1049,8 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
     assert not hasattr(inference, "resolve_backend")
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference,
-        "_build_hs2p_configs",
+        inference.runtime_tiling,
+        "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
             "segmentation",
@@ -1084,29 +1084,8 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
     ]
 
 
-def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
-    import slide2vec.inference as inference
-
-    class FakeTilingConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class FakeSegmentationConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class FakeFilterConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    class FakePreviewConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    monkeypatch.setattr(inference, "TilingConfig", FakeTilingConfig)
-    monkeypatch.setattr(inference, "SegmentationConfig", FakeSegmentationConfig)
-    monkeypatch.setattr(inference, "FilterConfig", FakeFilterConfig)
-    monkeypatch.setattr(inference, "PreviewConfig", FakePreviewConfig)
+def test_build_hs2p_configs_constructs_preview_config():
+    import slide2vec.runtime.tiling as runtime_tiling
 
     preprocessing = PreprocessingConfig(
         backend="asap",
@@ -1127,19 +1106,17 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
     )
 
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = (
-        inference._build_hs2p_configs(preprocessing)
+        runtime_tiling.build_hs2p_configs(preprocessing)
     )
 
-    assert tiling_cfg.kwargs["backend"] == "asap"
-    assert segmentation_cfg.kwargs == {"downsample": 64}
-    assert filtering_cfg.kwargs == {"ref_tile_size": 224}
-    assert preview_cfg.kwargs == {
-        "save_mask_preview": True,
-        "save_tiling_preview": False,
-        "downsample": 32,
-        "tissue_contour_color": (157, 219, 129),
-        "mask_overlay_alpha": 0.5,
-    }
+    assert tiling_cfg.backend == "asap"
+    assert segmentation_cfg.downsample == 64
+    assert filtering_cfg.ref_tile_size == 224
+    assert preview_cfg.save_mask_preview is True
+    assert preview_cfg.save_tiling_preview is False
+    assert preview_cfg.downsample == 32
+    assert preview_cfg.mask_overlay_color == (157, 219, 129)
+    assert preview_cfg.mask_overlay_alpha == pytest.approx(0.5)
     assert read_coordinates_from is None
     assert resume is False
 
@@ -1244,12 +1221,12 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
 
 
 def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():
-    import slide2vec.inference as inference
+    import slide2vec.runtime.tiling as runtime_tiling
 
-    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="cucim")) == "cucim"
-    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="asap")) == "asap"
-    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace()) == "asap"
-    assert inference._resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="cucim"), SimpleNamespace(backend="asap")) == "cucim"
+    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="cucim")) == "cucim"
+    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="asap")) == "asap"
+    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace()) == "asap"
+    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="cucim"), SimpleNamespace(backend="asap")) == "cucim"
 
 
 def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd):
@@ -1368,8 +1345,8 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     monkeypatch.setattr(inference, "_distributed_coordination_dir", fake_coordination_dir)
     monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference,
-        "_load_tile_embedding_shards",
+        inference.runtime_distributed,
+        "load_tile_embedding_shards",
         lambda *_args, **_kwargs: [
             {
                 "tile_index": np.array([0, 1], dtype=np.int64),
@@ -1432,8 +1409,8 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
     monkeypatch.setattr(inference, "_distributed_coordination_dir", fake_coordination_dir)
     monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference,
-        "_load_tile_embedding_shards",
+        inference.runtime_distributed,
+        "load_tile_embedding_shards",
         lambda *_args, **_kwargs: [
             {
                 "tile_index": np.array([0, 1], dtype=np.int64),
@@ -1442,8 +1419,8 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
         ],
     )
     monkeypatch.setattr(
-        inference,
-        "_merge_tile_embedding_shards",
+        inference.runtime_distributed,
+        "merge_tile_embedding_shards",
         lambda shard_payloads: shard_payloads[0]["tile_embeddings"],
     )
 
@@ -2007,7 +1984,7 @@ def test_pipeline_worker_assigns_slides_by_tile_count():
         SimpleNamespace(x=np.arange(6), y=np.arange(6), tile_size_lv0=224),
     ]
 
-    assignments = pipeline_worker._assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+    assignments = pipeline_worker.assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
 
     assert assignments == {
         0: ["slide-a", "slide-d"],
@@ -2015,7 +1992,7 @@ def test_pipeline_worker_assigns_slides_by_tile_count():
     }
 
 def test_assign_slides_to_ranks_balances_by_tile_count():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.distributed import assign_slides_to_ranks
 
     slides = [
         make_slide("slide-a"),
@@ -2030,7 +2007,7 @@ def test_assign_slides_to_ranks_balances_by_tile_count():
         SimpleNamespace(x=np.arange(6), y=np.arange(6), tile_size_lv0=224),
     ]
 
-    assignments = inference._assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+    assignments = assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
 
     assert assignments == {
         0: ["slide-a", "slide-d"],
@@ -2039,7 +2016,7 @@ def test_assign_slides_to_ranks_balances_by_tile_count():
 
 
 def test_assign_slides_to_ranks_tiebreaks_by_rank_deterministically():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.distributed import assign_slides_to_ranks
 
     slides = [
         make_slide("slide-a"),
@@ -2056,7 +2033,7 @@ def test_assign_slides_to_ranks_tiebreaks_by_rank_deterministically():
         SimpleNamespace(x=np.arange(1), y=np.arange(1), tile_size_lv0=224),
     ]
 
-    assignments = inference._assign_slides_to_ranks(slides, tiling_results, num_gpus=3)
+    assignments = assign_slides_to_ranks(slides, tiling_results, num_gpus=3)
 
     assert assignments == {
         0: ["slide-a", "slide-d"],
@@ -2066,9 +2043,9 @@ def test_assign_slides_to_ranks_tiebreaks_by_rank_deterministically():
 
 
 def test_merge_tile_embedding_shards_restores_original_tile_order():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.distributed import merge_tile_embedding_shards
 
-    merged = inference._merge_tile_embedding_shards(
+    merged = merge_tile_embedding_shards(
         [
             {
                 "tile_index": np.array([2, 0], dtype=np.int64),
@@ -2207,6 +2184,7 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
 
 def test_serialize_execution_preserves_loader_optimization_fields():
     import slide2vec.inference as inference
+    from slide2vec.runtime.serialization import deserialize_execution
 
     execution = ExecutionOptions(
         output_dir=Path("/tmp/output"),
@@ -2221,7 +2199,7 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     )
 
     payload = inference._serialize_execution(execution)
-    restored = inference.deserialize_execution(payload)
+    restored = deserialize_execution(payload)
 
     assert payload["prefetch_factor"] == 7
     assert payload["persistent_workers"] is False
@@ -2232,17 +2210,17 @@ def test_serialize_execution_preserves_loader_optimization_fields():
 
 
 def test_deserialize_execution_defaults_num_workers_to_auto():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.serialization import deserialize_execution
 
-    restored = inference.deserialize_execution({"batch_size": 4, "num_gpus": 1})
+    restored = deserialize_execution({"batch_size": 4, "num_gpus": 1})
 
     assert restored.num_workers is None
 
 
 def test_deserialize_execution_preserves_auto_num_workers():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.serialization import deserialize_execution
 
-    restored = inference.deserialize_execution({"batch_size": 4, "num_workers": None, "num_gpus": 1})
+    restored = deserialize_execution({"batch_size": 4, "num_workers": None, "num_gpus": 1})
 
     assert restored.num_workers is None
 
@@ -2940,8 +2918,8 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
     captured = {}
 
     monkeypatch.setattr(
-        inference,
-        "_write_tile_embedding_artifact",
+        inference.runtime_embedding,
+        "write_tile_embedding_artifact",
         lambda sample_id, features, *, execution, metadata: captured.setdefault("metadata", metadata) or SimpleNamespace(),
     )
 
@@ -3097,9 +3075,9 @@ def test_build_hierarchical_index_uses_tile_first_level0_offsets_under_spacing_m
 
 
 def test_merge_hierarchical_embedding_shards_restores_original_region_shape():
-    import slide2vec.inference as inference
+    from slide2vec.runtime.distributed import merge_hierarchical_embedding_shards
 
-    merged = inference._merge_hierarchical_embedding_shards(
+    merged = merge_hierarchical_embedding_shards(
         [
             {
                 "flat_index": np.array([2, 0, 7], dtype=np.int64),
@@ -3304,17 +3282,17 @@ def test_load_model_accepts_allow_non_recommended_settings_without_forwarding(mo
 
 
 def test_scale_coordinates_scales_down():
-    from slide2vec.inference import _scale_coordinates
+    from slide2vec.runtime.tiling import scale_coordinates
 
     coords = np.array([[10, 20], [30, 40]])
     # base=0.25, target=0.5 → scale=0.5 → coordinates halved
-    result = _scale_coordinates(coords, base_spacing_um=0.25, spacing=0.5)
+    result = scale_coordinates(coords, base_spacing_um=0.25, spacing=0.5)
     np.testing.assert_array_equal(result, [[5, 10], [15, 20]])
 
 
 def test_scale_coordinates_identity_when_spacings_equal():
-    from slide2vec.inference import _scale_coordinates
+    from slide2vec.runtime.tiling import scale_coordinates
 
     coords = np.array([[10, 20], [30, 40]])
-    result = _scale_coordinates(coords, base_spacing_um=0.5, spacing=0.5)
+    result = scale_coordinates(coords, base_spacing_um=0.5, spacing=0.5)
     np.testing.assert_array_equal(result, [[10, 20], [30, 40]])

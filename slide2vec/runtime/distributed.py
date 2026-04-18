@@ -16,6 +16,7 @@ import torch
 from hs2p import SlideSpec
 
 from slide2vec.progress import emit_progress_event, read_progress_events
+from slide2vec.runtime.hierarchical import num_tiles
 
 
 @contextmanager
@@ -126,18 +127,17 @@ def assign_slides_to_ranks(
     tiling_results,
     *,
     num_gpus: int,
-    num_tiles_fn,
 ) -> dict[int, list[str]]:
     assignments: dict[int, list[str]] = {rank: [] for rank in range(num_gpus)}
     assigned_ranks = [(0, rank) for rank in range(num_gpus)]
     heapq.heapify(assigned_ranks)
     sortable = []
     for slide, tiling_result in zip(slide_records, tiling_results):
-        sortable.append((slide.sample_id, num_tiles_fn(tiling_result)))
-    for sample_id, num_tiles in sorted(sortable, key=lambda item: (-item[1], item[0])):
+        sortable.append((slide.sample_id, num_tiles(tiling_result)))
+    for sample_id, tile_count in sorted(sortable, key=lambda item: (-item[1], item[0])):
         assigned_tiles, rank = heapq.heappop(assigned_ranks)
         assignments[rank].append(sample_id)
-        heapq.heappush(assigned_ranks, (assigned_tiles + int(num_tiles), rank))
+        heapq.heappush(assigned_ranks, (assigned_tiles + int(tile_count), rank))
     return assignments
 
 

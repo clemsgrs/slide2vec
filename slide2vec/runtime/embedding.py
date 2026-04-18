@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -14,6 +14,7 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
+from slide2vec.runtime.hierarchical import resolve_hierarchical_geometry
 
 
 def should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
@@ -67,7 +68,6 @@ def build_hierarchical_embedding_metadata(
     mask_path: Path | str | None,
     backend: str,
     preprocessing: PreprocessingConfig,
-    resolve_hierarchical_geometry_fn: Callable[[PreprocessingConfig, Any], dict[str, int]],
 ) -> dict[str, Any]:
     coordinates_npz_path = (
         tiling_result.coordinates_npz_path if hasattr(tiling_result, "coordinates_npz_path") else None
@@ -75,7 +75,7 @@ def build_hierarchical_embedding_metadata(
     coordinates_meta_path = (
         tiling_result.coordinates_meta_path if hasattr(tiling_result, "coordinates_meta_path") else None
     )
-    geometry = resolve_hierarchical_geometry_fn(preprocessing, tiling_result)
+    geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
     return {
         "encoder_name": model.name,
         "encoder_level": model.level,
@@ -100,7 +100,6 @@ def write_tile_embedding_artifact(
     *,
     execution: ExecutionOptions,
     metadata: dict[str, Any],
-    num_rows_fn: Callable[[Any], int],
 ) -> TileEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
@@ -110,8 +109,14 @@ def write_tile_embedding_artifact(
         output_dir=execution.output_dir,
         output_format=execution.output_format,
         metadata=metadata,
-        tile_index=np.arange(num_rows_fn(features), dtype=np.int64),
+        tile_index=np.arange(_num_rows(features), dtype=np.int64),
     )
+
+
+def _num_rows(data: Any) -> int:
+    if hasattr(data, "shape") and len(data.shape) >= 1:
+        return int(data.shape[0])
+    return len(data)
 
 
 def write_slide_embedding_artifact(
@@ -150,4 +155,3 @@ def write_hierarchical_embedding_artifact(
         output_format=execution.output_format,
         metadata=metadata,
     )
-

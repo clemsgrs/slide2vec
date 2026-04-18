@@ -2,6 +2,7 @@
 
 ## 2026-04-18
 
+- When internal runtime modules already own the implementation, call them directly from orchestrators; avoid pass-through wrappers or alias assignments in `inference.py` that only forward arguments unchanged.
 - Prefer neutral package names like `runtime/` for internal implementation modules unless the user explicitly wants a private-style namespace; leading underscores in directory names read as accidental or overly internal.
 
 - When slide2vec depends on bridged HS2P progress events, keep the bridge whitelist in sync with every reporter stage the UI renders; otherwise the code can define a preview bar and still never receive preview events.

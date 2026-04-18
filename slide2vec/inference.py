@@ -14,7 +14,7 @@ from typing import Any, Callable, Sequence
 import logging
 import pandas as pd
 import torch
-from hs2p import SlideSpec, FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result, tile_slides
+from hs2p import SlideSpec, tile_slides
 from hs2p.utils.stderr import run_with_filtered_stderr
 import numpy as np
 
@@ -94,12 +94,6 @@ from slide2vec.utils.tiling_io import (
 )
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
-deserialize_execution = runtime_serialization.deserialize_execution
-deserialize_preprocessing = runtime_serialization.deserialize_preprocessing
-_serialize_model = runtime_serialization.serialize_model
-_serialize_preprocessing = runtime_serialization.serialize_preprocessing
-
-
 def _serialize_execution(
     execution: ExecutionOptions,
     *,
@@ -134,7 +128,7 @@ def _log_on_the_fly_worker_override_once(
 ) -> None:
     if not preprocessing.on_the_fly or preprocessing.read_tiles_from is not None:
         return
-    if not any(_resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
+    if not any(runtime_tiling.resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
         return
     effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
     if effective_num_workers == execution.num_workers:
@@ -357,7 +351,7 @@ def embed_slides(
                     if slide_artifact is not None:
                         slide_artifacts.append(slide_artifact)
                 if process_list_path.is_file():
-                    persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
+                    persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
                     persist_hierarchical_embeddings = _is_hierarchical_preprocessing(preprocessing)
                     include_slide_embeddings = model.level == "slide"
                     _update_process_list_after_embedding(
@@ -626,16 +620,16 @@ def embed_tiles(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
             )
-            artifact = _write_hierarchical_embedding_artifact(
+            artifact = runtime_embedding.write_hierarchical_embedding_artifact(
                 slide.sample_id,
                 features,
                 execution=execution,
-                metadata=_build_hierarchical_embedding_metadata(
+                metadata=runtime_embedding.build_hierarchical_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
-                    backend=_resolve_slide_backend(resolved_preprocessing, tiling_result),
+                    backend=runtime_tiling.resolve_slide_backend(resolved_preprocessing, tiling_result),
                     preprocessing=resolved_preprocessing,
                 ),
             )
@@ -648,15 +642,15 @@ def embed_tiles(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
             )
-            metadata = _build_tile_embedding_metadata(
+            metadata = runtime_embedding.build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=slide.image_path,
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
-                backend=_resolve_slide_backend(resolved_preprocessing, tiling_result),
+                backend=runtime_tiling.resolve_slide_backend(resolved_preprocessing, tiling_result),
             )
-            artifact = _write_tile_embedding_artifact(
+            artifact = runtime_embedding.write_tile_embedding_artifact(
                 slide.sample_id,
                 features,
                 execution=execution,
@@ -689,7 +683,7 @@ def aggregate_tiles(
             raise ValueError(
                 f"Tile artifact for {artifact.sample_id} is missing tiling metadata paths required for slide aggregation"
             )
-        tiling_result = _load_tiling_result(
+        tiling_result = runtime_tiling.load_tiling_result_from_paths(
             Path(metadata["coordinates_npz_path"]),
             Path(metadata["coordinates_meta_path"]),
         )
@@ -697,7 +691,7 @@ def aggregate_tiles(
         coordinates = np.column_stack((x_values, y_values))
         image_path = Path(metadata["image_path"])
         if model.name == "prov-gigapath":
-            coordinates = _scale_coordinates(
+            coordinates = runtime_tiling.scale_coordinates(
                 coordinates,
                 float(tiling_result.base_spacing_um),
                 float(tiling_result.requested_spacing_um),
@@ -714,11 +708,11 @@ def aggregate_tiles(
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
             )
         latents = None
-        slide_artifact = _write_slide_embedding_artifact(
+        slide_artifact = runtime_embedding.write_slide_embedding_artifact(
             artifact.sample_id,
             embedding,
             execution=execution,
-            metadata=_build_slide_embedding_metadata(model, image_path=metadata["image_path"]),
+            metadata=runtime_embedding.build_slide_embedding_metadata(model, image_path=metadata["image_path"]),
             latents=latents,
         )
         outputs.append(slide_artifact)
@@ -862,7 +856,7 @@ def run_pipeline(
                 process_list_path=process_list_path,
             )
 
-        persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
+        persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
         persist_hierarchical_embeddings = _is_hierarchical_preprocessing(resolved_preprocessing)
         include_slide_embeddings = model.level == "slide"
         include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
@@ -1074,17 +1068,17 @@ def _run_patient_pipeline(
         )
 
         if execution.save_tile_embeddings:
-            tile_artifact = _write_tile_embedding_artifact(
+            tile_artifact = runtime_embedding.write_tile_embedding_artifact(
                 slide.sample_id,
                 tile_embeddings,
                 execution=execution,
-                metadata=_build_tile_embedding_metadata(
+                metadata=runtime_embedding.build_tile_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
-                    backend=_resolve_slide_backend(preprocessing, tiling_result),
+                    backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
                 ),
             )
             tile_artifacts.append(tile_artifact)
@@ -1098,11 +1092,11 @@ def _run_patient_pipeline(
         emit_progress("aggregation.finished", sample_id=slide.sample_id, has_latents=False)
 
         if execution.save_slide_embeddings:
-            slide_artifact = _write_slide_embedding_artifact(
+            slide_artifact = runtime_embedding.write_slide_embedding_artifact(
                 slide.sample_id,
                 slide_emb,
                 execution=execution,
-                metadata=_build_slide_embedding_metadata(model, image_path=slide.image_path),
+                metadata=runtime_embedding.build_slide_embedding_metadata(model, image_path=slide.image_path),
             )
             slide_artifacts.append(slide_artifact)
 
@@ -1179,7 +1173,7 @@ def _build_incremental_persist_callback(
     if execution.output_dir is None:
         return None, tile_artifacts, slide_artifacts
 
-    persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
+    persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
     persist_hierarchical_embeddings = _is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
 
@@ -1330,7 +1324,7 @@ def _collect_distributed_pipeline_artifacts(
     list[HierarchicalEmbeddingArtifact],
     list[SlideEmbeddingArtifact],
 ]:
-    persist_tile_embeddings = _should_persist_tile_embeddings(model, execution)
+    persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
     persist_hierarchical_embeddings = _is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
@@ -1461,7 +1455,7 @@ def _compute_tile_embeddings_for_slide(
             return torch.empty((0, int(feature_dim)), dtype=torch.float32)
     _supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
+        resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
         collate_fn = OnTheFlyBatchTileCollator(
             image_path=slide.image_path,
             tiling_result=tiling_result,
@@ -1488,8 +1482,8 @@ def _compute_tile_embeddings_for_slide(
             logging.getLogger(__name__).warning(
                 "read_tiles_from is set; ignoring on_the_fly=True and reading tiles from tar archives"
             )
-        tar_path = _resolve_tile_store_archive_for_slide(
-            slide=slide,
+        tar_path = runtime_tiling.resolve_tile_store_archive_for_slide(
+            slide_sample_id=slide.sample_id,
             tiling_result=tiling_result,
             preprocessing=preprocessing,
         )
@@ -1508,7 +1502,7 @@ def _compute_tile_embeddings_for_slide(
         tiling_result,
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
         effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
@@ -1577,7 +1571,7 @@ def _compute_hierarchical_embeddings_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
-        backend=_resolve_slide_backend(preprocessing, tiling_result),
+        backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
     )
@@ -1587,7 +1581,7 @@ def _compute_hierarchical_embeddings_for_slide(
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
         effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
@@ -1660,7 +1654,7 @@ def _compute_hierarchical_embedding_shard_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
-        backend=_resolve_slide_backend(preprocessing, tiling_result),
+        backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
     )
@@ -1670,7 +1664,7 @@ def _compute_hierarchical_embedding_shard_for_slide(
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = _resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
         effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
@@ -1727,7 +1721,7 @@ def _aggregate_tile_embeddings_for_slide(
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
     if model.name == "prov-gigapath":
-        coordinates = _scale_coordinates(
+        coordinates = runtime_tiling.scale_coordinates(
             coordinates,
             float(tiling_result.base_spacing_um),
             float(tiling_result.requested_spacing_um),
@@ -1799,148 +1793,56 @@ def _persist_embedded_slide(
             output_format=execution.output_format,
             feature_dim=None,
             num_tiles=0,
-            metadata=_build_tile_embedding_metadata(
+            metadata=runtime_embedding.build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_slide_backend(preprocessing, tiling_result),
+                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
         return None, None
     if _is_hierarchical_preprocessing(preprocessing):
-        hierarchical_artifact = _write_hierarchical_embedding_artifact(
+        hierarchical_artifact = runtime_embedding.write_hierarchical_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.tile_embeddings,
             execution=execution,
-            metadata=_build_hierarchical_embedding_metadata(
+            metadata=runtime_embedding.build_hierarchical_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
-                backend=_resolve_slide_backend(preprocessing, tiling_result),
+                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
                 preprocessing=preprocessing,
             ),
         )
         return hierarchical_artifact, None
     tile_artifact = None
-    if _should_persist_tile_embeddings(model, execution):
-        tile_artifact = _write_tile_embedding_artifact(
+    if runtime_embedding.should_persist_tile_embeddings(model, execution):
+        tile_artifact = runtime_embedding.write_tile_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.tile_embeddings,
             execution=execution,
-            metadata=_build_tile_embedding_metadata(
+            metadata=runtime_embedding.build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=_resolve_slide_backend(preprocessing, tiling_result),
+                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
     slide_artifact = None
     if embedded_slide.slide_embedding is not None:
-        slide_artifact = _write_slide_embedding_artifact(
+        slide_artifact = runtime_embedding.write_slide_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.slide_embedding,
             execution=execution,
-            metadata=_build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
+            metadata=runtime_embedding.build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
             latents=embedded_slide.latents,
         )
     return tile_artifact, slide_artifact
-
-
-def _build_tile_embedding_metadata(
-    model,
-    *,
-    tiling_result,
-    image_path: Path | str,
-    mask_path: Path | str | None,
-    tile_size_lv0: int,
-    backend: str,
-) -> dict[str, Any]:
-    return runtime_embedding.build_tile_embedding_metadata(
-        model,
-        tiling_result=tiling_result,
-        image_path=image_path,
-        mask_path=mask_path,
-        tile_size_lv0=tile_size_lv0,
-        backend=backend,
-    )
-
-
-def _build_slide_embedding_metadata(model, *, image_path: Path | str) -> dict[str, Any]:
-    return runtime_embedding.build_slide_embedding_metadata(model, image_path=image_path)
-
-
-def _build_hierarchical_embedding_metadata(
-    model,
-    *,
-    tiling_result,
-    image_path: Path | str,
-    mask_path: Path | str | None,
-    backend: str,
-    preprocessing: PreprocessingConfig,
-) -> dict[str, Any]:
-    return runtime_embedding.build_hierarchical_embedding_metadata(
-        model,
-        tiling_result=tiling_result,
-        image_path=image_path,
-        mask_path=mask_path,
-        backend=backend,
-        preprocessing=preprocessing,
-        resolve_hierarchical_geometry_fn=_resolve_hierarchical_geometry,
-    )
-
-
-def _write_tile_embedding_artifact(
-    sample_id: str,
-    features,
-    *,
-    execution: ExecutionOptions,
-    metadata: dict[str, Any],
-) -> TileEmbeddingArtifact:
-    return runtime_embedding.write_tile_embedding_artifact(
-        sample_id,
-        features,
-        execution=execution,
-        metadata=metadata,
-        num_rows_fn=_num_rows,
-    )
-
-
-def _write_slide_embedding_artifact(
-    sample_id: str,
-    embedding,
-    *,
-    execution: ExecutionOptions,
-    metadata: dict[str, Any],
-    latents=None,
-) -> SlideEmbeddingArtifact:
-    return runtime_embedding.write_slide_embedding_artifact(
-        sample_id,
-        embedding,
-        execution=execution,
-        metadata=metadata,
-        latents=latents,
-    )
-
-
-def _write_hierarchical_embedding_artifact(
-    sample_id: str,
-    features,
-    *,
-    execution: ExecutionOptions,
-    metadata: dict[str, Any],
-) -> HierarchicalEmbeddingArtifact:
-    return runtime_embedding.write_hierarchical_embedding_artifact(
-        sample_id,
-        features,
-        execution=execution,
-        metadata=metadata,
-    )
-
 
 
 def _describe_device_mode(model, execution: ExecutionOptions) -> str:
@@ -2062,12 +1964,12 @@ def _write_zero_tile_embedding_sidecars(
                 np.empty((0, int(geometry["tiles_per_region"]), 0), dtype=np.float32),
                 output_dir=output_dir,
                 output_format=output_format,
-                metadata=_build_hierarchical_embedding_metadata(
+                metadata=runtime_embedding.build_hierarchical_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
-                    backend=_resolve_slide_backend(preprocessing, tiling_result),
+                    backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
                     preprocessing=preprocessing,
                 ),
             )
@@ -2078,13 +1980,13 @@ def _write_zero_tile_embedding_sidecars(
             output_format=output_format,
             feature_dim=None,
             num_tiles=0,
-            metadata=_build_tile_embedding_metadata(
+            metadata=runtime_embedding.build_tile_embedding_metadata(
                 model=model,
                 tiling_result=tiling_result,
                 image_path=slide.image_path,
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
-                backend=_resolve_slide_backend(preprocessing, tiling_result),
+                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
 
@@ -2121,10 +2023,6 @@ def _emit_tiling_summary(
         pending=int(snapshot.pending),
         discovered_tiles=int(snapshot.discovered_tiles),
     )
-
-
-def _should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
-    return runtime_embedding.should_persist_tile_embeddings(model, execution)
 
 
 def _resolved_process_list_output_variant(model) -> str | None:
@@ -2239,7 +2137,7 @@ def _tile_slides(
     num_workers: int,
 ) -> list[Any]:
     _preload_asap_wholeslidedata(preprocessing)
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = _build_hs2p_configs(preprocessing)
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = runtime_tiling.build_hs2p_configs(preprocessing)
 
     def _run_tile_slides():
         return tile_slides(
@@ -2262,7 +2160,7 @@ def _tile_slides(
 
 def _preload_asap_wholeslidedata(preprocessing: PreprocessingConfig) -> None:
     """Load wholeslidedata quietly so ASAP backend import noise stays off stderr."""
-    if _resolve_tiling_backend(preprocessing) != "asap":
+    if runtime_tiling.resolve_tiling_backend(preprocessing) != "asap":
         return
     with suppress_c_stderr():
         try:
@@ -2342,61 +2240,6 @@ def _record_slide_metadata_in_process_list(
         mapped_tiling_preview_paths,
     )
     process_df.to_csv(process_list_path, index=False)
-
-
-def _build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
-    return runtime_tiling.build_preview_config(preview, preview_config_cls=PreviewConfig)
-
-
-def _build_hs2p_configs(preprocessing: PreprocessingConfig):
-    return runtime_tiling.build_hs2p_configs(
-        preprocessing,
-        is_hierarchical_preprocessing_fn=_is_hierarchical_preprocessing,
-        resolve_tiling_backend_fn=_resolve_tiling_backend,
-        tiling_config_cls=TilingConfig,
-        segmentation_config_cls=SegmentationConfig,
-        filter_config_cls=FilterConfig,
-        preview_config_cls=PreviewConfig,
-    )
-
-
-def _resolve_tile_store_archive_for_slide(
-    *,
-    slide: SlideSpec,
-    tiling_result,
-    preprocessing: PreprocessingConfig,
-) -> Path | None:
-    return runtime_tiling.resolve_tile_store_archive_for_slide(
-        slide_sample_id=slide.sample_id,
-        tiling_result=tiling_result,
-        preprocessing=preprocessing,
-    )
-
-
-def _tile_store_archive_path(tile_store_root: Path, sample_id: str) -> Path:
-    return runtime_tiling.tile_store_archive_path(tile_store_root, sample_id)
-
-
-
-def _load_tiling_result(coordinates_npz_path: Path, coordinates_meta_path: Path):
-    return runtime_tiling.load_tiling_result(
-        coordinates_npz_path,
-        coordinates_meta_path,
-        load_tiling_result_fn=load_tiling_result,
-    )
-
-
-def _scale_coordinates(coordinates: np.ndarray, base_spacing_um: float, spacing: float) -> np.ndarray:
-    return runtime_tiling.scale_coordinates(coordinates, base_spacing_um, spacing)
-
-
-
-def _resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
-    return runtime_tiling.resolve_tiling_backend(preprocessing)
-
-
-def _resolve_slide_backend(preprocessing: PreprocessingConfig | None, tiling_result) -> str:
-    return runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
 
 
 def _resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | None) -> PreprocessingConfig:
@@ -2504,16 +2347,16 @@ def _embed_single_slide_distributed(
             sample_id=slide.sample_id,
         )
         if _is_hierarchical_preprocessing(preprocessing):
-            shard_payloads = _load_hierarchical_embedding_shards(coordination_dir, slide.sample_id)
+            shard_payloads = runtime_distributed.load_hierarchical_embedding_shards(coordination_dir, slide.sample_id)
             geometry = _resolve_hierarchical_geometry(preprocessing, tiling_result)
-            tile_embeddings = _merge_hierarchical_embedding_shards(
+            tile_embeddings = runtime_distributed.merge_hierarchical_embedding_shards(
                 shard_payloads,
                 num_regions=_num_tiles(tiling_result),
                 tiles_per_region=int(geometry["tiles_per_region"]),
             )
         else:
-            shard_payloads = _load_tile_embedding_shards(coordination_dir, slide.sample_id)
-            tile_embeddings = _merge_tile_embedding_shards(shard_payloads)
+            shard_payloads = runtime_distributed.load_tile_embedding_shards(coordination_dir, slide.sample_id)
+            tile_embeddings = runtime_distributed.merge_tile_embedding_shards(shard_payloads)
         if model.level != "slide":
             return _make_embedded_slide(
                 slide=slide,
@@ -2548,7 +2391,11 @@ def _embed_multi_slides_distributed(
     execution: ExecutionOptions,
     work_dir: Path,
 ) -> list[EmbeddedSlide]:
-    assignments = _assign_slides_to_ranks(slide_records, tiling_results, num_gpus=execution.num_gpus)
+    assignments = runtime_distributed.assign_slides_to_ranks(
+        slide_records,
+        tiling_results,
+        num_gpus=execution.num_gpus,
+    )
     with _distributed_coordination_dir(work_dir) as coordination_dir:
         _run_distributed_direct_embedding_stage(
             model,
@@ -2561,7 +2408,7 @@ def _embed_multi_slides_distributed(
         )
         results = []
         for slide, tiling_result in zip(slide_records, tiling_results):
-            payload = _load_embedded_slide_payload(coordination_dir, slide.sample_id)
+            payload = runtime_distributed.load_embedded_slide_payload(coordination_dir, slide.sample_id)
             slide_embedding = payload["slide_embedding"] if "slide_embedding" in payload else None
             latents = payload["latents"] if "latents" in payload else None
             results.append(
@@ -2645,8 +2492,8 @@ def _build_pipeline_worker_request_payload(
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
-        "model": _serialize_model(model),
-        "preprocessing": _serialize_preprocessing(preprocessing),
+        "model": runtime_serialization.serialize_model(model),
+        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
         "execution": _serialize_execution(execution, preprocessing=preprocessing),
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
@@ -2659,8 +2506,8 @@ def _write_embedding_request(
     output_dir: Path,
 ) -> None:
     payload = {
-        "model": _serialize_model(model),
-        "preprocessing": _serialize_preprocessing(preprocessing),
+        "model": runtime_serialization.serialize_model(model),
+        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
         "execution": _serialize_execution(execution, preprocessing=preprocessing),
     }
     request_path = output_dir / "embedding_request.json"
@@ -2680,8 +2527,8 @@ def _build_direct_embed_worker_request_payload(
 ) -> dict[str, Any]:
     return {
         "strategy": strategy,
-        "model": _serialize_model(model),
-        "preprocessing": _serialize_preprocessing(preprocessing),
+        "model": runtime_serialization.serialize_model(model),
+        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
         "execution": _serialize_execution(execution, preprocessing=preprocessing),
         "coordination_dir": str(coordination_dir),
         "sample_id": sample_id,
@@ -2692,58 +2539,6 @@ def _build_direct_embed_worker_request_payload(
 
 def _reset_progress_event_logs(progress_events_path: Path) -> None:
     runtime_distributed.reset_progress_event_logs(progress_events_path)
-
-
-def _drain_stream_to_buffer(stream, chunks: list[str]) -> None:
-    # Compatibility shim for tests monkeypatching this helper in slide2vec.inference.
-    runtime_distributed.drain_stream_to_buffer(stream, chunks)
-
-
-def _write_worker_logs(module: str, output_dir: Path, stdout_text: str, stderr_text: str) -> tuple[Path, Path]:
-    return runtime_distributed.write_worker_logs(module, output_dir, stdout_text, stderr_text)
-
-
-def _assign_slides_to_ranks(
-    slide_records: Sequence[SlideSpec],
-    tiling_results,
-    *,
-    num_gpus: int,
-) -> dict[int, list[str]]:
-    return runtime_distributed.assign_slides_to_ranks(
-        slide_records,
-        tiling_results,
-        num_gpus=num_gpus,
-        num_tiles_fn=_num_tiles,
-    )
-
-
-def _merge_tile_embedding_shards(shard_payloads):
-    return runtime_distributed.merge_tile_embedding_shards(shard_payloads)
-
-
-def _merge_hierarchical_embedding_shards(
-    shard_payloads,
-    *,
-    num_regions: int,
-    tiles_per_region: int,
-):
-    return runtime_distributed.merge_hierarchical_embedding_shards(
-        shard_payloads,
-        num_regions=num_regions,
-        tiles_per_region=tiles_per_region,
-    )
-
-
-def _load_tile_embedding_shards(coordination_dir: Path, sample_id: str):
-    return runtime_distributed.load_tile_embedding_shards(coordination_dir, sample_id)
-
-
-def _load_hierarchical_embedding_shards(coordination_dir: Path, sample_id: str):
-    return runtime_distributed.load_hierarchical_embedding_shards(coordination_dir, sample_id)
-
-
-def _load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
-    return runtime_distributed.load_embedded_slide_payload(coordination_dir, sample_id)
 
 
 def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:

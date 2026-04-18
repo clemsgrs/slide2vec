@@ -3,7 +3,7 @@ from contextlib import nullcontext
 import json
 from pathlib import Path
 
-from slide2vec.inference import _assign_slides_to_ranks
+from slide2vec.runtime.distributed import assign_slides_to_ranks
 
 
 def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
@@ -21,11 +21,10 @@ def main(argv=None) -> int:
     from slide2vec.inference import (
         _compute_embedded_slides,
         _persist_embedded_slide,
-        deserialize_execution,
-        deserialize_preprocessing,
         load_successful_tiled_slides,
     )
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
+    from slide2vec.runtime.serialization import deserialize_execution, deserialize_preprocessing
 
     parser = get_args_parser(add_help=True)
     args = parser.parse_args(argv)
@@ -48,7 +47,7 @@ def main(argv=None) -> int:
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
         slide_records, tiling_results = load_successful_tiled_slides(output_dir)
-        assignments = _assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
+        assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
         assigned_ids = assignments.get(global_rank, [])
         if not assigned_ids:
             return 0
