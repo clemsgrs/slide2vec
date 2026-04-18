@@ -1,5 +1,27 @@
 # Documentation Log
 
+## 2026-04-18
+
+- Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
+
+- Split the live tiling UI into a coordinates-extraction bar plus a separate preview-generation bar, and moved the final tiling summary into a dedicated `tiling.summary` event so it prints once at the very end.
+
+## 2026-04-17
+
+- Kept per-slide backend-selection notices, but switched Rich rendering to the console print path used by hs2p so they appear above the live bar without corrupting it.
+
+## 2026-04-17
+
+- Added a selective hs2p progress bridge so slide2vec keeps its own run/config summaries while still surfacing bridged tissue and backend-selection events from upstream tiling.
+
+## 2026-04-17
+
+- Removed slide2vec's extra preflight backend-resolution pass for `backend="auto"` so tiling now relies on hs2p's own resolver once per slide.
+
+## 2026-04-17
+
+- Aligned slide2vec's bundled preprocessing schema with hs2p 3.3.0 by switching the default tissue-segmentation config to the new `method`-based SAM2-capable schema and documenting AtlasPatch-backed `sam2` usage.
+
 ## 2026-04-17
 
 - Reworked the docs landing page into a product-style hero with action buttons, feature cards, and a summary panel to make the site feel less like a flat index.

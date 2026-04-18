@@ -67,7 +67,7 @@ RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/
 WORKDIR /opt/app/
 
 ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
-ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git"
+ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git git+https://github.com/facebookresearch/sam2.git"
 
 RUN python -m ensurepip --upgrade \
     && python -m pip install --upgrade pip setuptools pip-tools \

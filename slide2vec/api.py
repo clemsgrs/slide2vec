@@ -72,8 +72,17 @@ class PreprocessingConfig:
         gpu_decode = bool(tiling.gpu_decode)
         adaptive_batching = bool(tiling.adaptive_batching)
         preview_cfg = tiling.preview
-        preview_save = bool(preview_cfg.save)
-        preview_downsample = int(preview_cfg.downsample)
+        preview_save = bool(preview_cfg.save_mask_preview)
+        preview_tiling_save = bool(preview_cfg.save_tiling_preview)
+        preview_kwargs: dict[str, Any] = {
+            "save_mask_preview": preview_save,
+            "save_tiling_preview": preview_tiling_save,
+            "downsample": int(preview_cfg.downsample),
+        }
+        preview_kwargs["tissue_contour_color"] = tuple(
+            int(channel) for channel in preview_cfg.tissue_contour_color
+        )
+        preview_kwargs["mask_overlay_alpha"] = float(preview_cfg.mask_overlay_alpha)
         return cls(
             backend=tiling.backend,
             requested_spacing_um=float(tiling.params.requested_spacing_um),
@@ -104,11 +113,7 @@ class PreprocessingConfig:
             resume=bool(cfg.resume),
             segmentation=dict(tiling.seg_params),
             filtering=dict(tiling.filter_params),
-            preview={
-                "save_mask_preview": preview_save,
-                "save_tiling_preview": preview_save,
-                "downsample": preview_downsample,
-            },
+            preview=preview_kwargs,
         )
 
     def with_backend(self, backend: str) -> "PreprocessingConfig":

@@ -9,6 +9,7 @@ from hs2p import SlideSpec, load_tiling_result
 REQUIRED_MANIFEST_COLUMNS = ("sample_id", "image_path")
 BASE_PROCESS_COLUMNS = (
     "sample_id",
+    "annotation",
     "image_path",
     "mask_path",
     "requested_backend",
@@ -22,6 +23,7 @@ BASE_PROCESS_COLUMNS = (
 )
 BASE_TILING_ORDERED_COLUMNS = (
     "sample_id",
+    "annotation",
     "image_path",
     "mask_path",
     "requested_backend",
@@ -39,6 +41,7 @@ BASE_TILING_ORDERED_COLUMNS = (
 )
 BASE_EMBEDDING_ORDERED_COLUMNS = (
     "sample_id",
+    "annotation",
     "image_path",
     "mask_path",
     "requested_backend",
@@ -150,6 +153,8 @@ def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
         )
     if "spacing_at_level_0" not in df.columns:
         df["spacing_at_level_0"] = [None] * len(df)
+    if "annotation" not in df.columns:
+        df["annotation"] = ["tissue"] * len(df)
     if "tiles_tar_path" not in df.columns:
         df["tiles_tar_path"] = [None] * len(df)
     if "mask_preview_path" not in df.columns:

@@ -60,7 +60,7 @@ In practice, the config controls:
 - preprocessing/tiling parameters
 - output directory
 - batch size, workers, precision, and GPU count
-- whether to save tiling previews through `tiling.preview.save`
+- whether to save mask and tiling previews through `tiling.preview.save_mask_preview` / `tiling.preview.save_tiling_preview`
 - whether to save tile artifacts alongside slide-level outputs
 
 ## Common Overrides
@@ -79,7 +79,9 @@ Common overrides:
 - `output_dir=/path/to/output`
 - `speed.num_gpus=4`
 - `speed.num_dataloader_workers=8` (`null` keeps auto mode)
-- `tiling.preview.save=true`
+- `tiling.preview.save_mask_preview=true`
+- `tiling.preview.save_tiling_preview=true`
+- `tiling.preview.tissue_contour_color=[157, 219, 129]`
 - `tiling.params.region_tile_multiple=6` (hierarchical extraction)
 - `model.name=...`
 - `model.output_variant=...`
@@ -138,6 +140,17 @@ slide2vec /path/to/config.yaml speed.num_gpus=4
 
 If you pass `--run-on-cpu`, the CLI uses CPU execution instead.
 
+## Segmentation Notes
+
+`tiling.seg_params.method` controls how hs2p segments tissue before it extracts coordinates:
+
+- `hsv` uses the HSV heuristic
+- `otsu` thresholds the saturation channel with Otsu
+- `threshold` applies a fixed saturation threshold
+- `sam2` runs the AtlasPatch SAM2 tissue segmentation path on an internal `8.0 um/px` thumbnail
+
+When `method: sam2` is selected, `sam2_checkpoint_path` and `sam2_config_path` are optional. If they are left blank, hs2p downloads the default AtlasPatch checkpoint and SAM2 config from Hugging Face.
+
 ## Outputs
 
 The CLI writes explicit artifact directories under the run output directory:
@@ -149,7 +162,7 @@ The CLI writes explicit artifact directories under the run output directory:
 - `slide_embeddings/<sample_id>.pt` or `.npz`
 - `slide_embeddings/<sample_id>.meta.json`
 - optional `slide_latents/<sample_id>.pt` or `.npz`
-- `process_list.csv` with backend provenance columns (`requested_backend`, `backend`) carried through from hs2p, plus embedding provenance columns (`encoder_name`, `output_variant`, `feature_kind`) once feature artifacts are written
+- `process_list.csv` with hs2p provenance columns (`annotation`, `requested_backend`, `backend`) carried through from hs2p, plus embedding provenance columns (`encoder_name`, `output_variant`, `feature_kind`) once feature artifacts are written
 - the resolved saved config file for the run
 - `logs/` with the main log plus distributed worker stdout/stderr captures when multi-GPU workers are used
 

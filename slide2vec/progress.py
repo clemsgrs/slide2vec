@@ -86,7 +86,7 @@ class PlainTextCliProgressReporter:
         line = self._format_line(kind, payload)
         if line is None:
             return
-        if kind in {"tiling.progress", "embedding.tile.progress"}:
+        if kind in {"tiling.progress", "preview.progress", "embedding.tile.progress"}:
             now = time.monotonic()
             last = self._last_line_by_kind.get(kind)
             if last is not None and last[1] == line and (now - last[0]) < 1.0:
@@ -106,17 +106,46 @@ class PlainTextCliProgressReporter:
                 f"Starting slide2vec run: {payload['slide_count']} slide(s), "
                 f"model={payload['model_name']} level={payload['level']} output={payload['output_dir']}"
             )
+        if kind == "tissue.started":
+            return f"Resolving tissue masks ({payload['total']} total)..."
+        if kind == "tissue.progress":
+            return (
+                f"Tissue resolution: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
+        if kind == "tissue.finished":
+            return (
+                f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
         if kind == "tiling.started":
             return f"Tiling slides ({payload['slide_count']} total)..."
         if kind == "tiling.progress":
             return (
                 f"Tiling progress: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed, {payload['discovered_tiles']} tiles discovered"
+                f"{payload['failed']} failed"
             )
         if kind == "tiling.finished":
             return (
                 f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+            )
+        if kind == "tiling.summary":
+            return (
+                f"Tiling summary: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+            )
+        if kind == "preview.started":
+            return f"Generating previews ({payload['total']} total)..."
+        if kind == "preview.progress":
+            return (
+                f"Preview generation: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
+        if kind == "preview.finished":
+            return (
+                f"Preview generation finished: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
             )
         if kind == "model.loading":
             return f"Loading model {payload['model_name']}..."
@@ -183,10 +212,15 @@ class RichCliProgressReporter:
             console=self.console,
             transient=False,
         )
-        self.progress.start()
+        self._progress_started = False
         self._task_ids: dict[str, int] = {}
         self._model_loading_counts: dict[str, int] = {}
         self._model_loading_devices: dict[str, set[str]] = {}
+
+    def _ensure_progress_started(self) -> None:
+        if not self._progress_started:
+            self.progress.start()
+            self._progress_started = True
 
     def emit(self, event: ProgressEvent) -> None:
         kind = event.kind
@@ -197,8 +231,36 @@ class RichCliProgressReporter:
                 f"for {payload['slide_count']} slide(s)"
             )
             return
+        if kind == "tissue.started":
+            self._ensure_progress_started()
+            self.progress.print(f"Resolving tissue masks ({payload['total']} total)...")
+            self._task_ids["tissue"] = self.progress.add_task("Resolving tissue masks", total=payload["total"])
+            return
+        if kind == "tissue.progress":
+            task_id = self._task_ids.get("tissue")
+            if task_id is not None:
+                self.progress.update(
+                    task_id,
+                    completed=payload["completed"] + payload["failed"],
+                    description=(
+                        f"Resolving tissue masks ({payload['completed']}/{payload['total']} resolved)"
+                    ),
+                )
+            return
+        if kind == "tissue.finished":
+            task_id = self._task_ids.pop("tissue", None)
+            if task_id is not None:
+                self.progress.remove_task(task_id)
+            self.progress.print(
+                f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
+                f"{payload['failed']} failed"
+            )
+            return
         if kind == "tiling.started":
+            self._ensure_progress_started()
             self._task_ids["tiling"] = self.progress.add_task("Tiling slides", total=payload["slide_count"])
+            self.progress.refresh()
+            self.progress.print(f"Tiling slides ({payload['slide_count']} total)...")
             return
         if kind == "tiling.progress":
             task_id = self._task_ids.get("tiling")
@@ -206,13 +268,18 @@ class RichCliProgressReporter:
                 self.progress.update(
                     task_id,
                     completed=payload["completed"] + payload["failed"],
-                    description=f"Tiling slides ({payload['discovered_tiles']} tiles discovered)",
+                    description=f"Tiling slides ({payload['completed']}/{payload['total']} resolved)",
                 )
             return
         if kind == "tiling.finished":
             task_id = self._task_ids.get("tiling")
             if task_id is not None:
                 self.progress.update(task_id, completed=payload["completed"] + payload["failed"])
+            if task_id is not None:
+                self.progress.remove_task(task_id)
+                self._task_ids.pop("tiling", None)
+            return
+        if kind == "tiling.summary":
             self._print_summary(
                 "Tiling Summary",
                 [
@@ -223,7 +290,31 @@ class RichCliProgressReporter:
                 ],
             )
             return
+        if kind == "preview.started":
+            self._ensure_progress_started()
+            total = int(payload["total"])
+            if total <= 0:
+                return
+            self._task_ids["preview"] = self.progress.add_task("Generating previews", total=total)
+            return
+        if kind == "preview.progress":
+            task_id = self._task_ids.get("preview")
+            if task_id is not None:
+                self.progress.update(
+                    task_id,
+                    completed=payload["completed"] + payload["failed"],
+                    description=f"Generating previews ({payload['completed']}/{payload['total']} rendered)",
+                )
+            return
+        if kind == "preview.finished":
+            task_id = self._task_ids.get("preview")
+            if task_id is not None:
+                self.progress.update(task_id, completed=payload["completed"] + payload["failed"])
+                self.progress.remove_task(task_id)
+                self._task_ids.pop("preview", None)
+            return
         if kind == "model.loading":
+            self._ensure_progress_started()
             model_name = str(payload["model_name"])
             count = self._model_loading_counts.get(model_name, 0) + 1
             self._model_loading_counts[model_name] = count
@@ -273,9 +364,11 @@ class RichCliProgressReporter:
                 )
             return
         if kind == "embedding.started":
+            self._ensure_progress_started()
             self._task_ids["embedding"] = self.progress.add_task("Embedding slides", total=payload["slide_count"])
             return
         if kind == "embedding.assignment.started":
+            self._ensure_progress_started()
             self._task_ids["embedding_assignment"] = self.progress.add_task(
                 f"Assigning slides across {payload['num_gpus']} GPUs",
                 total=None,
@@ -291,6 +384,7 @@ class RichCliProgressReporter:
             )
             return
         if kind == "embedding.slide.started":
+            self._ensure_progress_started()
             tile_task_key = _progress_task_key("tiles", payload)
             tile_task = self._task_ids.get(tile_task_key)
             description = _progress_subject(payload)
@@ -314,6 +408,7 @@ class RichCliProgressReporter:
                 self.progress.update(task_id, completed=payload["processed"], total=payload["total"])
             return
         if kind == "aggregation.started":
+            self._ensure_progress_started()
             aggregation_task_key = _progress_task_key("aggregation", payload)
             description = f"Aggregating {_progress_subject(payload)}"
             if aggregation_task_key not in self._task_ids:
@@ -367,7 +462,8 @@ class RichCliProgressReporter:
             return
 
     def close(self) -> None:
-        self.progress.stop()
+        if self._progress_started:
+            self.progress.stop()
 
     def _print_summary(self, title: str, rows: list[tuple[str, str]]) -> None:
         from rich.panel import Panel

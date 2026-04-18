@@ -34,7 +34,9 @@ class RecordingReporter:
 def _install_fake_rich_runtime(monkeypatch):
     fake_rich = types.ModuleType("rich")
     fake_console = types.ModuleType("rich.console")
+    fake_panel = types.ModuleType("rich.panel")
     fake_progress = types.ModuleType("rich.progress")
+    fake_table = types.ModuleType("rich.table")
 
     class FakeConsole:
         def __init__(self, file=None, **kwargs):
@@ -53,12 +55,14 @@ def _install_fake_rich_runtime(monkeypatch):
         def __init__(self, *args, **kwargs):
             self.tasks = {}
             self.next_task_id = 1
+            self.console = kwargs.get("console")
+            self.started = False
 
         def start(self):
-            return None
+            self.started = True
 
         def stop(self):
-            return None
+            self.started = False
 
         def add_task(self, description, total=None, completed=0, visible=True):
             task_id = self.next_task_id
@@ -77,11 +81,42 @@ def _install_fake_rich_runtime(monkeypatch):
         def remove_task(self, task_id):
             self.tasks.pop(task_id, None)
 
+        def refresh(self):
+            return None
+
         def advance(self, task_id, advance=1):
             completed = self.tasks[task_id]["completed"] if "completed" in self.tasks[task_id] else 0
             self.tasks[task_id]["completed"] = completed + advance
 
+        def print(self, *args, **kwargs):
+            if self.console is not None:
+                self.console.print(*args, **kwargs)
+
+    class FakeTable:
+        def __init__(self):
+            self.rows = []
+
+        @classmethod
+        def grid(cls, padding=(0, 2)):
+            return cls()
+
+        def add_column(self, *args, **kwargs):
+            return None
+
+        def add_row(self, *args):
+            self.rows.append(args)
+
+    class FakePanel:
+        @classmethod
+        def fit(cls, table, title=None, border_style=None):
+            return {
+                "table": table,
+                "title": title,
+                "border_style": border_style,
+            }
+
     fake_console.Console = FakeConsole
+    fake_panel.Panel = FakePanel
     fake_progress.Progress = FakeProgress
     fake_progress.BarColumn = lambda *args, **kwargs: None
     fake_progress.MofNCompleteColumn = lambda *args, **kwargs: None
@@ -90,11 +125,16 @@ def _install_fake_rich_runtime(monkeypatch):
     fake_progress.TextColumn = lambda *args, **kwargs: None
     fake_progress.TimeElapsedColumn = lambda *args, **kwargs: None
     fake_progress.TimeRemainingColumn = lambda *args, **kwargs: None
+    fake_table.Table = FakeTable
     fake_rich.console = fake_console
+    fake_rich.panel = fake_panel
     fake_rich.progress = fake_progress
+    fake_rich.table = fake_table
     monkeypatch.setitem(sys.modules, "rich", fake_rich)
     monkeypatch.setitem(sys.modules, "rich.console", fake_console)
+    monkeypatch.setitem(sys.modules, "rich.panel", fake_panel)
     monkeypatch.setitem(sys.modules, "rich.progress", fake_progress)
+    monkeypatch.setitem(sys.modules, "rich.table", fake_table)
     return FakeConsole, FakeProgress
 
 
@@ -205,12 +245,22 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
         "_build_incremental_persist_callback",
         lambda **kwargs: (None, [], []),
     )
+    def _emit_tiling_summary(*args, **kwargs):
+        progress.emit_progress(
+            "tiling.summary",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+            discovered_tiles=2,
+        )
     monkeypatch.setattr(
         inference,
         "_collect_pipeline_artifacts",
         lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_emit_tiling_summary", _emit_tiling_summary)
 
     model = SimpleNamespace(
         name="prov-gigapath",
@@ -234,7 +284,7 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     assert kinds == [
         "run.started",
         "tiling.started",
-        "tiling.finished",
+        "tiling.summary",
         "embedding.started",
         "embedding.slide.started",
         "aggregation.started",
@@ -287,6 +337,18 @@ def test_run_pipeline_emits_assignment_progress_for_multi_gpu_embedding(monkeypa
     )
     monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
     monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        inference,
+        "_emit_tiling_summary",
+        lambda *args, **kwargs: progress.emit_progress(
+            "tiling.summary",
+            total=2,
+            completed=2,
+            failed=0,
+            pending=0,
+            discovered_tiles=5,
+        ),
+    )
 
     model = SimpleNamespace(
         name="prism",
@@ -310,7 +372,7 @@ def test_run_pipeline_emits_assignment_progress_for_multi_gpu_embedding(monkeypa
     assert kinds == [
         "run.started",
         "tiling.started",
-        "tiling.finished",
+        "tiling.summary",
         "embedding.started",
         "embedding.assignment.started",
         "embedding.assignment.finished",
@@ -337,6 +399,31 @@ def test_plain_text_reporter_formats_assignment_progress():
             {"slide_count": 10, "num_gpus": 4},
         )
         == "Slide assignment complete: 10 slide(s) across 4 GPU(s)"
+    )
+
+
+def test_plain_text_reporter_formats_tissue_progress():
+    import slide2vec.progress as progress
+
+    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
+
+    assert (
+        reporter._format_line("tissue.started", {"total": 3})
+        == "Resolving tissue masks (3 total)..."
+    )
+    assert (
+        reporter._format_line(
+            "tissue.progress",
+            {"total": 3, "completed": 2, "failed": 1},
+        )
+        == "Tissue resolution: 2/3 complete, 1 failed"
+    )
+    assert (
+        reporter._format_line(
+            "tissue.finished",
+            {"total": 3, "completed": 3, "failed": 0},
+        )
+        == "Tissue resolution finished: 3/3 complete, 0 failed"
     )
 
 
@@ -595,6 +682,185 @@ def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypat
 
     assert reporter.progress.tasks == {}
     assert len(console.lines) == 1
+
+
+def test_rich_reporter_emits_tissue_progress_lines(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="tissue.started", payload={"total": 3}))
+    assert reporter.progress.tasks[1]["description"] == "Resolving tissue masks"
+    assert reporter.progress.tasks[1]["total"] == 3
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.progress",
+            payload={"total": 3, "completed": 2, "failed": 1},
+        )
+    )
+    assert reporter.progress.tasks[1]["completed"] == 3
+    assert reporter.progress.tasks[1]["description"] == "Resolving tissue masks (2/3 resolved)"
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.finished",
+            payload={"total": 3, "completed": 3, "failed": 0},
+        )
+    )
+
+    assert reporter.progress.tasks == {}
+    assert [line[0] for line in console.lines] == [
+        "Resolving tissue masks (3 total)...",
+        "Tissue resolution finished: 3/3 complete, 0 failed",
+    ]
+
+
+def test_rich_reporter_defers_tiling_bar_until_progress(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    assert reporter.progress.started is False
+    reporter.emit(progress.ProgressEvent(kind="tiling.started", payload={"slide_count": 8}))
+    assert reporter.progress.started is True
+    assert reporter.progress.tasks[1]["description"] == "Tiling slides"
+    assert reporter.progress.tasks[1]["total"] == 8
+    assert [line[0] for line in console.lines] == ["Tiling slides (8 total)..."]
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="backend.selected",
+            payload={
+                "sample_id": "slide-a",
+                "backend": "cucim",
+                "reason": "selected cuCIM for auto backend",
+            },
+        )
+    )
+    assert [line[0] for line in console.lines] == [
+        "Tiling slides (8 total)...",
+        "[backend] slide-a: selected cuCIM for auto backend",
+    ]
+
+    reporter.emit(progress.ProgressEvent(kind="tissue.finished", payload={"total": 8, "completed": 8, "failed": 0}))
+    assert reporter.progress.tasks[1]["total"] == 8
+    assert reporter.progress.tasks[1]["description"] == "Tiling slides"
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.progress",
+            payload={
+                "total": 8,
+                "completed": 1,
+                "failed": 0,
+                "pending": 7,
+                "discovered_tiles": 42,
+            },
+        )
+    )
+    assert reporter.progress.tasks[1]["description"] == "Tiling slides (1/8 resolved)"
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.finished",
+            payload={
+                "total": 8,
+                "completed": 8,
+                "failed": 0,
+                "pending": 0,
+                "discovered_tiles": 42,
+            },
+        )
+    )
+    assert 1 not in reporter.progress.tasks
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.summary",
+            payload={
+                "total": 8,
+                "completed": 8,
+                "failed": 0,
+                "pending": 0,
+                "discovered_tiles": 42,
+            },
+        )
+    )
+    assert console.lines[-1][0]["title"] == "Tiling Summary"
+
+    reporter.emit(progress.ProgressEvent(kind="preview.started", payload={"total": 3}))
+    assert reporter.progress.tasks[2]["description"] == "Generating previews"
+    assert reporter.progress.tasks[2]["total"] == 3
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.progress",
+            payload={"total": 3, "completed": 1, "failed": 0, "pending": 2},
+        )
+    )
+    assert reporter.progress.tasks[2]["description"] == "Generating previews (1/3 rendered)"
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="preview.finished",
+            payload={"total": 3, "completed": 3, "failed": 0, "pending": 0},
+        )
+    )
+    assert 2 not in reporter.progress.tasks
+
+
+def test_rich_reporter_emits_backend_selected_without_log_suffix(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="backend.selected",
+            payload={
+                "sample_id": "slide-a",
+                "backend": "cucim",
+                "reason": "selected cuCIM for auto backend",
+            },
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "[backend] slide-a: selected cuCIM for auto backend"
+    ]
+
+
+def test_rich_reporter_emits_backend_selected_via_console_print(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    def _fail_if_used(*args, **kwargs):
+        raise AssertionError("backend.selected should not go through Progress.print")
+
+    reporter.progress.print = _fail_if_used
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="backend.selected",
+            payload={
+                "sample_id": "slide-a",
+                "backend": "cucim",
+                "reason": "selected cuCIM for auto backend",
+            },
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "[backend] slide-a: selected cuCIM for auto backend"
+    ]
+
+
 
 
 def test_jsonl_progress_reporter_tags_worker_events_with_gpu_label(tmp_path: Path):

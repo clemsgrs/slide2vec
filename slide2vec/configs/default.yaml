@@ -38,12 +38,14 @@ tiling:
     # downsample controls which pyramid level is read for tissue segmentation.
     # Larger values are faster and use less memory; smaller values can improve mask precision.
     downsample: 64 # find the closest downsample in the slide for tissue segmentation
-    sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when use_otsu=True)
+    sthresh: 8 # segmentation threshold (positive integer, using a higher threshold leads to less foreground and more background detection) (not used when method="otsu")
     sthresh_up: 255 # upper threshold value for scaling the binary mask
     mthresh: 7 # median filter size (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
-    use_otsu: false # use otsu's method instead of simple binary thresholding
-    use_hsv: true # use HSV thresholding instead of simple binary thresholding
+    method: "hsv" # tissue segmentation method: "hsv", "otsu", "threshold", or "sam2"
+    sam2_checkpoint_path: # optional when method="sam2"; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
+    sam2_config_path: # optional local override for the SAM2 model config; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
+    sam2_device: "cpu" # device for SAM2 inference, e.g. "cpu", "cuda", or "cuda:0"
   filter_params:
     ref_tile_size: ${tiling.params.requested_tile_size_px} # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.requested_spacing_um will be kept)
@@ -60,9 +62,10 @@ tiling:
     blur_threshold: 50.0 # minimum blur score (higher is sharper)
     qc_spacing_um: 2.0 # spacing at which pixel-based QC is evaluated
   preview:
-    save: true # save preview images of slide tiling and mask overlays
+    save_mask_preview: true # save preview images of mask overlays
+    save_tiling_preview: true # save preview images of tile layouts
     downsample: 32 # downsample to use for preview rendering
-    mask_overlay_color: [157, 219, 129] # RGB color used for tissue overlays in batch mask previews
+    tissue_contour_color: [157, 219, 129] # RGB color used for tissue contours in batch mask previews
     mask_overlay_alpha: 0.5 # alpha used for tissue overlays in batch mask previews
 
 speed:

@@ -30,8 +30,7 @@ TILING_SEG_PARAMS = dict(
     sthresh_up=255,
     mthresh=7,
     close=4,
-    use_otsu=False,
-    use_hsv=True,
+    method="hsv",
 )
 
 # -- tiling.filter_params --

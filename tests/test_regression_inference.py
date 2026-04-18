@@ -317,8 +317,8 @@ def test_update_process_list_after_embedding_writes_feature_provenance(
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     slide_artifacts = []
@@ -387,8 +387,8 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     process_list_path = output_dir / "process_list.csv"
     process_list_path.parent.mkdir(parents=True, exist_ok=True)
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     slide_record = make_slide("slide-a", image_path=slide_path)
@@ -490,9 +490,9 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
     )
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-zero,/tmp/slide-zero.svs,,,success,0,/tmp/slide-zero.coordinates.npz,/tmp/slide-zero.coordinates.meta.json,,\n"
-        "slide-full,/tmp/slide-full.svs,,,success,2,/tmp/slide-full.coordinates.npz,/tmp/slide-full.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-zero,tissue,/tmp/slide-zero.svs,,,success,0,/tmp/slide-zero.coordinates.npz,/tmp/slide-zero.coordinates.meta.json,,\n"
+        "slide-full,tissue,/tmp/slide-full.svs,,,success,2,/tmp/slide-full.coordinates.npz,/tmp/slide-full.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -716,9 +716,9 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
-        "slide-b,/tmp/slide-b.svs,,asap,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
+        "slide-b,tissue,/tmp/slide-b.svs,,asap,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
 
@@ -767,9 +767,9 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
-        "slide-b,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
+        "slide-b,tissue,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     write_tile_embeddings(
@@ -837,10 +837,10 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,"  # spacing_at_level_0
         "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
-        "slide-b,/tmp/slide-b.svs,,,"
+        "slide-b,tissue,/tmp/slide-b.svs,,,"
         "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
@@ -947,11 +947,6 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
         inference,
-        "resolve_backend",
-        lambda requested_backend, **kwargs: SimpleNamespace(backend="asap", reason=None, tried=("asap",)),
-    )
-    monkeypatch.setattr(
-        inference,
         "_build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
@@ -971,6 +966,122 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     )
 
     assert captured["kwargs"]["save_tiles"] is False
+
+
+def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+    import slide2vec.progress as progress
+    from hs2p import progress as hs2p_progress
+
+    class Reporter:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event):
+            self.events.append(event)
+
+        def close(self):
+            return None
+
+    reporter = Reporter()
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["slides"] = list(slides)
+        captured["kwargs"] = kwargs
+        hs2p_progress.emit_progress("tissue.started", total=1)
+        hs2p_progress.emit_progress(
+            "tissue.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "tissue.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "backend.selected",
+            sample_id="slide-a",
+            backend="asap",
+            reason="selected asap for auto backend",
+        )
+        hs2p_progress.emit_progress("tiling.started", total=1)
+        hs2p_progress.emit_progress(
+            "tiling.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+            discovered_tiles=1,
+        )
+        hs2p_progress.emit_progress(
+            "tiling.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+            discovered_tiles=1,
+            output_dir=str(tmp_path),
+            process_list_path=str(tmp_path / "process_list.csv"),
+            zero_tile_successes=0,
+        )
+        hs2p_progress.emit_progress("preview.started", total=1)
+        hs2p_progress.emit_progress(
+            "preview.progress",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+        hs2p_progress.emit_progress(
+            "preview.finished",
+            total=1,
+            completed=1,
+            failed=0,
+            pending=0,
+        )
+
+    assert not hasattr(inference, "resolve_backend")
+    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(
+        inference,
+        "_build_hs2p_configs",
+        lambda preprocessing: (
+            SimpleNamespace(requested_backend="auto"),
+            "segmentation",
+            "filtering",
+            "preview",
+            None,
+            False,
+        ),
+    )
+
+    with progress.activate_progress_reporter(reporter):
+        inference._tile_slides(
+            [make_slide("slide-a")],
+            replace(DEFAULT_PREPROCESSING, backend="auto", on_the_fly=False),
+            output_dir=tmp_path,
+            num_workers=0,
+        )
+
+    assert captured["slides"][0].sample_id == "slide-a"
+    assert captured["kwargs"]["preview"] == "preview"
+    assert [event.kind for event in reporter.events] == [
+        "tissue.started",
+        "tissue.progress",
+        "tissue.finished",
+        "backend.selected",
+        "tiling.progress",
+        "tiling.finished",
+        "preview.started",
+        "preview.progress",
+        "preview.finished",
+    ]
 
 
 def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
@@ -1006,7 +1117,13 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         tissue_threshold=0.1,
         segmentation={"downsample": 64},
         filtering={"ref_tile_size": 224},
-        preview={"save_mask_preview": True, "save_tiling_preview": False, "downsample": 32},
+        preview={
+            "save_mask_preview": True,
+            "save_tiling_preview": False,
+            "downsample": 32,
+            "tissue_contour_color": (157, 219, 129),
+            "mask_overlay_alpha": 0.5,
+        },
     )
 
     tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = (
@@ -1020,6 +1137,8 @@ def test_build_hs2p_configs_constructs_preview_config(monkeypatch):
         "save_mask_preview": True,
         "save_tiling_preview": False,
         "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
+        "mask_overlay_alpha": 0.5,
     }
     assert read_coordinates_from is None
     assert resume is False
@@ -1038,8 +1157,8 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1064,8 +1183,8 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1099,8 +1218,8 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1216,8 +1335,8 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1654,10 +1773,10 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,"  # spacing_at_level_0
         "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
-        "slide-b,/tmp/slide-b.svs,,,"
+        "slide-b,tissue,/tmp/slide-b.svs,,,"
         "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
@@ -2525,7 +2644,7 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
         "_prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_emit_tiling_finished", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_emit_tiling_summary", lambda *args, **kwargs: None)
     monkeypatch.setattr(inference, "_write_zero_tile_embedding_sidecars", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference,

@@ -35,7 +35,7 @@ def test_resource_loading_uses_packaged_configs():
     assert cfg.speed.num_preprocessing_workers is None
 
 
-def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
+def test_packaged_preprocessing_config_matches_hs2p_4_tiling_schema():
     pytest.importorskip("omegaconf")
     cfg = load_config("default")
 
@@ -43,6 +43,13 @@ def test_packaged_preprocessing_config_matches_hs2p_3_tiling_schema():
     assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
     assert hasattr(cfg.tiling.filter_params, "filter_blur")
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
+    assert hasattr(cfg.tiling.seg_params, "method")
+    assert hasattr(cfg.tiling.seg_params, "sam2_checkpoint_path")
+    assert hasattr(cfg.tiling.seg_params, "sam2_config_path")
+    assert hasattr(cfg.tiling.seg_params, "sam2_device")
+    assert hasattr(cfg.tiling.preview, "save_mask_preview")
+    assert hasattr(cfg.tiling.preview, "save_tiling_preview")
+    assert hasattr(cfg.tiling.preview, "tissue_contour_color")
 
 
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):
@@ -674,7 +681,13 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=False, downsample=32),
+            preview=SimpleNamespace(
+                save_mask_preview=False,
+                save_tiling_preview=False,
+                downsample=32,
+                tissue_contour_color=(157, 219, 129),
+                mask_overlay_alpha=0.5,
+            ),
         ),
     )
 
@@ -895,7 +908,13 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=True, downsample=32),
+            preview=SimpleNamespace(
+                save_mask_preview=True,
+                save_tiling_preview=True,
+                downsample=32,
+                tissue_contour_color=(157, 219, 129),
+                mask_overlay_alpha=0.5,
+            ),
         ),
     )
 
@@ -929,7 +948,13 @@ def test_preprocessing_config_from_config_uses_explicit_speed_num_cucim_workers(
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=False, downsample=32),
+            preview=SimpleNamespace(
+                save_mask_preview=False,
+                save_tiling_preview=False,
+                downsample=32,
+                tissue_contour_color=(157, 219, 129),
+                mask_overlay_alpha=0.5,
+            ),
         ),
     )
 
@@ -961,7 +986,13 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(save=False, downsample=32),
+            preview=SimpleNamespace(
+                save_mask_preview=False,
+                save_tiling_preview=False,
+                downsample=32,
+                tissue_contour_color=(157, 219, 129),
+                mask_overlay_alpha=0.5,
+            ),
         ),
     )
 
