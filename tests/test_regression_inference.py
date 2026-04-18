@@ -24,7 +24,7 @@ from slide2vec.artifacts import (
     write_tile_embedding_metadata,
     write_tile_embeddings,
 )
-from slide2vec.resources import config_resource, load_config
+from slide2vec.configs.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 

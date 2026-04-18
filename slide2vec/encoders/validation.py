@@ -8,7 +8,7 @@ from slide2vec.encoders.registry import (
     resolve_encoder_output,
     resolve_preprocessing_requirements,
 )
-from slide2vec.model_settings import normalize_precision_name
+from slide2vec.runtime.model_settings import normalize_precision_name
 
 logger = logging.getLogger("slide2vec")
 

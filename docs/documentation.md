@@ -7,6 +7,7 @@
 - Extracted distributed torchrun orchestration, shard merge/loading, and rank-assignment helpers into `slide2vec.runtime.distributed`, with inference-level compatibility shims preserved for existing tests and monkeypatch patterns.
 - Moved artifact collection/loading and process-list embedding status updates into `slide2vec.runtime.persistence` so the pipeline orchestration flow in `slide2vec.inference` stays focused on control flow.
 - Extracted pure tiling and embedding metadata/writer helpers into `slide2vec.runtime.tiling` and `slide2vec.runtime.embedding`, keeping inference-level wrappers so existing monkeypatch-based regression tests remain stable.
+- Moved root-level internal helpers (`runtime_types.py`, `model_settings.py`, `registry.py`, `resources.py`) into clearer homes: `slide2vec.runtime.*` and `slide2vec.configs.resources`, and added a guardrail test that keeps the root package module list intentionally minimal.
 
 - Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
 

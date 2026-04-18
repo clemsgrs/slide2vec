@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import torch
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -35,3 +36,13 @@ class HierarchicalIndex:
     num_regions: int
     tiles_per_region: int
 
+
+@dataclass(kw_only=True)
+class LoadedModel:
+    name: str
+    level: str
+    model: object
+    transforms: object
+    feature_dim: int
+    device: torch.device
+    tile_feature_dim: int | None = None

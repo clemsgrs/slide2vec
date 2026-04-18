@@ -9,7 +9,7 @@ import torch
 from transformers.image_processing_utils import BaseImageProcessor
 
 from slide2vec.progress import emit_progress
-from slide2vec.runtime_types import LoadedModel
+from slide2vec.runtime.types import LoadedModel
 from slide2vec.utils.log_utils import suppress_c_stderr
 
 from .types import BatchTransformSpec, PreparedBatch

@@ -3,6 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def test_root_package_python_modules_are_curated():
+    package_root = Path(__file__).resolve().parents[1] / "slide2vec"
+    root_modules = {path.name for path in package_root.glob("*.py")}
+    assert root_modules == {
+        "__init__.py",
+        "__main__.py",
+        "api.py",
+        "artifacts.py",
+        "cli.py",
+        "inference.py",
+        "main.py",
+        "progress.py",
+    }
+
+
 def test_runtime_modules_do_not_depend_on_cli_or_package_facade():
     package_root = Path(__file__).resolve().parents[1] / "slide2vec" / "runtime"
     runtime_modules = sorted(package_root.glob("*.py"))
@@ -26,8 +41,10 @@ def test_internal_runtime_modules_stay_small():
         package_root / "distributed.py",
         package_root / "embedding.py",
         package_root / "hierarchical.py",
+        package_root / "model_settings.py",
         package_root / "persistence.py",
         package_root / "progress_bridge.py",
+        package_root / "registry.py",
         package_root / "serialization.py",
         package_root / "tiling.py",
         package_root / "types.py",

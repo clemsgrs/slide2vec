@@ -109,8 +109,8 @@ from slide2vec.encoders.registry import (
     resolve_encoder_output,
     resolve_preprocessing_defaults,
 )
-from slide2vec.model_settings import canonicalize_model_name
-from slide2vec.runtime_types import LoadedModel
+from slide2vec.runtime.model_settings import canonicalize_model_name
+from slide2vec.runtime.types import LoadedModel
 from slide2vec.progress import (
     emit_progress,
     read_tiling_progress_snapshot,

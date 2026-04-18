@@ -17,7 +17,7 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
-from slide2vec.resources import config_resource, load_config
+from slide2vec.configs.resources import config_resource, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)

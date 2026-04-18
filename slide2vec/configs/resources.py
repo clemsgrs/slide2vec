@@ -1,7 +1,7 @@
+from contextlib import contextmanager
 from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Iterator
-from contextlib import contextmanager
 
 
 def config_resource(*parts: str):
@@ -24,3 +24,4 @@ def config_path(*parts: str) -> Iterator[Path]:
     resource = config_resource(*parts)
     with as_file(resource) as resolved:
         yield resolved
+
