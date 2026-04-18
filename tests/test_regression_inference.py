@@ -317,8 +317,8 @@ def test_update_process_list_after_embedding_writes_feature_provenance(
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     slide_artifacts = []
@@ -387,8 +387,8 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     process_list_path = output_dir / "process_list.csv"
     process_list_path.parent.mkdir(parents=True, exist_ok=True)
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     slide_record = make_slide("slide-a", image_path=slide_path)
@@ -490,9 +490,9 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
     )
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-zero,/tmp/slide-zero.svs,,,success,0,/tmp/slide-zero.coordinates.npz,/tmp/slide-zero.coordinates.meta.json,,\n"
-        "slide-full,/tmp/slide-full.svs,,,success,2,/tmp/slide-full.coordinates.npz,/tmp/slide-full.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-zero,tissue,/tmp/slide-zero.svs,,,success,0,/tmp/slide-zero.coordinates.npz,/tmp/slide-zero.coordinates.meta.json,,\n"
+        "slide-full,tissue,/tmp/slide-full.svs,,,success,2,/tmp/slide-full.coordinates.npz,/tmp/slide-full.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -716,9 +716,9 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
-        "slide-b,/tmp/slide-b.svs,,asap,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,tbp,,\n"
+        "slide-b,tissue,/tmp/slide-b.svs,,asap,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
 
@@ -767,9 +767,9 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
-        "slide-b,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n"
+        "slide-b,tissue,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
     write_tile_embeddings(
@@ -837,10 +837,10 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,"  # spacing_at_level_0
         "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
-        "slide-b,/tmp/slide-b.svs,,,"
+        "slide-b,tissue,/tmp/slide-b.svs,,,"
         "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
@@ -1157,8 +1157,8 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1183,8 +1183,8 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1218,8 +1218,8 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1335,8 +1335,8 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
 
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,auto,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,,0.25,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
 
@@ -1773,10 +1773,10 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
     ]
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
-        "sample_id,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-a,/tmp/slide-a.svs,,,"  # spacing_at_level_0
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,"  # spacing_at_level_0
         "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
-        "slide-b,/tmp/slide-b.svs,,,"
+        "slide-b,tissue,/tmp/slide-b.svs,,,"
         "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
