@@ -7,6 +7,7 @@ def test_internal_runtime_modules_stay_small():
     package_root = Path(__file__).resolve().parents[1] / "slide2vec" / "runtime"
     module_paths = [
         package_root / "batching.py",
+        package_root / "distributed.py",
         package_root / "hierarchical.py",
         package_root / "progress_bridge.py",
         package_root / "serialization.py",

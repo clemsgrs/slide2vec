@@ -4,6 +4,7 @@
 
 - Split `slide2vec.inference` into workflow-scoped internal runtime helpers under `slide2vec.runtime` (`batching`, `hierarchical`, `progress_bridge`, `serialization`, `types`) while keeping `slide2vec.inference` as the stable orchestration entrypoint.
 - Added architecture guardrail tests that keep workflow helpers bounded (soft target around 400 lines, enforced ceiling 500) and prevent `slide2vec/inference.py` from regressing toward the previous monolith size.
+- Extracted distributed torchrun orchestration, shard merge/loading, and rank-assignment helpers into `slide2vec.runtime.distributed`, with inference-level compatibility shims preserved for existing tests and monkeypatch patterns.
 
 - Aligned slide2vec with hs2p 4.0.0's unified tiling/sampling contract by preserving the new `annotation` column in process lists and translating preview configs to hs2p's `save_mask_preview` / `save_tiling_preview` / `tissue_contour_color` fields.
 
