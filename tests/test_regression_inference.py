@@ -1094,7 +1094,7 @@ def test_build_hs2p_configs_constructs_preview_config():
         tolerance=0.05,
         overlap=0.0,
         tissue_threshold=0.1,
-        segmentation={"downsample": 64},
+        segmentation={"downsample": 64, "method": "hsv"},
         filtering={"ref_tile_size": 224},
         preview={
             "save_mask_preview": True,
@@ -1111,11 +1111,12 @@ def test_build_hs2p_configs_constructs_preview_config():
 
     assert tiling_cfg.backend == "asap"
     assert segmentation_cfg.downsample == 64
+    assert segmentation_cfg.method == "hsv"
     assert filtering_cfg.ref_tile_size == 224
     assert preview_cfg.save_mask_preview is True
     assert preview_cfg.save_tiling_preview is False
     assert preview_cfg.downsample == 32
-    assert preview_cfg.mask_overlay_color == (157, 219, 129)
+    assert preview_cfg.tissue_contour_color == (157, 219, 129)
     assert preview_cfg.mask_overlay_alpha == pytest.approx(0.5)
     assert read_coordinates_from is None
     assert resume is False

@@ -31,7 +31,7 @@ def build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
         save_mask_preview=bool(preview["save_mask_preview"]),
         save_tiling_preview=bool(preview["save_tiling_preview"]),
         downsample=int(preview["downsample"]),
-        mask_overlay_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
+        tissue_contour_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
         mask_overlay_alpha=float(preview["mask_overlay_alpha"]),
     )
 
