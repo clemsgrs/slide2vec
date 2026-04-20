@@ -1,3 +1,8 @@
+/* Hide the auto-generated RST h1 on the index page when a hero is already present */
+article:has(.s2v-hero) > section:first-child > h1 {
+  display: none;
+}
+
 .s2v-sidebar-github {
   margin: 1rem 1rem 1.25rem 0;
 }
@@ -12,7 +17,9 @@
 
 .s2v-hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
+  width: 100%;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1.4fr) minmax(180px, 0.75fr);
   gap: 1.25rem;
   padding: 2rem;
   margin: 0.5rem 0 2rem;
@@ -41,9 +48,9 @@
 
 .s2v-hero h1 {
   margin: 0;
-  font-size: clamp(2.6rem, 6vw, 4.4rem);
-  line-height: 0.95;
-  letter-spacing: -0.05em;
+  font-size: clamp(2rem, 5vw, 2.8rem);
+  line-height: 1;
+  letter-spacing: -0.04em;
 }
 
 .s2v-hero__lede {
@@ -111,7 +118,7 @@
 .s2v-hero__panel {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 1rem;
   padding: 1.25rem;
   border-radius: 1rem;
@@ -198,6 +205,7 @@
 
 .s2v-card h3 {
   margin: 0 0 0.5rem;
+  padding: 0;
   font-size: 1.05rem;
 }
 
@@ -220,8 +228,9 @@
 }
 
 .s2v-bullet {
-  padding: 1rem 1rem 1.05rem;
+  padding: 1rem 1rem 1.05rem 1.25rem;
   border: 1px solid var(--s2v-card-border);
+  border-left: 3px solid var(--color-brand-primary);
   border-radius: 0.9rem;
   background: var(--color-background-primary);
 }
