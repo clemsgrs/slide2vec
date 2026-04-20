@@ -32,9 +32,11 @@ exclude_patterns = [
 autosummary_generate = True
 autodoc_member_order = "bysource"
 autodoc_default_options = {
-    "members": False,
-    "undoc-members": False,
+    "members": True,
+    "undoc-members": True,
     "show-inheritance": True,
+    "special-members": False,
+    "private-members": False,
 }
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False

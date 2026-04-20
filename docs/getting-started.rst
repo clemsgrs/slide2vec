@@ -17,6 +17,8 @@ For foundation model dependencies, add the ``fm`` extra:
 Quickstart
 ----------
 
+The most basic way to embed a slide is with ``Model.embed_slide(...)``:
+
 .. code-block:: python
 
    from slide2vec import Model
@@ -26,17 +28,44 @@ Quickstart
 
    tile_embeddings = embedded.tile_embeddings  # shape (N, D)
    slide_embedding = embedded.slide_embedding  # shape (D,)
-   x, y = embedded.x, embedded.y              # tile coordinates
+   x, y = embedded.x, embedded.y               # tile coordinates
 
-``embed_slide`` returns an ``EmbeddedSlide`` with ``tile_embeddings``, ``slide_embedding``,
-``x``, ``y``, ``num_tiles``, and ``sample_id``.
+``embed_slide`` returns an :class:`~slide2vec.EmbeddedSlide` with tile
+embeddings, coordinates, and metadata.
 
-See :doc:`models` for the full preset catalog.
+To process a sequence of slides in one call, use ``embed_slides``:
+
+.. code-block:: python
+
+   results = model.embed_slides(
+       ["/path/to/slide1.svs", "/path/to/slide2.svs"],
+   )
+   for embedded in results:
+       print(embedded.sample_id, embedded.tile_embeddings.shape)
+
+``embed_slides`` distributes slides across all available GPUs and returns one
+:class:`~slide2vec.EmbeddedSlide` per input, in the same order.
+
+
+Supported Models
+----------------
+
+The full list of supported models is available in the :doc:`models` guide. To see all available presets:
+
+.. code-block:: python
+
+   from slide2vec import list_models
+
+   list_models()  # ["virchow", "virchow2", "moozy", ...]
+
 
 Controlling Preprocessing
---------------------------
+-------------------------
 
-Pass ``PreprocessingConfig`` to override tiling defaults:
+Existing models come with built-in tiling defaults matched to their intended use.
+By default, ``slide2vec`` picks these model-aware defaults automatically.
+
+Pass :class:`~slide2vec.PreprocessingConfig` to override tiling defaults:
 
 .. code-block:: python
 
@@ -47,17 +76,23 @@ Pass ``PreprocessingConfig`` to override tiling defaults:
        requested_spacing_um=0.5,
        requested_tile_size_px=224,
        tissue_threshold=0.1,
-       backend="auto",           # "auto", "cucim", "openslide", "vips"
+       backend="auto",
        segmentation={"method": "hsv"},
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
-If you omit ``preprocessing``, slide2vec picks model-aware defaults automatically.
+See :doc:`preprocessing` for advanced settings.
+
+.. _execution-options:
 
 Controlling Execution
 ---------------------
 
-Pass ``ExecutionOptions`` to control GPU count, batch size, and precision:
+By default, ``slide2vec`` uses all available GPUs, a batch size of 32, and infers precision from the
+model's registered ``precision`` field.
+
+Pass :class:`~slide2vec.ExecutionOptions` to control GPU count, batch size,
+and precision:
 
 .. code-block:: python
 
@@ -71,37 +106,34 @@ Pass ``ExecutionOptions`` to control GPU count, batch size, and precision:
    )
    embedded = model.embed_slide("/path/to/slide.svs", execution=execution)
 
-``num_gpus`` defaults to all available GPUs. ``embed_slides(...)`` distributes whole
-slides across GPUs while preserving input order.
+See :doc:`api` for the full field reference.
 
 Batch Processing with Pipeline
 -------------------------------
 
-For manifest-driven batch runs that write artifacts to disk, use ``Pipeline``:
+For manifest-driven batch runs that persist artifacts to disk, build a
+:class:`~slide2vec.Pipeline`:
 
 .. code-block:: python
 
-   from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+   from slide2vec import Model, Pipeline
+   from slide2vec import PreprocessingConfig, ExecutionOptions
 
    model = Model.from_preset("virchow2")
    pipeline = Pipeline(
        model=model,
-       preprocessing=PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224),
-       execution=ExecutionOptions(output_dir="outputs/run", num_gpus=2),
+       preprocessing=PreprocessingConfig(
+         requested_spacing_um=0.5,
+         requested_tile_size_px=224
+      ),
+       execution=ExecutionOptions(
+         output_dir="outputs/run",
+         num_gpus=2
+      ),
    )
 
    result = pipeline.run(manifest_path="/path/to/slides.csv")
 
-The manifest is a CSV with ``sample_id`` and ``image_path`` columns
-(``mask_path`` and ``spacing_at_level_0`` are optional):
-
-.. code-block:: text
-
-   sample_id,image_path
-   slide-1,/data/slide-1.svs
-   slide-2,/data/slide-2.svs
-
-``Pipeline.run`` returns a ``RunResult`` with ``tile_artifacts``, ``slide_artifacts``,
-and ``process_list_path``.
-
-You can also run batch jobs from the terminal — see the :doc:`cli` guide.
+See :doc:`manifest` for the full manifest schema and :doc:`output-layout` for
+the files written to ``output_dir``. You can also run batch jobs from the
+terminal — see the :doc:`cli` guide.

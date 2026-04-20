@@ -42,3 +42,13 @@ It ships with presets for the most widely used pathology foundation models.
    api
    cli
    models
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: In Depth
+
+   manifest
+   preprocessing
+   hierarchical
+   output-layout

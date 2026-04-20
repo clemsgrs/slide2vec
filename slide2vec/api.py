@@ -42,25 +42,53 @@ TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 @dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
+    """Configuration for slide tiling and preprocessing."""
+
+    #: Slide reading backend. ``"auto"`` tries cucim → openslide → vips in order.
+    #: Explicit choices: ``"cucim"``, ``"openslide"``, ``"vips"``, ``"asap"``.
     backend: str = "auto"
+    #: Target spacing in µm/px. Resolved from the model preset when ``None``.
     requested_spacing_um: float | None = None
+    #: Tile side length in pixels at *requested_spacing_um*.
+    #: Resolved from the model preset when ``None``.
     requested_tile_size_px: int | None = None
+    #: Parent region side length in pixels (hierarchical mode).
+    #: Auto-derived as ``requested_tile_size_px × region_tile_multiple`` when ``None``.
     requested_region_size_px: int | None = None
+    #: Region grid width/height in tiles (e.g. ``6`` → 6×6 = 36 tiles per region).
+    #: Enables hierarchical extraction when set; must be ≥ 2.
     region_tile_multiple: int | None = None
+    #: Relative spacing tolerance for pyramid level selection (default ``0.05``).
     tolerance: float = 0.05
+    #: Fractional tile overlap (``0.0`` = no overlap).
     overlap: float = 0.0
+    #: Minimum tissue fraction required to keep a tile (default ``0.01``).
     tissue_threshold: float = 0.01
+    #: Directory containing pre-extracted tile coordinates to reuse, skipping tiling.
     read_coordinates_from: Path | None = None
+    #: Directory containing pre-extracted tile images to skip the tiling step entirely.
     read_tiles_from: Path | None = None
+    #: Read and decode tiles on demand rather than pre-loading into memory.
     on_the_fly: bool = True
+    #: Decode tiles on the GPU via CuCIM / nvImageCodec when ``True``.
     gpu_decode: bool = False
+    #: Dynamically adjust batch size based on tile count.
     adaptive_batching: bool = False
+    #: Group adjacent tiles into supertile batches for faster I/O.
     use_supertiles: bool = True
+    #: JPEG decode library — ``"turbojpeg"`` (default) or ``"pillow"``.
     jpeg_backend: str = "turbojpeg"
+    #: Number of CuCIM reader threads.
     num_cucim_workers: int = 4
+    #: Skip slides already present in the output directory when ``True``.
     resume: bool = False
+    #: Forwarded to hs2p segmentation config. Supported keys: ``method``,
+    #: ``downsample``, ``sam2_device``. See :doc:`preprocessing` for details.
     segmentation: dict[str, Any] = field(default_factory=dict)
+    #: Forwarded to hs2p tile-filtering config.
     filtering: dict[str, Any] = field(default_factory=dict)
+    #: Controls whether hs2p writes mask and tiling preview images.
+    #: Keys: ``save_mask_preview``, ``save_tiling_preview``, ``downsample``.
     preview: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -123,17 +151,32 @@ class PreprocessingConfig:
 
 @dataclass(frozen=True, kw_only=True)
 class ExecutionOptions:
+    """Runtime execution and output settings."""
+
+    #: Directory where artifacts are written. Required for :class:`Pipeline` runs.
     output_dir: Path | None = None
+    #: Tensor serialization format — ``"pt"`` (PyTorch, default) or ``"npz"`` (NumPy).
     output_format: str = "pt"
-    batch_size: int = 1
+    #: Number of tiles per forward pass.
+    batch_size: int = 32
+    #: DataLoader worker count. ``None`` means auto (capped by CPU / SLURM limit).
     num_workers: int | None = None
+    #: Tiling worker count. ``None`` means auto (capped by CPU / SLURM limit).
     num_preprocessing_workers: int | None = None
+    #: Number of GPUs to use. ``None`` defaults to all available GPUs.
     num_gpus: int | None = None
+    #: Forward-pass dtype — ``"fp16"``, ``"bf16"``, ``"fp32"``,
+    #: or ``None`` (auto-determined from the model preset).
     precision: str | None = None
+    #: DataLoader prefetch queue depth per worker (default ``4``).
     prefetch_factor: int = 4
+    #: Keep DataLoader workers alive between batches (default ``True``).
     persistent_workers: bool = True
+    #: Persist tile embeddings to disk when running a slide-level model.
     save_tile_embeddings: bool = False
+    #: Persist slide embeddings to disk when running a patient-level model.
     save_slide_embeddings: bool = False
+    #: Persist encoder latent representations when available.
     save_latents: bool = False
 
     @classmethod
@@ -205,33 +248,60 @@ class ExecutionOptions:
 
 @dataclass(frozen=True, kw_only=True)
 class RunResult:
+    """Return value of :meth:`Pipeline.run`."""
+
+    #: Tile embedding artifacts written to disk.
     tile_artifacts: list[TileEmbeddingArtifact]
+    #: Hierarchical embedding artifacts; empty when hierarchical mode is disabled.
     hierarchical_artifacts: list[HierarchicalEmbeddingArtifact]
+    #: Slide embedding artifacts written to disk.
     slide_artifacts: list[SlideEmbeddingArtifact]
+    #: Patient embedding artifacts; empty when no patient-level model is used.
     patient_artifacts: list[PatientEmbeddingArtifact] = field(default_factory=list)
+    #: Path to ``process_list.csv``, which tracks processing status per sample.
     process_list_path: Path | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class EmbeddedPatient:
+    """In-memory result of embedding a single patient."""
+
+    #: Unique patient identifier.
     patient_id: str
-    patient_embedding: Any  # torch.Tensor [D]
-    slide_embeddings: dict[str, Any]  # {sample_id: torch.Tensor [D]}
+    #: Aggregated patient embedding — :class:`torch.Tensor` of shape ``(D,)``.
+    patient_embedding: Any
+    #: Slide-level embeddings keyed by ``sample_id`` — each a :class:`torch.Tensor` of shape ``(D,)``.
+    slide_embeddings: dict[str, Any]
 
 
 @dataclass(frozen=True, kw_only=True)
 class EmbeddedSlide:
+    """In-memory result of embedding a single slide."""
+
+    #: Unique slide identifier.
     sample_id: str
+    #: Tile embeddings — :class:`torch.Tensor` of shape ``(N, D)``.
     tile_embeddings: Any
+    #: Slide-level embedding — :class:`torch.Tensor` of shape ``(D,)`` for
+    #: slide-level encoders; ``None`` for tile-only encoders.
     slide_embedding: Any | None
+    #: x coordinate (pixels at level 0) of each tile's top-left corner — array of shape ``(N,)``.
     x: Any
+    #: y coordinate (pixels at level 0) of each tile's top-left corner — array of shape ``(N,)``.
     y: Any
+    #: Tile side length in pixels at level 0.
     tile_size_lv0: int
+    #: Path to the source slide file.
     image_path: Path
+    #: Path to the tissue mask used for tiling, if any.
     mask_path: Path | None = None
+    #: Number of tiles extracted from the slide.
     num_tiles: int | None = None
+    #: Path to the mask preview image, if generated.
     mask_preview_path: Path | None = None
+    #: Path to the tiling preview image, if generated.
     tiling_preview_path: Path | None = None
+    #: Encoder latent representations when available; ``None`` otherwise.
     latents: Any | None = None
 
 

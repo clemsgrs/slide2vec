@@ -355,7 +355,7 @@ dl.py.class > dd > dl.py {
   border: none;
   border-left: 2px solid var(--color-background-border);
   background: transparent;
-  margin: 0.75rem 0;
+  margin: 0.2rem 0;
   padding: 0 0 0 0.875rem;
 }
 
@@ -367,6 +367,10 @@ dl.py.class > dd > dl.py > dt.sig {
 }
 
 dl.py.class > dd > dl.py > dd {
-  padding: 0.25rem 0;
+  padding: 0.1rem 0;
   margin: 0;
+}
+
+dl.py.class > dd > dl.py > dd > p {
+  margin-bottom: 0;
 }

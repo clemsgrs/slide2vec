@@ -159,7 +159,7 @@ Patient-level encoders
 
 Patient-level encoders aggregate multiple slide embeddings for the same patient
 into a single patient-level embedding. They require a ``patient_id`` column in
-the input manifest csv (or ``patient_id`` keys in each slide dict when using
+the `input manifest <manifest.rst>`_ csv (or ``patient_id`` keys in each slide dict when using
 the Python API).
 
 .. list-table::
@@ -178,32 +178,6 @@ the Python API).
      - 768
      - Kotp et al. (2026)
 
-
-.. _patient-manifest-format:
-
-Patient manifest format
-~~~~~~~~~~~~~~~~~~~~~~~
-
-Add a ``patient_id`` column to the standard manifest csv to group slides by patient:
-
-.. code-block:: text
-
-   sample_id,image_path,patient_id
-   slide_1a,/data/slide_1a.svs,patient_1
-   slide_1b,/data/slide_1b.svs,patient_1
-   slide_2a,/data/slide_2a.svs,patient_2
-
-``sample_id`` remains the unique slide identifier. Multiple rows may share
-the same ``patient_id``.
-
-Per-slide embeddings
-~~~~~~~~~~~~~~~~~~~~
-
-When running a patient-level model via ``Pipeline``, the intermediate per-slide
-MOOZY embeddings can be saved alongside the patient embeddings by setting
-``save_slide_embeddings: true`` in config (or
-``ExecutionOptions(save_slide_embeddings=True)`` in the Python API). Saved
-slide embeddings are written to ``slide_embeddings/`` in the output directory.
 
 Custom registry-backed encoders
 --------------------------------
