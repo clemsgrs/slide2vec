@@ -37,8 +37,8 @@ Directory Structure
    └── config.yaml
 
 
-Tensor Files
-------------
+Embedding Files
+---------------
 
 All ``.pt`` files can be loaded with :func:`torch.load`:
 
@@ -80,6 +80,7 @@ and shape information. The exact fields depend on the artifact type.
 .. code-block:: text
 
    {
+      "sample_id": "slide-1",
       "artifact_type": "tile_embeddings",
       "backend": "cucim",
       "coordinates_meta_path": "<output_dir>/tiles/slide-1.coordinates.meta.json",
@@ -88,25 +89,20 @@ and shape information. The exact fields depend on the artifact type.
       "encoder_name": "prost40m",
       "feature_dim": 384,
       "format": "pt",
-      "image_path": "/path/to/slide-1.tif",
-      "mask_path": "/path/to/mask.tif",
+      "image_path": "/data/slide-1.tif",
+      "mask_path": "/data/mask-1.tif",
       "num_tiles": 166,
-      "sample_id": "slide-1",
       "tile_size_lv0": 224,
    }
 
-``coordinates_npz_path`` and ``coordinates_meta_path`` point back to the
-coordinate files in ``tiles/`` (see `Coordinate Files`_ below).
-
 **hierarchical_embeddings**
 
-Same fields as ``tile_embeddings``, plus:
+Same fields as ``tile_embeddings`` (except  ``"artifact_type": "hierarchical_embeddings"``), plus:
 
 .. code-block:: text
 
    {
      ...
-     "artifact_type": "hierarchical_embeddings",
      "num_regions": 512,
      "tiles_per_region": 36
    }
@@ -118,11 +114,11 @@ Same fields as ``tile_embeddings``, plus:
    {
      "sample_id": "slide-1",
      "artifact_type": "slide_embeddings",
-     "format": "pt",
-     "feature_dim": 1280,
-     "encoder_name": "conch_v2",
      "encoder_level": "slide",
-     "image_path": "/data/slide-1.svs"
+     "encoder_name": "prism",
+     "feature_dim": 1280,
+     "format": "pt",
+     "image_path": "/data/slide-1.tif",
    }
 
 **patient_embeddings**
@@ -132,11 +128,11 @@ Same fields as ``tile_embeddings``, plus:
    {
      "patient_id": "patient-1",
      "artifact_type": "patient_embeddings",
+     "encoder_name": "moozy",
+     "encoder_level": "patient"
      "format": "pt",
      "feature_dim": 768,
      "num_slides": 2,
-     "encoder_name": "moozy",
-     "encoder_level": "patient"
    }
 
 
@@ -146,10 +142,14 @@ Coordinate Files
 During tiling, slide2vec writes a pair of coordinate files for each slide
 under ``tiles/``:
 
-- ``<sample_id>.coordinates.npz`` — NumPy archive with tile coordinate arrays
+- ``<sample_id>.coordinates.npz`` — numpy archive with tile coordinate arrays
 - ``<sample_id>.coordinates.meta.json`` — tiling provenance and parameters
 
-**NPZ arrays**
+**Coordinate arrays**
+
+The ``.npz`` contains four arrays with tile coordinate and metadata information.
+All four arrays have length ``N`` (the number of tiles) and share the same ordering as the rows of the corresponding embedding tensor.
+
 
 .. list-table::
    :header-rows: 1
@@ -178,10 +178,8 @@ under ``tiles/``:
    x = data["x"]   # shape (N,) — level-0 x coordinates
    y = data["y"]   # shape (N,) — level-0 y coordinates
 
-``x`` and ``y`` are in the same order as the rows of the corresponding
-embedding tensor, so ``x[i]`` / ``y[i]`` gives the position of tile ``i``.
 
-**Coordinate meta JSON**
+**Coordinate meta files**
 
 The sidecar ``coordinates.meta.json`` is a structured file produced by the
 tiling pipeline. It contains several sections:
@@ -192,21 +190,21 @@ tiling pipeline. It contains several sections:
      "provenance": {
        "sample_id": "slide-1",
        "image_path": "/data/slide-1.svs",
-       "mask_path": null,
-       "backend": "openslide",
+       "mask_path": "/data/mask-1.tif",
+       "backend": "cucim",
        "requested_backend": "auto"
      },
      "slide": {
        "dimensions": [50000, 40000],
        "base_spacing_um": 0.25,
-       "level_downsamples": [1.0, 4.0, 16.0]
+       "level_downsamples": [1.0, 2.0, 4.0, 8.0, 16.0]
      },
      "tiling": {
        "requested_tile_size_px": 224,
        "requested_spacing_um": 0.5,
        "effective_tile_size_px": 224,
        "effective_spacing_um": 0.503,
-       "tile_size_lv0": 896,
+       "tile_size_lv0": 448,
        "n_tiles": 1024,
        ...
      },
@@ -221,7 +219,7 @@ tiling pipeline. It contains several sections:
 
 These files can be reused across runs via
 :attr:`~slide2vec.PreprocessingConfig.read_coordinates_from` to skip
-re-tiling when only the encoder changes.
+tiling when only the encoder changes.
 
 
 Process List

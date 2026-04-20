@@ -29,24 +29,10 @@ Tissue Segmentation
 `hs2p <https://github.com/clemsgrs/hs2p>`_\ 's segmentation pipeline.
 The ``method`` key selects the algorithm:
 
-``hsv``
-   Heuristic based on the HSV colour space. Fast and robust for H&E slides.
-   No additional parameters required.
-
-``otsu``
-   Thresholds the saturation channel using Otsu's method.
-   Works well for slides with high tissue contrast.
-
-``threshold``
-   Applies a fixed saturation threshold.
-   Use when you want deterministic, reproducible segmentation regardless of staining.
-
-``sam2``
-   Runs the `AtlasPatch <https://github.com/clemsgrs/atlaspatch>`_ SAM2 tissue
-   segmentation model on an internal 8.0 µm/px thumbnail.
-   Requires the ``atlaspatch`` package and a compatible GPU.
-   Additional key: ``sam2_device`` — device string for SAM2 inference
-   (e.g. ``"cuda:0"`` or ``"cpu"``).
+- ``hsv`` - heuristic based on the HSV colour space. Fast and robust for H&E slides.
+- ``otsu`` - thresholds the saturation channel using Otsu's method.
+- ``threshold`` - applies a fixed saturation threshold.
+- ``sam2`` - runs the `AtlasPatch <https://github.com/clemsgrs/atlaspatch>`_ SAM2 tissue segmentation model on an internal 8.0 µm/px thumbnail. Requires the ``atlaspatch`` package and a compatible GPU. Additional key: ``sam2_device`` — device string for SAM2 inference (e.g. ``"cuda:0"`` or ``"cpu"``).
 
 Example:
 
@@ -56,7 +42,7 @@ Example:
 
    model = Model.from_preset("virchow2")
    preprocessing = PreprocessingConfig(
-       segmentation={"method": "otsu"},
+       segmentation={"method": "sam2", "sam2_device": "cuda"},
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
@@ -66,7 +52,8 @@ Or in a YAML config:
 
    tiling:
      seg_params:
-       method: otsu
+         method: "sam2"
+         sam2_device: "cuda"
 
 
 Preview Images
