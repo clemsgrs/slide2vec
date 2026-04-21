@@ -2269,6 +2269,29 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     assert restored.precision == "bf16"
 
 
+def test_serialize_execution_preserves_slide_embedding_and_preprocessing_worker_fields():
+    import slide2vec.inference as inference
+    from slide2vec.runtime.serialization import deserialize_execution
+
+    execution = ExecutionOptions(
+        output_dir=Path("/tmp/output"),
+        num_workers=8,
+        num_preprocessing_workers=3,
+        num_gpus=2,
+        save_tile_embeddings=True,
+        save_slide_embeddings=True,
+        save_latents=True,
+    )
+
+    payload = inference._serialize_execution(execution)
+    restored = deserialize_execution(payload)
+
+    assert payload["num_preprocessing_workers"] == 3
+    assert payload["save_slide_embeddings"] is True
+    assert restored.num_preprocessing_workers == 3
+    assert restored.save_slide_embeddings is True
+
+
 def test_deserialize_execution_defaults_num_workers_to_auto():
     from slide2vec.runtime.serialization import deserialize_execution
 
