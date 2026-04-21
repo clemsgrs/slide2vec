@@ -1,4 +1,5 @@
 from slide2vec.api import (
+    EmbeddedPatient,
     EmbeddedSlide,
     ExecutionOptions,
     Model,
@@ -19,6 +20,7 @@ __all__ = [
     "PreprocessingConfig",
     "ExecutionOptions",
     "RunResult",
+    "EmbeddedPatient",
     "EmbeddedSlide",
     "SlideEmbeddingArtifact",
     "HierarchicalEmbeddingArtifact",
