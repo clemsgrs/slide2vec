@@ -49,6 +49,7 @@ def serialize_execution(
         "prefetch_factor": execution.prefetch_factor,
         "persistent_workers": execution.persistent_workers,
         "save_tile_embeddings": execution.save_tile_embeddings,
+        "save_slide_embeddings": execution.save_slide_embeddings,
         "save_latents": execution.save_latents,
     }
 
@@ -94,6 +95,9 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
     output_dir = payload["output_dir"] if "output_dir" in payload else None
     batch_size = payload["batch_size"] if "batch_size" in payload else None
     num_workers = payload["num_workers"] if "num_workers" in payload else None
+    num_preprocessing_workers = (
+        payload["num_preprocessing_workers"] if "num_preprocessing_workers" in payload else None
+    )
     num_gpus = payload["num_gpus"] if "num_gpus" in payload else 1
     precision = payload["precision"] if "precision" in payload else "fp32"
     prefetch_factor = payload["prefetch_factor"] if "prefetch_factor" in payload else 4
@@ -103,17 +107,23 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
     save_tile_embeddings = (
         bool(payload["save_tile_embeddings"]) if "save_tile_embeddings" in payload else False
     )
+    save_slide_embeddings = (
+        bool(payload["save_slide_embeddings"]) if "save_slide_embeddings" in payload else False
+    )
     save_latents = bool(payload["save_latents"]) if "save_latents" in payload else False
     return ExecutionOptions(
         output_dir=Path(output_dir) if output_dir is not None else None,
         output_format=payload["output_format"] if "output_format" in payload else "pt",
         batch_size=batch_size,
         num_workers=int(num_workers) if num_workers is not None else None,
+        num_preprocessing_workers=(
+            int(num_preprocessing_workers) if num_preprocessing_workers is not None else None
+        ),
         num_gpus=int(num_gpus),
         precision=precision,
         prefetch_factor=int(prefetch_factor),
         persistent_workers=persistent_workers,
         save_tile_embeddings=save_tile_embeddings,
+        save_slide_embeddings=save_slide_embeddings,
         save_latents=save_latents,
     )
-
