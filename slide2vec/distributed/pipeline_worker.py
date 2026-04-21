@@ -46,7 +46,8 @@ def main(argv=None) -> int:
         )
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
-        slide_records, tiling_results = load_successful_tiled_slides(output_dir)
+        tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
+        slide_records, tiling_results = load_successful_tiled_slides(tiling_input_dir)
         assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
         assigned_ids = assignments.get(global_rank, [])
         if not assigned_ids:

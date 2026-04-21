@@ -139,6 +139,62 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
 
+
+def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_for_worker_input(
+    monkeypatch,
+    tmp_path: Path,
+):
+    import slide2vec.inference as inference
+
+    coordinates_dir = tmp_path / "coords"
+    output_dir = tmp_path / "out"
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+
+    monkeypatch.setattr(
+        inference,
+        "load_successful_tiled_slides",
+        lambda path: ([slide], [tiling_result]),
+    )
+    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+
+    captured = {}
+
+    def fake_collect(
+        *,
+        model,
+        successful_slides,
+        process_list_path,
+        preprocessing,
+        execution,
+        output_dir,
+        tiling_input_dir,
+    ):
+        captured["successful_slides"] = successful_slides
+        captured["process_list_path"] = process_list_path
+        captured["preprocessing"] = preprocessing
+        captured["execution"] = execution
+        captured["output_dir"] = output_dir
+        captured["tiling_input_dir"] = tiling_input_dir
+        return ["tile-artifact"], [], ["slide-artifact"]
+
+    monkeypatch.setattr(inference, "_collect_distributed_pipeline_artifacts", fake_collect)
+
+    result = inference.run_pipeline_with_coordinates(
+        Model.from_preset("virchow2"),
+        coordinates_dir=coordinates_dir,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=output_dir, num_gpus=2),
+    )
+
+    assert captured["successful_slides"] == [slide]
+    assert captured["process_list_path"] == coordinates_dir / "process_list.csv"
+    assert captured["output_dir"] == output_dir
+    assert captured["tiling_input_dir"] == coordinates_dir
+    assert result.tile_artifacts == ["tile-artifact"]
+    assert result.slide_artifacts == ["slide-artifact"]
+
+
 def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -149,13 +205,14 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
 
     captured = {}
 
-    def fake_run_stage(*, model, successful_slides, preprocessing, execution, output_dir):
+    def fake_run_stage(*, model, successful_slides, preprocessing, execution, output_dir, tiling_input_dir=None):
         captured["run_stage"] = {
             "model": model,
             "successful_slides": successful_slides,
             "preprocessing": preprocessing,
             "execution": execution,
             "output_dir": output_dir,
+            "tiling_input_dir": tiling_input_dir,
         }
 
     def fake_collect(slides, *, output_dir, output_format, include_tile_embeddings, include_hierarchical_embeddings, include_slide_embeddings):
@@ -206,11 +263,13 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
         preprocessing=DEFAULT_PREPROCESSING,
         execution=execution,
         output_dir=tmp_path,
+        tiling_input_dir=tmp_path,
     )
 
     assert captured["run_stage"]["model"] is model
     assert captured["run_stage"]["successful_slides"] == [slide]
     assert captured["run_stage"]["output_dir"] == tmp_path
+    assert captured["run_stage"]["tiling_input_dir"] == tmp_path
 
     assert captured["collect"]["slides"] == [slide]
     assert captured["collect"]["output_dir"] == tmp_path

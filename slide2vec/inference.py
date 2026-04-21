@@ -834,6 +834,7 @@ def run_pipeline(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
                 output_dir=output_dir,
+                tiling_input_dir=output_dir,
             )
             emit_progress(
                 "embedding.finished",
@@ -994,6 +995,7 @@ def run_pipeline_with_coordinates(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
                 output_dir=output_dir,
+                tiling_input_dir=Path(coordinates_dir),
             )
             return RunResult(
                 tile_artifacts=tile_artifacts,
@@ -1317,6 +1319,7 @@ def _collect_distributed_pipeline_artifacts(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     output_dir: Path,
+    tiling_input_dir: Path | None = None,
 ) -> tuple[
     list[TileEmbeddingArtifact],
     list[HierarchicalEmbeddingArtifact],
@@ -1332,6 +1335,7 @@ def _collect_distributed_pipeline_artifacts(
         preprocessing=preprocessing,
         execution=execution,
         output_dir=output_dir,
+        tiling_input_dir=tiling_input_dir,
     )
     tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_pipeline_artifacts(
         successful_slides,
@@ -2292,6 +2296,7 @@ def _run_distributed_embedding_stage(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     output_dir: Path,
+    tiling_input_dir: Path | None = None,
 ) -> None:
     if not successful_slides:
         return
@@ -2302,6 +2307,7 @@ def _run_distributed_embedding_stage(
         model,
         preprocessing,
         execution,
+        tiling_input_dir=tiling_input_dir or output_dir,
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -2463,12 +2469,14 @@ def _build_pipeline_worker_request_payload(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     *,
+    tiling_input_dir: Path,
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
         "model": runtime_serialization.serialize_model(model),
         "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
         "execution": _serialize_execution(execution, preprocessing=preprocessing),
+        "tiling_input_dir": str(tiling_input_dir),
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
