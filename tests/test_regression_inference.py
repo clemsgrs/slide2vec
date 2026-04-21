@@ -113,13 +113,23 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
 
     captured = {}
 
-    def fake_collect(*, model, successful_slides, process_list_path, preprocessing, execution, output_dir):
+    def fake_collect(
+        *,
+        model,
+        successful_slides,
+        process_list_path,
+        preprocessing,
+        execution,
+        output_dir,
+        tiling_input_dir,
+    ):
         captured["model"] = model
         captured["successful_slides"] = successful_slides
         captured["process_list_path"] = process_list_path
         captured["preprocessing"] = preprocessing
         captured["execution"] = execution
         captured["output_dir"] = output_dir
+        captured["tiling_input_dir"] = tiling_input_dir
         return ["tile-artifact"], [], ["slide-artifact"]
 
     monkeypatch.setattr(inference, "_collect_distributed_pipeline_artifacts", fake_collect)
@@ -135,6 +145,7 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     assert captured["process_list_path"] == tmp_path / "process_list.csv"
     assert isinstance(captured["preprocessing"], BasePreprocessingConfig)
     assert captured["output_dir"] == tmp_path
+    assert captured["tiling_input_dir"] == tmp_path
     assert captured["execution"].num_gpus == 2
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
