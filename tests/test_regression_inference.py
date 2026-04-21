@@ -2563,6 +2563,13 @@ def test_resolve_on_the_fly_num_workers_caps_to_slurm_allocation(monkeypatch):
     assert "num_cucim_workers=4" in details
 
 
+def test_resolve_on_the_fly_num_workers_rejects_non_positive_cucim_worker_count():
+    import slide2vec.inference as inference
+
+    with pytest.raises(ValueError, match="num_cucim_workers must be at least 1"):
+        inference._resolve_on_the_fly_num_workers(0)
+
+
 def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monkeypatch, caplog):
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")

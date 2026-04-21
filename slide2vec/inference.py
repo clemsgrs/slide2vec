@@ -109,6 +109,8 @@ def _serialize_execution(
 
 
 def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
+    if int(num_cucim_workers) < 1:
+        raise ValueError("num_cucim_workers must be at least 1")
     cpu_count = os.cpu_count() or 1
     worker_budget = cpu_worker_limit()
     details = [f"cpu_count={cpu_count}"]
