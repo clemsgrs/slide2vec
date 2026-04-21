@@ -389,8 +389,8 @@ def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
 
     assert utils.cpu_worker_limit() == 64
 
-def test_execution_options_default_batch_size_is_one():
-    assert ExecutionOptions().batch_size == 1
+def test_execution_options_default_batchis_thirty_two():
+    assert ExecutionOptions().batch_size == 32
 
 def test_execution_options_default_num_workers_is_auto():
     assert ExecutionOptions().num_workers is None
