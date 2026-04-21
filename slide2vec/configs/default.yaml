@@ -46,6 +46,7 @@ tiling:
     sam2_checkpoint_path: # optional when method="sam2"; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
     sam2_config_path: # optional local override for the SAM2 model config; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
     sam2_device: "cpu" # device for SAM2 inference, e.g. "cpu", "cuda", or "cuda:0"
+    sam2_num_workers: # optional cap on concurrent SAM2 mask-resolution workers; set to 1 to serialize GPU inference and avoid CUDA OOMs
   filter_params:
     ref_tile_size: ${tiling.params.requested_tile_size_px} # reference tile size at the target spacing
     a_t: 4 # area filter threshold for tissue (positive integer, the minimum size of detected foreground contours to consider, relative to the reference tile size ref_tile_size, e.g. a value 10 means only detected foreground contours of size greater than 10 [ref_tile_size, ref_tile_size] tiles at spacing tiling.params.requested_spacing_um will be kept)

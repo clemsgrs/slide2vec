@@ -150,6 +150,7 @@ If you pass `--run-on-cpu`, the CLI uses CPU execution instead.
 - `sam2` runs the AtlasPatch SAM2 tissue segmentation path on an internal `8.0 um/px` thumbnail
 
 When `method: sam2` is selected, `sam2_checkpoint_path` and `sam2_config_path` are optional. If they are left blank, hs2p downloads the default AtlasPatch checkpoint and SAM2 config from Hugging Face.
+`sam2_num_workers` controls how many SAM2 mask-resolution workers can run at once; set it to `1` when GPU memory is tight or when you want to serialize SAM2 inference across slides.
 
 ## Outputs
 

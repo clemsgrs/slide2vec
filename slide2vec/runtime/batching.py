@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from transformers.image_processing_utils import BaseImageProcessor
+from torchvision.transforms.functional import to_pil_image
 
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
@@ -154,11 +155,23 @@ def prepare_batch_tensor(image):
     return image.float()
 
 
+def _apply_transform_sample(sample, transforms):
+    if not torch.is_tensor(sample):
+        return transforms(sample)
+    try:
+        return transforms(sample)
+    except AttributeError as exc:
+        message = str(exc)
+        if "convert" not in message and "Tensor" not in message:
+            raise
+        return transforms(to_pil_image(sample.cpu()))
+
+
 def apply_transforms_itemwise(image, transforms):
     if not torch.is_tensor(image) or image.ndim <= 3:
-        return transforms(image)
+        return _apply_transform_sample(image, transforms)
 
-    transformed_items = [transforms(sample) for sample in image.cpu()]
+    transformed_items = [_apply_transform_sample(sample, transforms) for sample in image.cpu()]
     if not transformed_items:
         return image.new_empty((0,), dtype=torch.float32)
     if not all(torch.is_tensor(item) for item in transformed_items):

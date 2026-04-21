@@ -86,7 +86,7 @@ Common fields:
 - `requested_tile_size_px`
 - `tissue_threshold`
 - `backend` - `"auto"`, `"cucim"`, `"openslide"`, `"vips"`, or `"asap"`
-- `segmentation` - forwarded to hs2p's segmentation config; `method` supports `"hsv"`, `"otsu"`, `"threshold"`, or `"sam2"`
+- `segmentation` - forwarded to hs2p's segmentation config; `method` supports `"hsv"`, `"otsu"`, `"threshold"`, or `"sam2"`, and `sam2_num_workers` caps concurrent SAM2 mask-resolution workers
 - `on_the_fly` - read tiles directly from WSI during embedding (default `True`)
 - `use_supertiles` - group tiles into spatial blocks to reduce WSI read calls (default `True`)
 - `read_coordinates_from` - reuse pre-extracted coordinates

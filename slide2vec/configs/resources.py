@@ -1,11 +1,10 @@
 from contextlib import contextmanager
-from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Iterator
 
 
 def config_resource(*parts: str):
-    path = files("slide2vec").joinpath("configs")
+    path = Path(__file__).resolve().parent
     for part in parts:
         path = path.joinpath(part)
     return path.with_suffix(".yaml")
@@ -21,7 +20,4 @@ def load_config(*parts: str):
 
 @contextmanager
 def config_path(*parts: str) -> Iterator[Path]:
-    resource = config_resource(*parts)
-    with as_file(resource) as resolved:
-        yield resolved
-
+    yield config_resource(*parts)

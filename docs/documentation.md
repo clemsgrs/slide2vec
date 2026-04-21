@@ -1,5 +1,17 @@
 # Documentation Log
 
+## 2026-04-21
+
+- Hardened the itemwise embedding fallback so tensor tile batches retry through PIL conversion only when a transform stack actually trips a PIL-only attribute error, which fixes the `Tensor.convert` crash seen with CONCH preprocessing while preserving tensor-native itemwise transforms.
+
+## 2026-04-20
+
+- Kept the slide2vec progress bridge in sync with hs2p's separate preview progress events so tiling and preview generation remain distinct in the CLI and API UX.
+
+## 2026-04-20
+
+- Exposed `tiling.seg_params.sam2_num_workers` in the bundled slide2vec config and docs so SAM2 tissue segmentation can be serialized on GPU when needed.
+
 ## 2026-04-18
 
 - Split `slide2vec.inference` into workflow-scoped internal runtime helpers under `slide2vec.runtime` (`batching`, `hierarchical`, `progress_bridge`, `serialization`, `types`) while keeping `slide2vec.inference` as the stable orchestration entrypoint.

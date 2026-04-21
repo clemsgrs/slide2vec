@@ -308,6 +308,11 @@ def embed_slides(
                     slide_count=len(embeddable_slides),
                     num_gpus=execution.num_gpus,
                 )
+                emit_progress(
+                    "embedding.assignment.finished",
+                    slide_count=len(embeddable_slides),
+                    num_gpus=execution.num_gpus,
+                )
             local_persist_callback = None
             if execution.output_dir is not None and execution.num_gpus <= 1:
                 local_persist_callback, _, _ = _build_incremental_persist_callback(
@@ -325,12 +330,6 @@ def embed_slides(
                 work_dir=work_dir,
                 on_embedded_slide=local_persist_callback,
             )
-            if execution.num_gpus > 1 and len(embeddable_slides) > 1:
-                emit_progress(
-                    "embedding.assignment.finished",
-                    slide_count=len(embeddable_slides),
-                    num_gpus=execution.num_gpus,
-                )
             if execution.output_dir is not None and execution.num_gpus > 1:
                 tile_artifacts: list[TileEmbeddingArtifact] = []
                 hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
@@ -2311,6 +2310,11 @@ def _run_distributed_embedding_stage(
         slide_count=len(successful_slides),
         num_gpus=execution.num_gpus,
     )
+    emit_progress(
+        "embedding.assignment.finished",
+        slide_count=len(successful_slides),
+        num_gpus=execution.num_gpus,
+    )
     runtime_distributed.run_torchrun_worker(
         module="slide2vec.distributed.pipeline_worker",
         num_gpus=execution.num_gpus,
@@ -2319,11 +2323,6 @@ def _run_distributed_embedding_stage(
         failure_title="Distributed feature extraction failed",
         progress_events_path=progress_events_path,
         popen_factory=runtime_distributed.subprocess.Popen,
-    )
-    emit_progress(
-        "embedding.assignment.finished",
-        slide_count=len(successful_slides),
-        num_gpus=execution.num_gpus,
     )
 
 
