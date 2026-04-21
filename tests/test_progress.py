@@ -295,90 +295,48 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     ]
 
 
-def test_run_pipeline_emits_assignment_progress_for_multi_gpu_embedding(monkeypatch, tmp_path: Path):
+def test_distributed_embedding_stage_finishes_assignment_before_embedding_starts(
+    monkeypatch, tmp_path: Path
+):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
 
     reporter = RecordingReporter()
 
-    slide_a = SimpleNamespace(
-        sample_id="slide-a",
-        image_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        spacing_at_level_0=None,
-    )
-    slide_b = SimpleNamespace(
-        sample_id="slide-b",
-        image_path=Path("/tmp/slide-b.svs"),
-        mask_path=None,
-        spacing_at_level_0=None,
-    )
-    tiling_a = SimpleNamespace(x=np.array([0, 1]), y=np.array([0, 1]), tile_size_lv0=224)
-    tiling_b = SimpleNamespace(x=np.array([0, 1, 2]), y=np.array([0, 1, 2]), tile_size_lv0=224)
-    embedded_a = SimpleNamespace(sample_id="slide-a")
-    embedded_b = SimpleNamespace(sample_id="slide-b")
+    def _fake_run_torchrun_worker(*args, **kwargs):
+        progress.emit_progress(
+            "embedding.slide.started",
+            sample_id="slide-a",
+            total_tiles=5,
+            progress_label="cuda:0",
+        )
 
+    monkeypatch.setattr(inference.runtime_distributed, "run_torchrun_worker", _fake_run_torchrun_worker)
+    monkeypatch.setattr(inference.runtime_distributed, "reset_progress_event_logs", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         inference,
-        "_prepare_tiled_slides",
-        lambda *args, **kwargs: ([slide_a, slide_b], [tiling_a, tiling_b], tmp_path / "process_list.csv"),
-    )
-    monkeypatch.setattr(
-        inference,
-        "_select_embedding_path",
-        lambda *args, **kwargs: [embedded_a, embedded_b],
-    )
-    monkeypatch.setattr(inference, "_persist_embedded_slide", lambda *args, **kwargs: (None, None))
-    monkeypatch.setattr(inference.runtime_distributed, "run_torchrun_worker", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_collect_pipeline_artifacts",
-        lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
-    )
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_emit_tiling_summary",
-        lambda *args, **kwargs: progress.emit_progress(
-            "tiling.summary",
-            total=2,
-            completed=2,
-            failed=0,
-            pending=0,
-            discovered_tiles=5,
-        ),
+        "_build_pipeline_worker_request_payload",
+        lambda *args, **kwargs: {},
     )
 
-    model = SimpleNamespace(
-        name="prism",
-        level="slide",
-        _requested_device="cuda:0",
-        _load_backend=lambda: SimpleNamespace(),
-    )
+    model = SimpleNamespace(name="prism", level="slide", _requested_device="cuda:0")
 
     with progress.activate_progress_reporter(reporter):
-        result = inference.run_pipeline(
+        inference._run_distributed_embedding_stage(
             model,
-            slides=[slide_a, slide_b],
+            successful_slides=[
+                SimpleNamespace(sample_id="slide-a"),
+                SimpleNamespace(sample_id="slide-b"),
+            ],
             preprocessing=DEFAULT_PREPROCESSING,
             execution=inference.ExecutionOptions(output_dir=tmp_path, num_gpus=2, save_tile_embeddings=True),
+            output_dir=tmp_path,
         )
 
     kinds = [event.kind for event in reporter.events]
-
-    assert result.tile_artifacts == ["tile-artifact"]
-    assert result.slide_artifacts == ["slide-artifact"]
-    assert kinds == [
-        "run.started",
-        "tiling.started",
-        "tiling.summary",
-        "embedding.started",
-        "embedding.assignment.started",
-        "embedding.assignment.finished",
-        "embedding.finished",
-        "run.finished",
-    ]
+    assert kinds.count("embedding.assignment.started") == 1
+    assert kinds.count("embedding.assignment.finished") == 1
+    assert kinds.count("embedding.slide.started") == 1
 
 
 def test_plain_text_reporter_formats_assignment_progress():

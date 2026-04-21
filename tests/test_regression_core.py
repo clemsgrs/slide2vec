@@ -47,6 +47,7 @@ def test_packaged_preprocessing_config_matches_hs2p_4_tiling_schema():
     assert hasattr(cfg.tiling.seg_params, "sam2_checkpoint_path")
     assert hasattr(cfg.tiling.seg_params, "sam2_config_path")
     assert hasattr(cfg.tiling.seg_params, "sam2_device")
+    assert "sam2_num_workers:" in (ROOT / "slide2vec" / "configs" / "default.yaml").read_text()
     assert hasattr(cfg.tiling.preview, "save_mask_preview")
     assert hasattr(cfg.tiling.preview, "save_tiling_preview")
     assert hasattr(cfg.tiling.preview, "tissue_contour_color")
@@ -388,8 +389,8 @@ def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
 
     assert utils.cpu_worker_limit() == 64
 
-def test_execution_options_default_batch_size_is_one():
-    assert ExecutionOptions().batch_size == 1
+def test_execution_options_default_batchis_thirty_two():
+    assert ExecutionOptions().batch_size == 32
 
 def test_execution_options_default_num_workers_is_auto():
     assert ExecutionOptions().num_workers is None

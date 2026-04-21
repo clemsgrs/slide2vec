@@ -7,6 +7,14 @@
 
 - When slide2vec depends on bridged HS2P progress events, keep the bridge whitelist in sync with every reporter stage the UI renders; otherwise the code can define a preview bar and still never receive preview events.
 
+## 2026-04-21
+
+- When an itemwise preprocessing fallback must support both tensor-native transforms and PIL-only transforms, retry through PIL only after the tensor path actually fails with a PIL-style attribute error; do not force all tensor samples through PIL up front and break legitimate tensor transforms.
+
+## 2026-04-20
+
+- When a progress bar is only meant to cover scheduling or assignment, emit its `finished` event before the downstream GPU work starts; otherwise the UI makes the orchestration phase look like it is still active while encoding is already running.
+
 ## 2026-04-18
 
 - Keep `tiling.finished` for closing the live bar and emit the final summary on a separate `tiling.summary` event; otherwise the reporter ends up printing the same panel twice.
