@@ -72,6 +72,7 @@ def run_torchrun_worker(
         sys.executable,
         "-m",
         "torch.distributed.run",
+        "--standalone",
         f"--nproc_per_node={num_gpus}",
         "-m",
         module,
