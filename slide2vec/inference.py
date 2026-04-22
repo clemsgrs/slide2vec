@@ -183,6 +183,13 @@ def _uses_cuda_runtime(device) -> bool:
     return str(device).startswith("cuda") and torch.cuda.is_available()
 
 
+def _slide_encode_autocast_ctx(device, precision: str | None):
+    autocast_dtype = _autocast_dtype(torch, precision) if precision is not None else None
+    if autocast_dtype is None or not _uses_cuda_runtime(device):
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=autocast_dtype)
+
+
 def _make_slide_spec(
     *,
     sample_id: str,
@@ -388,6 +395,8 @@ def _encode_slide_from_tiles(
     loaded: LoadedModel,
     tile_embeddings: torch.Tensor,
     tiling_result,
+    *,
+    execution: ExecutionOptions | None = None,
 ) -> torch.Tensor:
     """Run the slide encoder on already-computed tile embeddings.
 
@@ -397,12 +406,13 @@ def _encode_slide_from_tiles(
     coordinates = np.column_stack((x_values, y_values))
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     features = tile_embeddings.to(loaded.device)
-    with torch.inference_mode():
-        return loaded.model.encode_slide(
-            features,
-            coordinate_tensor,
-            tile_size_lv0=int(tiling_result.tile_size_lv0),
-        ).detach().cpu()
+    with _slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
+        with torch.inference_mode():
+            return loaded.model.encode_slide(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            ).detach().cpu()
 
 
 def embed_patients(
@@ -506,7 +516,12 @@ def embed_patients(
                     preprocessing=preprocessing,
                     execution=execution,
                 )
-                slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+                slide_emb = _encode_slide_from_tiles(
+                    loaded,
+                    tile_embeddings,
+                    tiling_result,
+                    execution=execution,
+                )
                 patient_id = patient_id_map.get(slide.sample_id, slide.sample_id)
                 patient_slide_embeddings.setdefault(patient_id, []).append(
                     (slide.sample_id, slide_emb)
@@ -701,12 +716,13 @@ def aggregate_tiles(
         if not torch.is_tensor(tile_features):
             tile_features = torch.as_tensor(tile_features)
         tile_features = tile_features.to(loaded.device)
-        with torch.inference_mode():
-            embedding = loaded.model.encode_slide(
-                tile_features,
-                coordinate_tensor,
-                tile_size_lv0=int(tiling_result.tile_size_lv0),
-            )
+        with _slide_encode_autocast_ctx(loaded.device, execution.precision):
+            with torch.inference_mode():
+                embedding = loaded.model.encode_slide(
+                    tile_features,
+                    coordinate_tensor,
+                    tile_size_lv0=int(tiling_result.tile_size_lv0),
+                )
         latents = None
         slide_artifact = runtime_embedding.write_slide_embedding_artifact(
             artifact.sample_id,
@@ -1090,7 +1106,12 @@ def _run_patient_pipeline(
             sample_id=slide.sample_id,
             total_tiles=_num_embedding_items(tiling_result, preprocessing),
         )
-        slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+        slide_emb = _encode_slide_from_tiles(
+            loaded,
+            tile_embeddings,
+            tiling_result,
+            execution=execution,
+        )
         emit_progress("aggregation.finished", sample_id=slide.sample_id, has_latents=False)
 
         if execution.save_slide_embeddings:
@@ -1734,12 +1755,13 @@ def _aggregate_tile_embeddings_for_slide(
     if not torch.is_tensor(tile_embeddings):
         tile_embeddings = torch.as_tensor(tile_embeddings)
     features = tile_embeddings.to(loaded.device)
-    with torch.inference_mode():
-        slide_embedding = loaded.model.encode_slide(
-            features,
-            coordinate_tensor,
-            tile_size_lv0=int(tiling_result.tile_size_lv0),
-        ).detach().cpu()
+    with _slide_encode_autocast_ctx(loaded.device, execution.precision):
+        with torch.inference_mode():
+            slide_embedding = loaded.model.encode_slide(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            ).detach().cpu()
     latents = None
     return slide_embedding, latents
 

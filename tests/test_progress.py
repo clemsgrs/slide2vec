@@ -611,6 +611,46 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
     assert [event.kind for event in reporter.events] == ["embedding.slide.started"]
 
 
+def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    observed = {}
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            observed["command"] = command
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+            self._returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(inference.runtime_distributed.time, "sleep", lambda _seconds: None)
+
+    inference.runtime_distributed.run_torchrun_worker(
+        module="slide2vec.distributed.direct_embed_worker",
+        num_gpus=2,
+        output_dir=output_dir,
+        request_path=request_path,
+        failure_title="boom",
+        popen_factory=FakePopen,
+    )
+
+    command = observed["command"]
+    assert "--standalone" in command
+    assert "--master_port" not in " ".join(command)
+    assert "--rdzv-endpoint" not in " ".join(command)
+
+
 def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypatch):
     import slide2vec.progress as progress
 

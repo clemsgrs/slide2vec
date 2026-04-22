@@ -1,5 +1,6 @@
 import ast
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,7 @@ import types
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from slide2vec.api import (
     EmbeddedSlide,
@@ -520,6 +522,138 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     recorded = pd.read_csv(process_list_path).set_index("sample_id")
     assert recorded.loc["slide-a", "feature_status"] == "success"
     assert recorded.loc["slide-a", "feature_path"] == str((tmp_path / "relative-output" / "slide_embeddings" / "slide-a.pt").resolve())
+
+
+def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    autocast_active = False
+
+    @contextmanager
+    def fake_autocast(*, device_type: str, dtype):
+        nonlocal autocast_active
+        assert device_type == "cuda"
+        assert dtype == torch.float16
+        autocast_active = True
+        try:
+            yield
+        finally:
+            autocast_active = False
+
+    def encode_slide(tile_features, coordinates, *, tile_size_lv0: int | None = None):
+        assert autocast_active is True
+        assert tile_features.shape == (1, 4)
+        assert coordinates.shape == (1, 2)
+        assert tile_size_lv0 == 224
+        return torch.ones(4, dtype=torch.float32)
+
+    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(
+        inference.runtime_tiling,
+        "load_tiling_result_from_paths",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            requested_spacing_um=0.5,
+        ),
+    )
+    monkeypatch.setattr(
+        inference,
+        "load_array",
+        lambda *_args, **_kwargs: np.ones((1, 4), dtype=np.float32),
+    )
+
+    captured = {}
+
+    def fake_write_slide_embedding_artifact(sample_id, embedding, *, execution, metadata, latents=None):
+        captured["sample_id"] = sample_id
+        captured["embedding"] = embedding
+        captured["execution"] = execution
+        captured["metadata"] = metadata
+        captured["latents"] = latents
+        return SimpleNamespace(sample_id=sample_id, path=tmp_path / "slide_embeddings" / f"{sample_id}.pt")
+
+    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    model = SimpleNamespace(name="prism", level="slide", _load_backend=lambda: loaded)
+    artifact = SimpleNamespace(
+        sample_id="slide-a",
+        path=tmp_path / "tile_embeddings" / "slide-a.pt",
+        metadata={
+            "coordinates_npz_path": str(tmp_path / "slide-a.coordinates.npz"),
+            "coordinates_meta_path": str(tmp_path / "slide-a.coordinates.meta.json"),
+            "image_path": str(tmp_path / "slide-a.svs"),
+        },
+    )
+
+    monkeypatch.setattr(inference.runtime_embedding, "write_slide_embedding_artifact", fake_write_slide_embedding_artifact)
+
+    outputs = inference.aggregate_tiles(
+        model,
+        [artifact],
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, precision="fp16", save_slide_embeddings=True),
+    )
+
+    assert len(outputs) == 1
+    assert captured["sample_id"] == "slide-a"
+    assert torch.equal(captured["embedding"], torch.ones(4))
+    assert captured["latents"] is None
+    assert autocast_active is False
+
+
+def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    autocast_active = False
+
+    @contextmanager
+    def fake_autocast(*, device_type: str, dtype):
+        nonlocal autocast_active
+        assert device_type == "cuda"
+        assert dtype == torch.float16
+        autocast_active = True
+        try:
+            yield
+        finally:
+            autocast_active = False
+
+    def encode_slide(tile_features, coordinates, *, tile_size_lv0: int | None = None):
+        assert autocast_active is True
+        assert tile_features.shape == (1, 4)
+        assert coordinates.shape == (1, 2)
+        assert tile_size_lv0 == 224
+        return torch.ones(4, dtype=torch.float32)
+
+    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+
+    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    model = SimpleNamespace(level="slide", name="prism")
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+    )
+    tile_embeddings = np.ones((1, 4), dtype=np.float32)
+
+    slide_embedding, latents = inference._aggregate_tile_embeddings_for_slide(
+        loaded,
+        model,
+        slide,
+        tiling_result,
+        tile_embeddings,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, precision="fp16"),
+    )
+
+    assert torch.equal(slide_embedding, torch.ones(4))
+    assert latents is None
+    assert autocast_active is False
 
 
 def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(monkeypatch, tmp_path: Path):
