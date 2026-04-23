@@ -20,16 +20,6 @@ def uses_cuda_runtime(device) -> bool:
     return str(device).startswith("cuda") and torch.cuda.is_available()
 
 
-def embedding_dataloader_kwargs(loaded: LoadedModel, execution) -> dict[str, Any]:
-    resolved_num_workers = execution.resolved_num_workers_per_gpu()
-    kwargs: dict[str, Any] = {
-        "num_workers": resolved_num_workers,
-        "pin_memory": uses_cuda_runtime(loaded.device),
-    }
-    if resolved_num_workers > 0:
-        kwargs["prefetch_factor"] = int(execution.prefetch_factor)
-    return kwargs
-
 
 def should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
     if dataloader is None:

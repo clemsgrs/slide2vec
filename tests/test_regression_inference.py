@@ -1,4 +1,5 @@
 import ast
+import json
 import sys
 from contextlib import contextmanager
 from dataclasses import replace
@@ -719,9 +720,19 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
         lambda *args, **kwargs: ([slide_zero, slide_full], [zero_tiling, full_tiling], process_list_path),
     )
 
-    def fake_compute_embedded_slides(model, slide_records, tiling_results, *, preprocessing, execution, on_embedded_slide=None):
+    def fake_compute_embedded_slides(
+        model,
+        slide_records,
+        tiling_results,
+        *,
+        preprocessing,
+        execution,
+        on_embedded_slide=None,
+        collect_results=True,
+    ):
         captured["slide_records"] = [slide.sample_id for slide in slide_records]
         captured["tiling_results"] = [result.x.shape[0] for result in tiling_results]
+        captured["collect_results"] = collect_results
         if on_embedded_slide is not None:
             on_embedded_slide(slide_full, full_tiling, embedded_full)
         return [embedded_full]
@@ -875,13 +886,16 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
         "_prepare_tiled_slides",
         lambda *args, **kwargs: ([slide_record], [tiling_result], tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
-        lambda *args, **kwargs: [embedded],
-    )
-
     captured = {}
+
+    def fake_compute_embedded_slides(*args, **kwargs):
+        captured["collect_results"] = kwargs.get("collect_results")
+        callback = kwargs.get("on_embedded_slide")
+        if callback is not None:
+            callback(slide_record, tiling_result, embedded)
+        return []
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
 
     def fake_build_callback(*, model, preprocessing, execution, process_list_path):
         captured["model"] = model
@@ -906,8 +920,121 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
     )
 
     assert captured["process_list_path"] == tmp_path / "process_list.csv"
+    assert captured["collect_results"] is False
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
+
+
+def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is_false(monkeypatch):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224),
+        SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224),
+    ]
+    seen: list[str] = []
+
+    model = SimpleNamespace(level="tile", _load_backend=lambda: SimpleNamespace())
+
+    monkeypatch.setattr(inference, "emit_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_is_hierarchical_preprocessing", lambda preprocessing: False)
+    monkeypatch.setattr(
+        inference,
+        "_compute_tile_embeddings_for_slide",
+        lambda *args, **kwargs: np.zeros((1, 2), dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_aggregate_tile_embeddings_for_slide",
+        lambda *args, **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_make_embedded_slide",
+        lambda *, slide, **kwargs: SimpleNamespace(sample_id=slide.sample_id),
+    )
+
+    result = inference._compute_embedded_slides(
+        model,
+        slides,
+        tiling_results,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=Path("/tmp")),
+        on_embedded_slide=lambda slide, tiling_result, embedded_slide: seen.append(embedded_slide.sample_id),
+        collect_results=False,
+    )
+
+    assert result == []
+    assert seen == ["slide-a", "slide-b"]
+
+
+def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, tmp_path: Path):
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.inference as inference
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import pipeline_worker
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {
+                    "name": "virchow2",
+                    "allow_non_recommended_settings": False,
+                },
+                "preprocessing": {},
+                "execution": {},
+                "tiling_input_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(
+        serialization,
+        "deserialize_execution",
+        lambda payload: ExecutionOptions(output_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        inference,
+        "load_successful_tiled_slides",
+        lambda tiling_input_dir: ([slide], [tiling_result]),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_build_incremental_persist_callback",
+        lambda **kwargs: (lambda *args, **kwargs: None, [], []),
+    )
+
+    def fake_compute_embedded_slides(*args, **kwargs):
+        captured["collect_results"] = kwargs.get("collect_results")
+        return []
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(
+        pipeline_worker,
+        "assign_slides_to_ranks",
+        lambda slide_records, tiling_results, *, num_gpus: {0: ["slide-a"]},
+    )
+
+    assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    assert captured["collect_results"] is False
 
 
 def test_run_pipeline_local_branch_persists_completed_slides_before_later_failure(monkeypatch, tmp_path: Path):
@@ -2455,6 +2582,8 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
     import slide2vec.inference as inference
     torch = pytest.importorskip("torch")
 
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
     monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
     monkeypatch.setattr(inference, "slurm_cpu_limit", lambda: 24)
     monkeypatch.setattr("slide2vec.utils.utils.cpu_worker_limit", lambda: 24)

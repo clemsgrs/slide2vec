@@ -83,6 +83,7 @@ def main(argv=None) -> int:
                 preprocessing=preprocessing,
                 execution=execution,
                 on_embedded_slide=persist_callback,
+                collect_results=False,
             )
         return 0
     finally:

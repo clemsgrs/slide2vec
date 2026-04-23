@@ -911,6 +911,7 @@ def run_pipeline(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
                 on_embedded_slide=local_persist_callback,
+                collect_results=False,
             )
         tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_pipeline_artifacts(
             embeddable_slides,
@@ -1041,6 +1042,7 @@ def run_pipeline_with_coordinates(
             preprocessing=resolved_preprocessing,
             execution=execution,
             on_embedded_slide=local_persist_callback,
+            collect_results=False,
         )
         tile_artifacts: list[TileEmbeddingArtifact] = []
         hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
@@ -1405,6 +1407,7 @@ def _compute_embedded_slides(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     on_embedded_slide: Callable[[SlideSpec, Any, EmbeddedSlide], None] | None = None,
+    collect_results: bool = True,
 ) -> list[EmbeddedSlide]:
     loaded = model._load_backend()
     embedded_slides: list[EmbeddedSlide] = []
@@ -1459,7 +1462,8 @@ def _compute_embedded_slides(
             slide_embedding=slide_embedding,
             latents=latents,
         )
-        embedded_slides.append(embedded_slide)
+        if collect_results:
+            embedded_slides.append(embedded_slide)
         if on_embedded_slide is not None:
             on_embedded_slide(slide, tiling_result, embedded_slide)
         emit_progress(
