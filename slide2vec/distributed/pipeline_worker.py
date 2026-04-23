@@ -19,8 +19,8 @@ def main(argv=None) -> int:
     import slide2vec.distributed as distributed
     from slide2vec.api import Model
     from slide2vec.inference import (
+        _build_incremental_persist_callback,
         _compute_embedded_slides,
-        _persist_embedded_slide,
         load_successful_tiled_slides,
     )
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
@@ -70,21 +70,20 @@ def main(argv=None) -> int:
         )
         context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
         with context:
-            embedded_slides = _compute_embedded_slides(
+            persist_callback, _, _ = _build_incremental_persist_callback(
+                model=model,
+                preprocessing=preprocessing,
+                execution=execution,
+                process_list_path=None,
+            )
+            _compute_embedded_slides(
                 model,
                 assigned_slides,
                 assigned_tiling_results,
                 preprocessing=preprocessing,
                 execution=execution,
+                on_embedded_slide=persist_callback,
             )
-            for embedded_slide, tiling_result in zip(embedded_slides, assigned_tiling_results):
-                _persist_embedded_slide(
-                    model,
-                    embedded_slide,
-                    tiling_result,
-                    preprocessing=preprocessing,
-                    execution=execution,
-                )
         return 0
     finally:
         if dist.is_available() and dist.is_initialized():

@@ -1021,24 +1021,31 @@ def run_pipeline_with_coordinates(
                 slide_artifacts=slide_artifacts,
                 process_list_path=process_list_path,
             )
-        embedded_slides = _compute_embedded_slides(
+        local_persist_callback, tile_or_hier_artifacts, slide_artifacts = _build_incremental_persist_callback(
+            model=model,
+            preprocessing=resolved_preprocessing,
+            execution=execution,
+            process_list_path=process_list_path,
+        )
+        _compute_embedded_slides(
             model,
             embeddable_slides,
             embeddable_tiling_results,
             preprocessing=resolved_preprocessing,
             execution=execution,
+            on_embedded_slide=local_persist_callback,
         )
-        tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_local_pipeline_artifacts(
-            model=model,
-            embedded_slides=embedded_slides,
-            tiling_results=embeddable_tiling_results,
-            preprocessing=resolved_preprocessing,
-            execution=execution,
-        )
+        tile_artifacts: list[TileEmbeddingArtifact] = []
+        hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
+        for artifact in tile_or_hier_artifacts:
+            if isinstance(artifact, HierarchicalEmbeddingArtifact):
+                hierarchical_artifacts.append(artifact)
+            elif artifact is not None:
+                tile_artifacts.append(artifact)
         return RunResult(
             tile_artifacts=tile_artifacts,
             hierarchical_artifacts=hierarchical_artifacts,
-            slide_artifacts=slide_artifacts,
+            slide_artifacts=list(slide_artifacts),
             process_list_path=process_list_path,
         )
     except Exception as exc:
