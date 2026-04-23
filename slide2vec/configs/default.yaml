@@ -42,7 +42,7 @@ tiling:
     sthresh_up: 255 # upper threshold value for scaling the binary mask
     mthresh: 7 # median filter size (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
-    method: "hsv" # tissue segmentation method: "hsv", "otsu", "threshold", or "sam2"
+    method: # tissue segmentation method: "hsv", "otsu", "threshold", or "sam2"; ignored when precomputed tissue masks are provided
     sam2_checkpoint_path: # optional when method="sam2"; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
     sam2_config_path: # optional local override for the SAM2 model config; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
     sam2_device: "cpu" # device for SAM2 inference, e.g. "cpu", "cuda", or "cuda:0"
@@ -71,12 +71,11 @@ tiling:
 
 speed:
   precision: # model inference precision ["fp32", "fp16", "bf16"]; if not set, determined automatically based on model recommendations
-  num_dataloader_workers: # number of DataLoader worker processes for reading tiles during embedding; defaults to auto (job CPU budget, except cuCIM on-the-fly uses cpu_budget // speed.num_cucim_workers)
+  num_dataloader_workers: # number of DataLoader worker processes per GPU rank for reading tiles during embedding; defaults to auto (job CPU budget split across GPUs, except cuCIM on-the-fly uses per-GPU budget // speed.num_cucim_workers)
   num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
   num_preprocessing_workers: # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing); defaults to the runtime CPU budget capped at 64
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
   prefetch_factor_embedding: 4 # prefetch factor for tile embedding dataloaders
-  persistent_workers_embedding: true # keep DataLoader workers alive across epochs/batches
 
 wandb:
   enable: false

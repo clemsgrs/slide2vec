@@ -376,9 +376,9 @@ def test_execution_options_preserves_explicit_dataloader_workers(monkeypatch):
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 2)
     monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 2)
 
-    execution = api.ExecutionOptions(num_workers=3)
+    execution = api.ExecutionOptions(num_workers_per_gpu=3)
 
-    assert execution.num_workers == 3
+    assert execution.num_workers_per_gpu == 3
     assert execution.num_preprocessing_workers == 2
 
 def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
@@ -393,7 +393,7 @@ def test_execution_options_default_batchis_thirty_two():
     assert ExecutionOptions().batch_size == 32
 
 def test_execution_options_default_num_workers_is_auto():
-    assert ExecutionOptions().num_workers is None
+    assert ExecutionOptions().num_workers_per_gpu is None
 
 def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
     import slide2vec.api as api
@@ -401,13 +401,25 @@ def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
     monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
     monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 1)
 
     with caplog.at_level("INFO"):
         execution = api.ExecutionOptions()
 
-    assert execution.num_workers is None
-    assert "ExecutionOptions: num_workers=18 (requested=auto)" in caplog.text
-    assert "num_workers=auto" not in caplog.text
+    assert execution.num_workers_per_gpu is None
+    assert "ExecutionOptions: num_workers_per_gpu=18 (requested=auto)" in caplog.text
+    assert "num_workers_per_gpu=auto" not in caplog.text
+
+
+def test_execution_options_auto_workers_are_split_across_gpus(monkeypatch):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
+
+    execution = api.ExecutionOptions(num_gpus=3)
+
+    assert execution.resolved_num_workers_per_gpu() == 6
 
 
 def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
@@ -453,11 +465,9 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.output_dir == tmp_path
     assert execution.output_format == "pt"
     assert execution.batch_size == 4
-    assert execution.num_workers == 2
     assert execution.num_gpus == 3
     assert execution.precision == "bf16"
     assert execution.prefetch_factor == 5
-    assert execution.persistent_workers is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -511,7 +521,7 @@ def test_execution_options_from_config_preserves_auto_num_workers(tmp_path: Path
 
     execution = ExecutionOptions.from_config(cfg)
 
-    assert execution.num_workers is None
+    assert execution.num_workers_per_gpu is None
 
 def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -540,7 +550,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     assert execution.num_gpus == 6
     assert execution.precision == "fp32"
     assert execution.prefetch_factor == 3
-    assert execution.persistent_workers is True
 
 def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -615,11 +624,10 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         output_dir=None,
         output_format="npz",
         batch_size=8,
-        num_workers=3,
+        num_workers_per_gpu=3,
         num_gpus=2,
         precision="bf16",
         prefetch_factor=6,
-        persistent_workers=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -629,11 +637,10 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.output_dir == tmp_path
     assert updated.output_format == base.output_format
     assert updated.batch_size == base.batch_size
-    assert updated.num_workers == base.num_workers
+    assert updated.num_workers_per_gpu == base.num_workers_per_gpu
     assert updated.num_gpus == base.num_gpus
     assert updated.precision == base.precision
     assert updated.prefetch_factor == base.prefetch_factor
-    assert updated.persistent_workers == base.persistent_workers
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base

@@ -45,12 +45,12 @@ def build_hs2p_configs(
         else preprocessing.requested_tile_size_px
     )
     tiling_cfg = TilingConfig(
-        backend=resolve_tiling_backend(preprocessing),
         requested_spacing_um=preprocessing.requested_spacing_um,
         requested_tile_size_px=requested_tile_size_px,
         tolerance=preprocessing.tolerance,
         overlap=preprocessing.overlap,
         tissue_threshold=preprocessing.tissue_threshold,
+        backend=resolve_tiling_backend(preprocessing),
     )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))

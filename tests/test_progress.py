@@ -405,7 +405,7 @@ def test_run_forward_pass_reports_processed_tile_counts():
     loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
 
     with progress.activate_progress_reporter(reporter):
-        outputs = inference._run_forward_pass(
+        indices, outputs = inference._run_forward_pass(
             dataloader,
             loaded,
             nullcontext(),
@@ -414,6 +414,7 @@ def test_run_forward_pass_reports_processed_tile_counts():
             unit_label="tile",
         )
 
+    assert torch.equal(indices, torch.tensor([0, 1, 2, 3, 4]))
     assert outputs.shape == (5, 3)
     payloads = [event.payload for event in reporter.events if event.kind == "embedding.tile.progress"]
     assert [payload["processed"] for payload in payloads] == [2, 4, 5]
@@ -496,7 +497,7 @@ def test_run_forward_pass_prefers_tile_encoder_when_present():
     )
 
     with progress.activate_progress_reporter(reporter):
-        outputs = inference._run_forward_pass(
+        indices, outputs = inference._run_forward_pass(
             dataloader,
             loaded,
             nullcontext(),
@@ -505,6 +506,7 @@ def test_run_forward_pass_prefers_tile_encoder_when_present():
             unit_label="tile",
         )
 
+    assert torch.equal(indices, torch.tensor([0, 1, 2]))
     assert outputs.shape == (3, 3)
     assert torch.all(outputs == 7.0)
 
@@ -609,6 +611,46 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
         )
 
     assert [event.kind for event in reporter.events] == ["embedding.slide.started"]
+
+
+def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    observed = {}
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            observed["command"] = command
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+            self._returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(inference.runtime_distributed.time, "sleep", lambda _seconds: None)
+
+    inference.runtime_distributed.run_torchrun_worker(
+        module="slide2vec.distributed.direct_embed_worker",
+        num_gpus=2,
+        output_dir=output_dir,
+        request_path=request_path,
+        failure_title="boom",
+        popen_factory=FakePopen,
+    )
+
+    command = observed["command"]
+    assert "--standalone" in command
+    assert "--master_port" not in " ".join(command)
+    assert "--rdzv-endpoint" not in " ".join(command)
 
 
 def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypatch):

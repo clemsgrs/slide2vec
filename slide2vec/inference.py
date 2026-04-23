@@ -98,25 +98,29 @@ def _serialize_execution(
     *,
     preprocessing: PreprocessingConfig | None = None,
 ) -> dict[str, Any]:
-    effective_num_workers = None
+    effective_num_workers_per_gpu = None
     if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers_per_gpu, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
     return runtime_serialization.serialize_execution(
         execution,
-        effective_num_workers=effective_num_workers,
+        effective_num_workers_per_gpu=effective_num_workers_per_gpu,
     )
 
 
 
-def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
+def _resolve_on_the_fly_num_workers(num_cucim_workers: int, num_gpus: int) -> tuple[int, str]:
     if int(num_cucim_workers) < 1:
         raise ValueError("num_cucim_workers must be at least 1")
     cpu_count = os.cpu_count() or 1
-    worker_budget = cpu_worker_limit()
+    worker_budget = max(1, cpu_worker_limit() // max(1, int(num_gpus)))
     details = [f"cpu_count={cpu_count}"]
     slurm_limit = slurm_cpu_limit()
     if slurm_limit is not None:
         details.append(f"slurm_cpu_limit={slurm_limit}")
+    details.append(f"num_gpus={num_gpus}")
     effective_num_workers = max(1, worker_budget // num_cucim_workers)
     details.append(f"num_cucim_workers={num_cucim_workers}")
     return effective_num_workers, " // ".join(details)
@@ -131,13 +135,16 @@ def _log_on_the_fly_worker_override_once(
         return
     if not any(runtime_tiling.resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
         return
-    effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
-    if effective_num_workers == execution.num_workers:
+    effective_num_workers_per_gpu, worker_context = _resolve_on_the_fly_num_workers(
+        preprocessing.num_cucim_workers,
+        num_gpus=execution.num_gpus,
+    )
+    if effective_num_workers_per_gpu == execution.resolved_num_workers_per_gpu():
         return
     logging.getLogger(__name__).info(
-        f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
+        f"on-the-fly mode: setting DataLoader num_workers_per_gpu={effective_num_workers_per_gpu} "
         f"({worker_context}); "
-        f"ignoring speed.num_dataloader_workers={execution.num_workers}"
+        f"ignoring speed.num_workers_per_gpu={execution.num_workers_per_gpu}"
     )
 
 
@@ -181,6 +188,13 @@ def _should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
 
 def _uses_cuda_runtime(device) -> bool:
     return str(device).startswith("cuda") and torch.cuda.is_available()
+
+
+def _slide_encode_autocast_ctx(device, precision: str | None):
+    autocast_dtype = _autocast_dtype(torch, precision) if precision is not None else None
+    if autocast_dtype is None or not _uses_cuda_runtime(device):
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=autocast_dtype)
 
 
 def _make_slide_spec(
@@ -388,6 +402,8 @@ def _encode_slide_from_tiles(
     loaded: LoadedModel,
     tile_embeddings: torch.Tensor,
     tiling_result,
+    *,
+    execution: ExecutionOptions | None = None,
 ) -> torch.Tensor:
     """Run the slide encoder on already-computed tile embeddings.
 
@@ -397,12 +413,13 @@ def _encode_slide_from_tiles(
     coordinates = np.column_stack((x_values, y_values))
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     features = tile_embeddings.to(loaded.device)
-    with torch.inference_mode():
-        return loaded.model.encode_slide(
-            features,
-            coordinate_tensor,
-            tile_size_lv0=int(tiling_result.tile_size_lv0),
-        ).detach().cpu()
+    with _slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
+        with torch.inference_mode():
+            return loaded.model.encode_slide(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            ).detach().cpu()
 
 
 def embed_patients(
@@ -506,7 +523,12 @@ def embed_patients(
                     preprocessing=preprocessing,
                     execution=execution,
                 )
-                slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+                slide_emb = _encode_slide_from_tiles(
+                    loaded,
+                    tile_embeddings,
+                    tiling_result,
+                    execution=execution,
+                )
                 patient_id = patient_id_map.get(slide.sample_id, slide.sample_id)
                 patient_slide_embeddings.setdefault(patient_id, []).append(
                     (slide.sample_id, slide_emb)
@@ -701,12 +723,13 @@ def aggregate_tiles(
         if not torch.is_tensor(tile_features):
             tile_features = torch.as_tensor(tile_features)
         tile_features = tile_features.to(loaded.device)
-        with torch.inference_mode():
-            embedding = loaded.model.encode_slide(
-                tile_features,
-                coordinate_tensor,
-                tile_size_lv0=int(tiling_result.tile_size_lv0),
-            )
+        with _slide_encode_autocast_ctx(loaded.device, execution.precision):
+            with torch.inference_mode():
+                embedding = loaded.model.encode_slide(
+                    tile_features,
+                    coordinate_tensor,
+                    tile_size_lv0=int(tiling_result.tile_size_lv0),
+                )
         latents = None
         slide_artifact = runtime_embedding.write_slide_embedding_artifact(
             artifact.sample_id,
@@ -888,6 +911,7 @@ def run_pipeline(
                 preprocessing=resolved_preprocessing,
                 execution=execution,
                 on_embedded_slide=local_persist_callback,
+                collect_results=False,
             )
         tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_pipeline_artifacts(
             embeddable_slides,
@@ -1005,24 +1029,32 @@ def run_pipeline_with_coordinates(
                 slide_artifacts=slide_artifacts,
                 process_list_path=process_list_path,
             )
-        embedded_slides = _compute_embedded_slides(
+        local_persist_callback, tile_or_hier_artifacts, slide_artifacts = _build_incremental_persist_callback(
+            model=model,
+            preprocessing=resolved_preprocessing,
+            execution=execution,
+            process_list_path=process_list_path,
+        )
+        _compute_embedded_slides(
             model,
             embeddable_slides,
             embeddable_tiling_results,
             preprocessing=resolved_preprocessing,
             execution=execution,
+            on_embedded_slide=local_persist_callback,
+            collect_results=False,
         )
-        tile_artifacts, hierarchical_artifacts, slide_artifacts = _collect_local_pipeline_artifacts(
-            model=model,
-            embedded_slides=embedded_slides,
-            tiling_results=embeddable_tiling_results,
-            preprocessing=resolved_preprocessing,
-            execution=execution,
-        )
+        tile_artifacts: list[TileEmbeddingArtifact] = []
+        hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
+        for artifact in tile_or_hier_artifacts:
+            if isinstance(artifact, HierarchicalEmbeddingArtifact):
+                hierarchical_artifacts.append(artifact)
+            elif artifact is not None:
+                tile_artifacts.append(artifact)
         return RunResult(
             tile_artifacts=tile_artifacts,
             hierarchical_artifacts=hierarchical_artifacts,
-            slide_artifacts=slide_artifacts,
+            slide_artifacts=list(slide_artifacts),
             process_list_path=process_list_path,
         )
     except Exception as exc:
@@ -1090,7 +1122,12 @@ def _run_patient_pipeline(
             sample_id=slide.sample_id,
             total_tiles=_num_embedding_items(tiling_result, preprocessing),
         )
-        slide_emb = _encode_slide_from_tiles(loaded, tile_embeddings, tiling_result)
+        slide_emb = _encode_slide_from_tiles(
+            loaded,
+            tile_embeddings,
+            tiling_result,
+            execution=execution,
+        )
         emit_progress("aggregation.finished", sample_id=slide.sample_id, has_latents=False)
 
         if execution.save_slide_embeddings:
@@ -1370,6 +1407,7 @@ def _compute_embedded_slides(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     on_embedded_slide: Callable[[SlideSpec, Any, EmbeddedSlide], None] | None = None,
+    collect_results: bool = True,
 ) -> list[EmbeddedSlide]:
     loaded = model._load_backend()
     embedded_slides: list[EmbeddedSlide] = []
@@ -1424,7 +1462,8 @@ def _compute_embedded_slides(
             slide_embedding=slide_embedding,
             latents=latents,
         )
-        embedded_slides.append(embedded_slide)
+        if collect_results:
+            embedded_slides.append(embedded_slide)
         if on_embedded_slide is not None:
             on_embedded_slide(slide, tiling_result, embedded_slide)
         emit_progress(
@@ -1508,10 +1547,12 @@ def _compute_tile_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
         _configure_cucim_worker_stderr(loader_kwargs, backend=resolved_backend)
     if batch_sampler is not None:
@@ -1525,7 +1566,7 @@ def _compute_tile_embeddings_for_slide(
         **loader_kwargs,
     )
     def _compute_embeddings():
-        return _run_forward_pass(
+        _batch_indices, tile_embeddings = _run_forward_pass(
             dataloader,
             loaded,
             autocast_context,
@@ -1534,6 +1575,7 @@ def _compute_tile_embeddings_for_slide(
             total_items=len(dataset),
             unit_label="tile",
         )
+        return tile_embeddings
 
     if resolved_backend == "cucim":
         tile_embeddings = run_with_filtered_stderr(_compute_embeddings)
@@ -1587,10 +1629,12 @@ def _compute_hierarchical_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,
@@ -1620,7 +1664,6 @@ def _compute_hierarchical_embeddings_for_slide(
             sample_id=slide.sample_id,
             total_items=len(dataset),
             unit_label="tile",
-            return_indices=True,
         )
 
     if resolved_backend == "cucim":
@@ -1670,10 +1713,12 @@ def _compute_hierarchical_embedding_shard_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
-        effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,
@@ -1699,7 +1744,6 @@ def _compute_hierarchical_embedding_shard_for_slide(
             sample_id=slide.sample_id,
             total_items=len(dataset),
             unit_label="tile",
-            return_indices=True,
         )
 
     if resolved_backend == "cucim":
@@ -1734,12 +1778,13 @@ def _aggregate_tile_embeddings_for_slide(
     if not torch.is_tensor(tile_embeddings):
         tile_embeddings = torch.as_tensor(tile_embeddings)
     features = tile_embeddings.to(loaded.device)
-    with torch.inference_mode():
-        slide_embedding = loaded.model.encode_slide(
-            features,
-            coordinate_tensor,
-            tile_size_lv0=int(tiling_result.tile_size_lv0),
-        ).detach().cpu()
+    with _slide_encode_autocast_ctx(loaded.device, execution.precision):
+        with torch.inference_mode():
+            slide_embedding = loaded.model.encode_slide(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            ).detach().cpu()
     latents = None
     return slide_embedding, latents
 

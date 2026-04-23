@@ -1,5 +1,7 @@
 import ast
+import json
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +10,7 @@ import types
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from slide2vec.api import (
     EmbeddedSlide,
@@ -522,6 +525,138 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     assert recorded.loc["slide-a", "feature_path"] == str((tmp_path / "relative-output" / "slide_embeddings" / "slide-a.pt").resolve())
 
 
+def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    autocast_active = False
+
+    @contextmanager
+    def fake_autocast(*, device_type: str, dtype):
+        nonlocal autocast_active
+        assert device_type == "cuda"
+        assert dtype == torch.float16
+        autocast_active = True
+        try:
+            yield
+        finally:
+            autocast_active = False
+
+    def encode_slide(tile_features, coordinates, *, tile_size_lv0: int | None = None):
+        assert autocast_active is True
+        assert tile_features.shape == (1, 4)
+        assert coordinates.shape == (1, 2)
+        assert tile_size_lv0 == 224
+        return torch.ones(4, dtype=torch.float32)
+
+    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(
+        inference.runtime_tiling,
+        "load_tiling_result_from_paths",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            requested_spacing_um=0.5,
+        ),
+    )
+    monkeypatch.setattr(
+        inference,
+        "load_array",
+        lambda *_args, **_kwargs: np.ones((1, 4), dtype=np.float32),
+    )
+
+    captured = {}
+
+    def fake_write_slide_embedding_artifact(sample_id, embedding, *, execution, metadata, latents=None):
+        captured["sample_id"] = sample_id
+        captured["embedding"] = embedding
+        captured["execution"] = execution
+        captured["metadata"] = metadata
+        captured["latents"] = latents
+        return SimpleNamespace(sample_id=sample_id, path=tmp_path / "slide_embeddings" / f"{sample_id}.pt")
+
+    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    model = SimpleNamespace(name="prism", level="slide", _load_backend=lambda: loaded)
+    artifact = SimpleNamespace(
+        sample_id="slide-a",
+        path=tmp_path / "tile_embeddings" / "slide-a.pt",
+        metadata={
+            "coordinates_npz_path": str(tmp_path / "slide-a.coordinates.npz"),
+            "coordinates_meta_path": str(tmp_path / "slide-a.coordinates.meta.json"),
+            "image_path": str(tmp_path / "slide-a.svs"),
+        },
+    )
+
+    monkeypatch.setattr(inference.runtime_embedding, "write_slide_embedding_artifact", fake_write_slide_embedding_artifact)
+
+    outputs = inference.aggregate_tiles(
+        model,
+        [artifact],
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, precision="fp16", save_slide_embeddings=True),
+    )
+
+    assert len(outputs) == 1
+    assert captured["sample_id"] == "slide-a"
+    assert torch.equal(captured["embedding"], torch.ones(4))
+    assert captured["latents"] is None
+    assert autocast_active is False
+
+
+def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    autocast_active = False
+
+    @contextmanager
+    def fake_autocast(*, device_type: str, dtype):
+        nonlocal autocast_active
+        assert device_type == "cuda"
+        assert dtype == torch.float16
+        autocast_active = True
+        try:
+            yield
+        finally:
+            autocast_active = False
+
+    def encode_slide(tile_features, coordinates, *, tile_size_lv0: int | None = None):
+        assert autocast_active is True
+        assert tile_features.shape == (1, 4)
+        assert coordinates.shape == (1, 2)
+        assert tile_size_lv0 == 224
+        return torch.ones(4, dtype=torch.float32)
+
+    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+
+    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    model = SimpleNamespace(level="slide", name="prism")
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+    )
+    tile_embeddings = np.ones((1, 4), dtype=np.float32)
+
+    slide_embedding, latents = inference._aggregate_tile_embeddings_for_slide(
+        loaded,
+        model,
+        slide,
+        tiling_result,
+        tile_embeddings,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, precision="fp16"),
+    )
+
+    assert torch.equal(slide_embedding, torch.ones(4))
+    assert latents is None
+    assert autocast_active is False
+
+
 def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
@@ -585,9 +720,19 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
         lambda *args, **kwargs: ([slide_zero, slide_full], [zero_tiling, full_tiling], process_list_path),
     )
 
-    def fake_compute_embedded_slides(model, slide_records, tiling_results, *, preprocessing, execution, on_embedded_slide=None):
+    def fake_compute_embedded_slides(
+        model,
+        slide_records,
+        tiling_results,
+        *,
+        preprocessing,
+        execution,
+        on_embedded_slide=None,
+        collect_results=True,
+    ):
         captured["slide_records"] = [slide.sample_id for slide in slide_records]
         captured["tiling_results"] = [result.x.shape[0] for result in tiling_results]
+        captured["collect_results"] = collect_results
         if on_embedded_slide is not None:
             on_embedded_slide(slide_full, full_tiling, embedded_full)
         return [embedded_full]
@@ -608,7 +753,7 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
             model,
             slides=[slide_zero, slide_full],
             preprocessing=DEFAULT_PREPROCESSING,
-            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+            execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1, save_tile_embeddings=True),
         )
 
     zero_meta = load_metadata(tmp_path / "tile_embeddings" / "slide-zero.meta.json")
@@ -741,13 +886,16 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
         "_prepare_tiled_slides",
         lambda *args, **kwargs: ([slide_record], [tiling_result], tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
-        lambda *args, **kwargs: [embedded],
-    )
-
     captured = {}
+
+    def fake_compute_embedded_slides(*args, **kwargs):
+        captured["collect_results"] = kwargs.get("collect_results")
+        callback = kwargs.get("on_embedded_slide")
+        if callback is not None:
+            callback(slide_record, tiling_result, embedded)
+        return []
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
 
     def fake_build_callback(*, model, preprocessing, execution, process_list_path):
         captured["model"] = model
@@ -772,8 +920,192 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
     )
 
     assert captured["process_list_path"] == tmp_path / "process_list.csv"
+    assert captured["collect_results"] is False
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
+
+
+def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is_false(monkeypatch):
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224),
+        SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224),
+    ]
+    seen: list[str] = []
+
+    model = SimpleNamespace(level="tile", _load_backend=lambda: SimpleNamespace())
+
+    monkeypatch.setattr(inference, "emit_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(inference, "_is_hierarchical_preprocessing", lambda preprocessing: False)
+    monkeypatch.setattr(
+        inference,
+        "_compute_tile_embeddings_for_slide",
+        lambda *args, **kwargs: np.zeros((1, 2), dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_aggregate_tile_embeddings_for_slide",
+        lambda *args, **kwargs: (None, None),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_make_embedded_slide",
+        lambda *, slide, **kwargs: SimpleNamespace(sample_id=slide.sample_id),
+    )
+
+    result = inference._compute_embedded_slides(
+        model,
+        slides,
+        tiling_results,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=Path("/tmp")),
+        on_embedded_slide=lambda slide, tiling_result, embedded_slide: seen.append(embedded_slide.sample_id),
+        collect_results=False,
+    )
+
+    assert result == []
+    assert seen == ["slide-a", "slide-b"]
+
+
+def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, tmp_path: Path):
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.inference as inference
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import pipeline_worker
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {
+                    "name": "virchow2",
+                    "allow_non_recommended_settings": False,
+                },
+                "preprocessing": {},
+                "execution": {},
+                "tiling_input_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(
+        serialization,
+        "deserialize_execution",
+        lambda payload: ExecutionOptions(output_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        inference,
+        "load_successful_tiled_slides",
+        lambda tiling_input_dir: ([slide], [tiling_result]),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_build_incremental_persist_callback",
+        lambda **kwargs: (lambda *args, **kwargs: None, [], []),
+    )
+
+    def fake_compute_embedded_slides(*args, **kwargs):
+        captured["collect_results"] = kwargs.get("collect_results")
+        return []
+
+    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(
+        pipeline_worker,
+        "assign_slides_to_ranks",
+        lambda slide_records, tiling_results, *, num_gpus: {0: ["slide-a"]},
+    )
+
+    assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    assert captured["collect_results"] is False
+
+
+def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypatch, tmp_path: Path):
+    import torch
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import direct_embed_worker
+
+    coordination_dir = tmp_path / "coordination"
+    coordination_dir.mkdir()
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {
+                    "name": "virchow2",
+                    "allow_non_recommended_settings": False,
+                },
+                "preprocessing": {},
+                "execution": {},
+                "coordination_dir": str(coordination_dir),
+                "strategy": "slide_shard",
+                "assignments": {"0": ["slide-a"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(
+        serialization,
+        "deserialize_execution",
+        lambda payload: ExecutionOptions(output_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        direct_embed_worker,
+        "_to_cpu_payload",
+        lambda value: value,
+    )
+
+    import slide2vec.inference as inference
+
+    monkeypatch.setattr(
+        inference,
+        "load_successful_tiled_slides",
+        lambda output_dir: ([slide], [tiling_result]),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_compute_embedded_slides",
+        lambda *args, **kwargs: [],
+    )
+
+    assert direct_embed_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    source = (ROOT / "slide2vec" / "distributed" / "direct_embed_worker.py").read_text(encoding="utf-8")
+    assert "collect_results=False" in source
+    assert "on_embedded_slide=_persist_embedded_slide" in source
 
 
 def test_run_pipeline_local_branch_persists_completed_slides_before_later_failure(monkeypatch, tmp_path: Path):
@@ -945,7 +1277,7 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
             model,
             slides=slides,
             preprocessing=DEFAULT_PREPROCESSING,
-            execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True),
+            execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1, save_tile_embeddings=True),
         )
 
     assert (tmp_path / "tile_embeddings" / "slide-a.pt").is_file()
@@ -2167,8 +2499,9 @@ def test_run_forward_pass_handles_empty_dataloader():
         device=torch.device("cpu"),
     )
 
-    result = inference._run_forward_pass(dataloader, loaded, nullcontext())
+    indices, result = inference._run_forward_pass(dataloader, loaded, nullcontext())
 
+    assert indices.shape == (0,)
     assert result.shape == (0, 5)
     assert result.dtype == torch.float32
 
@@ -2240,7 +2573,7 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
         device=torch.device("cpu"),
     )
 
-    result = inference._run_forward_pass(
+    indices, result = inference._run_forward_pass(
         DummyLoader(),
         loaded,
         nullcontext(),
@@ -2249,8 +2582,79 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
         total_items=2,
     )
 
+    assert torch.equal(indices, torch.tensor([0, 1], dtype=torch.long))
     assert result.shape == (2, 3)
     assert torch.allclose(result, torch.ones((2, 3), dtype=torch.float32))
+
+
+def test_run_forward_pass_preserves_embedding_order_and_indices_across_batches():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+    from contextlib import nullcontext
+
+    class DummyLoader:
+        def __iter__(self):
+            yield (
+                torch.tensor([5, 2], dtype=torch.long),
+                torch.tensor(
+                    [
+                        [[[10.0]]],
+                        [[[20.0]]],
+                    ],
+                    dtype=torch.float32,
+                ),
+            )
+            yield (
+                torch.tensor([9], dtype=torch.long),
+                torch.tensor([[[[30.0]]]], dtype=torch.float32),
+            )
+            yield (
+                torch.tensor([4, 1], dtype=torch.long),
+                torch.tensor(
+                    [
+                        [[[40.0]]],
+                        [[[50.0]]],
+                    ],
+                    dtype=torch.float32,
+                ),
+            )
+
+        def __len__(self):
+            return 3
+
+    class DummyModel:
+        def encode_tiles(self, image):
+            values = image[:, 0, 0, 0]
+            return torch.stack((values, values + 0.5), dim=1)
+
+    loaded = inference.LoadedModel(
+        name="virchow2",
+        level="tile",
+        model=DummyModel(),
+        transforms=lambda image: image,
+        feature_dim=2,
+        device=torch.device("cpu"),
+    )
+
+    indices, embeddings = inference._run_forward_pass(
+        DummyLoader(),
+        loaded,
+        nullcontext(),
+        total_items=5,
+    )
+
+    assert torch.equal(indices, torch.tensor([5, 2, 9, 4, 1], dtype=torch.long))
+    expected = torch.tensor(
+        [
+            [10.0, 10.5],
+            [20.0, 20.5],
+            [30.0, 30.5],
+            [40.0, 40.5],
+            [50.0, 50.5],
+        ],
+        dtype=torch.float32,
+    )
+    assert torch.equal(embeddings, expected)
 
 
 def test_serialize_execution_preserves_loader_optimization_fields():
@@ -2260,11 +2664,10 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     execution = ExecutionOptions(
         output_dir=Path("/tmp/output"),
         batch_size=64,
-        num_workers=8,
+        num_workers_per_gpu=8,
         num_gpus=2,
         precision="bf16",
         prefetch_factor=7,
-        persistent_workers=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -2273,10 +2676,8 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     restored = deserialize_execution(payload)
 
     assert payload["prefetch_factor"] == 7
-    assert payload["persistent_workers"] is False
     assert payload["precision"] == "bf16"
     assert restored.prefetch_factor == 7
-    assert restored.persistent_workers is False
     assert restored.precision == "bf16"
 
 
@@ -2286,7 +2687,7 @@ def test_serialize_execution_preserves_slide_embedding_and_preprocessing_worker_
 
     execution = ExecutionOptions(
         output_dir=Path("/tmp/output"),
-        num_workers=8,
+        num_workers_per_gpu=8,
         num_preprocessing_workers=3,
         num_gpus=2,
         save_tile_embeddings=True,
@@ -2308,15 +2709,15 @@ def test_deserialize_execution_defaults_num_workers_to_auto():
 
     restored = deserialize_execution({"batch_size": 4, "num_gpus": 1})
 
-    assert restored.num_workers is None
+    assert restored.num_workers_per_gpu is None
 
 
 def test_deserialize_execution_preserves_auto_num_workers():
     from slide2vec.runtime.serialization import deserialize_execution
 
-    restored = deserialize_execution({"batch_size": 4, "num_workers": None, "num_gpus": 1})
+    restored = deserialize_execution({"batch_size": 4, "num_workers_per_gpu": None, "num_gpus": 1})
 
-    assert restored.num_workers is None
+    assert restored.num_workers_per_gpu is None
 
 
 def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch):
@@ -2325,6 +2726,11 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
     torch = pytest.importorskip("torch")
 
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(inference, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr("slide2vec.utils.utils.cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr("slide2vec.utils.utils.slurm_cpu_limit", lambda: 24)
 
     loaded = inference.LoadedModel(
         name="test",
@@ -2337,11 +2743,10 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
 
     kwargs = inference._embedding_dataloader_kwargs(
         loaded,
-        ExecutionOptions(num_workers=None, num_gpus=1),
+        ExecutionOptions(num_workers_per_gpu=None, num_gpus=1),
     )
 
     assert kwargs["num_workers"] == 24
-    assert kwargs["persistent_workers"] is True
     assert kwargs["prefetch_factor"] == 4
 
 
@@ -2390,6 +2795,11 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
     monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(inference, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr("slide2vec.utils.utils.cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr("slide2vec.utils.utils.slurm_cpu_limit", lambda: 24)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -2415,12 +2825,11 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
             tile_size_lv0=224,
         ),
         preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
-        execution=ExecutionOptions(batch_size=2, num_workers=None, num_gpus=1),
+        execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=None, num_gpus=1),
     )
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 24
-    assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 4
     assert captured["wsd_collator_kwargs"]["backend"] == "asap"
 
@@ -2480,10 +2889,9 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
     )
     execution = ExecutionOptions(
         batch_size=2,
-        num_workers=3,
+        num_workers_per_gpu=3,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -2497,7 +2905,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 3
-    assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert captured["kwargs"]["collate_fn"] == (
         "collator",
@@ -2568,7 +2975,7 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         slide,
         tiling_result,
         preprocessing=replace(DEFAULT_PREPROCESSING, read_tiles_from=Path("/tmp/external-tiles")),
-        execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
+        execution=ExecutionOptions(batch_size=1, num_workers_per_gpu=0, num_gpus=1),
     )
 
     assert result.shape == (1, 3)
@@ -2579,29 +2986,6 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
             "tiling_result": tiling_result,
         },
     )
-
-
-def test_resolve_on_the_fly_num_workers_caps_to_slurm_allocation(monkeypatch):
-    import slide2vec.inference as inference
-
-    monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
-    monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
-    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
-    monkeypatch.delenv("SLURM_CPUS_ON_NODE", raising=False)
-
-    workers, details = inference._resolve_on_the_fly_num_workers(4)
-
-    assert workers == 8
-    assert "cpu_count=96" in details
-    assert "slurm_cpu_limit=32" in details
-    assert "num_cucim_workers=4" in details
-
-
-def test_resolve_on_the_fly_num_workers_rejects_non_positive_cucim_worker_count():
-    import slide2vec.inference as inference
-
-    with pytest.raises(ValueError, match="num_cucim_workers must be at least 1"):
-        inference._resolve_on_the_fly_num_workers(0)
 
 
 def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monkeypatch, caplog):
@@ -2673,10 +3057,9 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     )
     execution = ExecutionOptions(
         batch_size=2,
-        num_workers=99,
+        num_workers_per_gpu=99,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     with caplog.at_level("INFO"):
@@ -2691,9 +3074,91 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert "on-the-fly mode: setting DataLoader num_workers=8" not in caplog.text
+
+
+def test_compute_tile_embeddings_for_slide_splits_on_the_fly_workers_across_gpus():
+    import subprocess
+    import sys
+
+    script = """
+import slide2vec.inference as inference
+inference.cpu_worker_limit = lambda: 24
+inference.slurm_cpu_limit = lambda: 24
+workers, details = inference._resolve_on_the_fly_num_workers(4, 2)
+print(workers)
+print(details)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.splitlines()[0] == "3"
+    assert "num_gpus=2" in result.stdout
+
+
+def test_compute_tile_embeddings_for_slide_rejects_non_positive_cucim_worker_count(monkeypatch):
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+
+    class DummyLoader:
+        def __init__(self, dataset, **kwargs):
+            del dataset, kwargs
+
+        def __iter__(self):
+            yield (
+                torch.tensor([0], dtype=torch.long),
+                torch.zeros((1, 3, 4, 4), dtype=torch.uint8),
+                {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
+            )
+
+        def __len__(self):
+            return 1
+
+    class DummyEncoder:
+        pretrained_cfg = {}
+
+    class DummyModel:
+        encoder = DummyEncoder()
+
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
+
+    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", lambda **kwargs: SimpleNamespace(__call__=lambda batch_indices: None, ordered_indices=None))
+    monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
+    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+
+    loaded = inference.LoadedModel(
+        name="prov-gigapath",
+        level="tile",
+        model=DummyModel(),
+        transforms=object(),
+        feature_dim=3,
+        device=torch.device("cpu"),
+    )
+
+    with pytest.raises(ValueError, match="num_cucim_workers must be at least 1"):
+        inference._compute_tile_embeddings_for_slide(
+            loaded,
+            SimpleNamespace(level="tile"),
+            make_slide("slide-a"),
+            SimpleNamespace(
+                x=np.array([0]),
+                y=np.array([1]),
+                backend="cucim",
+                requested_spacing_um=0.5,
+                requested_tile_size_px=4,
+                read_spacing_um=0.5,
+                read_tile_size_px=4,
+                tile_size_lv0=224,
+            ),
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=0),
+            execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=99, num_gpus=2),
+        )
 
 
 def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path: Path, caplog):
@@ -2748,7 +3213,7 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
             execution=execution,
         )
 
-    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers=") == 1
+    assert caplog.text.count("on-the-fly mode: setting DataLoader num_workers_per_gpu=") == 1
 
 
 def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_without_changing_workers(monkeypatch):
@@ -2823,10 +3288,9 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
     )
     execution = ExecutionOptions(
         batch_size=2,
-        num_workers=99,
+        num_workers_per_gpu=99,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -2840,7 +3304,6 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert captured["filtered_calls"] == 1
 
@@ -2916,7 +3379,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             tile_size_lv0=224,
         ),
         preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
-        execution=ExecutionOptions(batch_size=2, num_workers=8, num_gpus=1),
+        execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=8, num_gpus=1),
     )
 
     assert result.shape == (2, 3)
@@ -2993,12 +3456,11 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             tile_size_lv0=224,
         ),
         preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
-        execution=ExecutionOptions(batch_size=2, num_workers=8, num_gpus=1),
+        execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=8, num_gpus=1),
     )
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
     assert captured["kwargs"]["prefetch_factor"] == 4
     assert captured["wsd_collator_kwargs"]["backend"] == "asap"
 
@@ -3069,7 +3531,7 @@ def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_witho
                 tiles_tar_path=None,
             ),
             preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=False),
-            execution=ExecutionOptions(batch_size=1, num_workers=0, num_gpus=1),
+            execution=ExecutionOptions(batch_size=1, num_workers_per_gpu=0, num_gpus=1),
         )
 
 
@@ -3307,7 +3769,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         slide,
         tiling_result,
         preprocessing=replace(DEFAULT_PREPROCESSING, region_tile_multiple=2, requested_region_size_px=448),
-        execution=ExecutionOptions(batch_size=4, num_workers=0, num_gpus=1),
+        execution=ExecutionOptions(batch_size=4, num_workers_per_gpu=0, num_gpus=1),
     )
 
     assert result.shape == (2, 4, 2)

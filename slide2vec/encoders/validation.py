@@ -63,14 +63,18 @@ def validate_encoder_config(
     if not mismatches:
         return
 
-    message = (
-        f"Model '{encoder_name}' is configured with "
-        f"{'; '.join(mismatches)}. "
-        "Set `model.allow_non_recommended_settings=true` in YAML/CLI or "
-        "`allow_non_recommended_settings=True` in `Model.from_preset(...)` "
-        "to continue with a warning."
-    )
     if allow_non_recommended:
-        logger.warning(message)
+        logger.warning(
+            f"Model '{encoder_name}' is configured with "
+            f"{'; '.join(mismatches)}. "
+            "Warning-only mode is enabled because "
+            "`allow_non_recommended_settings=True`."
+        )
     else:
-        raise ValueError(message)
+        raise ValueError(
+            f"Model '{encoder_name}' is configured with "
+            f"{'; '.join(mismatches)}. "
+            "Set `model.allow_non_recommended_settings=true` in YAML/CLI or "
+            "`allow_non_recommended_settings=True` in `Model.from_preset(...)` "
+            "to continue."
+        )

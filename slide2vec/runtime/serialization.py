@@ -36,18 +36,21 @@ def serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any
 def serialize_execution(
     execution: ExecutionOptions,
     *,
-    effective_num_workers: int | None = None,
+    effective_num_workers_per_gpu: int | None = None,
 ) -> dict[str, Any]:
     return {
         "output_dir": str(execution.output_dir) if execution.output_dir is not None else None,
         "output_format": execution.output_format,
         "batch_size": execution.batch_size,
-        "num_workers": effective_num_workers if effective_num_workers is not None else execution.num_workers,
+        "num_workers_per_gpu": (
+            effective_num_workers_per_gpu
+            if effective_num_workers_per_gpu is not None
+            else execution.num_workers_per_gpu
+        ),
         "num_preprocessing_workers": execution.num_preprocessing_workers,
         "num_gpus": execution.num_gpus,
         "precision": execution.precision,
         "prefetch_factor": execution.prefetch_factor,
-        "persistent_workers": execution.persistent_workers,
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_slide_embeddings": execution.save_slide_embeddings,
         "save_latents": execution.save_latents,
@@ -92,37 +95,27 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
 
 
 def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
-    output_dir = payload["output_dir"] if "output_dir" in payload else None
-    batch_size = payload["batch_size"] if "batch_size" in payload else None
-    num_workers = payload["num_workers"] if "num_workers" in payload else None
-    num_preprocessing_workers = (
-        payload["num_preprocessing_workers"] if "num_preprocessing_workers" in payload else None
-    )
-    num_gpus = payload["num_gpus"] if "num_gpus" in payload else 1
-    precision = payload["precision"] if "precision" in payload else "fp32"
-    prefetch_factor = payload["prefetch_factor"] if "prefetch_factor" in payload else 4
-    persistent_workers = (
-        bool(payload["persistent_workers"]) if "persistent_workers" in payload else True
-    )
-    save_tile_embeddings = (
-        bool(payload["save_tile_embeddings"]) if "save_tile_embeddings" in payload else False
-    )
-    save_slide_embeddings = (
-        bool(payload["save_slide_embeddings"]) if "save_slide_embeddings" in payload else False
-    )
-    save_latents = bool(payload["save_latents"]) if "save_latents" in payload else False
+    output_dir = payload.get("output_dir")
+    batch_size = payload.get("batch_size")
+    num_workers_per_gpu = payload.get("num_workers_per_gpu")
+    num_preprocessing_workers = payload.get("num_preprocessing_workers")
+    num_gpus = payload.get("num_gpus", 1)
+    precision = payload.get("precision", "fp32")
+    prefetch_factor = payload.get("prefetch_factor", 4)
+    save_tile_embeddings = bool(payload.get("save_tile_embeddings", False))
+    save_slide_embeddings = bool(payload.get("save_slide_embeddings", False))
+    save_latents = bool(payload.get("save_latents", False))
     return ExecutionOptions(
         output_dir=Path(output_dir) if output_dir is not None else None,
-        output_format=payload["output_format"] if "output_format" in payload else "pt",
+        output_format=payload.get("output_format", "pt"),
         batch_size=batch_size,
-        num_workers=int(num_workers) if num_workers is not None else None,
+        num_workers_per_gpu=int(num_workers_per_gpu) if num_workers_per_gpu is not None else None,
         num_preprocessing_workers=(
             int(num_preprocessing_workers) if num_preprocessing_workers is not None else None
         ),
         num_gpus=int(num_gpus),
         precision=precision,
         prefetch_factor=int(prefetch_factor),
-        persistent_workers=persistent_workers,
         save_tile_embeddings=save_tile_embeddings,
         save_slide_embeddings=save_slide_embeddings,
         save_latents=save_latents,
