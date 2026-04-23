@@ -119,20 +119,24 @@ def main(argv=None) -> int:
                 return 0
             assigned_slides = [paired_by_sample[sample_id][0] for sample_id in assigned_ids]
             assigned_tiling_results = [paired_by_sample[sample_id][1] for sample_id in assigned_ids]
-            embedded_slides = _compute_embedded_slides(
-                model,
-                assigned_slides,
-                assigned_tiling_results,
-                preprocessing=preprocessing,
-                execution=execution,
-            )
-            for embedded_slide in embedded_slides:
+
+            def _persist_embedded_slide(slide, tiling_result, embedded_slide) -> None:
                 payload = {
                     "tile_embeddings": _to_cpu_payload(embedded_slide.tile_embeddings),
                     "slide_embedding": _to_cpu_payload(embedded_slide.slide_embedding),
                     "latents": _to_cpu_payload(embedded_slide.latents),
                 }
                 torch.save(payload, coordination_dir / f"{embedded_slide.sample_id}.embedded.pt")
+
+            _compute_embedded_slides(
+                model,
+                assigned_slides,
+                assigned_tiling_results,
+                preprocessing=preprocessing,
+                execution=execution,
+                on_embedded_slide=_persist_embedded_slide,
+                collect_results=False,
+            )
             return 0
     finally:
         if dist.is_available() and dist.is_initialized():

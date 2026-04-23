@@ -369,10 +369,10 @@ def run_forward_pass(
     sample_id: str | None = None,
     total_items: int | None = None,
     unit_label: str = "tile",
-    return_indices: bool = False,
 ):
-    outputs = []
-    batch_indices = [] if return_indices else None
+    embeddings = None
+    batch_indices = None
+    buffer_capacity = max(0, int(total_items)) if total_items is not None else 0
     processed = 0
     batch_index = 0
     prefetcher_context = (
@@ -388,9 +388,33 @@ def run_forward_pass(
             forward_start = time.perf_counter()
             embedding = loaded.model.encode_tiles(image).detach().cpu()
             forward_ms = (time.perf_counter() - forward_start) * 1000.0
-            outputs.append(embedding)
-            if batch_indices is not None:
-                batch_indices.append(torch.as_tensor(prepared_batch.indices, dtype=torch.long).detach().cpu())
+            batch_size = int(embedding.shape[0])
+            current_indices = torch.as_tensor(prepared_batch.indices, dtype=torch.long).detach().cpu()
+            required_capacity = processed + batch_size
+            if embeddings is None:
+                buffer_capacity = max(buffer_capacity, required_capacity)
+                embeddings = torch.empty(
+                    (buffer_capacity, int(embedding.shape[-1])),
+                    dtype=embedding.dtype,
+                )
+                batch_indices = torch.empty((buffer_capacity,), dtype=torch.long)
+            elif required_capacity > buffer_capacity:
+                new_capacity = max(required_capacity, max(1, buffer_capacity * 2))
+                grown_embeddings = torch.empty(
+                    (new_capacity, int(embeddings.shape[-1])),
+                    dtype=embeddings.dtype,
+                )
+                if processed > 0:
+                    grown_embeddings[:processed] = embeddings[:processed]
+                embeddings = grown_embeddings
+                grown_indices = torch.empty((new_capacity,), dtype=torch.long)
+                if processed > 0:
+                    grown_indices[:processed] = batch_indices[:processed]
+                batch_indices = grown_indices
+                buffer_capacity = new_capacity
+
+            embeddings[processed:required_capacity] = embedding
+            batch_indices[processed:required_capacity] = current_indices
             processed += int(embedding.shape[0])
             batch_index += 1
             batch_total_ms = (
@@ -427,16 +451,11 @@ def run_forward_pass(
                     total=int(total_items or processed),
                     unit=unit_label,
                 )
-    if not outputs:
+    if embeddings is None:
         feature_dim = loaded.tile_feature_dim if loaded.tile_feature_dim is not None else loaded.feature_dim
         empty = torch.empty((0, int(feature_dim)), dtype=torch.float32)
-        if batch_indices is not None:
-            return torch.empty((0,), dtype=torch.long), empty
-        return empty
-    embeddings = torch.cat(outputs, dim=0)
-    if batch_indices is not None:
-        return torch.cat(batch_indices, dim=0), embeddings
-    return embeddings
+        return torch.empty((0,), dtype=torch.long), empty
+    return batch_indices[:processed], embeddings[:processed]
 
 
 def resolve_device(device: str, default_device):

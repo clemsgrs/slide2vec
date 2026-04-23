@@ -1037,6 +1037,77 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
     assert captured["collect_results"] is False
 
 
+def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypatch, tmp_path: Path):
+    import torch
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import direct_embed_worker
+
+    coordination_dir = tmp_path / "coordination"
+    coordination_dir.mkdir()
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {
+                    "name": "virchow2",
+                    "allow_non_recommended_settings": False,
+                },
+                "preprocessing": {},
+                "execution": {},
+                "coordination_dir": str(coordination_dir),
+                "strategy": "slide_shard",
+                "assignments": {"0": ["slide-a"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(
+        serialization,
+        "deserialize_execution",
+        lambda payload: ExecutionOptions(output_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        direct_embed_worker,
+        "_to_cpu_payload",
+        lambda value: value,
+    )
+
+    import slide2vec.inference as inference
+
+    monkeypatch.setattr(
+        inference,
+        "load_successful_tiled_slides",
+        lambda output_dir: ([slide], [tiling_result]),
+    )
+    monkeypatch.setattr(
+        inference,
+        "_compute_embedded_slides",
+        lambda *args, **kwargs: [],
+    )
+
+    assert direct_embed_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    source = (ROOT / "slide2vec" / "distributed" / "direct_embed_worker.py").read_text(encoding="utf-8")
+    assert "collect_results=False" in source
+    assert "on_embedded_slide=_persist_embedded_slide" in source
+
+
 def test_run_pipeline_local_branch_persists_completed_slides_before_later_failure(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -2428,8 +2499,9 @@ def test_run_forward_pass_handles_empty_dataloader():
         device=torch.device("cpu"),
     )
 
-    result = inference._run_forward_pass(dataloader, loaded, nullcontext())
+    indices, result = inference._run_forward_pass(dataloader, loaded, nullcontext())
 
+    assert indices.shape == (0,)
     assert result.shape == (0, 5)
     assert result.dtype == torch.float32
 
@@ -2501,7 +2573,7 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
         device=torch.device("cpu"),
     )
 
-    result = inference._run_forward_pass(
+    indices, result = inference._run_forward_pass(
         DummyLoader(),
         loaded,
         nullcontext(),
@@ -2510,8 +2582,79 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
         total_items=2,
     )
 
+    assert torch.equal(indices, torch.tensor([0, 1], dtype=torch.long))
     assert result.shape == (2, 3)
     assert torch.allclose(result, torch.ones((2, 3), dtype=torch.float32))
+
+
+def test_run_forward_pass_preserves_embedding_order_and_indices_across_batches():
+    import slide2vec.inference as inference
+    torch = pytest.importorskip("torch")
+    from contextlib import nullcontext
+
+    class DummyLoader:
+        def __iter__(self):
+            yield (
+                torch.tensor([5, 2], dtype=torch.long),
+                torch.tensor(
+                    [
+                        [[[10.0]]],
+                        [[[20.0]]],
+                    ],
+                    dtype=torch.float32,
+                ),
+            )
+            yield (
+                torch.tensor([9], dtype=torch.long),
+                torch.tensor([[[[30.0]]]], dtype=torch.float32),
+            )
+            yield (
+                torch.tensor([4, 1], dtype=torch.long),
+                torch.tensor(
+                    [
+                        [[[40.0]]],
+                        [[[50.0]]],
+                    ],
+                    dtype=torch.float32,
+                ),
+            )
+
+        def __len__(self):
+            return 3
+
+    class DummyModel:
+        def encode_tiles(self, image):
+            values = image[:, 0, 0, 0]
+            return torch.stack((values, values + 0.5), dim=1)
+
+    loaded = inference.LoadedModel(
+        name="virchow2",
+        level="tile",
+        model=DummyModel(),
+        transforms=lambda image: image,
+        feature_dim=2,
+        device=torch.device("cpu"),
+    )
+
+    indices, embeddings = inference._run_forward_pass(
+        DummyLoader(),
+        loaded,
+        nullcontext(),
+        total_items=5,
+    )
+
+    assert torch.equal(indices, torch.tensor([5, 2, 9, 4, 1], dtype=torch.long))
+    expected = torch.tensor(
+        [
+            [10.0, 10.5],
+            [20.0, 20.5],
+            [30.0, 30.5],
+            [40.0, 40.5],
+            [50.0, 50.5],
+        ],
+        dtype=torch.float32,
+    )
+    assert torch.equal(embeddings, expected)
 
 
 def test_serialize_execution_preserves_loader_optimization_fields():

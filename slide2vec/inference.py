@@ -1566,7 +1566,7 @@ def _compute_tile_embeddings_for_slide(
         **loader_kwargs,
     )
     def _compute_embeddings():
-        return _run_forward_pass(
+        _batch_indices, tile_embeddings = _run_forward_pass(
             dataloader,
             loaded,
             autocast_context,
@@ -1575,6 +1575,7 @@ def _compute_tile_embeddings_for_slide(
             total_items=len(dataset),
             unit_label="tile",
         )
+        return tile_embeddings
 
     if resolved_backend == "cucim":
         tile_embeddings = run_with_filtered_stderr(_compute_embeddings)
@@ -1663,7 +1664,6 @@ def _compute_hierarchical_embeddings_for_slide(
             sample_id=slide.sample_id,
             total_items=len(dataset),
             unit_label="tile",
-            return_indices=True,
         )
 
     if resolved_backend == "cucim":
@@ -1744,7 +1744,6 @@ def _compute_hierarchical_embedding_shard_for_slide(
             sample_id=slide.sample_id,
             total_items=len(dataset),
             unit_label="tile",
-            return_indices=True,
         )
 
     if resolved_backend == "cucim":
