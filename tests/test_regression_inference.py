@@ -2398,7 +2398,6 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         num_gpus=2,
         precision="bf16",
         prefetch_factor=7,
-        persistent_workers=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -2407,10 +2406,8 @@ def test_serialize_execution_preserves_loader_optimization_fields():
     restored = deserialize_execution(payload)
 
     assert payload["prefetch_factor"] == 7
-    assert payload["persistent_workers"] is False
     assert payload["precision"] == "bf16"
     assert restored.prefetch_factor == 7
-    assert restored.persistent_workers is False
     assert restored.precision == "bf16"
 
 
@@ -2475,7 +2472,7 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
     )
 
     assert kwargs["num_workers"] == 24
-    assert kwargs["persistent_workers"] is True
+    assert "persistent_workers" not in kwargs
     assert kwargs["prefetch_factor"] == 4
 
 
@@ -2554,7 +2551,7 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 24
-    assert captured["kwargs"]["persistent_workers"] is True
+    assert "persistent_workers" not in captured["kwargs"]
     assert captured["kwargs"]["prefetch_factor"] == 4
     assert captured["wsd_collator_kwargs"]["backend"] == "asap"
 
@@ -2617,7 +2614,6 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         num_workers=3,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -2631,7 +2627,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 3
-    assert captured["kwargs"]["persistent_workers"] is True
+    assert "persistent_workers" not in captured["kwargs"]
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert captured["kwargs"]["collate_fn"] == (
         "collator",
@@ -2810,7 +2806,6 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
         num_workers=99,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     with caplog.at_level("INFO"):
@@ -2825,7 +2820,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
+    assert "persistent_workers" not in captured["kwargs"]
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert "on-the-fly mode: setting DataLoader num_workers=8" not in caplog.text
 
@@ -2960,7 +2955,6 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
         num_workers=99,
         num_gpus=1,
         prefetch_factor=9,
-        persistent_workers=True,
     )
 
     result = inference._compute_tile_embeddings_for_slide(
@@ -2974,7 +2968,7 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
+    assert "persistent_workers" not in captured["kwargs"]
     assert captured["kwargs"]["prefetch_factor"] == 9
     assert captured["filtered_calls"] == 1
 
@@ -3132,7 +3126,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
 
     assert result.shape == (2, 3)
     assert captured["kwargs"]["num_workers"] == 8
-    assert captured["kwargs"]["persistent_workers"] is True
+    assert "persistent_workers" not in captured["kwargs"]
     assert captured["kwargs"]["prefetch_factor"] == 4
     assert captured["wsd_collator_kwargs"]["backend"] == "asap"
 

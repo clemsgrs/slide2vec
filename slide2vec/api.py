@@ -170,8 +170,6 @@ class ExecutionOptions:
     precision: str | None = None
     #: DataLoader prefetch queue depth per worker (default ``4``).
     prefetch_factor: int = 4
-    #: Keep DataLoader workers alive between batches (default ``True``).
-    persistent_workers: bool = True
     #: Persist tile embeddings to disk when running a slide-level model.
     save_tile_embeddings: bool = False
     #: Persist slide embeddings to disk when running a patient-level model.
@@ -185,7 +183,6 @@ class ExecutionOptions:
         requested_precision = normalize_precision_name(cfg.speed.precision)
         num_workers = cfg.speed.num_dataloader_workers
         prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
-        persistent_workers = bool(cfg.speed.persistent_workers_embedding)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
@@ -199,7 +196,6 @@ class ExecutionOptions:
             num_gpus=1 if run_on_cpu else (int(configured_num_gpus) if configured_num_gpus is not None else None),
             precision="fp32" if run_on_cpu else requested_precision,
             prefetch_factor=prefetch_factor,
-            persistent_workers=persistent_workers,
             save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
             save_slide_embeddings=bool(cfg.model.save_slide_embeddings),
             save_latents=bool(cfg.model.save_latents),

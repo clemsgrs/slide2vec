@@ -1539,7 +1539,6 @@ def _compute_tile_embeddings_for_slide(
         effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
         _configure_cucim_worker_stderr(loader_kwargs, backend=resolved_backend)
     if batch_sampler is not None:
@@ -1618,7 +1617,6 @@ def _compute_hierarchical_embeddings_for_slide(
         effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,
@@ -1701,7 +1699,6 @@ def _compute_hierarchical_embedding_shard_for_slide(
         effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
-            loader_kwargs.pop("persistent_workers", None)
             loader_kwargs.pop("prefetch_factor", None)
     _configure_cucim_worker_stderr(
         loader_kwargs,

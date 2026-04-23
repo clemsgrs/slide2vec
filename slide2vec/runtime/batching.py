@@ -27,7 +27,6 @@ def embedding_dataloader_kwargs(loaded: LoadedModel, execution) -> dict[str, Any
         "pin_memory": uses_cuda_runtime(loaded.device),
     }
     if resolved_num_workers > 0:
-        kwargs["persistent_workers"] = bool(execution.persistent_workers)
         kwargs["prefetch_factor"] = int(execution.prefetch_factor)
     return kwargs
 

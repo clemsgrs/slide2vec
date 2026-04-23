@@ -76,7 +76,6 @@ speed:
   num_preprocessing_workers: # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing); defaults to the runtime CPU budget capped at 64
   num_cucim_workers: 4 # number of internal cucim threads per read_region call (embedding path, on-the-fly only); DataLoader workers are auto-set to cpu_count // num_cucim_workers
   prefetch_factor_embedding: 4 # prefetch factor for tile embedding dataloaders
-  persistent_workers_embedding: true # keep DataLoader workers alive across epochs/batches
 
 wandb:
   enable: false

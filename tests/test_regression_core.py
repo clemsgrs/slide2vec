@@ -457,7 +457,6 @@ def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     assert execution.num_gpus == 3
     assert execution.precision == "bf16"
     assert execution.prefetch_factor == 5
-    assert execution.persistent_workers is False
     assert execution.save_tile_embeddings is True
     assert execution.save_latents is True
 
@@ -540,7 +539,6 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
     assert execution.num_gpus == 6
     assert execution.precision == "fp32"
     assert execution.prefetch_factor == 3
-    assert execution.persistent_workers is True
 
 def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp_path: Path):
     import slide2vec.api as api
@@ -619,7 +617,6 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
         num_gpus=2,
         precision="bf16",
         prefetch_factor=6,
-        persistent_workers=False,
         save_tile_embeddings=True,
         save_latents=True,
     )
@@ -633,7 +630,6 @@ def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path
     assert updated.num_gpus == base.num_gpus
     assert updated.precision == base.precision
     assert updated.prefetch_factor == base.prefetch_factor
-    assert updated.persistent_workers == base.persistent_workers
     assert updated.save_tile_embeddings == base.save_tile_embeddings
     assert updated.save_latents == base.save_latents
     assert updated is not base
