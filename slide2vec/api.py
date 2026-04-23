@@ -159,8 +159,9 @@ class ExecutionOptions:
     output_format: str = "pt"
     #: Number of tiles per forward pass.
     batch_size: int = 32
-    #: DataLoader worker count. ``None`` means auto (capped by CPU / SLURM limit).
-    num_workers: int | None = None
+    #: DataLoader worker count per GPU rank. ``None`` means auto
+    #: (capped by CPU / SLURM limit, then split across the resolved GPU count).
+    num_workers_per_gpu: int | None = None
     #: Tiling worker count. ``None`` means auto (capped by CPU / SLURM limit).
     num_preprocessing_workers: int | None = None
     #: Number of GPUs to use. ``None`` defaults to all available GPUs.
@@ -181,13 +182,13 @@ class ExecutionOptions:
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
         configured_num_gpus = cfg.speed.num_gpus
         requested_precision = normalize_precision_name(cfg.speed.precision)
-        num_workers = cfg.speed.num_dataloader_workers
+        num_workers_per_gpu = cfg.speed.num_dataloader_workers
         prefetch_factor = int(cfg.speed.prefetch_factor_embedding)
         return cls(
             output_dir=Path(cfg.output_dir),
             output_format="pt",
             batch_size=int(cfg.model.batch_size),
-            num_workers=int(num_workers) if num_workers is not None else None,
+            num_workers_per_gpu=int(num_workers_per_gpu) if num_workers_per_gpu is not None else None,
             num_preprocessing_workers=(
                 int(cfg.speed.num_preprocessing_workers)
                 if cfg.speed.num_preprocessing_workers is not None
@@ -218,23 +219,25 @@ class ExecutionOptions:
         object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
         logger = logging.getLogger(__name__)
         cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
-        resolved_num_workers = self.resolved_num_workers()
-        num_workers_label = (
+        resolved_num_workers = self.resolved_num_workers_per_gpu()
+        num_workers_per_gpu_label = (
             f"{resolved_num_workers} (requested=auto)"
-            if self.num_workers is None
+            if self.num_workers_per_gpu is None
             else str(resolved_num_workers)
         )
         logger.info(
-            "ExecutionOptions: num_workers=%s, num_preprocessing_workers=%d "
+            "ExecutionOptions: num_workers_per_gpu=%s, num_preprocessing_workers=%d "
             "(preprocessing cap=%d via %s)",
-            num_workers_label,
+            num_workers_per_gpu_label,
             capped_num_preprocessing_workers,
             cap,
             cap_source,
         )
 
-    def resolved_num_workers(self) -> int:
-        return cpu_worker_limit() if self.num_workers is None else int(self.num_workers)
+    def resolved_num_workers_per_gpu(self) -> int:
+        if self.num_workers_per_gpu is not None:
+            return self.num_workers_per_gpu
+        return max(1, cpu_worker_limit() // self.num_gpus)
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:

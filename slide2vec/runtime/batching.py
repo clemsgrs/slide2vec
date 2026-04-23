@@ -21,7 +21,7 @@ def uses_cuda_runtime(device) -> bool:
 
 
 def embedding_dataloader_kwargs(loaded: LoadedModel, execution) -> dict[str, Any]:
-    resolved_num_workers = execution.resolved_num_workers()
+    resolved_num_workers = execution.resolved_num_workers_per_gpu()
     kwargs: dict[str, Any] = {
         "num_workers": resolved_num_workers,
         "pin_memory": uses_cuda_runtime(loaded.device),

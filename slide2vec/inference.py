@@ -98,25 +98,29 @@ def _serialize_execution(
     *,
     preprocessing: PreprocessingConfig | None = None,
 ) -> dict[str, Any]:
-    effective_num_workers = None
+    effective_num_workers_per_gpu = None
     if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers_per_gpu, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
     return runtime_serialization.serialize_execution(
         execution,
-        effective_num_workers=effective_num_workers,
+        effective_num_workers_per_gpu=effective_num_workers_per_gpu,
     )
 
 
 
-def _resolve_on_the_fly_num_workers(num_cucim_workers: int) -> tuple[int, str]:
+def _resolve_on_the_fly_num_workers(num_cucim_workers: int, num_gpus: int) -> tuple[int, str]:
     if int(num_cucim_workers) < 1:
         raise ValueError("num_cucim_workers must be at least 1")
     cpu_count = os.cpu_count() or 1
-    worker_budget = cpu_worker_limit()
+    worker_budget = max(1, cpu_worker_limit() // max(1, int(num_gpus)))
     details = [f"cpu_count={cpu_count}"]
     slurm_limit = slurm_cpu_limit()
     if slurm_limit is not None:
         details.append(f"slurm_cpu_limit={slurm_limit}")
+    details.append(f"num_gpus={num_gpus}")
     effective_num_workers = max(1, worker_budget // num_cucim_workers)
     details.append(f"num_cucim_workers={num_cucim_workers}")
     return effective_num_workers, " // ".join(details)
@@ -131,13 +135,16 @@ def _log_on_the_fly_worker_override_once(
         return
     if not any(runtime_tiling.resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
         return
-    effective_num_workers, worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
-    if effective_num_workers == execution.num_workers:
+    effective_num_workers_per_gpu, worker_context = _resolve_on_the_fly_num_workers(
+        preprocessing.num_cucim_workers,
+        num_gpus=execution.num_gpus,
+    )
+    if effective_num_workers_per_gpu == execution.resolved_num_workers_per_gpu():
         return
     logging.getLogger(__name__).info(
-        f"on-the-fly mode: setting DataLoader num_workers={effective_num_workers} "
+        f"on-the-fly mode: setting DataLoader num_workers_per_gpu={effective_num_workers_per_gpu} "
         f"({worker_context}); "
-        f"ignoring speed.num_dataloader_workers={execution.num_workers}"
+        f"ignoring speed.num_workers_per_gpu={execution.num_workers_per_gpu}"
     )
 
 
@@ -1536,7 +1543,10 @@ def _compute_tile_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
             loader_kwargs.pop("prefetch_factor", None)
@@ -1614,7 +1624,10 @@ def _compute_hierarchical_embeddings_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
-        effective_num_workers, _ = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _ = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
             loader_kwargs.pop("prefetch_factor", None)
@@ -1696,7 +1709,10 @@ def _compute_hierarchical_embedding_shard_for_slide(
     loader_kwargs = _embedding_dataloader_kwargs(loaded, execution)
     resolved_backend = runtime_tiling.resolve_slide_backend(preprocessing, tiling_result)
     if resolved_backend == "cucim":
-        effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(preprocessing.num_cucim_workers)
+        effective_num_workers, _worker_context = _resolve_on_the_fly_num_workers(
+            preprocessing.num_cucim_workers,
+            num_gpus=execution.num_gpus,
+        )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
             loader_kwargs.pop("prefetch_factor", None)
