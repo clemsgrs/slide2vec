@@ -46,7 +46,13 @@ TILING_FILTER_PARAMS = dict(
 )
 
 # -- tiling.preview --
-TILING_PREVIEW = dict(save=False, downsample=32)
+TILING_PREVIEW = dict(
+    save_mask_preview=False,
+    save_tiling_preview=False,
+    downsample=32,
+    tissue_contour_color=(157, 219, 129),
+    mask_overlay_alpha=0.5,
+)
 
 # -- model --
 MODEL_PARAMS = dict(

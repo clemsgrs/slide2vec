@@ -42,7 +42,7 @@ tiling:
     sthresh_up: 255 # upper threshold value for scaling the binary mask
     mthresh: 7 # median filter size (positive, odd integer)
     close: 4 # additional morphological closing to apply following initial thresholding (positive integer)
-    method: "hsv" # tissue segmentation method: "hsv", "otsu", "threshold", or "sam2"
+    method: # tissue segmentation method: "hsv", "otsu", "threshold", or "sam2"; ignored when precomputed tissue masks are provided
     sam2_checkpoint_path: # optional when method="sam2"; if empty, hs2p downloads the default AtlasPatch checkpoint from Hugging Face
     sam2_config_path: # optional local override for the SAM2 model config; if empty, hs2p downloads the default AtlasPatch config from Hugging Face
     sam2_device: "cpu" # device for SAM2 inference, e.g. "cpu", "cuda", or "cuda:0"
