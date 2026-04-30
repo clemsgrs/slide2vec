@@ -111,20 +111,14 @@ class PreprocessingConfig:
             int(channel) for channel in preview_cfg.tissue_contour_color
         )
         preview_kwargs["mask_overlay_alpha"] = float(preview_cfg.mask_overlay_alpha)
+        region_size_px = tiling.params.requested_region_size_px
+        region_tile_multiple = tiling.params.region_tile_multiple
         return cls(
             backend=tiling.backend,
             requested_spacing_um=float(tiling.params.requested_spacing_um),
             requested_tile_size_px=int(tiling.params.requested_tile_size_px),
-            requested_region_size_px=(
-                int(v)
-                if (v := getattr(tiling.params, "requested_region_size_px", None)) is not None
-                else None
-            ),
-            region_tile_multiple=(
-                int(v)
-                if (v := getattr(tiling.params, "region_tile_multiple", None)) is not None
-                else None
-            ),
+            requested_region_size_px=int(region_size_px) if region_size_px is not None else None,
+            region_tile_multiple=int(region_tile_multiple) if region_tile_multiple is not None else None,
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
             tissue_threshold=float(tiling.params.tissue_threshold),
@@ -615,11 +609,9 @@ def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_n
 
 
 def _recommended_execution_precision(model: Model | None) -> str:
-    name = None if model is None else model.name
-    if name and name in encoder_registry:
-        info = encoder_registry.info(name)
-        return info["precision"] if "precision" in info and info["precision"] is not None else "fp32"
-    return "fp32"
+    if model is None or model.name not in encoder_registry:
+        return "fp32"
+    return encoder_registry.info(model.name).get("precision") or "fp32"
 
 
 def _resolve_direct_api_preprocessing(

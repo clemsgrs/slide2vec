@@ -14,17 +14,6 @@ from slide2vec.configs import default_config
 logger = logging.getLogger("slide2vec")
 
 
-def validate_removed_options(cfg) -> None:
-    if "level" in cfg.model:
-        raise ValueError("model.level is not a valid slide2vec option.")
-    if "restrict_to_tissue" in cfg.model:
-        raise ValueError("model.restrict_to_tissue is not a valid slide2vec option.")
-    if "visualize" in cfg:
-        raise ValueError("visualize is not a valid slide2vec option.")
-    if "visu_params" in cfg.tiling:
-        raise ValueError("tiling.visu_params is not a valid slide2vec option.")
-
-
 def _encoder_derived_cfg(model_name: str) -> dict:
     """Build OmegaConf defaults derived from encoder registry metadata."""
     from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_defaults
@@ -89,25 +78,30 @@ def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_cfg = OmegaConf.create(default_config)
 
-    # Load user config first to derive model name for registry lookup.
     user_cfg = OmegaConf.load(args.config_file)
     cli_cfg = OmegaConf.from_cli(args.opts)
     requested_cfg = OmegaConf.merge(user_cfg, cli_cfg)
-    model_name = (OmegaConf.select(requested_cfg, "model.name") or "")
-    spacing_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um") is not None
-    tile_size_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px") is not None
-    if model_name and (not spacing_defined or not tile_size_defined):
-        encoder_defaults = _encoder_derived_cfg(model_name)
+
+    default_cfg = OmegaConf.create(default_config)
+    if _needs_encoder_defaults(requested_cfg):
+        encoder_defaults = _encoder_derived_cfg(OmegaConf.select(requested_cfg, "model.name"))
         if encoder_defaults:
             default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
 
     cfg = OmegaConf.merge(default_cfg, user_cfg, cli_cfg)
     OmegaConf.resolve(cfg)
-    validate_removed_options(cfg)
     validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
     return cfg
+
+
+def _needs_encoder_defaults(cfg) -> bool:
+    """True when a model preset is set but tile geometry is not — pull defaults from the registry."""
+    if not OmegaConf.select(cfg, "model.name"):
+        return False
+    spacing = OmegaConf.select(cfg, "tiling.params.requested_spacing_um")
+    tile_size = OmegaConf.select(cfg, "tiling.params.requested_tile_size_px")
+    return spacing is None or tile_size is None
 
 
 def setup(args):

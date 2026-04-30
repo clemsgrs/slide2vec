@@ -27,10 +27,8 @@ def build_model_and_pipeline(args):
     hf_login()
     model = Model.from_preset(
         cfg.model.name,
-        output_variant=getattr(cfg.model, "output_variant", None),
-        allow_non_recommended_settings=bool(
-            getattr(cfg.model, "allow_non_recommended_settings", False)
-        ),
+        output_variant=cfg.model.output_variant,
+        allow_non_recommended_settings=bool(cfg.model.allow_non_recommended_settings),
         device="cpu" if args.run_on_cpu else "auto",
     )
     preprocessing = PreprocessingConfig.from_config(cfg)
@@ -42,7 +40,7 @@ def build_model_and_pipeline(args):
 def main(argv=None):
     args = parse_args(argv)
     pipeline, cfg = build_model_and_pipeline(args)
-    reporter = progress.create_cli_progress_reporter(output_dir=getattr(cfg, "output_dir", None))
+    reporter = progress.create_cli_progress_reporter(output_dir=cfg.output_dir)
     with progress.activate_progress_reporter(reporter):
         return pipeline.run(
             manifest_path=cfg.csv,
