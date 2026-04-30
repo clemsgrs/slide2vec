@@ -162,7 +162,7 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     monkeypatch.setattr(
         cli,
         "build_model_and_pipeline",
-        lambda args: (FakePipeline(), SimpleNamespace(csv="/tmp/slides.csv")),
+        lambda args: (FakePipeline(), SimpleNamespace(csv="/tmp/slides.csv", output_dir="/tmp/output")),
     )
     monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
 

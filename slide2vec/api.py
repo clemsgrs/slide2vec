@@ -111,8 +111,8 @@ class PreprocessingConfig:
             int(channel) for channel in preview_cfg.tissue_contour_color
         )
         preview_kwargs["mask_overlay_alpha"] = float(preview_cfg.mask_overlay_alpha)
-        region_size_px = tiling.params.requested_region_size_px
-        region_tile_multiple = tiling.params.region_tile_multiple
+        region_size_px = getattr(tiling.params, "requested_region_size_px", None)
+        region_tile_multiple = getattr(tiling.params, "region_tile_multiple", None)
         return cls(
             backend=tiling.backend,
             requested_spacing_um=float(tiling.params.requested_spacing_um),
