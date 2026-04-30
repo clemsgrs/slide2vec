@@ -39,8 +39,6 @@ def drain_stream_to_buffer(stream, chunks: list[str]) -> None:
         return
     try:
         for line in iter(stream.readline, ""):
-            if line == "":
-                break
             chunks.append(line)
     finally:
         stream.close()

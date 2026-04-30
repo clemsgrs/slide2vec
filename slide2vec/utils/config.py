@@ -84,8 +84,11 @@ def get_cfg_from_args(args):
     requested_cfg = OmegaConf.merge(user_cfg, cli_cfg)
 
     default_cfg = OmegaConf.create(default_config)
-    if _needs_encoder_defaults(requested_cfg):
-        encoder_defaults = _encoder_derived_cfg(OmegaConf.select(requested_cfg, "model.name"))
+    model_name = OmegaConf.select(requested_cfg, "model.name")
+    spacing = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um")
+    tile_size = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px")
+    if model_name and (spacing is None or tile_size is None):
+        encoder_defaults = _encoder_derived_cfg(model_name)
         if encoder_defaults:
             default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
 
@@ -93,15 +96,6 @@ def get_cfg_from_args(args):
     OmegaConf.resolve(cfg)
     validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
     return cfg
-
-
-def _needs_encoder_defaults(cfg) -> bool:
-    """True when a model preset is set but tile geometry is not — pull defaults from the registry."""
-    if not OmegaConf.select(cfg, "model.name"):
-        return False
-    spacing = OmegaConf.select(cfg, "tiling.params.requested_spacing_um")
-    tile_size = OmegaConf.select(cfg, "tiling.params.requested_tile_size_px")
-    return spacing is None or tile_size is None
 
 
 def setup(args):
