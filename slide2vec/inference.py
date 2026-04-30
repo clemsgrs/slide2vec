@@ -93,123 +93,38 @@ from slide2vec.utils.tiling_io import (
 )
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
-def _serialize_execution(
-    execution: ExecutionOptions,
-    *,
-    preprocessing: PreprocessingConfig | None = None,
-) -> dict[str, Any]:
-    effective_num_workers_per_gpu = None
-    if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        effective_num_workers_per_gpu, _ = _resolve_on_the_fly_num_workers(
-            preprocessing.num_cucim_workers,
-            num_gpus=execution.num_gpus,
-        )
-    return runtime_serialization.serialize_execution(
-        execution,
-        effective_num_workers_per_gpu=effective_num_workers_per_gpu,
-    )
-
-
-
-def _resolve_on_the_fly_num_workers(num_cucim_workers: int, num_gpus: int) -> tuple[int, str]:
-    if int(num_cucim_workers) < 1:
-        raise ValueError("num_cucim_workers must be at least 1")
-    cpu_count = os.cpu_count() or 1
-    worker_budget = max(1, cpu_worker_limit() // max(1, int(num_gpus)))
-    details = [f"cpu_count={cpu_count}"]
-    slurm_limit = slurm_cpu_limit()
-    if slurm_limit is not None:
-        details.append(f"slurm_cpu_limit={slurm_limit}")
-    details.append(f"num_gpus={num_gpus}")
-    effective_num_workers = max(1, worker_budget // num_cucim_workers)
-    details.append(f"num_cucim_workers={num_cucim_workers}")
-    return effective_num_workers, " // ".join(details)
-
-
-def _log_on_the_fly_worker_override_once(
-    preprocessing: PreprocessingConfig,
-    execution: ExecutionOptions,
-    tiling_results: Sequence[Any],
-) -> None:
-    if not preprocessing.on_the_fly or preprocessing.read_tiles_from is not None:
-        return
-    if not any(runtime_tiling.resolve_slide_backend(preprocessing, tiling_result) == "cucim" for tiling_result in tiling_results):
-        return
-    effective_num_workers_per_gpu, worker_context = _resolve_on_the_fly_num_workers(
-        preprocessing.num_cucim_workers,
-        num_gpus=execution.num_gpus,
-    )
-    if effective_num_workers_per_gpu == execution.resolved_num_workers_per_gpu():
-        return
-    logging.getLogger(__name__).info(
-        f"on-the-fly mode: setting DataLoader num_workers_per_gpu={effective_num_workers_per_gpu} "
-        f"({worker_context}); "
-        f"ignoring speed.num_workers_per_gpu={execution.num_workers_per_gpu}"
-    )
-
-
-def _redirect_worker_output() -> None:
-    worker_log_path = os.path.join(
-        tempfile.gettempdir(),
-        "slide2vec-cucim-workers.log",
-    )
-    worker_log_fd = os.open(
-        worker_log_path,
-        os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-        0o644,
-    )
-    try:
-        os.dup2(worker_log_fd, 1)
-        os.dup2(worker_log_fd, 2)
-    finally:
-        os.close(worker_log_fd)
-
-
-def _configure_cucim_worker_stderr(loader_kwargs: dict[str, Any], *, backend: str) -> None:
-    if backend != "cucim" or int(loader_kwargs.get("num_workers", 0)) <= 0:
-        return
-    existing_worker_init = loader_kwargs.get("worker_init_fn")
-
-    def _worker_init(worker_id: int) -> None:
-        _redirect_worker_output()
-        if existing_worker_init is not None:
-            existing_worker_init(worker_id)
-
-    loader_kwargs["worker_init_fn"] = _worker_init
-
-
-def _should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
-    if int(getattr(dataloader, "num_workers", 0)) <= 0:
-        return False
-    collate_fn = getattr(dataloader, "collate_fn", None)
-    reader = getattr(collate_fn, "_reader", None)
-    return getattr(reader, "_backend", None) == "cucim"
-
-
-def _uses_cuda_runtime(device) -> bool:
-    return str(device).startswith("cuda") and torch.cuda.is_available()
-
-
-def _slide_encode_autocast_ctx(device, precision: str | None):
-    autocast_dtype = _autocast_dtype(torch, precision) if precision is not None else None
-    if autocast_dtype is None or not _uses_cuda_runtime(device):
-        return nullcontext()
-    return torch.autocast(device_type="cuda", dtype=autocast_dtype)
-
-
-def _make_slide_spec(
-    *,
-    sample_id: str,
-    image_path: Path | str,
-    mask_path: Path | str | None = None,
-    spacing_at_level_0: float | None = None,
-):
-    return SlideSpec(
-        sample_id=str(sample_id),
-        image_path=Path(image_path),
-        mask_path=Path(mask_path) if mask_path is not None else None,
-        spacing_at_level_0=_optional_float(spacing_at_level_0),
-    )
+from slide2vec.runtime.cpu_budget import (
+    log_on_the_fly_worker_override_once as _log_on_the_fly_worker_override_once,
+    resolve_on_the_fly_num_workers as _resolve_on_the_fly_num_workers,
+    serialize_execution as _serialize_execution,
+)
+from slide2vec.runtime.manifest import (
+    coerce_slide_spec as _coerce_slide_spec,
+    load_successful_tiled_slides,
+    make_slide_spec as _make_slide_spec,
+    normalize_tiling_results as _normalize_tiling_results,
+    resolve_patient_id_map as _resolve_patient_id_map,
+    resolve_slides as _resolve_slides,
+)
+from slide2vec.runtime.process_list import (
+    emit_tiling_summary as _emit_tiling_summary,
+    num_rows as _num_rows,
+    partition_slides_by_tile_count as _partition_slides_by_tile_count,
+    record_slide_metadata_in_process_list as _record_slide_metadata_in_process_list,
+    resolved_process_list_output_variant as _resolved_process_list_output_variant,
+    write_zero_tile_embedding_sidecars as _write_zero_tile_embedding_sidecars,
+)
+from slide2vec.runtime.slide_encode import (
+    describe_device_mode as _describe_device_mode,
+    encode_slide_from_tiles as _encode_slide_from_tiles,
+    slide_encode_autocast_ctx as _slide_encode_autocast_ctx,
+)
+from slide2vec.runtime.worker_io import (
+    configure_cucim_worker_stderr as _configure_cucim_worker_stderr,
+    redirect_worker_output as _redirect_worker_output,
+    should_suppress_cucim_dataloader_stderr as _should_suppress_cucim_dataloader_stderr,
+    uses_cuda_runtime as _uses_cuda_runtime,
+)
 
 
 def load_model(
@@ -396,30 +311,6 @@ def embed_slides(
         except Exception as exc:
             emit_progress("run.failed", stage="embedding", error=str(exc))
             raise
-
-
-def _encode_slide_from_tiles(
-    loaded: LoadedModel,
-    tile_embeddings: torch.Tensor,
-    tiling_result,
-    *,
-    execution: ExecutionOptions | None = None,
-) -> torch.Tensor:
-    """Run the slide encoder on already-computed tile embeddings.
-
-    Returns a CPU tensor of shape ``(D,)``.
-    """
-    x_values, y_values = coordinate_arrays(tiling_result)
-    coordinates = np.column_stack((x_values, y_values))
-    coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
-    features = tile_embeddings.to(loaded.device)
-    with _slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
-        with torch.inference_mode():
-            return loaded.model.encode_slide(
-                features,
-                coordinate_tensor,
-                tile_size_lv0=int(tiling_result.tile_size_lv0),
-            ).detach().cpu()
 
 
 def embed_patients(
@@ -1894,197 +1785,6 @@ def _persist_embedded_slide(
     return tile_artifact, slide_artifact
 
 
-def _describe_device_mode(model, execution: ExecutionOptions) -> str:
-    requested_device = getattr(model, "_requested_device", None)
-    if requested_device == "cpu":
-        return "cpu"
-    if execution.num_gpus and execution.num_gpus > 1:
-        return f"{execution.num_gpus} gpus"
-    return "gpu"
-
-
-def _resolve_slides(*, slides=None, manifest_path: str | Path | None = None) -> list[SlideSpec]:
-    if slides is not None:
-        return [_coerce_slide_spec(slide) for slide in slides]
-    if manifest_path is None:
-        return []
-    return [_coerce_slide_spec(slide) for slide in load_slide_manifest(manifest_path)]
-
-
-def _resolve_patient_id_map(
-    *,
-    slides=None,
-    manifest_path: str | Path | None = None,
-) -> dict[str, str]:
-    """Return {sample_id: patient_id} for patient-level models.
-
-    Reads the 'patient_id' column from the manifest CSV, or falls back to
-    inspecting slide dicts for a 'patient_id' key. Raises if neither is found.
-    """
-    if manifest_path is not None:
-        return load_patient_id_mapping(manifest_path)
-    if slides is not None:
-        result = {}
-        for slide in slides:
-            if isinstance(slide, dict) and "patient_id" in slide:
-                result[str(slide["sample_id"])] = str(slide["patient_id"])
-            elif hasattr(slide, "patient_id"):
-                result[str(slide.sample_id)] = str(slide.patient_id)
-            else:
-                raise ValueError(
-                    "Patient-level models require a 'patient_id' for every slide. "
-                    "Provide a manifest CSV with a 'patient_id' column, or include "
-                    "'patient_id' in each slide dict when calling programmatically."
-                )
-        return result
-    raise ValueError(
-        "Either slides or manifest_path must be provided for patient-level models."
-    )
-
-
-def _coerce_slide_spec(slide) -> SlideSpec:
-    if isinstance(slide, SlideSpec):
-        return slide
-    if isinstance(slide, (str, Path)):
-        image_path = Path(slide)
-        return _make_slide_spec(
-            sample_id=image_path.stem,
-            image_path=image_path,
-            mask_path=None,
-        )
-    if isinstance(slide, dict):
-        mask_path = slide["mask_path"] if "mask_path" in slide else None
-        spacing_at_level_0 = slide["spacing_at_level_0"] if "spacing_at_level_0" in slide else None
-        return _make_slide_spec(
-            sample_id=str(slide["sample_id"]),
-            image_path=Path(slide["image_path"]),
-            mask_path=Path(mask_path) if mask_path else None,
-            spacing_at_level_0=spacing_at_level_0,
-        )
-    sample_id = slide.sample_id
-    image_path = slide.image_path
-    mask_path = slide.mask_path
-    spacing_at_level_0 = slide.spacing_at_level_0
-    return _make_slide_spec(
-        sample_id=str(sample_id),
-        image_path=Path(image_path),
-        mask_path=Path(mask_path) if mask_path is not None else None,
-        spacing_at_level_0=spacing_at_level_0,
-    )
-
-
-def _normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
-    if isinstance(tiling_results, dict):
-        return [tiling_results[slide.sample_id] for slide in slides]
-    return list(tiling_results)
-
-
-def _partition_slides_by_tile_count(
-    slide_records: Sequence[SlideSpec],
-    tiling_results,
-) -> tuple[list[SlideSpec], list[Any], list[tuple[SlideSpec, Any]]]:
-    embeddable_slides: list[SlideSpec] = []
-    embeddable_tiling_results: list[Any] = []
-    zero_tile_pairs: list[tuple[SlideSpec, Any]] = []
-    for slide, tiling_result in zip(slide_records, tiling_results):
-        if _num_tiles(tiling_result) > 0:
-            embeddable_slides.append(slide)
-            embeddable_tiling_results.append(tiling_result)
-        else:
-            zero_tile_pairs.append((slide, tiling_result))
-    return embeddable_slides, embeddable_tiling_results, zero_tile_pairs
-
-
-def _write_zero_tile_embedding_sidecars(
-    zero_tile_pairs: Sequence[tuple[SlideSpec, Any]],
-    *,
-    model,
-    preprocessing: PreprocessingConfig,
-    output_dir: Path | None,
-    output_format: str,
-) -> None:
-    if output_dir is None:
-        return
-    for slide, tiling_result in zero_tile_pairs:
-        if _is_hierarchical_preprocessing(preprocessing):
-            geometry = _resolve_hierarchical_geometry(preprocessing, tiling_result)
-            write_hierarchical_embeddings(
-                slide.sample_id,
-                np.empty((0, int(geometry["tiles_per_region"]), 0), dtype=np.float32),
-                output_dir=output_dir,
-                output_format=output_format,
-                metadata=runtime_embedding.build_hierarchical_embedding_metadata(
-                    model,
-                    tiling_result=tiling_result,
-                    image_path=slide.image_path,
-                    mask_path=slide.mask_path,
-                    backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
-                    preprocessing=preprocessing,
-                ),
-            )
-            continue
-        write_tile_embedding_metadata(
-            slide.sample_id,
-            output_dir=output_dir,
-            output_format=output_format,
-            feature_dim=None,
-            num_tiles=0,
-            metadata=runtime_embedding.build_tile_embedding_metadata(
-                model=model,
-                tiling_result=tiling_result,
-                image_path=slide.image_path,
-                mask_path=slide.mask_path,
-                tile_size_lv0=int(tiling_result.tile_size_lv0),
-                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
-            ),
-        )
-
-
-
-def _num_rows(data) -> int:
-    if hasattr(data, "shape") and len(data.shape) >= 1:
-        return int(data.shape[0])
-    return len(data)
-
-
-def _emit_tiling_summary(
-    process_list_path: Path,
-    *,
-    expected_total: int,
-    successful_slides: Sequence[SlideSpec],
-    tiling_results,
-) -> None:
-    snapshot = read_tiling_progress_snapshot(process_list_path, expected_total=expected_total)
-    if snapshot is None:
-        discovered_tiles = sum(_num_tiles(tiling_result) for tiling_result in tiling_results)
-        snapshot = SimpleNamespace(
-            total=expected_total,
-            completed=len(successful_slides),
-            failed=max(0, expected_total - len(successful_slides)),
-            pending=0,
-            discovered_tiles=discovered_tiles,
-        )
-    emit_progress(
-        "tiling.summary",
-        total=int(snapshot.total),
-        completed=int(snapshot.completed),
-        failed=int(snapshot.failed),
-        pending=int(snapshot.pending),
-        discovered_tiles=int(snapshot.discovered_tiles),
-    )
-
-
-def _resolved_process_list_output_variant(model) -> str | None:
-    requested_output_variant = getattr(model, "_output_variant", None)
-    if not hasattr(model, "name") or model.name not in encoder_registry:
-        return requested_output_variant
-    resolved = resolve_encoder_output(
-        model.name,
-        requested_output_variant=requested_output_variant,
-    )
-    return str(resolved["output_variant"])
-
-
 def _prepare_tiled_slides(
     slide_records: Sequence[SlideSpec],
     preprocessing: PreprocessingConfig,
@@ -2216,79 +1916,6 @@ def _preload_asap_wholeslidedata(preprocessing: PreprocessingConfig) -> None:
             importlib.import_module("wholeslidedata")
         except ImportError:
             pass
-
-
-def _record_slide_metadata_in_process_list(
-    process_list_path: Path,
-    slide_records: Sequence[SlideSpec],
-    *,
-    preprocessing: PreprocessingConfig,
-    tiling_artifacts: Sequence[Any],
-) -> None:
-    def _resolve_path_str(value: Any) -> str | None:
-        if value is None or pd.isna(value):
-            return None
-        return str(Path(value).resolve())
-
-    spacing_by_sample_id = {
-        slide.sample_id: slide.spacing_at_level_0
-        for slide in slide_records
-        if slide.spacing_at_level_0 is not None
-    }
-    mask_preview_by_sample_id = {
-        str(artifact.sample_id): _resolve_path_str(artifact.mask_preview_path)
-        for artifact in tiling_artifacts
-    }
-    tiling_preview_by_sample_id = {
-        str(artifact.sample_id): _resolve_path_str(artifact.tiling_preview_path)
-        for artifact in tiling_artifacts
-    }
-    process_df = pd.read_csv(process_list_path)
-    if "requested_backend" not in process_df.columns:
-        process_df["requested_backend"] = [None] * len(process_df)
-    if "backend" not in process_df.columns:
-        process_df["backend"] = [None] * len(process_df)
-    if "spacing_at_level_0" not in process_df.columns:
-        process_df["spacing_at_level_0"] = [None] * len(process_df)
-    if "mask_preview_path" not in process_df.columns:
-        process_df["mask_preview_path"] = [None] * len(process_df)
-    if "tiling_preview_path" not in process_df.columns:
-        process_df["tiling_preview_path"] = [None] * len(process_df)
-    requested_backend = str(preprocessing.backend)
-    process_df["requested_backend"] = process_df["requested_backend"].where(
-        process_df["requested_backend"].notna(),
-        requested_backend,
-    )
-    if spacing_by_sample_id:
-        mapped_spacing = process_df["sample_id"].astype(str).map(spacing_by_sample_id)
-        process_df["spacing_at_level_0"] = process_df["spacing_at_level_0"].where(
-            process_df["spacing_at_level_0"].notna(),
-            mapped_spacing,
-        )
-    backend_by_sample_id = {}
-    for row in process_df.to_dict("records"):
-        sample_id = str(row["sample_id"])
-        try:
-            tiling_result = load_tiling_result_from_row(row)
-        except Exception:
-            continue
-        backend = getattr(tiling_result, "backend", None)
-        if backend is not None:
-            backend_by_sample_id[sample_id] = backend
-    if backend_by_sample_id:
-        mapped_backend = process_df["sample_id"].astype(str).map(backend_by_sample_id)
-        process_df["backend"] = process_df["backend"].where(process_df["backend"].notna(), mapped_backend)
-    mapped_mask_preview_paths = process_df["sample_id"].astype(str).map(mask_preview_by_sample_id)
-    process_df["mask_preview_path"] = process_df["mask_preview_path"].where(
-        process_df["mask_preview_path"].notna(),
-        mapped_mask_preview_paths,
-    )
-    mapped_tiling_preview_paths = process_df["sample_id"].astype(str).map(tiling_preview_by_sample_id)
-    process_df["tiling_preview_path"] = process_df["tiling_preview_path"].where(
-        process_df["tiling_preview_path"].notna(),
-        mapped_tiling_preview_paths,
-    )
-    process_df.to_csv(process_list_path, index=False)
 
 
 def _resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | None) -> PreprocessingConfig:
@@ -2564,28 +2191,3 @@ def _build_direct_embed_worker_request_payload(
         "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
-def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:
-    base_dir = Path(output_dir)
-    process_df = load_tiling_process_df(base_dir / "process_list.csv")
-    successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
-    slide_records: list[SlideSpec] = []
-    tiling_results: list[Any] = []
-    for row in successful_rows.to_dict("records"):
-        num_tiles = row.get("num_tiles", 0)
-        if num_tiles == 0 or pd.isna(row.get("coordinates_npz_path")):
-            logging.getLogger(__name__).warning(
-                f"Skipping {row['sample_id']}: no tiles extracted"
-            )
-            continue
-        mask_path = row["mask_path"] if "mask_path" in row else None
-        spacing_at_level_0 = row["spacing_at_level_0"] if "spacing_at_level_0" in row else None
-        slide_records.append(
-            _make_slide_spec(
-                sample_id=str(row["sample_id"]),
-                image_path=Path(row["image_path"]),
-                mask_path=Path(mask_path) if mask_path is not None and not pd.isna(mask_path) else None,
-                spacing_at_level_0=spacing_at_level_0,
-            )
-        )
-        tiling_results.append(load_tiling_result_from_row(row))
-    return slide_records, tiling_results
