@@ -637,15 +637,30 @@ def read_progress_events(
         if not candidate.exists():
             continue
         offset = known_offsets.get(candidate, 0)
-        with candidate.open("r", encoding="utf-8") as handle:
-            handle.seek(offset)
-            for line in handle:
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                payload = json.loads(stripped)
-                events.append(ProgressEvent(kind=payload["kind"], payload=dict(payload.get("payload", {}))))
-            known_offsets[candidate] = handle.tell()
+        last_good_offset = offset
+        try:
+            with candidate.open("r", encoding="utf-8") as handle:
+                handle.seek(offset)
+                while True:
+                    line = handle.readline()
+                    if line == "":
+                        known_offsets[candidate] = last_good_offset
+                        break
+                    stripped = line.strip()
+                    if not stripped:
+                        last_good_offset = handle.tell()
+                        continue
+                    try:
+                        payload = json.loads(stripped)
+                    except json.JSONDecodeError:
+                        if not line.endswith("\n"):
+                            known_offsets[candidate] = last_good_offset
+                            break
+                        raise
+                    events.append(ProgressEvent(kind=payload["kind"], payload=dict(payload.get("payload", {}))))
+                    last_good_offset = handle.tell()
+        except FileNotFoundError:
+            continue
     return events, known_offsets
 
 

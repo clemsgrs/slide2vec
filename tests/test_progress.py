@@ -653,6 +653,19 @@ def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: P
     assert "--rdzv-endpoint" not in " ".join(command)
 
 
+def test_reset_progress_event_logs_is_idempotent(tmp_path: Path):
+    import slide2vec.runtime.distributed as distributed
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text("stale\n", encoding="utf-8")
+
+    distributed.reset_progress_event_logs(progress_path)
+    distributed.reset_progress_event_logs(progress_path)
+
+    assert not progress_path.exists()
+
+
 def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypatch):
     import slide2vec.progress as progress
 
@@ -885,6 +898,68 @@ def test_jsonl_progress_reporter_tags_worker_events_with_gpu_label(tmp_path: Pat
 
     assert [event.kind for event in events] == ["embedding.slide.started"]
     assert events[0].payload["progress_label"] == "cuda:1"
+
+
+def test_read_progress_events_ignores_trailing_partial_jsonl_line(tmp_path: Path):
+    import slide2vec.progress as progress
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+        '{"kind":"embedding.slide.started","payload":{"sample_id":"slide-b","total_tiles":8}',
+        encoding="utf-8",
+    )
+
+    events, offsets = progress.read_progress_events(progress_path)
+
+    assert [event.kind for event in events] == ["embedding.started"]
+    assert offsets[progress_path] == len(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+    )
+
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+        '{"kind":"embedding.slide.started","payload":{"sample_id":"slide-b","total_tiles":8},"timestamp":2}\n',
+        encoding="utf-8",
+    )
+
+    events, offsets = progress.read_progress_events(progress_path, offsets=offsets)
+
+    assert [event.kind for event in events] == ["embedding.slide.started"]
+    assert events[0].payload["sample_id"] == "slide-b"
+    assert offsets[progress_path] == progress_path.stat().st_size
+
+
+def test_read_progress_events_ignores_file_disappearing_between_exists_and_open(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import slide2vec.progress as progress
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n',
+        encoding="utf-8",
+    )
+
+    original_open = progress.Path.open
+    calls = {"count": 0}
+
+    def _open(self, *args, **kwargs):
+        if self == progress_path and calls["count"] == 0:
+            calls["count"] += 1
+            raise FileNotFoundError
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(progress.Path, "open", _open, raising=False)
+
+    events, offsets = progress.read_progress_events(progress_path)
+
+    assert events == []
+    assert offsets == {}
+    assert calls["count"] == 1
 
 
 def test_rich_reporter_tracks_multi_gpu_embedding_rows_separately(monkeypatch):

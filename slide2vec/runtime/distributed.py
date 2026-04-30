@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from hs2p import SlideSpec
 
-from slide2vec.progress import emit_progress_event, read_progress_events
+import slide2vec.progress as progress
 from slide2vec.runtime.hierarchical import num_tiles
 
 
@@ -31,8 +31,7 @@ def distributed_coordination_dir(work_dir: Path):
 def reset_progress_event_logs(progress_events_path: Path) -> None:
     progress_events_path.parent.mkdir(parents=True, exist_ok=True)
     for path in [progress_events_path, *progress_events_path.parent.glob(f"{progress_events_path.stem}.rank*{progress_events_path.suffix}")]:
-        if path.exists():
-            path.unlink()
+        path.unlink(missing_ok=True)
 
 
 def drain_stream_to_buffer(stream, chunks: list[str]) -> None:
@@ -98,14 +97,14 @@ def run_torchrun_worker(
     offsets: dict[Path, int] = {}
     while process.poll() is None:
         if progress_events_path is not None:
-            events, offsets = read_progress_events(progress_events_path, offsets=offsets)
+            events, offsets = progress.read_progress_events(progress_events_path, offsets=offsets)
             for event in events:
-                emit_progress_event(event)
+                progress.emit_progress_event(event)
         time.sleep(0.1)
     if progress_events_path is not None:
-        events, offsets = read_progress_events(progress_events_path, offsets=offsets)
+        events, offsets = progress.read_progress_events(progress_events_path, offsets=offsets)
         for event in events:
-            emit_progress_event(event)
+            progress.emit_progress_event(event)
     returncode = process.wait()
     stdout_thread.join(timeout=1.0)
     stderr_thread.join(timeout=1.0)
