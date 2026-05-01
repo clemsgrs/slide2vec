@@ -11,10 +11,10 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
-from slide2vec.runtime import embedding as runtime_embedding
 from slide2vec.runtime.distributed_stage import run_distributed_embedding_stage
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
+from slide2vec.runtime.embedding import should_persist_tile_embeddings
 from slide2vec.runtime.persistence import (
     collect_pipeline_artifacts,
     update_process_list_after_embedding,
@@ -64,7 +64,7 @@ def collect_distributed_pipeline_artifacts(
     list[HierarchicalEmbeddingArtifact],
     list[SlideEmbeddingArtifact],
 ]:
-    persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
+    persist_tile_embeddings = should_persist_tile_embeddings(model, execution)
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings

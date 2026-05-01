@@ -1,6 +1,7 @@
 """Multi-GPU orchestration: torchrun launches and worker request payloads."""
 
 import json
+from subprocess import Popen
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -9,18 +10,26 @@ from hs2p import SlideSpec
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.progress import emit_progress
-from slide2vec.runtime import distributed as runtime_distributed
-from slide2vec.runtime import serialization as runtime_serialization
 from slide2vec.runtime.cpu_budget import serialize_execution
 from slide2vec.runtime.embedding_persist import make_embedded_slide
 from slide2vec.runtime.embedding_pipeline import aggregate_tile_embeddings_for_slide
+from slide2vec.runtime.distributed import (
+    distributed_coordination_dir,
+    assign_slides_to_ranks,
+    load_embedded_slide_payload,
+    load_hierarchical_embedding_shards,
+    load_tile_embedding_shards,
+    merge_hierarchical_embedding_shards,
+    merge_tile_embedding_shards,
+    reset_progress_event_logs,
+    run_torchrun_worker,
+)
 from slide2vec.runtime.hierarchical import (
     is_hierarchical_preprocessing,
     num_tiles,
     resolve_hierarchical_geometry,
 )
-
-
+from slide2vec.runtime.serialization import serialize_model, serialize_preprocessing
 def validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
     requested_device = getattr(model, "_requested_device", None)
     if requested_device == "cpu":
@@ -43,8 +52,8 @@ def build_pipeline_worker_request_payload(
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
-        "model": runtime_serialization.serialize_model(model),
-        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
+        "model": serialize_model(model),
+        "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
         "tiling_input_dir": str(tiling_input_dir),
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
@@ -58,8 +67,8 @@ def write_embedding_request(
     output_dir: Path,
 ) -> None:
     payload = {
-        "model": runtime_serialization.serialize_model(model),
-        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
+        "model": serialize_model(model),
+        "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
     }
     request_path = output_dir / "embedding_request.json"
@@ -79,8 +88,8 @@ def build_direct_embed_worker_request_payload(
 ) -> dict[str, Any]:
     return {
         "strategy": strategy,
-        "model": runtime_serialization.serialize_model(model),
-        "preprocessing": runtime_serialization.serialize_preprocessing(preprocessing),
+        "model": serialize_model(model),
+        "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
         "coordination_dir": str(coordination_dir),
         "sample_id": sample_id,
@@ -102,7 +111,7 @@ def run_distributed_embedding_stage(
         return
     request_path = output_dir / "embedding_request.json"
     progress_events_path = output_dir / "logs" / "pipeline_worker.progress.jsonl"
-    runtime_distributed.reset_progress_event_logs(progress_events_path)
+    reset_progress_event_logs(progress_events_path)
     request_payload = build_pipeline_worker_request_payload(
         model,
         preprocessing,
@@ -121,14 +130,14 @@ def run_distributed_embedding_stage(
         slide_count=len(successful_slides),
         num_gpus=execution.num_gpus,
     )
-    runtime_distributed.run_torchrun_worker(
+    run_torchrun_worker(
         module="slide2vec.distributed.pipeline_worker",
         num_gpus=execution.num_gpus,
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
         progress_events_path=progress_events_path,
-        popen_factory=runtime_distributed.subprocess.Popen,
+        popen_factory=Popen,
     )
 
 
@@ -145,7 +154,7 @@ def run_distributed_direct_embedding_stage(
 ) -> None:
     request_path = coordination_dir / "direct_embedding_request.json"
     progress_events_path = output_dir / "logs" / "direct_embed_worker.progress.jsonl"
-    runtime_distributed.reset_progress_event_logs(progress_events_path)
+    reset_progress_event_logs(progress_events_path)
     request_payload = build_direct_embed_worker_request_payload(
         model=model,
         preprocessing=preprocessing,
@@ -157,14 +166,14 @@ def run_distributed_direct_embedding_stage(
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
-    runtime_distributed.run_torchrun_worker(
+    run_torchrun_worker(
         module="slide2vec.distributed.direct_embed_worker",
         num_gpus=execution.num_gpus,
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed direct embedding failed",
         progress_events_path=progress_events_path,
-        popen_factory=runtime_distributed.subprocess.Popen,
+        popen_factory=Popen,
     )
 
 
@@ -177,7 +186,7 @@ def embed_single_slide_distributed(
     execution: ExecutionOptions,
     work_dir: Path,
 ) -> EmbeddedSlide:
-    with runtime_distributed.distributed_coordination_dir(work_dir) as coordination_dir:
+    with distributed_coordination_dir(work_dir) as coordination_dir:
         run_distributed_direct_embedding_stage(
             model,
             preprocessing=preprocessing,
@@ -188,16 +197,16 @@ def embed_single_slide_distributed(
             sample_id=slide.sample_id,
         )
         if is_hierarchical_preprocessing(preprocessing):
-            shard_payloads = runtime_distributed.load_hierarchical_embedding_shards(coordination_dir, slide.sample_id)
+            shard_payloads = load_hierarchical_embedding_shards(coordination_dir, slide.sample_id)
             geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
-            tile_embeddings = runtime_distributed.merge_hierarchical_embedding_shards(
+            tile_embeddings = merge_hierarchical_embedding_shards(
                 shard_payloads,
                 num_regions=num_tiles(tiling_result),
                 tiles_per_region=int(geometry["tiles_per_region"]),
             )
         else:
-            shard_payloads = runtime_distributed.load_tile_embedding_shards(coordination_dir, slide.sample_id)
-            tile_embeddings = runtime_distributed.merge_tile_embedding_shards(shard_payloads)
+            shard_payloads = load_tile_embedding_shards(coordination_dir, slide.sample_id)
+            tile_embeddings = merge_tile_embedding_shards(shard_payloads)
         if model.level != "slide":
             return make_embedded_slide(
                 slide=slide,
@@ -232,12 +241,12 @@ def embed_multi_slides_distributed(
     execution: ExecutionOptions,
     work_dir: Path,
 ) -> list[EmbeddedSlide]:
-    assignments = runtime_distributed.assign_slides_to_ranks(
+    assignments = assign_slides_to_ranks(
         slide_records,
         tiling_results,
         num_gpus=execution.num_gpus,
     )
-    with runtime_distributed.distributed_coordination_dir(work_dir) as coordination_dir:
+    with distributed_coordination_dir(work_dir) as coordination_dir:
         run_distributed_direct_embedding_stage(
             model,
             preprocessing=preprocessing,
@@ -249,7 +258,7 @@ def embed_multi_slides_distributed(
         )
         results = []
         for slide, tiling_result in zip(slide_records, tiling_results):
-            payload = runtime_distributed.load_embedded_slide_payload(coordination_dir, slide.sample_id)
+            payload = load_embedded_slide_payload(coordination_dir, slide.sample_id)
             slide_embedding = payload["slide_embedding"] if "slide_embedding" in payload else None
             latents = payload["latents"] if "latents" in payload else None
             results.append(

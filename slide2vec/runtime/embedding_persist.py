@@ -11,10 +11,18 @@ from slide2vec.artifacts import (
     TileEmbeddingArtifact,
     write_tile_embedding_metadata,
 )
-from slide2vec.runtime import embedding as runtime_embedding
-from slide2vec.runtime import tiling as runtime_tiling
+from slide2vec.runtime.embedding import (
+    build_hierarchical_embedding_metadata,
+    build_tile_embedding_metadata,
+    build_slide_embedding_metadata,
+    should_persist_tile_embeddings,
+    write_hierarchical_embedding_artifact,
+    write_slide_embedding_artifact,
+    write_tile_embedding_artifact,
+)
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.process_list import num_rows
+from slide2vec.runtime.tiling import resolve_slide_backend
 from slide2vec.utils.coordinates import coordinate_arrays
 
 
@@ -71,53 +79,53 @@ def persist_embedded_slide(
             output_format=execution.output_format,
             feature_dim=None,
             num_tiles=0,
-            metadata=runtime_embedding.build_tile_embedding_metadata(
+            metadata=build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
         return None, None
     if is_hierarchical_preprocessing(preprocessing):
-        hierarchical_artifact = runtime_embedding.write_hierarchical_embedding_artifact(
+        hierarchical_artifact = write_hierarchical_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.tile_embeddings,
             execution=execution,
-            metadata=runtime_embedding.build_hierarchical_embedding_metadata(
+            metadata=build_hierarchical_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
-                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing, tiling_result),
                 preprocessing=preprocessing,
             ),
         )
         return hierarchical_artifact, None
     tile_artifact = None
-    if runtime_embedding.should_persist_tile_embeddings(model, execution):
-        tile_artifact = runtime_embedding.write_tile_embedding_artifact(
+    if should_persist_tile_embeddings(model, execution):
+        tile_artifact = write_tile_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.tile_embeddings,
             execution=execution,
-            metadata=runtime_embedding.build_tile_embedding_metadata(
+            metadata=build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
     slide_artifact = None
     if embedded_slide.slide_embedding is not None:
-        slide_artifact = runtime_embedding.write_slide_embedding_artifact(
+        slide_artifact = write_slide_embedding_artifact(
             embedded_slide.sample_id,
             embedded_slide.slide_embedding,
             execution=execution,
-            metadata=runtime_embedding.build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
+            metadata=build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
             latents=embedded_slide.latents,
         )
     return tile_artifact, slide_artifact

@@ -16,9 +16,9 @@ from hs2p.utils.stderr import run_with_filtered_stderr
 from slide2vec.api import PreprocessingConfig, _resolve_hierarchical_preprocessing
 from slide2vec.encoders.registry import resolve_preprocessing_defaults
 from slide2vec.progress import emit_progress, read_tiling_progress_snapshot
-from slide2vec.runtime import tiling as runtime_tiling
 from slide2vec.runtime.process_list import record_slide_metadata_in_process_list
 from slide2vec.runtime.progress_bridge import bridge_hs2p_progress_to_slide2vec
+from slide2vec.runtime.tiling import build_hs2p_configs, resolve_tiling_backend
 from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.utils.tiling_io import load_tiling_process_df, load_tiling_result_from_row
 
@@ -42,7 +42,7 @@ def monitor_tiling_progress(process_list_path: Path, expected_total: int, stop_e
 
 def preload_asap_wholeslidedata(preprocessing: PreprocessingConfig) -> None:
     """Load wholeslidedata quietly so ASAP backend import noise stays off stderr."""
-    if runtime_tiling.resolve_tiling_backend(preprocessing) != "asap":
+    if resolve_tiling_backend(preprocessing) != "asap":
         return
     with suppress_c_stderr():
         try:
@@ -59,8 +59,7 @@ def tile_slides_call(
     num_workers: int,
 ) -> list[Any]:
     preload_asap_wholeslidedata(preprocessing)
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = runtime_tiling.build_hs2p_configs(preprocessing)
-
+    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = build_hs2p_configs(preprocessing)
     def _run_tile_slides():
         return tile_slides(
             slides,

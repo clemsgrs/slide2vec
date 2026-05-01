@@ -12,13 +12,13 @@ from slide2vec.api import PreprocessingConfig
 from slide2vec.artifacts import write_hierarchical_embeddings, write_tile_embedding_metadata
 from slide2vec.encoders.registry import encoder_registry, resolve_encoder_output
 from slide2vec.progress import emit_progress, read_tiling_progress_snapshot
-from slide2vec.runtime import embedding as runtime_embedding
-from slide2vec.runtime import tiling as runtime_tiling
 from slide2vec.runtime.hierarchical import (
     is_hierarchical_preprocessing,
     num_tiles,
     resolve_hierarchical_geometry,
 )
+from slide2vec.runtime.embedding import build_hierarchical_embedding_metadata, build_tile_embedding_metadata
+from slide2vec.runtime.tiling import resolve_slide_backend
 from slide2vec.utils.tiling_io import load_tiling_result_from_row
 
 
@@ -62,12 +62,12 @@ def write_zero_tile_embedding_sidecars(
                 np.empty((0, int(geometry["tiles_per_region"]), 0), dtype=np.float32),
                 output_dir=output_dir,
                 output_format=output_format,
-                metadata=runtime_embedding.build_hierarchical_embedding_metadata(
+                metadata=build_hierarchical_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
-                    backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                    backend=resolve_slide_backend(preprocessing, tiling_result),
                     preprocessing=preprocessing,
                 ),
             )
@@ -78,13 +78,13 @@ def write_zero_tile_embedding_sidecars(
             output_format=output_format,
             feature_dim=None,
             num_tiles=0,
-            metadata=runtime_embedding.build_tile_embedding_metadata(
+            metadata=build_tile_embedding_metadata(
                 model=model,
                 tiling_result=tiling_result,
                 image_path=slide.image_path,
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
-                backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing, tiling_result),
             ),
         )
 

@@ -5,8 +5,8 @@ import os
 from typing import Any, Sequence
 
 from slide2vec.api import ExecutionOptions, PreprocessingConfig
-from slide2vec.runtime import serialization as runtime_serialization
-from slide2vec.runtime import tiling as runtime_tiling
+from slide2vec.runtime.serialization import serialize_execution as serialize_execution_dict
+from slide2vec.runtime.tiling import resolve_slide_backend
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 
@@ -36,7 +36,7 @@ def serialize_execution(
             preprocessing.num_cucim_workers,
             num_gpus=execution.num_gpus,
         )
-    return runtime_serialization.serialize_execution(
+    return serialize_execution_dict(
         execution,
         effective_num_workers_per_gpu=effective_num_workers_per_gpu,
     )
@@ -46,11 +46,11 @@ def log_on_the_fly_worker_override_once(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     tiling_results: Sequence[Any],
-) -> None:
+    ) -> None:
     if not preprocessing.on_the_fly or preprocessing.read_tiles_from is not None:
         return
     if not any(
-        runtime_tiling.resolve_slide_backend(preprocessing, tiling_result) == "cucim"
+        resolve_slide_backend(preprocessing, tiling_result) == "cucim"
         for tiling_result in tiling_results
     ):
         return

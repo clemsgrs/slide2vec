@@ -14,11 +14,16 @@ from slide2vec.artifacts import (
     write_patient_embeddings,
 )
 from slide2vec.progress import emit_progress
-from slide2vec.runtime import embedding as runtime_embedding
-from slide2vec.runtime import tiling as runtime_tiling
+from slide2vec.runtime.embedding import (
+    build_slide_embedding_metadata,
+    build_tile_embedding_metadata,
+    write_slide_embedding_artifact,
+    write_tile_embedding_artifact,
+)
 from slide2vec.runtime.embedding_pipeline import compute_tile_embeddings_for_slide
 from slide2vec.runtime.hierarchical import num_embedding_items
 from slide2vec.runtime.slide_encode import encode_slide_from_tiles
+from slide2vec.runtime.tiling import resolve_slide_backend
 
 
 def run_patient_pipeline(
@@ -60,17 +65,17 @@ def run_patient_pipeline(
         )
 
         if execution.save_tile_embeddings:
-            tile_artifact = runtime_embedding.write_tile_embedding_artifact(
+            tile_artifact = write_tile_embedding_artifact(
                 slide.sample_id,
                 tile_embeddings,
                 execution=execution,
-                metadata=runtime_embedding.build_tile_embedding_metadata(
+                metadata=build_tile_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
-                    backend=runtime_tiling.resolve_slide_backend(preprocessing, tiling_result),
+                    backend=resolve_slide_backend(preprocessing, tiling_result),
                 ),
             )
             tile_artifacts.append(tile_artifact)
@@ -89,11 +94,11 @@ def run_patient_pipeline(
         emit_progress("aggregation.finished", sample_id=slide.sample_id, has_latents=False)
 
         if execution.save_slide_embeddings:
-            slide_artifact = runtime_embedding.write_slide_embedding_artifact(
+            slide_artifact = write_slide_embedding_artifact(
                 slide.sample_id,
                 slide_emb,
                 execution=execution,
-                metadata=runtime_embedding.build_slide_embedding_metadata(model, image_path=slide.image_path),
+                metadata=build_slide_embedding_metadata(model, image_path=slide.image_path),
             )
             slide_artifacts.append(slide_artifact)
 

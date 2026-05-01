@@ -18,18 +18,13 @@ def main(argv=None) -> int:
     import torch.distributed as dist
 
     import slide2vec.distributed as distributed
+    import slide2vec.inference as inference
     from slide2vec.api import Model
-    from slide2vec.runtime.embedding_pipeline import (
-        compute_embedded_slides,
-        compute_hierarchical_embedding_shard_for_slide,
-        compute_tile_embeddings_for_slide,
-    )
     from slide2vec.runtime.hierarchical import (
         build_hierarchical_index,
         is_hierarchical_preprocessing,
         resolve_hierarchical_geometry,
     )
-    from slide2vec.runtime.manifest import load_successful_tiled_slides
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
     from slide2vec.runtime.serialization import deserialize_execution, deserialize_preprocessing
 
@@ -54,7 +49,10 @@ def main(argv=None) -> int:
         )
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
-        slide_records, tiling_results = load_successful_tiled_slides(output_dir)
+        load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
+        if not callable(load_successful_tiled_slides_fn):
+            from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
+        slide_records, tiling_results = load_successful_tiled_slides_fn(output_dir)
         paired_by_sample = {
             slide.sample_id: (slide, tiling_result)
             for slide, tiling_result in zip(slide_records, tiling_results)
@@ -84,7 +82,16 @@ def main(argv=None) -> int:
                         tile_size_lv0=int(geometry["tile_size_lv0"]),
                     )
                     flat_indices = np.array_split(index.flat_index, world_size)[global_rank]
-                    shard_indices, tile_embeddings = compute_hierarchical_embedding_shard_for_slide(
+                    compute_hierarchical_embedding_shard_for_slide_fn = getattr(
+                        inference,
+                        "_compute_hierarchical_embedding_shard_for_slide",
+                        None,
+                    )
+                    if not callable(compute_hierarchical_embedding_shard_for_slide_fn):
+                        from slide2vec.runtime.embedding_pipeline import (
+                            compute_hierarchical_embedding_shard_for_slide as compute_hierarchical_embedding_shard_for_slide_fn,
+                        )
+                    shard_indices, tile_embeddings = compute_hierarchical_embedding_shard_for_slide_fn(
                         loaded,
                         slide,
                         tiling_result,
@@ -100,7 +107,16 @@ def main(argv=None) -> int:
                 else:
                     num_tiles = len(tiling_result.x)
                     tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
-                    tile_embeddings = compute_tile_embeddings_for_slide(
+                    compute_tile_embeddings_for_slide_fn = getattr(
+                        inference,
+                        "_compute_tile_embeddings_for_slide",
+                        None,
+                    )
+                    if not callable(compute_tile_embeddings_for_slide_fn):
+                        from slide2vec.runtime.embedding_pipeline import (
+                            compute_tile_embeddings_for_slide as compute_tile_embeddings_for_slide_fn,
+                        )
+                    tile_embeddings = compute_tile_embeddings_for_slide_fn(
                         loaded,
                         model,
                         slide,
@@ -130,7 +146,10 @@ def main(argv=None) -> int:
                 }
                 torch.save(payload, coordination_dir / f"{embedded_slide.sample_id}.embedded.pt")
 
-            compute_embedded_slides(
+            compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
+            if not callable(compute_embedded_slides_fn):
+                from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
+            compute_embedded_slides_fn(
                 model,
                 assigned_slides,
                 assigned_tiling_results,

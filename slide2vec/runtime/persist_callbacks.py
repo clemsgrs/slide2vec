@@ -11,7 +11,7 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
-from slide2vec.runtime import embedding as runtime_embedding
+from slide2vec.runtime.embedding import should_persist_tile_embeddings
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.persistence import update_process_list_after_embedding
@@ -140,7 +140,7 @@ def build_incremental_persist_callback(
     if execution.output_dir is None:
         return None, tile_artifacts, slide_artifacts
 
-    persist_tile_embeddings = runtime_embedding.should_persist_tile_embeddings(model, execution)
+    persist_tile_embeddings = should_persist_tile_embeddings(model, execution)
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
 

@@ -6,7 +6,10 @@ import getpass
 from pathlib import Path
 from omegaconf import OmegaConf
 
-import slide2vec.distributed as distributed
+from slide2vec.distributed import (
+    is_enabled_and_multiple_gpus,
+    is_main_process,
+)
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
@@ -123,7 +126,7 @@ def setup(args):
         run_id = wandb_run.id
 
     output_dir = Path(cfg.output_dir, run_id)
-    if distributed.is_main_process():
+    if is_main_process():
         output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
@@ -141,7 +144,7 @@ def hf_login():
 
     token = os.environ.get("HF_TOKEN")
     prompted = False
-    if token is None and distributed.is_main_process():
+    if token is None and is_main_process():
         token = getpass.getpass(
             "Enter your Hugging Face API token (input will not be visible): "
         )
@@ -149,9 +152,9 @@ def hf_login():
         prompted = True
     if token is None:
         return
-    if distributed.is_enabled_and_multiple_gpus():
+    if is_enabled_and_multiple_gpus():
         import torch.distributed as dist
 
         dist.barrier()
-    if distributed.is_main_process() and prompted:
+    if is_main_process() and prompted:
         login(token)

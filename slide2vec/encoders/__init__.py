@@ -21,7 +21,7 @@ from slide2vec.encoders.registry import (
 )
 
 # Trigger registration of all built-in encoders.
-from slide2vec.encoders import models as _models_pkg  # noqa: F401
+from slide2vec.encoders import models  # noqa: F401
 
 __all__ = [
     "Encoder",

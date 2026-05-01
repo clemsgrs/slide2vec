@@ -28,6 +28,25 @@ from slide2vec.artifacts import (
     write_tile_embeddings,
 )
 from slide2vec.configs.resources import config_resource, load_config
+from slide2vec.runtime import (
+    artifacts_collect,
+    batching,
+    cpu_budget,
+    distributed,
+    distributed_stage,
+    embedding,
+    embedding_pipeline,
+    embedding_persist,
+    hierarchical,
+    manifest,
+    persistence,
+    persist_callbacks,
+    process_list,
+    slide_encode,
+    tiling,
+    tiling_pipeline,
+    worker_io,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,6 +54,17 @@ ROOT = Path(__file__).resolve().parents[1]
 def PreprocessingConfig(*args, **kwargs):
     kwargs.setdefault("requested_spacing_um", 0.5)
     kwargs.setdefault("requested_tile_size_px", 224)
+    kwargs.setdefault("segmentation", {"method": "hsv"})
+    kwargs.setdefault(
+        "preview",
+        {
+            "save_mask_preview": True,
+            "save_tiling_preview": True,
+            "downsample": 32,
+            "tissue_contour_color": (157, 219, 129),
+            "mask_overlay_alpha": 0.5,
+        },
+    )
     return BasePreprocessingConfig(*args, **kwargs)
 
 
@@ -71,23 +101,17 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     )
     captured = {}
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(
-        inference,
-        "_run_distributed_embedding_stage",
+    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage",
         lambda *args, **kwargs: captured.update({"args": args, "kwargs": kwargs}),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_collect_pipeline_artifacts",
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts",
         lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         model,
@@ -107,12 +131,10 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
 
     captured = {}
 
@@ -135,7 +157,7 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
         captured["tiling_input_dir"] = tiling_input_dir
         return ["tile-artifact"], [], ["slide-artifact"]
 
-    monkeypatch.setattr(inference, "_collect_distributed_pipeline_artifacts", fake_collect)
+    monkeypatch.setattr(artifacts_collect, "collect_distributed_pipeline_artifacts", fake_collect)
 
     result = inference.run_pipeline(
         Model.from_preset("virchow2"),
@@ -170,7 +192,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
         "load_successful_tiled_slides",
         lambda path: ([slide], [tiling_result]),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
 
     captured = {}
 
@@ -192,7 +214,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
         captured["tiling_input_dir"] = tiling_input_dir
         return ["tile-artifact"], [], ["slide-artifact"]
 
-    monkeypatch.setattr(inference, "_collect_distributed_pipeline_artifacts", fake_collect)
+    monkeypatch.setattr(artifacts_collect, "collect_distributed_pipeline_artifacts", fake_collect)
 
     result = inference.run_pipeline_with_coordinates(
         Model.from_preset("virchow2"),
@@ -266,11 +288,11 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "slide_artifacts": slide_artifacts,
         }
 
-    monkeypatch.setattr(inference, "_run_distributed_embedding_stage", fake_run_stage)
-    monkeypatch.setattr(inference, "_collect_pipeline_artifacts", fake_collect)
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", fake_update)
+    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage", fake_run_stage)
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts", fake_collect)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", fake_update)
 
-    tile_artifacts, hierarchical_artifacts, slide_artifacts = inference._collect_distributed_pipeline_artifacts(
+    tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
         model=model,
         successful_slides=[slide],
         process_list_path=process_list_path,
@@ -330,10 +352,10 @@ def test_collect_distributed_pipeline_artifacts_uses_hierarchical_artifacts_for_
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
     model = SimpleNamespace(name="virchow2", level="tile")
 
-    monkeypatch.setattr(inference, "_run_distributed_embedding_stage", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
-    tile_artifacts, hierarchical_artifacts, slide_artifacts = inference._collect_distributed_pipeline_artifacts(
+    tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
         model=model,
         successful_slides=[slide],
         process_list_path=tmp_path / "process_list.csv",
@@ -360,7 +382,7 @@ def test_has_complete_local_embedding_outputs_uses_hierarchical_artifacts_for_hi
         metadata={"image_path": "/tmp/slide-a.svs"},
     )
 
-    assert inference._has_complete_local_embedding_outputs(
+    assert persist_callbacks.has_complete_local_embedding_outputs(
         "slide-a",
         output_dir=tmp_path,
         output_format="pt",
@@ -427,7 +449,7 @@ def test_update_process_list_after_embedding_writes_feature_provenance(
         tile_artifacts = [artifact]
         hierarchical_artifacts = []
 
-    inference._update_process_list_after_embedding(
+    persistence.update_process_list_after_embedding(
         process_list_path,
         successful_slides=[slide],
         persist_tile_embeddings=not persist_hierarchical_embeddings,
@@ -484,12 +506,10 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
         num_tiles=1,
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide_record], [tiling_result], process_list_path),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
     monkeypatch.setattr(inference, "_select_embedding_path", lambda **kwargs: [embedded])
 
     def fake_persist_embedded_slide(model, embedded_slide, tiling_result, *, preprocessing, execution):
@@ -510,7 +530,7 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
         )
         return tile_artifact, slide_artifact
 
-    monkeypatch.setattr(inference, "_persist_embedded_slide", fake_persist_embedded_slide)
+    monkeypatch.setattr(embedding_persist, "persist_embedded_slide", fake_persist_embedded_slide)
 
     model = Model.from_preset("prism")
     result = model.embed_slide(
@@ -548,11 +568,11 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         assert tile_size_lv0 == 224
         return torch.ones(4, dtype=torch.float32)
 
-    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
-    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
-    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(slide_encode.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(embedding_pipeline, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(embedding_pipeline, "uses_cuda_runtime", lambda device: True)
     monkeypatch.setattr(
-        inference.runtime_tiling,
+        tiling,
         "load_tiling_result_from_paths",
         lambda *_args, **_kwargs: SimpleNamespace(
             x=np.array([0], dtype=np.int64),
@@ -589,7 +609,7 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         },
     )
 
-    monkeypatch.setattr(inference.runtime_embedding, "write_slide_embedding_artifact", fake_write_slide_embedding_artifact)
+    monkeypatch.setattr(embedding, "write_slide_embedding_artifact", fake_write_slide_embedding_artifact)
 
     outputs = inference.aggregate_tiles(
         model,
@@ -628,9 +648,9 @@ def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path
         assert tile_size_lv0 == 224
         return torch.ones(4, dtype=torch.float32)
 
-    monkeypatch.setattr(inference.torch, "autocast", fake_autocast)
-    monkeypatch.setattr(inference, "_autocast_dtype", lambda torch_module, precision: torch_module.float16)
-    monkeypatch.setattr(inference, "_uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(slide_encode.torch, "autocast", fake_autocast)
+    monkeypatch.setattr(embedding_pipeline, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(embedding_pipeline, "uses_cuda_runtime", lambda device: True)
 
     loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
     model = SimpleNamespace(level="slide", name="prism")
@@ -642,7 +662,7 @@ def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path
     )
     tile_embeddings = np.ones((1, 4), dtype=np.float32)
 
-    slide_embedding, latents = inference._aggregate_tile_embeddings_for_slide(
+    slide_embedding, latents = embedding_pipeline.aggregate_tile_embeddings_for_slide(
         loaded,
         model,
         slide,
@@ -714,9 +734,7 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
     )
     captured = {}
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide_zero, slide_full], [zero_tiling, full_tiling], process_list_path),
     )
 
@@ -737,9 +755,9 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
             on_embedded_slide(slide_full, full_tiling, embedded_full)
         return [embedded_full]
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
-    monkeypatch.setattr(inference, "_collect_pipeline_artifacts", lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]))
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts", lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]))
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     model = SimpleNamespace(
         name="prism",
@@ -821,9 +839,9 @@ def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
         ("tile-a", "slide-a"),
         (None, "slide-b"),
     ]
-    monkeypatch.setattr(inference, "_persist_embedded_slide", lambda *args, **kwargs: responses.pop(0))
+    monkeypatch.setattr(artifacts_collect, "persist_embedded_slide", lambda *args, **kwargs: responses.pop(0))
 
-    tile_artifacts, hierarchical_artifacts, slide_artifacts = inference._collect_local_pipeline_artifacts(
+    tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_local_pipeline_artifacts(
         model=SimpleNamespace(),
         embedded_slides=embedded_slides,
         tiling_results=tiling_results,
@@ -849,7 +867,7 @@ def test_make_embedded_slide_carries_tiling_artifact_fields():
         tiling_preview_path=Path("/tmp/slide-a-tiling-preview.png"),
     )
 
-    embedded = inference._make_embedded_slide(
+    embedded = embedding_persist.make_embedded_slide(
         slide=slide,
         tiling_result=tiling_result,
         tile_embeddings=np.zeros((1, 2), dtype=np.float32),
@@ -881,9 +899,7 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
         mask_path=None,
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide_record], [tiling_result], tmp_path / "process_list.csv"),
     )
     captured = {}
@@ -895,7 +911,7 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
             callback(slide_record, tiling_result, embedded)
         return []
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
 
     def fake_build_callback(*, model, preprocessing, execution, process_list_path):
         captured["model"] = model
@@ -904,13 +920,11 @@ def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch
         captured["process_list_path"] = process_list_path
         return None, [], []
 
-    monkeypatch.setattr(inference, "_build_incremental_persist_callback", fake_build_callback)
-    monkeypatch.setattr(
-        inference,
-        "_collect_pipeline_artifacts",
+    monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback", fake_build_callback)
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts",
         lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         Model.from_preset("virchow2"),
@@ -937,25 +951,19 @@ def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is
 
     model = SimpleNamespace(level="tile", _load_backend=lambda: SimpleNamespace())
 
-    monkeypatch.setattr(inference, "emit_progress", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_is_hierarchical_preprocessing", lambda preprocessing: False)
-    monkeypatch.setattr(
-        inference,
-        "_compute_tile_embeddings_for_slide",
+    monkeypatch.setattr(embedding_pipeline, "emit_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(hierarchical, "is_hierarchical_preprocessing", lambda preprocessing: False)
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide",
         lambda *args, **kwargs: np.zeros((1, 2), dtype=np.float32),
     )
-    monkeypatch.setattr(
-        inference,
-        "_aggregate_tile_embeddings_for_slide",
+    monkeypatch.setattr(embedding_pipeline, "aggregate_tile_embeddings_for_slide",
         lambda *args, **kwargs: (None, None),
     )
-    monkeypatch.setattr(
-        inference,
-        "_make_embedded_slide",
+    monkeypatch.setattr(embedding_persist, "make_embedded_slide",
         lambda *, slide, **kwargs: SimpleNamespace(sample_id=slide.sample_id),
     )
 
-    result = inference._compute_embedded_slides(
+    result = embedding_pipeline.compute_embedded_slides(
         model,
         slides,
         tiling_results,
@@ -1016,9 +1024,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
         "load_successful_tiled_slides",
         lambda tiling_input_dir: ([slide], [tiling_result]),
     )
-    monkeypatch.setattr(
-        inference,
-        "_build_incremental_persist_callback",
+    monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
         lambda **kwargs: (lambda *args, **kwargs: None, [], []),
     )
 
@@ -1026,7 +1032,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
         captured["collect_results"] = kwargs.get("collect_results")
         return []
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
     monkeypatch.setattr(
         pipeline_worker,
         "assign_slides_to_ranks",
@@ -1096,9 +1102,7 @@ def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypa
         "load_successful_tiled_slides",
         lambda output_dir: ([slide], [tiling_result]),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides",
         lambda *args, **kwargs: [],
     )
 
@@ -1124,14 +1128,10 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, process_list_path),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_tile_embeddings_for_slide",
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide",
         lambda _loaded, _model, slide, _tiling_result, **_kwargs: (
             np.array([[1.0, 2.0]], dtype=np.float32)
             if slide.sample_id == "slide-a"
@@ -1183,9 +1183,7 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
         tile_index=np.array([0], dtype=np.int64),
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, process_list_path),
     )
 
@@ -1195,7 +1193,7 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
         computed_sample_ids.append(slide.sample_id)
         return np.array([[1.0, 2.0]], dtype=np.float32)
 
-    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
 
     model = SimpleNamespace(
         name="virchow2",
@@ -1247,9 +1245,7 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, process_list_path),
     )
 
@@ -1258,10 +1254,8 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
             raise RuntimeError("embedding boom")
         return np.zeros((2, 4), dtype=np.float32)
 
-    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
-    monkeypatch.setattr(
-        inference,
-        "_aggregate_tile_embeddings_for_slide",
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+    monkeypatch.setattr(embedding_pipeline, "aggregate_tile_embeddings_for_slide",
         lambda *args, **kwargs: (np.zeros((8,), dtype=np.float32), None),
     )
 
@@ -1303,9 +1297,9 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
         captured["slides"] = list(slides)
         captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference.runtime_tiling,
+        tiling_pipeline,
         "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="cucim"),
@@ -1317,7 +1311,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
         ),
     )
 
-    slide = inference._coerce_slide_spec(
+    slide = manifest.coerce_slide_spec(
         {
             "sample_id": "slide-a",
             "image_path": "/tmp/slide-a.svs",
@@ -1325,7 +1319,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
         }
     )
 
-    inference._tile_slides(
+    tiling_pipeline.tile_slides_call(
         [slide],
         replace(DEFAULT_PREPROCESSING, on_the_fly=False),
         output_dir=tmp_path,
@@ -1346,9 +1340,9 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
         captured["slides"] = list(slides)
         captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference.runtime_tiling,
+        tiling_pipeline,
         "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
@@ -1360,7 +1354,7 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
         ),
     )
 
-    inference._tile_slides(
+    tiling_pipeline.tile_slides_call(
         [make_slide("slide-a")],
         replace(DEFAULT_PREPROCESSING, read_tiles_from=Path("/tmp/existing-tiles")),
         output_dir=tmp_path,
@@ -1449,9 +1443,9 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
         )
 
     assert not hasattr(inference, "resolve_backend")
-    monkeypatch.setattr(inference, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
     monkeypatch.setattr(
-        inference.runtime_tiling,
+        tiling_pipeline,
         "build_hs2p_configs",
         lambda preprocessing: (
             SimpleNamespace(requested_backend="auto"),
@@ -1464,7 +1458,7 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
     )
 
     with progress.activate_progress_reporter(reporter):
-        inference._tile_slides(
+        tiling_pipeline.tile_slides_call(
             [make_slide("slide-a")],
             replace(DEFAULT_PREPROCESSING, backend="auto", on_the_fly=False),
             output_dir=tmp_path,
@@ -1529,7 +1523,7 @@ def test_num_tiles_accepts_x_y_tiling_result():
 
     tiling_result = SimpleNamespace(x=np.array([0, 2, 4], dtype=np.int64), y=np.array([1, 3, 5], dtype=np.int64))
 
-    assert inference._num_tiles(tiling_result) == 3
+    assert hierarchical.num_tiles(tiling_result) == 3
 
 
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
@@ -1542,12 +1536,12 @@ def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeyp
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide = make_slide("slide-a", spacing_at_level_0=0.25)
 
-    inference._prepare_tiled_slides(
+    tiling_pipeline.prepare_tiled_slides(
         [slide],
         DEFAULT_PREPROCESSING,
         output_dir=tmp_path,
@@ -1576,12 +1570,12 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
         )
     ]
 
-    monkeypatch.setattr(inference, "_tile_slides", lambda *args, **kwargs: tiling_artifacts)
-    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", lambda *args, **kwargs: tiling_artifacts)
+    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide = make_slide("slide-a")
 
-    inference._prepare_tiled_slides(
+    tiling_pipeline.prepare_tiled_slides(
         [slide],
         DEFAULT_PREPROCESSING,
         output_dir=tmp_path,
@@ -1603,13 +1597,9 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        inference,
-        "load_tiling_result_from_row",
-        lambda row: SimpleNamespace(backend="asap"),
-    )
+    monkeypatch.setattr(process_list, "load_tiling_result_from_row", lambda row: SimpleNamespace(backend="asap"))
 
-    inference._record_slide_metadata_in_process_list(
+    process_list.record_slide_metadata_in_process_list(
         process_list_path,
         [make_slide("slide-a")],
         preprocessing=DEFAULT_PREPROCESSING,
@@ -1646,9 +1636,9 @@ def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd)
             return SimpleNamespace()
         raise AssertionError(f"Unexpected import: {name}")
 
-    monkeypatch.setattr(inference.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(tiling_pipeline.importlib, "import_module", fake_import_module)
 
-    inference._preload_asap_wholeslidedata(replace(DEFAULT_PREPROCESSING, backend="asap"))
+    tiling_pipeline.preload_asap_wholeslidedata(replace(DEFAULT_PREPROCESSING, backend="asap"))
 
     captured = capfd.readouterr()
     assert captured.err == ""
@@ -1660,14 +1650,14 @@ def test_configure_cucim_worker_stderr_wraps_existing_worker_init(monkeypatch):
 
     calls: list[tuple[str, int] | str] = []
 
-    monkeypatch.setattr(inference, "_redirect_worker_output", lambda: calls.append("redirected"))
+    monkeypatch.setattr(worker_io, "redirect_worker_output", lambda: calls.append("redirected"))
 
     def _existing(worker_id: int):
         calls.append(("existing", worker_id))
 
     loader_kwargs = {"num_workers": 3, "worker_init_fn": _existing}
 
-    inference._configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
+    worker_io.configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
 
     worker_init = loader_kwargs["worker_init_fn"]
     worker_init(5)
@@ -1679,11 +1669,11 @@ def test_configure_cucim_worker_stderr_skips_non_cucim_or_single_process_loader(
     import slide2vec.inference as inference
 
     loader_kwargs = {"num_workers": 0}
-    inference._configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
+    worker_io.configure_cucim_worker_stderr(loader_kwargs, backend="cucim")
     assert "worker_init_fn" not in loader_kwargs
 
     loader_kwargs = {"num_workers": 4}
-    inference._configure_cucim_worker_stderr(loader_kwargs, backend="asap")
+    worker_io.configure_cucim_worker_stderr(loader_kwargs, backend="asap")
     assert "worker_init_fn" not in loader_kwargs
 
 
@@ -1694,20 +1684,20 @@ def test_should_suppress_cucim_dataloader_stderr_only_for_multi_worker_cucim_col
         num_workers=4,
         collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
     )
-    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is True
+    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is True
 
     dataloader = SimpleNamespace(
         num_workers=0,
         collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
     )
-    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is False
+    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is False
 
 
     dataloader = SimpleNamespace(
         num_workers=4,
         collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="asap")),
     )
-    assert inference._should_suppress_cucim_dataloader_stderr(dataloader) is False
+    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is False
 
 
 def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, tmp_path: Path):
@@ -1720,9 +1710,9 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(inference, "load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
-    slide_records, tiling_results = inference.load_successful_tiled_slides(tmp_path)
+    slide_records, tiling_results = manifest.load_successful_tiled_slides(tmp_path)
 
     assert len(slide_records) == 1
     assert slide_records[0].spacing_at_level_0 == pytest.approx(0.25)
@@ -1745,10 +1735,10 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     def fake_coordination_dir(work_dir: Path):
         yield work_dir / "coord"
 
-    monkeypatch.setattr(inference.runtime_distributed, "distributed_coordination_dir", fake_coordination_dir)
-    monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "distributed_coordination_dir", fake_coordination_dir)
+    monkeypatch.setattr(distributed_stage, "run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference.runtime_distributed,
+        distributed_stage,
         "load_tile_embedding_shards",
         lambda *_args, **_kwargs: [
             {
@@ -1771,9 +1761,9 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
         captured["execution_num_gpus"] = execution.num_gpus
         return np.array([9.0, 8.0], dtype=np.float32), np.array([[1.0, 1.0]], dtype=np.float32)
 
-    monkeypatch.setattr(inference, "_aggregate_tile_embeddings_for_slide", fake_aggregate)
+    monkeypatch.setattr(distributed_stage, "aggregate_tile_embeddings_for_slide", fake_aggregate)
 
-    embedded = inference._embed_single_slide_distributed(
+    embedded = distributed_stage.embed_single_slide_distributed(
         model,
         slide=slide,
         tiling_result=tiling_result,
@@ -1809,10 +1799,10 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
     def fake_coordination_dir(work_dir: Path):
         yield work_dir / "coord"
 
-    monkeypatch.setattr(inference.runtime_distributed, "distributed_coordination_dir", fake_coordination_dir)
-    monkeypatch.setattr(inference, "_run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "distributed_coordination_dir", fake_coordination_dir)
+    monkeypatch.setattr(distributed_stage, "run_distributed_direct_embedding_stage", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference.runtime_distributed,
+        distributed_stage,
         "load_tile_embedding_shards",
         lambda *_args, **_kwargs: [
             {
@@ -1822,7 +1812,7 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
         ],
     )
     monkeypatch.setattr(
-        inference.runtime_distributed,
+        distributed_stage,
         "merge_tile_embedding_shards",
         lambda shard_payloads: shard_payloads[0]["tile_embeddings"],
     )
@@ -1835,9 +1825,9 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
         level="tile",
         _load_backend=fail_if_called,
     )
-    monkeypatch.setattr(inference, "_aggregate_tile_embeddings_for_slide", fail_if_called)
+    monkeypatch.setattr(distributed_stage, "aggregate_tile_embeddings_for_slide", fail_if_called)
 
-    embedded = inference._embed_single_slide_distributed(
+    embedded = distributed_stage.embed_single_slide_distributed(
         model,
         slide=slide,
         tiling_result=tiling_result,
@@ -1870,15 +1860,11 @@ def test_select_embedding_path_uses_local_compute_when_single_gpu(monkeypatch):
         )
     ]
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", lambda *args, **kwargs: expected)
-    monkeypatch.setattr(
-        inference,
-        "_embed_single_slide_distributed",
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", lambda *args, **kwargs: expected)
+    monkeypatch.setattr(distributed_stage, "embed_single_slide_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("single-slide distributed path should not be used")),
     )
-    monkeypatch.setattr(
-        inference,
-        "_embed_multi_slides_distributed",
+    monkeypatch.setattr(distributed_stage, "embed_multi_slides_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("multi-slide distributed path should not be used")),
     )
 
@@ -1909,15 +1895,11 @@ def test_select_embedding_path_uses_single_slide_distributed_when_one_slide(monk
         mask_path=None,
     )
 
-    monkeypatch.setattr(inference, "_embed_single_slide_distributed", lambda *args, **kwargs: expected)
-    monkeypatch.setattr(
-        inference,
-        "_embed_multi_slides_distributed",
+    monkeypatch.setattr(distributed_stage, "embed_single_slide_distributed", lambda *args, **kwargs: expected)
+    monkeypatch.setattr(distributed_stage, "embed_multi_slides_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("multi-slide distributed path should not be used")),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("local path should not be used")),
     )
 
@@ -1945,15 +1927,11 @@ def test_select_embedding_path_uses_multi_slide_distributed_when_multiple_slides
     ]
     expected = ["a", "b"]
 
-    monkeypatch.setattr(inference, "_embed_multi_slides_distributed", lambda *args, **kwargs: expected)
-    monkeypatch.setattr(
-        inference,
-        "_embed_single_slide_distributed",
+    monkeypatch.setattr(distributed_stage, "embed_multi_slides_distributed", lambda *args, **kwargs: expected)
+    monkeypatch.setattr(distributed_stage, "embed_single_slide_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("single-slide distributed path should not be used")),
     )
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("local path should not be used")),
     )
 
@@ -1990,7 +1968,7 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
         y=np.array([2, 3]),
         tile_size_lv0=224,
     )
-    tile_only = inference._make_embedded_slide(
+    tile_only = embedding_persist.make_embedded_slide(
         slide=slide,
         tiling_result=tiling_result,
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
@@ -1999,7 +1977,7 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
     np.testing.assert_array_equal(tile_only.x, np.array([0, 1], dtype=np.int64))
     np.testing.assert_array_equal(tile_only.y, np.array([2, 3], dtype=np.int64))
 
-    slide_level = inference._make_embedded_slide(
+    slide_level = embedding_persist.make_embedded_slide(
         slide=slide,
         tiling_result=tiling_result,
         tile_embeddings=np.zeros((2, 4), dtype=np.float32),
@@ -2010,7 +1988,7 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
     assert slide_level.latents.shape == (3, 8)
 
     with pytest.raises(ValueError, match="Tile embedding count"):
-        inference._make_embedded_slide(
+        embedding_persist.make_embedded_slide(
             slide=slide,
             tiling_result=tiling_result,
             tile_embeddings=np.zeros((1, 4), dtype=np.float32),
@@ -2085,9 +2063,7 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         latents=np.zeros((3, 8), dtype=np.float32),
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
     )
     def fake_compute_embedded_slides(*args, **kwargs):
@@ -2096,8 +2072,8 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
             on_embedded_slide(slide_record, tiling_result, embedded)
         return [embedded]
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     model = SimpleNamespace(
         name="prism",
@@ -2161,9 +2137,7 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: (slides, tiling_results, process_list_path),
     )
 
@@ -2172,10 +2146,8 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
             raise RuntimeError("embedding boom")
         return np.zeros((2, 4), dtype=np.float32)
 
-    monkeypatch.setattr(inference, "_compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
-    monkeypatch.setattr(
-        inference,
-        "_aggregate_tile_embeddings_for_slide",
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
+    monkeypatch.setattr(embedding_pipeline, "aggregate_tile_embeddings_for_slide",
         lambda *args, **kwargs: (np.zeros((8,), dtype=np.float32), None),
     )
 
@@ -2230,9 +2202,7 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
         latents=None,
     )
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
     )
     def fake_compute_embedded_slides(*args, **kwargs):
@@ -2241,8 +2211,8 @@ def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_
             on_embedded_slide(slide_record, tiling_result, embedded)
         return [embedded]
 
-    monkeypatch.setattr(inference, "_compute_embedded_slides", fake_compute_embedded_slides)
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         Model.from_preset("prism"),
@@ -2282,20 +2252,14 @@ def test_direct_embed_slides_uses_tile_sharding_for_single_slide(monkeypatch, tm
     )
     captured = {}
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: ([slide_record], [tiling_result], Path(output_dir) / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_embed_single_slide_distributed",
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "embed_single_slide_distributed",
         lambda *args, **kwargs: captured.update({"single": kwargs}) or embedded,
     )
-    monkeypatch.setattr(
-        inference,
-        "_embed_multi_slides_distributed",
+    monkeypatch.setattr(distributed_stage, "embed_multi_slides_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("multi-slide path should not be used")),
     )
 
@@ -2344,20 +2308,14 @@ def test_direct_embed_slides_uses_balanced_slide_sharding_for_multiple_slides(mo
     ]
     captured = {}
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda slide_records, preprocessing, output_dir, num_workers: (slides, tiling_results, Path(output_dir) / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_validate_multi_gpu_execution", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_embed_multi_slides_distributed",
+    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "embed_multi_slides_distributed",
         lambda *args, **kwargs: captured.update({"multi": kwargs}) or expected,
     )
-    monkeypatch.setattr(
-        inference,
-        "_embed_single_slide_distributed",
+    monkeypatch.setattr(distributed_stage, "embed_single_slide_distributed",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("single-slide path should not be used")),
     )
 
@@ -2499,7 +2457,7 @@ def test_run_forward_pass_handles_empty_dataloader():
         device=torch.device("cpu"),
     )
 
-    indices, result = inference._run_forward_pass(dataloader, loaded, nullcontext())
+    indices, result = batching.run_forward_pass(dataloader, loaded, nullcontext())
 
     assert indices.shape == (0,)
     assert result.shape == (0, 5)
@@ -2524,7 +2482,7 @@ def test_build_batch_preprocessor_falls_back_for_unsupported_transform_stack(cap
     tiling_result = SimpleNamespace(requested_tile_size_px=224)
 
     with caplog.at_level("WARNING", logger="slide2vec.inference"):
-        preprocess = inference._build_batch_preprocessor(
+        preprocess = batching.build_batch_preprocessor(
             loaded,
             tiling_result,
         )
@@ -2573,7 +2531,7 @@ def test_run_forward_pass_applies_itemwise_transforms_when_batch_preprocessing_i
         device=torch.device("cpu"),
     )
 
-    indices, result = inference._run_forward_pass(
+    indices, result = batching.run_forward_pass(
         DummyLoader(),
         loaded,
         nullcontext(),
@@ -2636,7 +2594,7 @@ def test_run_forward_pass_preserves_embedding_order_and_indices_across_batches()
         device=torch.device("cpu"),
     )
 
-    indices, embeddings = inference._run_forward_pass(
+    indices, embeddings = batching.run_forward_pass(
         DummyLoader(),
         loaded,
         nullcontext(),
@@ -2672,7 +2630,7 @@ def test_serialize_execution_preserves_loader_optimization_fields():
         save_latents=True,
     )
 
-    payload = inference._serialize_execution(execution)
+    payload = cpu_budget.serialize_execution(execution)
     restored = deserialize_execution(payload)
 
     assert payload["prefetch_factor"] == 7
@@ -2695,7 +2653,7 @@ def test_serialize_execution_preserves_slide_embedding_and_preprocessing_worker_
         save_latents=True,
     )
 
-    payload = inference._serialize_execution(execution)
+    payload = cpu_budget.serialize_execution(execution)
     restored = deserialize_execution(payload)
 
     assert payload["num_preprocessing_workers"] == 3
@@ -2727,8 +2685,8 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
 
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
     monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
-    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
-    monkeypatch.setattr(inference, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr(cpu_budget, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(cpu_budget, "slurm_cpu_limit", lambda: 24)
     monkeypatch.setattr("slide2vec.utils.utils.cpu_worker_limit", lambda: 24)
     monkeypatch.setattr("slide2vec.utils.utils.slurm_cpu_limit", lambda: 24)
 
@@ -2741,7 +2699,7 @@ def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch
         device=torch.device("cpu"),
     )
 
-    kwargs = inference._embedding_dataloader_kwargs(
+    kwargs = batching.embedding_dataloader_kwargs(
         loaded,
         ExecutionOptions(num_workers_per_gpu=None, num_gpus=1),
     )
@@ -2791,13 +2749,13 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
     monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
     monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
-    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 24)
-    monkeypatch.setattr(inference, "slurm_cpu_limit", lambda: 24)
+    monkeypatch.setattr(cpu_budget, "cpu_worker_limit", lambda: 24)
+    monkeypatch.setattr(cpu_budget, "slurm_cpu_limit", lambda: 24)
     monkeypatch.setattr("slide2vec.utils.utils.cpu_worker_limit", lambda: 24)
     monkeypatch.setattr("slide2vec.utils.utils.slurm_cpu_limit", lambda: 24)
 
@@ -2810,7 +2768,7 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
         device=torch.device("cpu"),
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         make_slide("slide-a"),
@@ -2863,10 +2821,10 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         def encode_tiles(self, image):
             return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
-    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
-    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
+    monkeypatch.setattr(embedding_pipeline, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(embedding_pipeline, "TileIndexDataset", lambda tile_indices: list(tile_indices))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -2894,7 +2852,7 @@ def test_compute_tile_embeddings_for_slide_uses_batched_loader_knobs(monkeypatch
         prefetch_factor=9,
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         slide,
@@ -2944,10 +2902,10 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         def encode_tiles(self, image):
             return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
-    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
-    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
+    monkeypatch.setattr(embedding_pipeline, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(embedding_pipeline, "TileIndexDataset", lambda tile_indices: list(tile_indices))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -2969,7 +2927,7 @@ def test_compute_tile_embeddings_for_slide_prefers_explicit_tile_store_root(monk
         tiles_tar_path=Path("/tmp/current-run.tiles.tar"),
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         slide,
@@ -3029,10 +2987,10 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
-    monkeypatch.setattr(inference.os, "cpu_count", lambda: 96)
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(cpu_budget.os, "cpu_count", lambda: 96)
     monkeypatch.setenv("SLURM_JOB_CPUS_PER_NODE", "32")
     monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
     monkeypatch.delenv("SLURM_CPUS_ON_NODE", raising=False)
@@ -3063,7 +3021,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
     )
 
     with caplog.at_level("INFO"):
-        result = inference._compute_tile_embeddings_for_slide(
+        result = embedding_pipeline.compute_tile_embeddings_for_slide(
             loaded,
             SimpleNamespace(level="tile"),
             slide,
@@ -3084,9 +3042,9 @@ def test_compute_tile_embeddings_for_slide_splits_on_the_fly_workers_across_gpus
 
     script = """
 import slide2vec.inference as inference
-inference.cpu_worker_limit = lambda: 24
-inference.slurm_cpu_limit = lambda: 24
-workers, details = inference._resolve_on_the_fly_num_workers(4, 2)
+cpu_budget.cpu_worker_limit = lambda: 24
+cpu_budget.slurm_cpu_limit = lambda: 24
+workers, details = cpu_budget.resolve_on_the_fly_num_workers(4, 2)
 print(workers)
 print(details)
 """
@@ -3128,9 +3086,9 @@ def test_compute_tile_embeddings_for_slide_rejects_non_positive_cucim_worker_cou
         def encode_tiles(self, image):
             return torch.ones((image.shape[0], 3), dtype=torch.float32, device=image.device)
 
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", lambda **kwargs: SimpleNamespace(__call__=lambda batch_indices: None, ordered_indices=None))
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", lambda **kwargs: SimpleNamespace(__call__=lambda batch_indices: None, ordered_indices=None))
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -3142,7 +3100,7 @@ def test_compute_tile_embeddings_for_slide_rejects_non_positive_cucim_worker_cou
     )
 
     with pytest.raises(ValueError, match="num_cucim_workers must be at least 1"):
-        inference._compute_tile_embeddings_for_slide(
+        embedding_pipeline.compute_tile_embeddings_for_slide(
             loaded,
             SimpleNamespace(level="tile"),
             make_slide("slide-a"),
@@ -3183,24 +3141,18 @@ def test_run_pipeline_logs_on_the_fly_worker_override_once(monkeypatch, tmp_path
         ),
     ]
 
-    monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: (slides, tiling_results, tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(inference, "_emit_tiling_summary", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_write_zero_tile_embedding_sidecars", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        inference,
-        "_compute_embedded_slides",
+    monkeypatch.setattr(process_list, "emit_tiling_summary", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process_list, "write_zero_tile_embedding_sidecars", lambda *args, **kwargs: None)
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides",
         lambda *args, **kwargs: [SimpleNamespace(slide_embedding=None) for _ in slides],
     )
-    monkeypatch.setattr(
-        inference,
-        "_collect_pipeline_artifacts",
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts",
         lambda *args, **kwargs: ([], [], []),
     )
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     model = SimpleNamespace(name="prov-gigapath", level="tile")
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1)
@@ -3256,17 +3208,17 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
-    monkeypatch.setattr(inference, "cpu_worker_limit", lambda: 32)
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(cpu_budget, "cpu_worker_limit", lambda: 32)
 
     def _fake_run_with_filtered_stderr(func, **kwargs):
         del kwargs
         captured["filtered_calls"] = captured.get("filtered_calls", 0) + 1
         return func()
 
-    monkeypatch.setattr(inference, "run_with_filtered_stderr", _fake_run_with_filtered_stderr)
+    monkeypatch.setattr(embedding_pipeline, "run_with_filtered_stderr", _fake_run_with_filtered_stderr)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -3293,7 +3245,7 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
         prefetch_factor=9,
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         slide,
@@ -3348,12 +3300,12 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setattr(inference, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
-    monkeypatch.setattr(inference, "TileIndexDataset", lambda tile_indices: list(tile_indices))
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCucimCollator)
+    monkeypatch.setattr(embedding_pipeline, "BatchTileCollator", lambda **kwargs: ("collator", kwargs))
+    monkeypatch.setattr(embedding_pipeline, "TileIndexDataset", lambda tile_indices: list(tile_indices))
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", DummyCucimCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
-    monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(cpu_budget.os, "cpu_count", lambda: 32)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -3364,7 +3316,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
         device=torch.device("cpu"),
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         make_slide("slide-a"),
@@ -3427,10 +3379,10 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
             batch = torch.zeros((len(batch_indices), 3, 4, 4), dtype=torch.uint8)
             return tile_indices, batch, {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0}
 
-    monkeypatch.setattr(inference, "OnTheFlyBatchTileCollator", DummyCollator)
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyBatchTileCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
-    monkeypatch.setattr(inference, "_build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
-    monkeypatch.setattr(inference.os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(embedding_pipeline, "build_batch_preprocessor", lambda *args, **kwargs: lambda batch: batch.float())
+    monkeypatch.setattr(cpu_budget.os, "cpu_count", lambda: 32)
 
     loaded = inference.LoadedModel(
         name="prov-gigapath",
@@ -3441,7 +3393,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_wsd_backend_when_auto(m
         device=torch.device("cpu"),
     )
 
-    result = inference._compute_tile_embeddings_for_slide(
+    result = embedding_pipeline.compute_tile_embeddings_for_slide(
         loaded,
         SimpleNamespace(level="tile"),
         make_slide("slide-a"),
@@ -3481,12 +3433,12 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
     captured = {}
 
     monkeypatch.setattr(
-        inference.runtime_embedding,
+        embedding,
         "write_tile_embedding_artifact",
         lambda sample_id, features, *, execution, metadata: captured.setdefault("metadata", metadata) or SimpleNamespace(),
     )
 
-    inference._persist_embedded_slide(
+    embedding_persist.persist_embedded_slide(
         SimpleNamespace(name="prov-gigapath", level="tile"),
         embedded,
         SimpleNamespace(
@@ -3516,7 +3468,7 @@ def test_compute_tile_embeddings_for_slide_requires_current_run_tile_store_witho
     )
 
     with pytest.raises(ValueError, match="missing tiles_tar_path"):
-        inference._compute_tile_embeddings_for_slide(
+        embedding_pipeline.compute_tile_embeddings_for_slide(
             loaded,
             SimpleNamespace(level="tile"),
             make_slide("slide-a"),
@@ -3548,7 +3500,7 @@ def test_build_hierarchical_index_is_region_major_and_row_major_within_region():
         requested_tile_size_px=224,
     )
 
-    index = inference._build_hierarchical_index(
+    index = hierarchical.build_hierarchical_index(
         tiling_result,
         region_tile_multiple=3,
     )
@@ -3588,7 +3540,7 @@ def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch(
         base_spacing_um=0.27,
     )
 
-    geometry = inference._resolve_hierarchical_geometry(preprocessing, tiling_result)
+    geometry = hierarchical.resolve_hierarchical_geometry(preprocessing, tiling_result)
 
     assert geometry["read_tile_size_px"] == 415
     assert geometry["read_region_size_px"] == 3320
@@ -3612,7 +3564,7 @@ def test_resolve_hierarchical_geometry_keeps_level0_footprint_when_spacing_match
         base_spacing_um=0.486187607049942,
     )
 
-    geometry = inference._resolve_hierarchical_geometry(preprocessing, tiling_result)
+    geometry = hierarchical.resolve_hierarchical_geometry(preprocessing, tiling_result)
 
     assert geometry["read_tile_size_px"] == 224
     assert geometry["tile_size_lv0"] == 224
@@ -3626,7 +3578,7 @@ def test_build_hierarchical_index_uses_tile_first_level0_offsets_under_spacing_m
         y=np.array([200], dtype=np.int64),
     )
 
-    index = inference._build_hierarchical_index(
+    index = hierarchical.build_hierarchical_index(
         tiling_result,
         region_tile_multiple=8,
         tile_size_lv0=415,
@@ -3737,8 +3689,8 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         def build_batch_sampler(self, *, batch_size, dataset_indices):
             return None
 
-    monkeypatch.setattr(inference, "TileIndexDataset", DummyDataset)
-    monkeypatch.setattr(inference, "OnTheFlyHierarchicalBatchCollator", DummyCollator)
+    monkeypatch.setattr(embedding_pipeline, "TileIndexDataset", DummyDataset)
+    monkeypatch.setattr(embedding_pipeline, "OnTheFlyHierarchicalBatchCollator", DummyCollator)
     monkeypatch.setattr(torch.utils.data, "DataLoader", DummyLoader)
 
     loaded = inference.LoadedModel(
@@ -3764,7 +3716,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         read_level=0,
     )
 
-    result = inference._compute_hierarchical_embeddings_for_slide(
+    result = embedding_pipeline.compute_hierarchical_embeddings_for_slide(
         loaded,
         slide,
         tiling_result,

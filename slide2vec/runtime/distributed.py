@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from hs2p import SlideSpec
 
-import slide2vec.progress as progress
+from slide2vec.progress import emit_progress_event, read_progress_events
 from slide2vec.runtime.hierarchical import num_tiles
 
 
@@ -95,14 +95,14 @@ def run_torchrun_worker(
     offsets: dict[Path, int] = {}
     while process.poll() is None:
         if progress_events_path is not None:
-            events, offsets = progress.read_progress_events(progress_events_path, offsets=offsets)
+            events, offsets = read_progress_events(progress_events_path, offsets=offsets)
             for event in events:
-                progress.emit_progress_event(event)
+                emit_progress_event(event)
         time.sleep(0.1)
     if progress_events_path is not None:
-        events, offsets = progress.read_progress_events(progress_events_path, offsets=offsets)
+        events, offsets = read_progress_events(progress_events_path, offsets=offsets)
         for event in events:
-            progress.emit_progress_event(event)
+            emit_progress_event(event)
     returncode = process.wait()
     stdout_thread.join(timeout=1.0)
     stderr_thread.join(timeout=1.0)
