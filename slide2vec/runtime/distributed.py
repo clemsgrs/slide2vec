@@ -31,8 +31,7 @@ def distributed_coordination_dir(work_dir: Path):
 def reset_progress_event_logs(progress_events_path: Path) -> None:
     progress_events_path.parent.mkdir(parents=True, exist_ok=True)
     for path in [progress_events_path, *progress_events_path.parent.glob(f"{progress_events_path.stem}.rank*{progress_events_path.suffix}")]:
-        if path.exists():
-            path.unlink()
+        path.unlink(missing_ok=True)
 
 
 def drain_stream_to_buffer(stream, chunks: list[str]) -> None:
@@ -40,8 +39,6 @@ def drain_stream_to_buffer(stream, chunks: list[str]) -> None:
         return
     try:
         for line in iter(stream.readline, ""):
-            if line == "":
-                break
             chunks.append(line)
     finally:
         stream.close()

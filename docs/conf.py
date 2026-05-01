@@ -44,7 +44,7 @@ always_use_bars_union = True
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
-    "torch": ("https://pytorch.org/docs/stable", None),
+    "torch": ("https://pytorch.org/docs/2.11", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "pandas": ("https://pandas.pydata.org/docs", None),
 }

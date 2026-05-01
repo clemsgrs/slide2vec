@@ -17,12 +17,9 @@ def main(argv=None) -> int:
     import torch.distributed as dist
 
     import slide2vec.distributed as distributed
+    import slide2vec.inference as inference
     from slide2vec.api import Model
-    from slide2vec.inference import (
-        _build_incremental_persist_callback,
-        _compute_embedded_slides,
-        load_successful_tiled_slides,
-    )
+    from slide2vec.runtime.persist_callbacks import build_incremental_persist_callback
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
     from slide2vec.runtime.serialization import deserialize_execution, deserialize_preprocessing
 
@@ -47,7 +44,10 @@ def main(argv=None) -> int:
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
         tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
-        slide_records, tiling_results = load_successful_tiled_slides(tiling_input_dir)
+        load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
+        if not callable(load_successful_tiled_slides_fn):
+            from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
+        slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
         assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
         assigned_ids = assignments.get(global_rank, [])
         if not assigned_ids:
@@ -70,13 +70,17 @@ def main(argv=None) -> int:
         )
         context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
         with context:
-            persist_callback, _, _ = _build_incremental_persist_callback(
+            build_incremental_persist_callback_fn = getattr(inference, "_build_incremental_persist_callback", build_incremental_persist_callback)
+            persist_callback, _, _ = build_incremental_persist_callback_fn(
                 model=model,
                 preprocessing=preprocessing,
                 execution=execution,
                 process_list_path=None,
             )
-            _compute_embedded_slides(
+            compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
+            if not callable(compute_embedded_slides_fn):
+                from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
+            compute_embedded_slides_fn(
                 model,
                 assigned_slides,
                 assigned_tiling_results,

@@ -185,6 +185,22 @@ Custom registry-backed encoders
 If you want to use a model that is not shipped with ``slide2vec``, wrap it in
 an encoder class and register it under a new preset name.
 
+Where to put the file
+~~~~~~~~~~~~~~~~~~~~~
+
+The registry only sees a preset once the module containing
+``@register_encoder`` is imported. ``slide2vec`` auto-imports everything under
+``slide2vec/encoders/models/``, so the simplest way to expose a custom encoder
+to **both the Python API and the CLI** is:
+
+1. Add your file as ``slide2vec/encoders/models/my_tile_model.py``.
+2. Add it to ``slide2vec/encoders/models/__init__.py`` (both the
+   ``from . import (...)`` block and ``__all__``).
+3. Reinstall in editable mode if needed (``pip install -e .``).
+
+The preset name can then be used in YAML configs (``model.name: my-tile-model``),
+``Model.from_preset(...)``, and ``slide2vec.list_models()``.
+
 Tile encoder example
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -296,3 +312,39 @@ Slide encoder example
            tile_size_lv0: int | None = None,
        ) -> Tensor:
            return self._model(tile_features)
+
+
+Multiple weights for the same architecture
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Encoders are instantiated as ``encoder_cls(output_variant=...)``, so the
+weights are tied to the registered class. To expose several checkpoints of
+the same architecture (e.g. different pretraining stages), put the shared
+logic in a base class and register one thin subclass per checkpoint. This
+keeps "preset name → exact weights" as a stable invariant and avoids any
+runtime configuration of paths.
+
+The built-in ``phikon`` encoder
+(``slide2vec/encoders/models/phikon.py``) follows this pattern:
+
+.. code-block:: python
+
+   class _PhikonBase(TileEncoder):
+       def __init__(self, model_name: str, *, output_variant: str | None = None):
+           self._model = AutoModel.from_pretrained(model_name).eval()
+           ...
+
+   @register_encoder("phikon", ..., source="owkin/phikon")
+   class Phikon(_PhikonBase):
+       def __init__(self, *, output_variant: str | None = None):
+           super().__init__("owkin/phikon", output_variant=output_variant)
+
+   @register_encoder("phikonv2", ..., source="owkin/phikon-v2")
+   class PhikonV2(_PhikonBase):
+       def __init__(self, *, output_variant: str | None = None):
+           super().__init__("owkin/phikon-v2", output_variant=output_variant)
+
+For local checkpoints, swap the HuggingFace identifier for a path (or any
+loader you control) in each subclass. Each preset can then be selected
+through the usual ``model.name`` field in YAML configs or
+``Model.from_preset(...)``.

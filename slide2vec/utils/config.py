@@ -6,23 +6,15 @@ import getpass
 from pathlib import Path
 from omegaconf import OmegaConf
 
-import slide2vec.distributed as distributed
+from slide2vec.distributed import (
+    is_enabled_and_multiple_gpus,
+    is_main_process,
+)
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
 
 logger = logging.getLogger("slide2vec")
-
-
-def validate_removed_options(cfg) -> None:
-    if "level" in cfg.model:
-        raise ValueError("model.level is not a valid slide2vec option.")
-    if "restrict_to_tissue" in cfg.model:
-        raise ValueError("model.restrict_to_tissue is not a valid slide2vec option.")
-    if "visualize" in cfg:
-        raise ValueError("visualize is not a valid slide2vec option.")
-    if "visu_params" in cfg.tiling:
-        raise ValueError("tiling.visu_params is not a valid slide2vec option.")
 
 
 def _encoder_derived_cfg(model_name: str) -> dict:
@@ -89,23 +81,22 @@ def get_cfg_from_args(args):
     if args.output_dir is not None:
         args.output_dir = os.path.abspath(args.output_dir)
         args.opts += [f"output_dir={args.output_dir}"]
-    default_cfg = OmegaConf.create(default_config)
 
-    # Load user config first to derive model name for registry lookup.
     user_cfg = OmegaConf.load(args.config_file)
     cli_cfg = OmegaConf.from_cli(args.opts)
     requested_cfg = OmegaConf.merge(user_cfg, cli_cfg)
-    model_name = (OmegaConf.select(requested_cfg, "model.name") or "")
-    spacing_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um") is not None
-    tile_size_defined = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px") is not None
-    if model_name and (not spacing_defined or not tile_size_defined):
+
+    default_cfg = OmegaConf.create(default_config)
+    model_name = OmegaConf.select(requested_cfg, "model.name")
+    spacing = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um")
+    tile_size = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px")
+    if model_name and (spacing is None or tile_size is None):
         encoder_defaults = _encoder_derived_cfg(model_name)
         if encoder_defaults:
             default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
 
     cfg = OmegaConf.merge(default_cfg, user_cfg, cli_cfg)
     OmegaConf.resolve(cfg)
-    validate_removed_options(cfg)
     validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
     return cfg
 
@@ -135,7 +126,7 @@ def setup(args):
         run_id = wandb_run.id
 
     output_dir = Path(cfg.output_dir, run_id)
-    if distributed.is_main_process():
+    if is_main_process():
         output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
@@ -153,7 +144,7 @@ def hf_login():
 
     token = os.environ.get("HF_TOKEN")
     prompted = False
-    if token is None and distributed.is_main_process():
+    if token is None and is_main_process():
         token = getpass.getpass(
             "Enter your Hugging Face API token (input will not be visible): "
         )
@@ -161,9 +152,9 @@ def hf_login():
         prompted = True
     if token is None:
         return
-    if distributed.is_enabled_and_multiple_gpus():
+    if is_enabled_and_multiple_gpus():
         import torch.distributed as dist
 
         dist.barrier()
-    if distributed.is_main_process() and prompted:
+    if is_main_process() and prompted:
         login(token)

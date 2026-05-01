@@ -433,8 +433,8 @@ def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
         called = True
 
     monkeypatch.setenv("HF_TOKEN", "token-from-env")
-    monkeypatch.setattr(config.distributed, "is_main_process", lambda: True)
-    monkeypatch.setattr(config.distributed, "is_enabled_and_multiple_gpus", lambda: False)
+    monkeypatch.setattr(config, "is_main_process", lambda: True)
+    monkeypatch.setattr(config, "is_enabled_and_multiple_gpus", lambda: False)
     monkeypatch.setattr("huggingface_hub.login", _fake_login)
 
     config.hf_login()
@@ -1007,46 +1007,6 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
     preprocessing = PreprocessingConfig.from_config(cfg)
 
     assert preprocessing.gpu_decode is False
-
-def test_validate_removed_options_rejects_legacy_preview_keys():
-    pytest.importorskip("omegaconf")
-    from omegaconf import OmegaConf
-
-    from slide2vec.utils.config import validate_removed_options
-
-    with pytest.raises(ValueError, match="model.level"):
-        validate_removed_options(
-            OmegaConf.create(
-                {
-                    "model": {"level": "tile"},
-                    "tiling": {"preview": {"save": True, "downsample": 32}},
-                }
-            )
-        )
-
-    with pytest.raises(ValueError, match="visualize"):
-        validate_removed_options(
-            OmegaConf.create(
-                {
-                    "visualize": True,
-                    "model": {},
-                    "tiling": {"preview": {"save": True, "downsample": 32}},
-                }
-            )
-        )
-
-    with pytest.raises(ValueError, match="tiling.visu_params"):
-        validate_removed_options(
-            OmegaConf.create(
-                {
-                    "model": {},
-                    "tiling": {
-                        "visu_params": {"downsample": 32},
-                        "preview": {"save": True, "downsample": 32},
-                    },
-                }
-            )
-        )
 
 def test_artifact_writers_use_explicit_embedding_directories(tmp_path: Path):
     tile_artifact = write_tile_embeddings(

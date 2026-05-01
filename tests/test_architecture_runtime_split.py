@@ -13,7 +13,6 @@ def test_root_package_python_modules_are_curated():
         "artifacts.py",
         "cli.py",
         "inference.py",
-        "main.py",
         "progress.py",
     }
 

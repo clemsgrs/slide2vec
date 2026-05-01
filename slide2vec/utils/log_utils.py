@@ -105,7 +105,7 @@ def _configure_logger(
 
         os.makedirs(os.path.dirname(filename), exist_ok=True)
 
-        handler = logging.StreamHandler(open(filename, "a"))
+        handler = logging.FileHandler(filename, mode="a")
         handler.setLevel(logging.DEBUG)
         handler.setFormatter(formatter)
         logger.addHandler(handler)

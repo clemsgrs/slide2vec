@@ -12,6 +12,17 @@ import pandas as pd
 import pytest
 
 from slide2vec.api import PreprocessingConfig
+from slide2vec.runtime import (
+    artifacts_collect,
+    batching,
+    distributed,
+    distributed_stage,
+    embedding_pipeline,
+    persistence,
+    persist_callbacks,
+    process_list,
+    tiling_pipeline,
+)
 
 DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
@@ -162,9 +173,9 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     monkeypatch.setattr(
         cli,
         "build_model_and_pipeline",
-        lambda args: (FakePipeline(), SimpleNamespace(csv="/tmp/slides.csv")),
+        lambda args: (FakePipeline(), SimpleNamespace(csv="/tmp/slides.csv", output_dir="/tmp/output")),
     )
-    monkeypatch.setattr(progress, "create_cli_progress_reporter", lambda **kwargs: reporter)
+    monkeypatch.setattr(cli, "create_cli_progress_reporter", lambda **kwargs: reporter)
 
     result = cli.main([])
 
@@ -226,23 +237,23 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
     reporter = RecordingReporter()
 
     monkeypatch.setattr(
-        inference,
-        "_prepare_tiled_slides",
+        tiling_pipeline,
+        "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
     )
     monkeypatch.setattr(
-        inference,
-        "_compute_tile_embeddings_for_slide",
+        embedding_pipeline,
+        "compute_tile_embeddings_for_slide",
         lambda *args, **kwargs: np.zeros((2, 4), dtype=np.float32),
     )
     monkeypatch.setattr(
-        inference,
-        "_aggregate_tile_embeddings_for_slide",
+        embedding_pipeline,
+        "aggregate_tile_embeddings_for_slide",
         lambda *args, **kwargs: (np.zeros((8,), dtype=np.float32), None),
     )
     monkeypatch.setattr(
-        inference,
-        "_build_incremental_persist_callback",
+        persist_callbacks,
+        "build_incremental_persist_callback",
         lambda **kwargs: (None, [], []),
     )
     def _emit_tiling_summary(*args, **kwargs):
@@ -255,12 +266,12 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
             discovered_tiles=2,
         )
     monkeypatch.setattr(
-        inference,
-        "_collect_pipeline_artifacts",
+        artifacts_collect,
+        "collect_pipeline_artifacts",
         lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
-    monkeypatch.setattr(inference, "_update_process_list_after_embedding", lambda *args, **kwargs: None)
-    monkeypatch.setattr(inference, "_emit_tiling_summary", _emit_tiling_summary)
+    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(process_list, "emit_tiling_summary", _emit_tiling_summary)
 
     model = SimpleNamespace(
         name="prov-gigapath",
@@ -311,18 +322,18 @@ def test_distributed_embedding_stage_finishes_assignment_before_embedding_starts
             progress_label="cuda:0",
         )
 
-    monkeypatch.setattr(inference.runtime_distributed, "run_torchrun_worker", _fake_run_torchrun_worker)
-    monkeypatch.setattr(inference.runtime_distributed, "reset_progress_event_logs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "run_torchrun_worker", _fake_run_torchrun_worker)
+    monkeypatch.setattr(distributed_stage, "reset_progress_event_logs", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference,
-        "_build_pipeline_worker_request_payload",
+        distributed_stage,
+        "build_pipeline_worker_request_payload",
         lambda *args, **kwargs: {},
     )
 
     model = SimpleNamespace(name="prism", level="slide", _requested_device="cuda:0")
 
     with progress.activate_progress_reporter(reporter):
-        inference._run_distributed_embedding_stage(
+        distributed_stage.run_distributed_embedding_stage(
             model,
             successful_slides=[
                 SimpleNamespace(sample_id="slide-a"),
@@ -405,7 +416,7 @@ def test_run_forward_pass_reports_processed_tile_counts():
     loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
 
     with progress.activate_progress_reporter(reporter):
-        indices, outputs = inference._run_forward_pass(
+        indices, outputs = batching.run_forward_pass(
             dataloader,
             loaded,
             nullcontext(),
@@ -441,7 +452,7 @@ def test_run_forward_pass_emits_batch_timing_events():
     loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
 
     with progress.activate_progress_reporter(reporter):
-        inference._run_forward_pass(
+        batching.run_forward_pass(
             dataloader,
             loaded,
             nullcontext(),
@@ -497,7 +508,7 @@ def test_run_forward_pass_prefers_tile_encoder_when_present():
     )
 
     with progress.activate_progress_reporter(reporter):
-        indices, outputs = inference._run_forward_pass(
+        indices, outputs = batching.run_forward_pass(
             dataloader,
             loaded,
             nullcontext(),
@@ -536,7 +547,7 @@ def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):
 def test_build_direct_embed_worker_request_payload_includes_progress_events_path(tmp_path: Path):
     import slide2vec.inference as inference
 
-    payload = inference._build_direct_embed_worker_request_payload(
+    payload = distributed_stage.build_direct_embed_worker_request_payload(
         model=SimpleNamespace(
             name="virchow2",
             level="tile",
@@ -596,11 +607,11 @@ def test_run_torchrun_worker_streams_progress_events_before_process_exit(monkeyp
             self.returncode = 0
             return 0
 
-    monkeypatch.setattr(inference.runtime_distributed.subprocess, "Popen", FakePopen)
-    monkeypatch.setattr(inference.runtime_distributed.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(distributed.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(distributed.time, "sleep", lambda _seconds: None)
 
     with progress.activate_progress_reporter(reporter):
-        inference.runtime_distributed.run_torchrun_worker(
+        distributed.run_torchrun_worker(
             module="slide2vec.distributed.direct_embed_worker",
             num_gpus=2,
             output_dir=tmp_path,
@@ -636,9 +647,9 @@ def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: P
         def wait(self, timeout=None):
             return 0
 
-    monkeypatch.setattr(inference.runtime_distributed.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(distributed.time, "sleep", lambda _seconds: None)
 
-    inference.runtime_distributed.run_torchrun_worker(
+    distributed.run_torchrun_worker(
         module="slide2vec.distributed.direct_embed_worker",
         num_gpus=2,
         output_dir=output_dir,
@@ -651,6 +662,19 @@ def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: P
     assert "--standalone" in command
     assert "--master_port" not in " ".join(command)
     assert "--rdzv-endpoint" not in " ".join(command)
+
+
+def test_reset_progress_event_logs_is_idempotent(tmp_path: Path):
+    import slide2vec.runtime.distributed as distributed
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text("stale\n", encoding="utf-8")
+
+    distributed.reset_progress_event_logs(progress_path)
+    distributed.reset_progress_event_logs(progress_path)
+
+    assert not progress_path.exists()
 
 
 def test_rich_reporter_collapses_multi_gpu_model_loading_into_one_task(monkeypatch):
@@ -885,6 +909,68 @@ def test_jsonl_progress_reporter_tags_worker_events_with_gpu_label(tmp_path: Pat
 
     assert [event.kind for event in events] == ["embedding.slide.started"]
     assert events[0].payload["progress_label"] == "cuda:1"
+
+
+def test_read_progress_events_ignores_trailing_partial_jsonl_line(tmp_path: Path):
+    import slide2vec.progress as progress
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+        '{"kind":"embedding.slide.started","payload":{"sample_id":"slide-b","total_tiles":8}',
+        encoding="utf-8",
+    )
+
+    events, offsets = progress.read_progress_events(progress_path)
+
+    assert [event.kind for event in events] == ["embedding.started"]
+    assert offsets[progress_path] == len(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+    )
+
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n'
+        '{"kind":"embedding.slide.started","payload":{"sample_id":"slide-b","total_tiles":8},"timestamp":2}\n',
+        encoding="utf-8",
+    )
+
+    events, offsets = progress.read_progress_events(progress_path, offsets=offsets)
+
+    assert [event.kind for event in events] == ["embedding.slide.started"]
+    assert events[0].payload["sample_id"] == "slide-b"
+    assert offsets[progress_path] == progress_path.stat().st_size
+
+
+def test_read_progress_events_ignores_file_disappearing_between_exists_and_open(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import slide2vec.progress as progress
+
+    progress_path = tmp_path / "logs" / "worker.progress.jsonl"
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path.write_text(
+        '{"kind":"embedding.started","payload":{"slide_count":2},"timestamp":1}\n',
+        encoding="utf-8",
+    )
+
+    original_open = progress.Path.open
+    calls = {"count": 0}
+
+    def _open(self, *args, **kwargs):
+        if self == progress_path and calls["count"] == 0:
+            calls["count"] += 1
+            raise FileNotFoundError
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(progress.Path, "open", _open, raising=False)
+
+    events, offsets = progress.read_progress_events(progress_path)
+
+    assert events == []
+    assert offsets == {}
+    assert calls["count"] == 1
 
 
 def test_rich_reporter_tracks_multi_gpu_embedding_rows_separately(monkeypatch):
