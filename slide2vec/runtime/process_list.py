@@ -19,7 +19,7 @@ from slide2vec.runtime.hierarchical import (
 )
 from slide2vec.runtime.embedding import build_hierarchical_embedding_metadata, build_tile_embedding_metadata
 from slide2vec.runtime.tiling import resolve_slide_backend
-from slide2vec.utils.tiling_io import load_tiling_result_from_row
+from slide2vec.utils.tiling_io import atomic_write_dataframe_csv, load_tiling_result_from_row
 
 
 def num_rows(data) -> int:
@@ -197,4 +197,4 @@ def record_slide_metadata_in_process_list(
         process_df["tiling_preview_path"].notna(),
         mapped_tiling_preview_paths,
     )
-    process_df.to_csv(process_list_path, index=False)
+    atomic_write_dataframe_csv(process_df, process_list_path)
