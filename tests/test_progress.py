@@ -322,11 +322,11 @@ def test_distributed_embedding_stage_finishes_assignment_before_embedding_starts
             progress_label="cuda:0",
         )
 
-    monkeypatch.setattr(distributed, "run_torchrun_worker", _fake_run_torchrun_worker)
-    monkeypatch.setattr(distributed, "reset_progress_event_logs", lambda *args, **kwargs: None)
+    monkeypatch.setattr(distributed_stage, "run_torchrun_worker", _fake_run_torchrun_worker)
+    monkeypatch.setattr(distributed_stage, "reset_progress_event_logs", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        inference,
-        "_build_pipeline_worker_request_payload",
+        distributed_stage,
+        "build_pipeline_worker_request_payload",
         lambda *args, **kwargs: {},
     )
 

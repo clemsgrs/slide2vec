@@ -104,14 +104,14 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
     )
-    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage",
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage",
         lambda *args, **kwargs: captured.update({"args": args, "kwargs": kwargs}),
     )
     monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
     monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts",
         lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
     )
-    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(artifacts_collect, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     result = inference.run_pipeline(
         model,
@@ -188,7 +188,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
 
     monkeypatch.setattr(
-        inference,
+        manifest,
         "load_successful_tiled_slides",
         lambda path: ([slide], [tiling_result]),
     )
@@ -288,9 +288,9 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "slide_artifacts": slide_artifacts,
         }
 
-    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage", fake_run_stage)
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)
     monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts", fake_collect)
-    monkeypatch.setattr(persistence, "update_process_list_after_embedding", fake_update)
+    monkeypatch.setattr(artifacts_collect, "update_process_list_after_embedding", fake_update)
 
     tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
         model=model,
@@ -352,8 +352,8 @@ def test_collect_distributed_pipeline_artifacts_uses_hierarchical_artifacts_for_
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
     model = SimpleNamespace(name="virchow2", level="tile")
 
-    monkeypatch.setattr(distributed_stage, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
-    monkeypatch.setattr(persistence, "update_process_list_after_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(artifacts_collect, "update_process_list_after_embedding", lambda *args, **kwargs: None)
 
     tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
         model=model,
@@ -569,8 +569,8 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         return torch.ones(4, dtype=torch.float32)
 
     monkeypatch.setattr(slide_encode.torch, "autocast", fake_autocast)
-    monkeypatch.setattr(embedding_pipeline, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
-    monkeypatch.setattr(embedding_pipeline, "uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(slide_encode, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(slide_encode, "uses_cuda_runtime", lambda device: True)
     monkeypatch.setattr(
         tiling,
         "load_tiling_result_from_paths",
@@ -649,8 +649,8 @@ def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path
         return torch.ones(4, dtype=torch.float32)
 
     monkeypatch.setattr(slide_encode.torch, "autocast", fake_autocast)
-    monkeypatch.setattr(embedding_pipeline, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
-    monkeypatch.setattr(embedding_pipeline, "uses_cuda_runtime", lambda device: True)
+    monkeypatch.setattr(slide_encode, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
+    monkeypatch.setattr(slide_encode, "uses_cuda_runtime", lambda device: True)
 
     loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
     model = SimpleNamespace(level="slide", name="prism")
@@ -1020,7 +1020,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
         lambda payload: ExecutionOptions(output_dir=tmp_path),
     )
     monkeypatch.setattr(
-        inference,
+        manifest,
         "load_successful_tiled_slides",
         lambda tiling_input_dir: ([slide], [tiling_result]),
     )
@@ -1098,7 +1098,7 @@ def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypa
     import slide2vec.inference as inference
 
     monkeypatch.setattr(
-        inference,
+        manifest,
         "load_successful_tiled_slides",
         lambda output_dir: ([slide], [tiling_result]),
     )
@@ -1710,7 +1710,7 @@ def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, 
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", lambda row: SimpleNamespace())
+    monkeypatch.setattr(manifest, "load_tiling_result_from_row", lambda row: SimpleNamespace())
 
     slide_records, tiling_results = manifest.load_successful_tiled_slides(tmp_path)
 
@@ -3042,6 +3042,7 @@ def test_compute_tile_embeddings_for_slide_splits_on_the_fly_workers_across_gpus
 
     script = """
 import slide2vec.inference as inference
+from slide2vec.runtime import cpu_budget
 cpu_budget.cpu_worker_limit = lambda: 24
 cpu_budget.slurm_cpu_limit = lambda: 24
 workers, details = cpu_budget.resolve_on_the_fly_num_workers(4, 2)
@@ -3433,7 +3434,7 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
     captured = {}
 
     monkeypatch.setattr(
-        embedding,
+        embedding_persist,
         "write_tile_embedding_artifact",
         lambda sample_id, features, *, execution, metadata: captured.setdefault("metadata", metadata) or SimpleNamespace(),
     )

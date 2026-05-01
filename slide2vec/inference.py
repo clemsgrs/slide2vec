@@ -157,7 +157,7 @@ def embed_slides(
     if execution.output_dir is not None:
         out = Path(execution.output_dir)
         out.mkdir(parents=True, exist_ok=True)
-        write_embedding_request(model, preprocessing, execution, out)
+        distributed_stage.write_embedding_request(model, preprocessing, execution, out)
     with tiling_pipeline.embedding_work_dir(execution.output_dir) as work_dir:
         try:
             emit_progress("tiling.started", slide_count=len(slide_records))
@@ -573,7 +573,7 @@ def aggregate_tiles(
         tile_features = tile_features.to(loaded.device)
         with slide_encode.slide_encode_autocast_ctx(loaded.device, execution.precision):
             with torch.inference_mode():
-                embedding = loaded.model.encode_slide(
+                slide_embedding = loaded.model.encode_slide(
                     tile_features,
                     coordinate_tensor,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
@@ -581,7 +581,7 @@ def aggregate_tiles(
         latents = None
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,
-            embedding,
+            slide_embedding,
             execution=execution,
             metadata=embedding.build_slide_embedding_metadata(model, image_path=metadata["image_path"]),
             latents=latents,
