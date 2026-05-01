@@ -12,6 +12,7 @@ from slide2vec.artifacts import (
     TileEmbeddingArtifact,
     load_metadata,
 )
+from slide2vec.utils.tiling_io import atomic_write_dataframe_csv
 
 
 def collect_pipeline_artifacts(
@@ -162,4 +163,4 @@ def update_process_list_after_embedding(
             df.loc[mask, "aggregation_status"] = (
                 "success" if slide.sample_id in slide_success_ids else "error"
             )
-    df.to_csv(process_list_path, index=False)
+    atomic_write_dataframe_csv(df, process_list_path)

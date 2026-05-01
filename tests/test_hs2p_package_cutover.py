@@ -221,3 +221,45 @@ def test_model_from_preset_uses_public_factory(monkeypatch):
     assert model.level == "tile"
     assert model.feature_dim == 1280
     assert captured["name"] == "virchow2"
+
+
+def test_atomic_write_dataframe_csv_writes_expected_content(tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    target = tmp_path / "process_list.csv"
+    df = pd.DataFrame([{"sample_id": "slide-1", "tiling_status": "success"}])
+    helper.atomic_write_dataframe_csv(df, target)
+
+    assert target.is_file()
+    assert pd.read_csv(target).to_dict("records") == [
+        {"sample_id": "slide-1", "tiling_status": "success"}
+    ]
+
+
+def test_atomic_write_dataframe_csv_preserves_existing_file_on_crash(monkeypatch, tmp_path: Path):
+    """A crash mid-write must leave the existing process_list.csv untouched
+    (and not leave a stray temp file behind), so resume can still trust it."""
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    target = tmp_path / "process_list.csv"
+    target.write_text("sample_id,tiling_status\nslide-1,success\n", encoding="utf-8")
+    original_bytes = target.read_bytes()
+
+    real_replace = Path.replace
+
+    def _crashing_replace(self, *args, **kwargs):
+        if Path(self).parent == tmp_path:
+            raise RuntimeError("simulated crash during rename")
+        return real_replace(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", _crashing_replace)
+
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        helper.atomic_write_dataframe_csv(
+            pd.DataFrame([{"sample_id": "slide-2", "tiling_status": "success"}]),
+            target,
+        )
+
+    assert target.read_bytes() == original_bytes
+    leftover = [p for p in tmp_path.iterdir() if p != target]
+    assert leftover == []
