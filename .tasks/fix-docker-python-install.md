@@ -1,4 +1,0 @@
-- [x] Update `Dockerfile.ci` and `Dockerfile` to use Ubuntu 22.04 stock Python 3.10.
-- [x] Remove Deadsnakes keyring/source setup from both Dockerfiles.
-- [x] Update multi-stage Python package copy paths from Python 3.11 to Python 3.10.
-- [x] Run Dockerfile/build syntax checks that are feasible in the local environment.
