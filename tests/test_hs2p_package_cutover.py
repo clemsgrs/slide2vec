@@ -263,3 +263,30 @@ def test_atomic_write_dataframe_csv_preserves_existing_file_on_crash(monkeypatch
     assert target.read_bytes() == original_bytes
     leftover = [p for p in tmp_path.iterdir() if p != target]
     assert leftover == []
+
+
+def test_atomic_write_dataframe_csv_falls_back_on_permission_error(monkeypatch, tmp_path: Path):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    target = tmp_path / "process_list.csv"
+    target.write_text("sample_id,tiling_status\nslide-1,success\n", encoding="utf-8")
+
+    real_replace = Path.replace
+
+    def _permission_error_replace(self, *args, **kwargs):
+        if Path(self).parent == tmp_path:
+            raise PermissionError(13, "permission denied")
+        return real_replace(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", _permission_error_replace)
+
+    helper.atomic_write_dataframe_csv(
+        pd.DataFrame([{"sample_id": "slide-2", "tiling_status": "error"}]),
+        target,
+    )
+
+    assert pd.read_csv(target).to_dict("records") == [
+        {"sample_id": "slide-2", "tiling_status": "error"}
+    ]
+    leftover = [p for p in tmp_path.iterdir() if p != target]
+    assert leftover == []

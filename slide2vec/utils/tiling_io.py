@@ -12,7 +12,9 @@ def atomic_write_dataframe_csv(df: pd.DataFrame, path: Path) -> None:
 
     A crash mid-write must never leave a half-written process_list.csv, since
     that breaks resume. We write to a sibling temp file and ``replace()`` it
-    onto the target.
+    onto the target. Some network filesystems, notably CIFS shares, reject the
+    atomic replace step even when normal writes still work, so we fall back to a
+    direct overwrite in that case.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -26,8 +28,13 @@ def atomic_write_dataframe_csv(df: pd.DataFrame, path: Path) -> None:
         ) as handle:
             temp_path = Path(handle.name)
             df.to_csv(handle, index=False)
-        temp_path.replace(path)
-        temp_path = None
+        try:
+            temp_path.replace(path)
+        except PermissionError:
+            df.to_csv(path, index=False)
+            temp_path.unlink(missing_ok=True)
+        else:
+            temp_path = None
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
