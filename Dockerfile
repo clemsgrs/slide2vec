@@ -36,22 +36,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    software-properties-common \
+    python3 \
+    python3-dev \
+    python3-venv \
+    python3-distutils \
+    python3-pip \
     && mkdir /var/run/sshd \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.11 \
-        python3.11-dev \
-        python3.11-venv \
-        python3.11-distutils \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # libjpeg-turbo 3.x (required by PyTurboJPEG>=2)
@@ -69,8 +63,7 @@ WORKDIR /opt/app/
 ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
 ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git git+https://github.com/facebookresearch/sam2.git"
 
-RUN python -m ensurepip --upgrade \
-    && python -m pip install --upgrade pip setuptools pip-tools \
+RUN python -m pip install --upgrade pip setuptools pip-tools \
     && python -m pip install hatchling psutil \
     && rm -rf /home/user/.cache/pip
 
@@ -134,22 +127,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    software-properties-common \
+    python3 \
+    python3-venv \
+    python3-distutils \
+    python3-pip \
     && mkdir /var/run/sshd \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python3 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.11 \
-        python3.11-dev \
-        python3.11-venv \
-        python3.11-distutils \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
 
 # libjpeg-turbo 3.x (copied from build stage)
@@ -166,11 +152,11 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     rm -rf /var/lib/apt/lists/*
 
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
-COPY --from=build /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
+COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
-RUN echo "/usr/local/lib/python3.11/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
     ldconfig
 
 # copy app code
