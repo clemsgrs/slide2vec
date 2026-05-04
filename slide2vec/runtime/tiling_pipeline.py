@@ -16,7 +16,10 @@ from hs2p.utils.stderr import run_with_filtered_stderr
 from slide2vec.api import PreprocessingConfig, _resolve_hierarchical_preprocessing
 from slide2vec.encoders.registry import resolve_preprocessing_defaults
 from slide2vec.progress import emit_progress, read_tiling_progress_snapshot
-from slide2vec.runtime.process_list import record_slide_metadata_in_process_list
+from slide2vec.runtime.process_list import (
+    record_slide_metadata_in_process_list,
+    restore_resume_metadata_after_tiling,
+)
 from slide2vec.runtime.progress_bridge import bridge_hs2p_progress_to_slide2vec
 from slide2vec.runtime.tiling import build_hs2p_configs, resolve_tiling_backend
 from slide2vec.utils.log_utils import suppress_c_stderr
@@ -109,6 +112,11 @@ def prepare_tiled_slides(
     num_workers: int,
 ) -> tuple[list[SlideSpec], list[Any], Path]:
     process_list_path = output_dir / "process_list.csv"
+    previous_process_df = (
+        pd.read_csv(process_list_path)
+        if preprocessing.resume and process_list_path.is_file()
+        else None
+    )
     tiling_artifacts = tile_slides_with_progress(
         slide_records,
         preprocessing,
@@ -122,6 +130,7 @@ def prepare_tiled_slides(
         preprocessing=preprocessing,
         tiling_artifacts=tiling_artifacts,
     )
+    restore_resume_metadata_after_tiling(process_list_path, previous_process_df)
     process_df = load_tiling_process_df(process_list_path)
     tiling_results = []
     successful_slides = []

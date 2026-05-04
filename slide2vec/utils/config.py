@@ -113,7 +113,7 @@ def setup(args):
     cfg = get_cfg_from_args(args)
 
     if cfg.resume:
-        run_id = cfg.resume_dirname
+        run_id = cfg.resume_dirname or ""
     elif not args.skip_datetime:
         run_id = datetime.datetime.now().strftime("%Y-%m-%d_%H_%M")
     else:

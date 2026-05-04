@@ -103,6 +103,46 @@ def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_pa
         get_cfg_from_args(args)
 
 
+def test_setup_resumes_from_base_output_dir_when_resume_dirname_is_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import setup
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                f"output_dir: {tmp_path / 'output'}",
+                "resume: true",
+                "resume_dirname:",
+            ]
+        )
+    )
+
+    args = SimpleNamespace(
+        config_file=str(config_path),
+        output_dir=None,
+        opts=["resume=true", "resume_dirname="],
+        skip_datetime=True,
+        run_on_cpu=False,
+    )
+
+    monkeypatch.setattr("slide2vec.utils.config.is_main_process", lambda: True)
+    monkeypatch.setattr("slide2vec.utils.config.fix_random_seeds", lambda seed: None)
+    monkeypatch.setattr("slide2vec.utils.config.setup_logging", lambda **kwargs: None)
+    monkeypatch.setattr("slide2vec.utils.config.get_sha", lambda: "deadbeef")
+
+    cfg, cfg_path = setup(args)
+
+    assert cfg.output_dir == str(tmp_path / "output")
+    assert cfg_path == str(tmp_path / "output" / "config.yaml")
+    assert (tmp_path / "output").is_dir()
+
+
 def test_list_models_is_public_and_returns_all_registered_models():
     from slide2vec import list_models
 

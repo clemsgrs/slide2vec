@@ -241,7 +241,16 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
 
     captured = {}
 
-    def fake_run_stage(*, model, successful_slides, preprocessing, execution, output_dir, tiling_input_dir=None):
+    def fake_run_stage(
+        *,
+        model,
+        successful_slides,
+        preprocessing,
+        execution,
+        output_dir,
+        tiling_input_dir=None,
+        on_progress_event=None,
+    ):
         captured["run_stage"] = {
             "model": model,
             "successful_slides": successful_slides,
@@ -249,6 +258,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "execution": execution,
             "output_dir": output_dir,
             "tiling_input_dir": tiling_input_dir,
+            "on_progress_event": on_progress_event,
         }
 
     def fake_collect(slides, *, output_dir, output_format, include_tile_embeddings, include_hierarchical_embeddings, include_slide_embeddings):
@@ -367,6 +377,60 @@ def test_collect_distributed_pipeline_artifacts_uses_hierarchical_artifacts_for_
     assert tile_artifacts == []
     assert [artifact.sample_id for artifact in hierarchical_artifacts] == ["slide-a"]
     assert slide_artifacts == []
+
+
+def test_collect_distributed_pipeline_artifacts_resume_skips_completed_hierarchical_slides(
+    monkeypatch,
+    tmp_path: Path,
+):
+    completed_slide = make_slide("slide-done")
+    pending_slide = make_slide("slide-pending")
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,feature_path,encoder_name,output_variant,feature_kind,error,traceback\n"
+        f"slide-done,tissue,/tmp/slide-done.svs,,auto,asap,,success,1,/tmp/slide-done.coordinates.npz,/tmp/slide-done.coordinates.meta.json,success,{tmp_path / 'hierarchical_embeddings' / 'slide-done.pt'},virchow2,default,hierarchical,,\n"
+        "slide-pending,tissue,/tmp/slide-pending.svs,,auto,asap,,success,1,/tmp/slide-pending.coordinates.npz,/tmp/slide-pending.coordinates.meta.json,tbp,,,,,\n",
+        encoding="utf-8",
+    )
+    write_hierarchical_embeddings(
+        "slide-done",
+        np.zeros((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/slide-done.svs"},
+    )
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        requested_region_size_px=448,
+        region_tile_multiple=2,
+        resume=True,
+    )
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="virchow2", level="tile")
+    captured = {}
+
+    def fake_run_stage(**kwargs):
+        captured["run_stage_slides"] = list(kwargs["successful_slides"])
+
+    def fake_collect(slides, **kwargs):
+        captured["collect_slides"] = list(slides)
+        return [], ["hierarchical-artifacts"], []
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)
+    monkeypatch.setattr(artifacts_collect, "collect_pipeline_artifacts", fake_collect)
+    monkeypatch.setattr(artifacts_collect, "update_process_list_after_embedding", lambda *args, **kwargs: None)
+
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[completed_slide, pending_slide],
+        process_list_path=process_list_path,
+        preprocessing=preprocessing,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    assert [slide.sample_id for slide in captured["run_stage_slides"]] == ["slide-pending"]
+    assert [slide.sample_id for slide in captured["collect_slides"]] == ["slide-done", "slide-pending"]
 
 
 def test_has_complete_local_embedding_outputs_uses_hierarchical_artifacts_for_hierarchical_preprocessing(
@@ -543,6 +607,51 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     recorded = pd.read_csv(process_list_path).set_index("sample_id")
     assert recorded.loc["slide-a", "feature_status"] == "success"
     assert recorded.loc["slide-a", "feature_path"] == str((tmp_path / "relative-output" / "slide_embeddings" / "slide-a.pt").resolve())
+
+
+def test_distributed_collection_updates_process_list_when_worker_slide_finishes(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+    slide = make_slide("slide-a")
+    artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/slide-a.svs"},
+    )
+    captured = {}
+
+    def fake_run_distributed_embedding_stage(*args, **kwargs):
+        callback = kwargs.get("on_progress_event")
+        captured["callback"] = callback
+        assert callback is not None
+        callback(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_distributed_embedding_stage)
+
+    model = SimpleNamespace(name="prost40m", level="tile", _output_variant=None)
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=process_list_path,
+        preprocessing=PreprocessingConfig(region_tile_multiple=2),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+        output_dir=tmp_path,
+    )
+
+    recorded = pd.read_csv(process_list_path).set_index("sample_id")
+    assert captured["callback"] is not None
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "feature_path"] == str(artifact.path.resolve())
+    assert recorded.loc["slide-a", "feature_kind"] == "hierarchical"
 
 
 def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path: Path):
@@ -997,6 +1106,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
                 "preprocessing": {},
                 "execution": {},
                 "tiling_input_dir": str(tmp_path),
+                "sample_ids": ["slide-a"],
             }
         ),
         encoding="utf-8",
@@ -1041,6 +1151,69 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
 
     assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
     assert captured["collect_results"] is False
+
+
+def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: Path):
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import pipeline_worker
+
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {
+                    "name": "virchow2",
+                    "allow_non_recommended_settings": False,
+                },
+                "preprocessing": {},
+                "execution": {},
+                "tiling_input_dir": str(tmp_path),
+                "sample_ids": ["slide-b"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide_a = make_slide("slide-a")
+    slide_b = make_slide("slide-b")
+    tiling_a = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    tiling_b = SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(
+        serialization,
+        "deserialize_execution",
+        lambda payload: ExecutionOptions(output_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        manifest,
+        "load_successful_tiled_slides",
+        lambda tiling_input_dir: ([slide_a, slide_b], [tiling_a, tiling_b]),
+    )
+    monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
+        lambda **kwargs: (lambda *args, **kwargs: None, [], []),
+    )
+
+    def fake_compute_embedded_slides(_model, slides, _tiling_results, **kwargs):
+        captured["computed_sample_ids"] = [slide.sample_id for slide in slides]
+        return []
+
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
+
+    assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    assert captured["computed_sample_ids"] == ["slide-b"]
 
 
 def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypatch, tmp_path: Path):
@@ -1212,6 +1385,38 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     assert computed_sample_ids == ["slide-b"]
     assert [artifact.sample_id for artifact in result.tile_artifacts] == ["slide-a", "slide-b"]
     assert result.slide_artifacts == []
+
+
+def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: Path):
+    slide = make_slide("slide-a")
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n",
+        encoding="utf-8",
+    )
+    artifact_path = tmp_path / "tile_embeddings" / "slide-a.npz"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(artifact_path, features=np.array([[1.0, 2.0]], dtype=np.float32))
+
+    pending_slides, pending_tiling_results = persist_callbacks.pending_local_embedding_records(
+        [slide],
+        [SimpleNamespace(x=np.array([0]), y=np.array([0]), tile_size_lv0=224)],
+        process_list_path=process_list_path,
+        output_dir=tmp_path,
+        output_format="npz",
+        persist_tile_embeddings=True,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=False,
+        save_latents=False,
+        resume=True,
+    )
+    tile_artifact = persistence.load_tile_artifact("slide-a", output_dir=tmp_path, output_format="npz")
+
+    assert pending_slides == []
+    assert pending_tiling_results == []
+    assert tile_artifact.feature_dim == 2
+    assert tile_artifact.num_tiles == 1
 
 
 def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_failure(monkeypatch, tmp_path: Path):
@@ -1585,6 +1790,69 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
     recorded = pd.read_csv(process_list_path)
     assert Path(recorded.loc[0, "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png").resolve()
     assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png").resolve()
+
+
+def test_prepare_tiled_slides_resume_preserves_embedding_and_existing_preview_metadata(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_list_path = tmp_path / "process_list.csv"
+    coordinates_npz_path = tmp_path / "tiles" / "slide-a.coordinates.npz"
+    coordinates_meta_path = tmp_path / "tiles" / "slide-a.coordinates.meta.json"
+    mask_preview_path = tmp_path / "preview" / "mask" / "slide-a.jpg"
+    tiling_preview_path = tmp_path / "preview" / "tiling" / "slide-a.jpg"
+    feature_path = tmp_path / "tile_embeddings" / "slide-a.npz"
+    for path in [
+        coordinates_npz_path,
+        coordinates_meta_path,
+        mask_preview_path,
+        tiling_preview_path,
+        feature_path,
+    ]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("artifact", encoding="utf-8")
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,tiles_tar_path,mask_preview_path,tiling_preview_path,feature_status,feature_path,encoder_name,output_variant,feature_kind,error,traceback\n"
+        f"slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,{coordinates_npz_path},{coordinates_meta_path},,{mask_preview_path},{tiling_preview_path},success,{feature_path},virchow2,default,tile,,\n",
+        encoding="utf-8",
+    )
+
+    def fake_tile_slides(*args, **kwargs):
+        process_list_path.write_text(
+            "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,tiles_tar_path,error,traceback\n"
+            f"slide-a,tissue,/tmp/slide-a.svs,,asap,asap,success,1,{coordinates_npz_path},{coordinates_meta_path},,,\n",
+            encoding="utf-8",
+        )
+        return [
+            SimpleNamespace(
+                sample_id="slide-a",
+                mask_preview_path=None,
+                tiling_preview_path=None,
+            )
+        ]
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "load_tiling_result_from_row",
+        lambda row: SimpleNamespace(x=np.array([0]), y=np.array([0]), tile_size_lv0=224),
+    )
+
+    tiling_pipeline.prepare_tiled_slides(
+        [make_slide("slide-a")],
+        replace(DEFAULT_PREPROCESSING, resume=True),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    recorded = pd.read_csv(process_list_path)
+    assert recorded.loc[0, "feature_status"] == "success"
+    assert Path(recorded.loc[0, "feature_path"]) == feature_path
+    assert recorded.loc[0, "encoder_name"] == "virchow2"
+    assert recorded.loc[0, "output_variant"] == "default"
+    assert recorded.loc[0, "feature_kind"] == "tile"
+    assert Path(recorded.loc[0, "mask_preview_path"]) == mask_preview_path
+    assert Path(recorded.loc[0, "tiling_preview_path"]) == tiling_preview_path
 
 
 def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch, tmp_path: Path):

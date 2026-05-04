@@ -744,6 +744,14 @@ def run_pipeline(
             save_latents=execution.save_latents,
             resume=resolved_preprocessing.resume,
         )
+        skipped_slide_count = len(embeddable_slides) - len(pending_slides)
+        if resolved_preprocessing.resume and skipped_slide_count > 0:
+            emit_progress(
+                "embedding.resume",
+                total_slide_count=len(embeddable_slides),
+                pending_slide_count=len(pending_slides),
+                skipped_slide_count=skipped_slide_count,
+            )
         local_persist_callback, _, _ = persist_callbacks.build_incremental_persist_callback(
             model=model,
             preprocessing=resolved_preprocessing,
@@ -785,6 +793,7 @@ def run_pipeline(
             "embedding.finished",
             slide_count=len(embeddable_slides),
             slides_completed=len(embeddable_slides),
+            slides_skipped=skipped_slide_count,
             tile_artifacts=len(tile_artifacts) + len(hierarchical_artifacts),
             slide_artifacts=len(slide_artifacts),
         )

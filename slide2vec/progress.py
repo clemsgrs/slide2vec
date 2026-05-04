@@ -153,6 +153,11 @@ class PlainTextCliProgressReporter:
             return f"Model {payload['model_name']} ready on {payload['device']}"
         if kind == "embedding.started":
             return f"Embedding slides ({payload['slide_count']} total)..."
+        if kind == "embedding.resume":
+            return (
+                f"Resume: skipped {payload['skipped_slide_count']} already processed slide(s); "
+                f"{payload['pending_slide_count']} pending"
+            )
         if kind == "embedding.assignment.started":
             return f"Assigning slides across {payload['num_gpus']} GPU(s)..."
         if kind == "embedding.assignment.finished":
@@ -172,9 +177,15 @@ class PlainTextCliProgressReporter:
         if kind == "embedding.slide.finished":
             return f"Completed {_progress_subject(payload)} ({payload['num_tiles']} tiles)"
         if kind == "embedding.finished":
+            skipped_text = (
+                f", {payload['slides_skipped']} skipped"
+                if "slides_skipped" in payload
+                else ""
+            )
             return (
                 f"Embedding finished: {payload['slides_completed']}/{payload['slide_count']} slides, "
                 f"{payload['tile_artifacts']} tile artifacts, {payload['slide_artifacts']} slide artifacts"
+                f"{skipped_text}"
             )
         if kind == "backend.selected":
             return _format_backend_selected_message(payload)
@@ -366,6 +377,23 @@ class RichCliProgressReporter:
         if kind == "embedding.started":
             self._ensure_progress_started()
             self._task_ids["embedding"] = self.progress.add_task("Embedding slides", total=payload["slide_count"])
+            return
+        if kind == "embedding.resume":
+            skipped = int(payload["skipped_slide_count"])
+            pending = int(payload["pending_slide_count"])
+            total = int(payload["total_slide_count"])
+            if skipped > 0:
+                self.console.print(
+                    f"Resume: skipped {skipped} already processed slide(s); {pending}/{total} pending"
+                )
+            task_id = self._task_ids.get("embedding")
+            if task_id is not None:
+                self.progress.update(
+                    task_id,
+                    total=pending,
+                    completed=0,
+                    description=f"Embedding slides ({pending} pending, {skipped} skipped)",
+                )
             return
         if kind == "embedding.assignment.started":
             self._ensure_progress_started()
@@ -616,11 +644,14 @@ def _embedding_summary_rows(payload: dict[str, Any]) -> list[tuple[str, str]]:
     slide_count = int(payload["slide_count"])
     completed = int(payload["slides_completed"])
     failed = max(0, slide_count - completed)
-    return [
+    rows = [
         ("Slides w/ tiles", str(slide_count)),
         ("Completed", str(completed)),
         ("Failed", str(failed)),
     ]
+    if "slides_skipped" in payload:
+        rows.insert(2, ("Skipped", str(payload["slides_skipped"])))
+    return rows
 
 
 def read_progress_events(

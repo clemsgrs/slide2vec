@@ -9,7 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 import torch
@@ -63,6 +63,7 @@ def run_torchrun_worker(
     request_path: Path,
     failure_title: str,
     progress_events_path: Path | None = None,
+    progress_event_callback: Callable[[Any], None] | None = None,
     popen_factory=subprocess.Popen,
 ) -> None:
     command = [
@@ -98,11 +99,15 @@ def run_torchrun_worker(
             events, offsets = read_progress_events(progress_events_path, offsets=offsets)
             for event in events:
                 emit_progress_event(event)
+                if progress_event_callback is not None:
+                    progress_event_callback(event)
         time.sleep(0.1)
     if progress_events_path is not None:
         events, offsets = read_progress_events(progress_events_path, offsets=offsets)
         for event in events:
             emit_progress_event(event)
+            if progress_event_callback is not None:
+                progress_event_callback(event)
     returncode = process.wait()
     stdout_thread.join(timeout=1.0)
     stderr_thread.join(timeout=1.0)

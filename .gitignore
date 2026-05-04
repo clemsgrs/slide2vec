@@ -167,3 +167,4 @@ outputs/
 archive/
 docs/20*-*.md
 data/
+.tasks/
