@@ -1,5 +1,6 @@
 ARG UBUNTU_VERSION=22.04
 ARG CUDA_MAJOR_VERSION=12.8.1
+ARG PYTHON_VERSION=3.11
 
 ########################
 # Stage 1: build stage #
@@ -8,6 +9,7 @@ FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn-devel-ubuntu${UBUNTU_VERSION} AS bu
 
 ARG USER_UID=1001
 ARG USER_GID=1001
+ARG PYTHON_VERSION
 
 # ensures that Python output to stdout/stderr is not buffered: prevents missing information when terminating
 ENV PYTHONUNBUFFERED=1
@@ -26,6 +28,7 @@ WORKDIR /home/user
 ENV PATH="/home/user/.local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
     libtiff-dev \
     cmake \
     zlib1g-dev \
@@ -36,15 +39,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    python3 \
-    python3-dev \
-    python3-venv \
-    python3-distutils \
-    python3-pip \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
+    python${PYTHON_VERSION}-distutils \
     && mkdir /var/run/sshd \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && curl -fsSL https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -101,6 +106,7 @@ FROM nvidia/cuda:${CUDA_MAJOR_VERSION}-cudnn-runtime-ubuntu${UBUNTU_VERSION}
 
 ARG USER_UID=1001
 ARG USER_GID=1001
+ARG PYTHON_VERSION
 
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Amsterdam
@@ -119,6 +125,7 @@ WORKDIR /home/user
 ENV PATH="/home/user/.local/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
     libtiff-dev \
     zlib1g-dev \
     libnuma1 \
@@ -127,14 +134,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
-    python3 \
-    python3-venv \
-    python3-distutils \
-    python3-pip \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    python${PYTHON_VERSION} \
+    python${PYTHON_VERSION}-venv \
+    python${PYTHON_VERSION}-distutils \
     && mkdir /var/run/sshd \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python3 \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python \
-    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && curl -fsSL https://bootstrap.pypa.io/get-pip.py | python${PYTHON_VERSION} \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3 \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python \
+    && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/bin/python \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -152,11 +161,11 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     rm -rf /var/lib/apt/lists/*
 
 # copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
-COPY --from=build /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=build /usr/local/lib/python${PYTHON_VERSION}/dist-packages /usr/local/lib/python${PYTHON_VERSION}/dist-packages
 COPY --from=build /usr/local/bin /usr/local/bin
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
-RUN echo "/usr/local/lib/python3.10/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+RUN echo "/usr/local/lib/python${PYTHON_VERSION}/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
     ldconfig
 
 # copy app code
