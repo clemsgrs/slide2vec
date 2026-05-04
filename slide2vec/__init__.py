@@ -11,7 +11,7 @@ from slide2vec.api import (
 from slide2vec.artifacts import HierarchicalEmbeddingArtifact, SlideEmbeddingArtifact, TileEmbeddingArtifact
 
 
-__version__ = "4.4.0"
+__version__ = "4.5.0"
 
 __all__ = [
     "Model",
