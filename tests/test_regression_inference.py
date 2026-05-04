@@ -241,7 +241,16 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
 
     captured = {}
 
-    def fake_run_stage(*, model, successful_slides, preprocessing, execution, output_dir, tiling_input_dir=None):
+    def fake_run_stage(
+        *,
+        model,
+        successful_slides,
+        preprocessing,
+        execution,
+        output_dir,
+        tiling_input_dir=None,
+        on_progress_event=None,
+    ):
         captured["run_stage"] = {
             "model": model,
             "successful_slides": successful_slides,
@@ -249,6 +258,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "execution": execution,
             "output_dir": output_dir,
             "tiling_input_dir": tiling_input_dir,
+            "on_progress_event": on_progress_event,
         }
 
     def fake_collect(slides, *, output_dir, output_format, include_tile_embeddings, include_hierarchical_embeddings, include_slide_embeddings):

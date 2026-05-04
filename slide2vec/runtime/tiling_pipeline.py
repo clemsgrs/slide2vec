@@ -5,7 +5,6 @@ import logging
 import tempfile
 import threading
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
