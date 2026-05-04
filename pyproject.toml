@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "hs2p[asap,cucim,openslide,sam2,vips]>=4.0.4",
+    "hs2p[asap,cucim,openslide,sam2,vips]>=4.0.5",
     "omegaconf",
     "matplotlib",
     "numpy<2",
@@ -88,7 +88,7 @@ fm = [
     "pandas",
     "pillow",
     "rich",
-    "hs2p[asap,cucim,openslide,sam2,vips]>=4.0.4",
+    "hs2p[asap,cucim,openslide,sam2,vips]>=4.0.5",
     "wandb",
     "torch>=2.3,<2.8",
     "torchvision>=0.18.0",
