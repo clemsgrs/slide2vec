@@ -369,6 +369,17 @@ def test_plain_text_reporter_formats_assignment_progress():
         )
         == "Slide assignment complete: 10 slide(s) across 4 GPU(s)"
     )
+    assert (
+        reporter._format_line(
+            "embedding.resume",
+            {
+                "total_slide_count": 10,
+                "pending_slide_count": 8,
+                "skipped_slide_count": 2,
+            },
+        )
+        == "Resume: skipped 2 already processed slide(s); 8 pending"
+    )
 
 
 def test_plain_text_reporter_formats_tissue_progress():
@@ -833,6 +844,33 @@ def test_rich_reporter_defers_tiling_bar_until_progress(monkeypatch):
         )
     )
     assert 2 not in reporter.progress.tasks
+
+
+def test_rich_reporter_updates_embedding_total_for_resume_skips(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="embedding.started", payload={"slide_count": 10}))
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="embedding.resume",
+            payload={
+                "total_slide_count": 10,
+                "pending_slide_count": 8,
+                "skipped_slide_count": 2,
+            },
+        )
+    )
+
+    assert reporter.progress.tasks[1]["total"] == 8
+    assert reporter.progress.tasks[1]["completed"] == 0
+    assert reporter.progress.tasks[1]["description"] == "Embedding slides (8 pending, 2 skipped)"
+    assert [line[0] for line in console.lines] == [
+        "Resume: skipped 2 already processed slide(s); 8/10 pending"
+    ]
 
 
 def test_rich_reporter_emits_backend_selected_without_log_suffix(monkeypatch):

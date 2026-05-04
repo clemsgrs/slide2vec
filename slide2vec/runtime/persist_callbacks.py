@@ -31,18 +31,15 @@ def has_complete_local_embedding_outputs(
 ) -> bool:
     if persist_hierarchical_embeddings:
         hierarchical_artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
-        hierarchical_metadata_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.meta.json"
-        if not hierarchical_artifact_path.is_file() or not hierarchical_metadata_path.is_file():
+        if not hierarchical_artifact_path.is_file():
             return False
     elif persist_tile_embeddings:
         tile_artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
-        tile_metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
-        if not tile_artifact_path.is_file() or not tile_metadata_path.is_file():
+        if not tile_artifact_path.is_file():
             return False
     if include_slide_embeddings:
         slide_artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
-        slide_metadata_path = output_dir / "slide_embeddings" / f"{sample_id}.meta.json"
-        if not slide_artifact_path.is_file() or not slide_metadata_path.is_file():
+        if not slide_artifact_path.is_file():
             return False
         if save_latents:
             latent_suffix = "pt" if output_format == "pt" else "npz"

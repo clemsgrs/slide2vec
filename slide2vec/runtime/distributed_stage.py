@@ -49,6 +49,7 @@ def build_pipeline_worker_request_payload(
     execution: ExecutionOptions,
     *,
     tiling_input_dir: Path,
+    sample_ids: Sequence[str] | None = None,
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
@@ -56,6 +57,7 @@ def build_pipeline_worker_request_payload(
         "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
         "tiling_input_dir": str(tiling_input_dir),
+        "sample_ids": list(sample_ids) if sample_ids is not None else None,
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
@@ -118,6 +120,7 @@ def run_distributed_embedding_stage(
         preprocessing,
         execution,
         tiling_input_dir=tiling_input_dir or output_dir,
+        sample_ids=[slide.sample_id for slide in successful_slides],
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")

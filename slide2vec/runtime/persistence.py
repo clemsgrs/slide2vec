@@ -10,6 +10,7 @@ from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    load_array,
     load_metadata,
 )
 from slide2vec.utils.tiling_io import atomic_write_dataframe_csv
@@ -48,14 +49,21 @@ def collect_pipeline_artifacts(
 def load_tile_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> TileEmbeddingArtifact:
     artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
     metadata_path = output_dir / "tile_embeddings" / f"{sample_id}.meta.json"
-    metadata = load_metadata(metadata_path)
+    if metadata_path.is_file():
+        metadata = load_metadata(metadata_path)
+        feature_dim = int(metadata["feature_dim"])
+        num_tiles = int(metadata["num_tiles"])
+    else:
+        features = load_array(artifact_path)
+        feature_dim = int(features.shape[-1]) if getattr(features, "ndim", 0) else 1
+        num_tiles = int(features.shape[0]) if getattr(features, "ndim", 0) else 1
     return TileEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
         format=output_format,
-        feature_dim=int(metadata["feature_dim"]),
-        num_tiles=int(metadata["num_tiles"]),
+        feature_dim=feature_dim,
+        num_tiles=num_tiles,
     )
 
 
@@ -67,22 +75,36 @@ def load_hierarchical_artifact(
 ) -> HierarchicalEmbeddingArtifact:
     artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
     metadata_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.meta.json"
-    metadata = load_metadata(metadata_path)
+    if metadata_path.is_file():
+        metadata = load_metadata(metadata_path)
+        feature_dim = int(metadata["feature_dim"])
+        num_regions = int(metadata["num_regions"])
+        tiles_per_region = int(metadata["tiles_per_region"])
+    else:
+        features = load_array(artifact_path)
+        feature_dim = int(features.shape[2])
+        num_regions = int(features.shape[0])
+        tiles_per_region = int(features.shape[1])
     return HierarchicalEmbeddingArtifact(
         sample_id=sample_id,
         path=artifact_path,
         metadata_path=metadata_path,
         format=output_format,
-        feature_dim=int(metadata["feature_dim"]),
-        num_regions=int(metadata["num_regions"]),
-        tiles_per_region=int(metadata["tiles_per_region"]),
+        feature_dim=feature_dim,
+        num_regions=num_regions,
+        tiles_per_region=tiles_per_region,
     )
 
 
 def load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str) -> SlideEmbeddingArtifact:
     artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
     metadata_path = output_dir / "slide_embeddings" / f"{sample_id}.meta.json"
-    metadata = load_metadata(metadata_path)
+    if metadata_path.is_file():
+        metadata = load_metadata(metadata_path)
+        feature_dim = int(metadata["feature_dim"])
+    else:
+        embedding = load_array(artifact_path)
+        feature_dim = int(embedding.shape[-1]) if getattr(embedding, "ndim", 0) else 1
     latent_suffix = "pt" if output_format == "pt" else "npz"
     latent_path = output_dir / "slide_latents" / f"{sample_id}.{latent_suffix}"
     return SlideEmbeddingArtifact(
@@ -90,7 +112,7 @@ def load_slide_artifact(sample_id: str, *, output_dir: Path, output_format: str)
         path=artifact_path,
         metadata_path=metadata_path,
         format=output_format,
-        feature_dim=int(metadata["feature_dim"]),
+        feature_dim=feature_dim,
         latent_path=latent_path if latent_path.is_file() else None,
     )
 

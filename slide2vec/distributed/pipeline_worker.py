@@ -48,6 +48,16 @@ def main(argv=None) -> int:
         if not callable(load_successful_tiled_slides_fn):
             from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
         slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
+        requested_sample_ids = request.get("sample_ids")
+        if requested_sample_ids is not None:
+            requested_sample_id_set = {str(sample_id) for sample_id in requested_sample_ids}
+            paired = [
+                (slide, tiling_result)
+                for slide, tiling_result in zip(slide_records, tiling_results)
+                if slide.sample_id in requested_sample_id_set
+            ]
+            slide_records = [slide for slide, _ in paired]
+            tiling_results = [tiling_result for _, tiling_result in paired]
         assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
         assigned_ids = assignments.get(global_rank, [])
         if not assigned_ids:

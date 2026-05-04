@@ -73,8 +73,12 @@ Both are disabled by default. Enable them via the ``preview`` dict:
        }
    )
 
-Preview images are written to ``<output_dir>/preview/mask/<sample_id>.png``
-and ``<output_dir>/preview/tiling/<sample_id>.png``. Their paths are also
+Preview images are written to ``<output_dir>/preview/mask/<sample_id>.jpg``
+and ``<output_dir>/preview/tiling/<sample_id>.jpg``. Their paths are also
 recorded in ``process_list.csv`` and on the returned
 :class:`~slide2vec.EmbeddedSlide` (``mask_preview_path``,
 ``tiling_preview_path``).
+
+When resuming a run, existing preview paths are preserved in
+``process_list.csv`` for unchanged successful tiling artifacts if the preview
+files still exist on disk.
