@@ -545,6 +545,51 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
     assert recorded.loc["slide-a", "feature_path"] == str((tmp_path / "relative-output" / "slide_embeddings" / "slide-a.pt").resolve())
 
 
+def test_distributed_collection_updates_process_list_when_worker_slide_finishes(
+    monkeypatch,
+    tmp_path: Path,
+):
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,asap,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+    slide = make_slide("slide-a")
+    artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="pt",
+        metadata={"image_path": "/tmp/slide-a.svs"},
+    )
+    captured = {}
+
+    def fake_run_distributed_embedding_stage(*args, **kwargs):
+        callback = kwargs.get("on_progress_event")
+        captured["callback"] = callback
+        assert callback is not None
+        callback(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_distributed_embedding_stage)
+
+    model = SimpleNamespace(name="prost40m", level="tile", _output_variant=None)
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=process_list_path,
+        preprocessing=PreprocessingConfig(region_tile_multiple=2),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+        output_dir=tmp_path,
+    )
+
+    recorded = pd.read_csv(process_list_path).set_index("sample_id")
+    assert captured["callback"] is not None
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-a", "feature_path"] == str(artifact.path.resolve())
+    assert recorded.loc["slide-a", "feature_kind"] == "hierarchical"
+
+
 def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 

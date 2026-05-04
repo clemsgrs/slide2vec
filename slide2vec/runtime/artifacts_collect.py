@@ -68,6 +68,39 @@ def collect_distributed_pipeline_artifacts(
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
+    slide_by_sample_id = {slide.sample_id: slide for slide in successful_slides}
+    live_updated_sample_ids: set[str] = set()
+
+    def _update_process_list_for_finished_slide(event) -> None:
+        if getattr(event, "kind", None) != "embedding.slide.finished":
+            return
+        payload = getattr(event, "payload", {}) or {}
+        sample_id = str(payload.get("sample_id", ""))
+        slide = slide_by_sample_id.get(sample_id)
+        if slide is None or sample_id in live_updated_sample_ids:
+            return
+        tile_artifacts, hierarchical_artifacts, slide_artifacts = collect_pipeline_artifacts(
+            [slide],
+            output_dir=output_dir,
+            output_format=execution.output_format,
+            include_tile_embeddings=include_tile_embeddings,
+            include_hierarchical_embeddings=persist_hierarchical_embeddings,
+            include_slide_embeddings=include_slide_embeddings,
+        )
+        update_process_list_after_embedding(
+            process_list_path,
+            successful_slides=[slide],
+            persist_tile_embeddings=persist_tile_embeddings,
+            persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+            include_slide_embeddings=include_slide_embeddings,
+            encoder_name=model.name,
+            output_variant=resolved_process_list_output_variant(model),
+            tile_artifacts=tile_artifacts,
+            hierarchical_artifacts=hierarchical_artifacts,
+            slide_artifacts=slide_artifacts,
+        )
+        live_updated_sample_ids.add(sample_id)
+
     run_distributed_embedding_stage(
         model=model,
         successful_slides=successful_slides,
@@ -75,6 +108,7 @@ def collect_distributed_pipeline_artifacts(
         execution=execution,
         output_dir=output_dir,
         tiling_input_dir=tiling_input_dir,
+        on_progress_event=_update_process_list_for_finished_slide,
     )
     tile_artifacts, hierarchical_artifacts, slide_artifacts = collect_pipeline_artifacts(
         successful_slides,

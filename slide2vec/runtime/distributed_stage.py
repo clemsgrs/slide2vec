@@ -3,7 +3,7 @@
 import json
 from subprocess import Popen
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import torch
 from hs2p import SlideSpec
@@ -106,6 +106,7 @@ def run_distributed_embedding_stage(
     execution: ExecutionOptions,
     output_dir: Path,
     tiling_input_dir: Path | None = None,
+    on_progress_event: Callable[[Any], None] | None = None,
 ) -> None:
     if not successful_slides:
         return
@@ -137,6 +138,7 @@ def run_distributed_embedding_stage(
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
         progress_events_path=progress_events_path,
+        progress_event_callback=on_progress_event,
         popen_factory=Popen,
     )
 
