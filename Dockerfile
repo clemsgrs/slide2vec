@@ -39,6 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
+    gnupg2 \
+    gpg-agent \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} \
@@ -135,6 +137,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip unzip \
     git \
     openssh-server \
+    gnupg2 \
+    gpg-agent \
     && add-apt-repository -y ppa:deadsnakes/ppa \
     && apt-get update && apt-get install -y --no-install-recommends \
     python${PYTHON_VERSION} \
