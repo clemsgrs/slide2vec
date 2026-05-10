@@ -555,6 +555,15 @@ def test_read_tiling_progress_snapshot_summarizes_process_list(tmp_path: Path):
     assert snapshot.discovered_tiles == 10
 
 
+def test_read_tiling_progress_snapshot_ignores_transient_empty_process_list(tmp_path: Path):
+    import slide2vec.progress as progress
+
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text("", encoding="utf-8")
+
+    assert progress.read_tiling_progress_snapshot(process_list_path, expected_total=3) is None
+
+
 def test_build_direct_embed_worker_request_payload_includes_progress_events_path(tmp_path: Path):
     import slide2vec.inference as inference
 

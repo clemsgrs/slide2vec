@@ -699,7 +699,10 @@ def read_tiling_progress_snapshot(process_list_path: str | Path, *, expected_tot
     path = Path(process_list_path)
     if not path.is_file():
         return None
-    df = pd.read_csv(path)
+    try:
+        df = pd.read_csv(path)
+    except (pd.errors.EmptyDataError, pd.errors.ParserError):
+        return None
     if "tiling_status" not in df.columns:
         return None
     statuses = df["tiling_status"].fillna("tbp").astype(str)
