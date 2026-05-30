@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import heapq
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -55,6 +57,42 @@ def write_worker_logs(module: str, output_dir: Path, stdout_text: str, stderr_te
     return stdout_log_path, stderr_log_path
 
 
+def terminate_process_group(process, *, grace_seconds: float = 10.0) -> None:
+    """SIGTERM then SIGKILL the worker's whole process group.
+
+    The torchrun *agent* and the GPU worker processes it spawns share the session
+    we start the agent in (``start_new_session=True``), so signalling the group id
+    reaps the agent and every worker at once — including the elastic agent, which
+    would otherwise respawn workers if we only killed them individually. A no-op if
+    the process already exited or the platform lacks process groups.
+    """
+    if process.poll() is not None:
+        return
+    pid = getattr(process, "pid", None)
+    if pid is None or not hasattr(os, "killpg"):
+        process.terminate()
+        return
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        return
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            process.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def run_torchrun_worker(
     *,
     module: str,
@@ -79,6 +117,19 @@ def run_torchrun_worker(
         "--request-path",
         str(request_path),
     ]
+    # Run the agent in its own session so a single killpg reaps agent + workers
+    # (see terminate_process_group). A bare SIGTERM to *this* process would skip
+    # the finally block, so while the agent is alive we convert SIGTERM into a
+    # KeyboardInterrupt — but only from the main thread, where signal.signal is
+    # allowed; the original handler is restored in finally.
+    previous_sigterm = None
+    if threading.current_thread() is threading.main_thread():
+        def _raise_on_sigterm(signum, frame):  # noqa: ANN001
+            raise KeyboardInterrupt
+        try:
+            previous_sigterm = signal.signal(signal.SIGTERM, _raise_on_sigterm)
+        except (ValueError, OSError):
+            previous_sigterm = None
     process = popen_factory(
         command,
         cwd=str(Path(__file__).resolve().parents[2]),
@@ -86,43 +137,52 @@ def run_torchrun_worker(
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
-    stdout_thread = threading.Thread(target=drain_stream_to_buffer, args=(process.stdout, stdout_chunks), daemon=True)
-    stderr_thread = threading.Thread(target=drain_stream_to_buffer, args=(process.stderr, stderr_chunks), daemon=True)
-    stdout_thread.start()
-    stderr_thread.start()
-    offsets: dict[Path, int] = {}
-    while process.poll() is None:
+    try:
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        stdout_thread = threading.Thread(target=drain_stream_to_buffer, args=(process.stdout, stdout_chunks), daemon=True)
+        stderr_thread = threading.Thread(target=drain_stream_to_buffer, args=(process.stderr, stderr_chunks), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+        offsets: dict[Path, int] = {}
+        while process.poll() is None:
+            if progress_events_path is not None:
+                events, offsets = read_progress_events(progress_events_path, offsets=offsets)
+                for event in events:
+                    emit_progress_event(event)
+                    if progress_event_callback is not None:
+                        progress_event_callback(event)
+            time.sleep(0.1)
         if progress_events_path is not None:
             events, offsets = read_progress_events(progress_events_path, offsets=offsets)
             for event in events:
                 emit_progress_event(event)
                 if progress_event_callback is not None:
                     progress_event_callback(event)
-        time.sleep(0.1)
-    if progress_events_path is not None:
-        events, offsets = read_progress_events(progress_events_path, offsets=offsets)
-        for event in events:
-            emit_progress_event(event)
-            if progress_event_callback is not None:
-                progress_event_callback(event)
-    returncode = process.wait()
-    stdout_thread.join(timeout=1.0)
-    stderr_thread.join(timeout=1.0)
-    stdout_text = "".join(stdout_chunks)
-    stderr_text = "".join(stderr_chunks)
-    stdout_log_path, stderr_log_path = write_worker_logs(module, output_dir, stdout_text, stderr_text)
-    if returncode != 0:
-        raise RuntimeError(
-            f"{failure_title}.\n"
-            f"See logs:\n"
-            f"stdout: {stdout_log_path}\n"
-            f"stderr: {stderr_log_path}\n"
-            f"stdout:\n{stdout_text}\n"
-            f"stderr:\n{stderr_text}"
-        )
+        returncode = process.wait()
+        stdout_thread.join(timeout=1.0)
+        stderr_thread.join(timeout=1.0)
+        stdout_text = "".join(stdout_chunks)
+        stderr_text = "".join(stderr_chunks)
+        stdout_log_path, stderr_log_path = write_worker_logs(module, output_dir, stdout_text, stderr_text)
+        if returncode != 0:
+            raise RuntimeError(
+                f"{failure_title}.\n"
+                f"See logs:\n"
+                f"stdout: {stdout_log_path}\n"
+                f"stderr: {stderr_log_path}\n"
+                f"stdout:\n{stdout_text}\n"
+                f"stderr:\n{stderr_text}"
+            )
+    finally:
+        # On any early exit (Ctrl-C, converted SIGTERM, RuntimeError) reap the
+        # whole worker group so no orphaned agent/workers keep holding the GPUs.
+        # No-op on the normal path: the agent has already exited.
+        terminate_process_group(process)
+        if previous_sigterm is not None:
+            signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 def assign_slides_to_ranks(
