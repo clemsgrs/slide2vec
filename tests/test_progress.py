@@ -684,6 +684,64 @@ def test_run_torchrun_worker_uses_standalone_rendezvous(monkeypatch, tmp_path: P
     assert "--rdzv-endpoint" not in " ".join(command)
 
 
+def test_run_torchrun_worker_starts_new_session(monkeypatch, tmp_path: Path):
+    # The agent must run in its own session so terminate_process_group can reap
+    # the agent and every worker it spawns with a single killpg.
+    request_path = tmp_path / "request.json"
+    request_path.write_text("{}", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    observed = {}
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            observed["kwargs"] = kwargs
+            self.stdout = io.StringIO("")
+            self.stderr = io.StringIO("")
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(distributed.time, "sleep", lambda _seconds: None)
+
+    distributed.run_torchrun_worker(
+        module="slide2vec.distributed.direct_embed_worker",
+        num_gpus=2,
+        output_dir=output_dir,
+        request_path=request_path,
+        failure_title="boom",
+        popen_factory=FakePopen,
+    )
+
+    assert observed["kwargs"].get("start_new_session") is True
+
+
+def test_terminate_process_group_reaps_whole_group():
+    # A real grandchild in the same session must die when we tear down the group.
+    parent = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import subprocess, sys, time; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+            "time.sleep(60)",
+        ],
+        start_new_session=True,
+    )
+    import os
+
+    pgid = os.getpgid(parent.pid)
+    distributed.terminate_process_group(parent, grace_seconds=5.0)
+    assert parent.poll() is not None
+    # The whole group is gone: signalling it with 0 must raise.
+    with pytest.raises(ProcessLookupError):
+        os.killpg(pgid, 0)
+
+
 def test_reset_progress_event_logs_is_idempotent(tmp_path: Path):
     import slide2vec.runtime.distributed as distributed
 
