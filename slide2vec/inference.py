@@ -608,7 +608,14 @@ def run_pipeline(
         raise ValueError("At least one slide is required")
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required for Pipeline.run(...)")
-    if execution.num_gpus > 1:
+    # `validate_multi_gpu_execution` validates the multi-GPU *embedding* setup
+    # and touches `torch.cuda` in the parent process. A tiling-only run has no
+    # embedding stage, so skip it: any GPU work during tiling (e.g. SAM2 mask
+    # generation on cuda) runs inside the spawned tiling workers, which
+    # initialize their own CUDA and do not depend on this parent-side check.
+    # Initializing a CUDA context in the parent here only buys needless fork
+    # risk for the downstream tiling pool with no benefit.
+    if not tiling_only and execution.num_gpus > 1:
         distributed_stage.validate_multi_gpu_execution(model, execution)
 
     output_dir = Path(execution.output_dir)

@@ -125,6 +125,91 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     assert result.tile_artifacts == ["tile-artifact"]
     assert result.slide_artifacts == ["slide-artifact"]
 
+
+def test_run_pipeline_tiling_only_skips_multi_gpu_validation(monkeypatch, tmp_path: Path):
+    """Tiling is CPU-only; it must not initialize CUDA in the parent.
+
+    ``validate_multi_gpu_execution`` calls ``torch.cuda`` in the parent process,
+    which (combined with forking the tiling pool) caused deadlocks. For a
+    tiling-only run there is no GPU stage, so the validation must be skipped even
+    when ``num_gpus > 1``.
+    """
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0, 1]), y=np.array([2, 3]), tile_size_lv0=224)
+
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
+    )
+
+    validate_calls = []
+    monkeypatch.setattr(
+        distributed_stage,
+        "validate_multi_gpu_execution",
+        lambda *args, **kwargs: validate_calls.append(True),
+    )
+
+    result = inference.run_pipeline(
+        Model.from_preset("virchow2"),
+        slides=[slide],
+        preprocessing=DEFAULT_PREPROCESSING,
+        tiling_only=True,
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+    )
+
+    assert validate_calls == []
+    assert result.tile_artifacts == []
+    assert result.slide_artifacts == []
+    assert result.process_list_path == tmp_path / "process_list.csv"
+
+
+def test_run_pipeline_validates_multi_gpu_when_not_tiling_only(monkeypatch, tmp_path: Path):
+    """The multi-GPU fast-fail check must still run for full embedding runs."""
+    import slide2vec.inference as inference
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0, 1]), y=np.array([2, 3]), tile_size_lv0=224)
+
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "prepare_tiled_slides",
+        lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
+    )
+    monkeypatch.setattr(
+        artifacts_collect,
+        "run_distributed_embedding_stage",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        artifacts_collect,
+        "collect_pipeline_artifacts",
+        lambda *args, **kwargs: (["tile-artifact"], [], ["slide-artifact"]),
+    )
+    monkeypatch.setattr(
+        artifacts_collect, "update_process_list_after_embedding", lambda *args, **kwargs: None
+    )
+
+    validate_calls = []
+    monkeypatch.setattr(
+        distributed_stage,
+        "validate_multi_gpu_execution",
+        lambda *args, **kwargs: validate_calls.append(True),
+    )
+
+    inference.run_pipeline(
+        Model.from_preset("virchow2"),
+        slides=[slide],
+        preprocessing=DEFAULT_PREPROCESSING,
+        tiling_only=False,
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2),
+    )
+
+    assert validate_calls == [True]
+
+
 def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_helper(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
