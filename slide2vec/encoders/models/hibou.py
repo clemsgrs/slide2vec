@@ -10,7 +10,12 @@ from torch import Tensor
 from torchvision.transforms import v2
 from transformers import AutoModel
 
-from slide2vec.encoders.base import TileEncoder, preferred_default_device, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    TileEncoder,
+    preferred_default_device,
+    reshape_tokens_to_grid,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
 
 _HIBOU_MEAN = (0.7068, 0.5755, 0.722)
@@ -40,9 +45,39 @@ class _HibouBase(TileEncoder):
     def get_transform(self) -> Callable:
         return _hibou_transform()
 
+    def get_dense_transform(self) -> Callable:
+        return v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=_HIBOU_MEAN, std=_HIBOU_STD),
+        ])
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         output = self._model(pixel_values=batch)
         return output.pooler_output
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        if batch.ndim != 4:
+            raise ValueError(
+                "encode_tiles_dense expects a (B, C, H, W) batch, got shape "
+                f"{tuple(batch.shape)}."
+            )
+        _, _, height, width = batch.shape
+        patch = int(self._model.config.patch_size)
+        if height % patch != 0 or width % patch != 0:
+            raise ValueError(
+                f"Dense extraction for '{type(self).__name__}' requires input "
+                f"divisible by the patch size: got {height}x{width}, patch "
+                f"{patch}. Pad the tile up to a patch multiple first."
+            )
+        output = self._model(pixel_values=batch)
+        return reshape_tokens_to_grid(
+            output.last_hidden_state,
+            grid_h=height // patch,
+            grid_w=width // patch,
+            num_prefix_tokens=1 + int(getattr(self._model.config, "num_register_tokens", 0)),
+            encoder_name=type(self).__name__,
+        )
 
     @property
     def encode_dim(self) -> int:

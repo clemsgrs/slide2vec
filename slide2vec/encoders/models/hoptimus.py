@@ -7,7 +7,11 @@ import torch
 from torch import Tensor
 from torchvision.transforms import v2
 
-from slide2vec.encoders.base import TimmTileEncoder, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    TimmTileEncoder,
+    resolve_recommended_dynamic_img_size,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
 
 # Shared normalization for H-Optimus models
@@ -73,12 +77,26 @@ class _HOptimusBase(TimmTileEncoder):
     source="bioptimus/H-optimus-0",
 )
 class HOptimus0(TimmTileEncoder):
-    def __init__(self, *, output_variant: str | None = None):
+    # bioptimus' model card explicitly loads with dynamic_img_size=False, so that
+    # is the recommended default. Dense extraction needs variable input size and
+    # opts in via dynamic_img_size=True + allow_non_recommended_settings=True.
+    def __init__(
+        self,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool | None = None,
+        allow_non_recommended_settings: bool = False,
+    ):
         super().__init__(
             "hf-hub:bioptimus/H-optimus-0",
             output_variant=output_variant,
             init_values=1e-5,
-            dynamic_img_size=False,
+            dynamic_img_size=resolve_recommended_dynamic_img_size(
+                requested=dynamic_img_size,
+                recommended=False,
+                allow_non_recommended=allow_non_recommended_settings,
+                encoder_name="h-optimus-0",
+            ),
         )
 
     def get_transform(self) -> Callable:
@@ -95,12 +113,24 @@ class HOptimus0(TimmTileEncoder):
     source="bioptimus/H-optimus-1",
 )
 class HOptimus1(TimmTileEncoder):
-    def __init__(self, *, output_variant: str | None = None):
+    # See HOptimus0: card recommends dynamic_img_size=False; dense extraction opts in.
+    def __init__(
+        self,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool | None = None,
+        allow_non_recommended_settings: bool = False,
+    ):
         super().__init__(
             "hf-hub:bioptimus/H-optimus-1",
             output_variant=output_variant,
             init_values=1e-5,
-            dynamic_img_size=False,
+            dynamic_img_size=resolve_recommended_dynamic_img_size(
+                requested=dynamic_img_size,
+                recommended=False,
+                allow_non_recommended=allow_non_recommended_settings,
+                encoder_name="h-optimus-1",
+            ),
         )
 
     def get_transform(self) -> Callable:

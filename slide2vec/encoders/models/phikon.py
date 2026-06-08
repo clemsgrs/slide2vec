@@ -9,7 +9,12 @@ import torch
 from torch import Tensor
 from transformers import AutoImageProcessor, AutoModel
 
-from slide2vec.encoders.base import TileEncoder, preferred_default_device, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    TileEncoder,
+    preferred_default_device,
+    reshape_tokens_to_grid,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
 
 
@@ -33,9 +38,56 @@ class _PhikonBase(TileEncoder):
 
         return _transform
 
+    def get_dense_transform(self) -> Callable:
+        # Normalization only — no resize/crop (see TileEncoder.get_dense_transform).
+        # Reuses the HF processor's normalization so it matches pooled extraction;
+        # Phikon is pinned to its native 224, so the dense pipeline must feed 224.
+        from torchvision.transforms import v2
+
+        return v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=self._processor.image_mean, std=self._processor.image_std),
+        ])
+
+    @property
+    def patch_size(self) -> tuple[int, int]:
+        patch = int(self._model.config.patch_size)
+        return patch, patch
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         output = self._model(pixel_values=batch)
         return output.last_hidden_state[:, 0, :]  # CLS token
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        """Encode tiles into a dense spatial grid. (B, C, H, W) -> (B, d, h, w).
+
+        Phikon's ViT emits ``[CLS, patch tokens...]`` (one prefix token, no
+        register tokens). The model is pinned to its native input size, so the
+        grid is ``input_size / patch_size`` (e.g. 224/16 -> 14x14); feeding a
+        larger tile raises inside the HF backbone (positional-embedding mismatch).
+        """
+        if batch.ndim != 4:
+            raise ValueError(
+                "encode_tiles_dense expects a (B, C, H, W) batch, got shape "
+                f"{tuple(batch.shape)}."
+            )
+        _, _, height, width = batch.shape
+        patch = int(self._model.config.patch_size)
+        if height % patch != 0 or width % patch != 0:
+            raise ValueError(
+                f"Dense extraction for '{type(self).__name__}' requires input "
+                f"divisible by the patch size: got {height}x{width}, patch "
+                f"{patch}. Pad the tile up to a patch multiple first."
+            )
+        output = self._model(pixel_values=batch)
+        return reshape_tokens_to_grid(
+            output.last_hidden_state,
+            grid_h=height // patch,
+            grid_w=width // patch,
+            num_prefix_tokens=1,
+            encoder_name=type(self).__name__,
+        )
 
     @property
     def encode_dim(self) -> int:

@@ -1,6 +1,9 @@
 """Prov-GigaPath encoder implementation."""
 
+from typing import Callable
+
 import torch
+from torchvision.transforms import v2
 
 from slide2vec.encoders.base import (
     SlideEncoder,
@@ -9,6 +12,14 @@ from slide2vec.encoders.base import (
     resolve_requested_output_variant,
 )
 from slide2vec.encoders.registry import register_encoder
+
+# Prov-GigaPath model card transform: resize the 256px tile to 256 (no-op),
+# center-crop to the model's native 224, ImageNet normalization. timm's packaged
+# pretrained_cfg reports crop_pct=1.0 -> get_transform would instead Resize(224),
+# downscaling the whole tile to ~0.57 mpp; the paper feeds the center 224 at the
+# native 0.5 mpp. https://www.nature.com/articles/s41586-024-07441-w
+_GIGAPATH_MEAN = (0.485, 0.456, 0.406)
+_GIGAPATH_STD = (0.229, 0.224, 0.225)
 
 
 @register_encoder(
@@ -25,7 +36,24 @@ class GigaPath(TimmTileEncoder):
         super().__init__(
             "hf_hub:prov-gigapath/prov-gigapath",
             output_variant=output_variant,
+            dynamic_img_size=True,
         )
+
+    def get_transform(self) -> Callable:
+        # POOLED transform only: center-crops the 256px tile to the model's 224px
+        # native input (paper recipe, center 224 @ native 0.5 mpp). Dense extraction
+        # must NOT route through this — it needs the full uncropped tile so the grid
+        # covers the whole source tile. The dense path supplies its own no-crop
+        # transform (Resize(256), no CenterCrop) → a 16x16 grid over the full tile;
+        # encode_tiles_dense itself is transform-agnostic (inherited from
+        # TimmTileEncoder) and operates on whatever batch the dense pipeline feeds.
+        return v2.Compose([
+            v2.ToImage(),
+            v2.Resize(256, interpolation=v2.InterpolationMode.BICUBIC, antialias=True),
+            v2.CenterCrop(224),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=_GIGAPATH_MEAN, std=_GIGAPATH_STD),
+        ])
 
 
 @register_encoder(
