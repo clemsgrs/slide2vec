@@ -8,6 +8,8 @@ ground-truth oracle, pinning spatial registration (not just tensor shape).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -207,6 +209,167 @@ def test_phikon_dense_end_to_end():
     with torch.no_grad():
         grid = enc.encode_tiles_dense(x)
     assert grid.shape == (2, enc.encode_dim, 14, 14)  # 224 / 16 = 14
+
+
+class _FakeOutput:
+    def __init__(self, last_hidden_state: torch.Tensor):
+        self.last_hidden_state = last_hidden_state
+        self.pooler_output = last_hidden_state[:, 0]
+
+
+def _token_sequence(
+    *,
+    batch_size: int,
+    prefix_tokens: int,
+    grid_h: int,
+    grid_w: int,
+    dim: int,
+) -> torch.Tensor:
+    tokens = torch.full((batch_size, prefix_tokens + grid_h * grid_w, dim), -1.0)
+    patch_values = torch.arange(grid_h * grid_w, dtype=torch.float32).view(1, -1, 1)
+    tokens[:, prefix_tokens:, :] = patch_values
+    return tokens
+
+
+class _FakeHFViT:
+    def __init__(self, *, patch_size: int, hidden_size: int, prefix_tokens: int):
+        self.config = SimpleNamespace(
+            patch_size=patch_size,
+            num_register_tokens=prefix_tokens - 1,
+        )
+        self.hidden_size = hidden_size
+        self.prefix_tokens = prefix_tokens
+
+    def __call__(self, *args, **kwargs):
+        batch = kwargs.get("pixel_values") if "pixel_values" in kwargs else args[0]
+        _, _, height, width = batch.shape
+        tokens = _token_sequence(
+            batch_size=batch.shape[0],
+            prefix_tokens=self.prefix_tokens,
+            grid_h=height // int(self.config.patch_size),
+            grid_w=width // int(self.config.patch_size),
+            dim=self.hidden_size,
+        )
+        return _FakeOutput(tokens)
+
+
+def test_midnight_dense_uses_last_hidden_state_patch_tokens():
+    from slide2vec.encoders.models.midnight import Midnight
+
+    enc = Midnight.__new__(Midnight)
+    enc._model = _FakeHFViT(patch_size=14, hidden_size=1536, prefix_tokens=1)
+    grid = enc.encode_tiles_dense(torch.randn(2, 3, 224, 224))
+    assert grid.shape == (2, 1536, 16, 16)
+    expected = torch.arange(16 * 16, dtype=torch.float32).reshape(16, 16)
+    assert torch.equal(grid[0, 0], expected)
+
+
+def test_hibou_dense_strips_cls_and_register_tokens():
+    from slide2vec.encoders.models.hibou import HibouB
+
+    enc = HibouB.__new__(HibouB)
+    enc._model = _FakeHFViT(patch_size=14, hidden_size=768, prefix_tokens=5)
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 224, 224))
+    assert grid.shape == (1, 768, 16, 16)
+    expected = torch.arange(16 * 16, dtype=torch.float32).reshape(16, 16)
+    assert torch.equal(grid[0, 0], expected)
+
+
+class _FakePatchEmbed:
+    patch_size = (16, 16)
+
+
+class _FakeTrunk:
+    patch_embed = _FakePatchEmbed()
+    num_prefix_tokens = 1
+
+    def __init__(self, *, hidden_size: int = 768):
+        self.hidden_size = hidden_size
+
+    def forward_features(self, batch: torch.Tensor) -> torch.Tensor:
+        _, _, height, width = batch.shape
+        return _token_sequence(
+            batch_size=batch.shape[0],
+            prefix_tokens=self.num_prefix_tokens,
+            grid_h=height // 16,
+            grid_w=width // 16,
+            dim=self.hidden_size,
+        )
+
+
+def test_conch_dense_uses_visual_trunk_not_attentional_tokens():
+    from slide2vec.encoders.models.conch import CONCH
+
+    class _Visual:
+        trunk = _FakeTrunk(hidden_size=768)
+
+        def __call__(self, batch):  # pragma: no cover - must not be used
+            return torch.zeros(batch.shape[0], 512), torch.zeros(batch.shape[0], 256, 768)
+
+    enc = CONCH.__new__(CONCH)
+    enc._model = SimpleNamespace(visual=_Visual())
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 448))
+    assert grid.shape == (1, 768, 28, 28)
+    expected = torch.arange(28 * 28, dtype=torch.float32).reshape(28, 28)
+    assert torch.equal(grid[0, 0], expected)
+
+
+def test_conchv15_dense_uses_returned_conch_trunk():
+    from slide2vec.encoders.models.conch import CONCHv15
+
+    enc = CONCHv15.__new__(CONCHv15)
+    enc._model = SimpleNamespace(trunk=_FakeTrunk(hidden_size=1024))
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 448))
+    assert grid.shape == (1, 1024, 28, 28)
+
+
+class _FakeMUSKModel:
+    def __init__(self):
+        self.beit3 = SimpleNamespace(
+            vision_embed=SimpleNamespace(img_size=384, patch_size=16)
+        )
+
+    def __call__(
+        self,
+        *,
+        image: torch.Tensor,
+        with_head: bool,
+        out_norm: bool,
+        ms_aug: bool,
+        return_global: bool,
+    ):
+        assert with_head is False
+        assert out_norm is False
+        assert ms_aug is False
+        assert return_global is False
+        tokens = _token_sequence(
+            batch_size=image.shape[0],
+            prefix_tokens=1,
+            grid_h=24,
+            grid_w=24,
+            dim=1024,
+        )
+        return tokens, None
+
+
+def test_musk_dense_supports_native_384_only():
+    from slide2vec.encoders.models.musk import MUSK
+
+    enc = MUSK.__new__(MUSK)
+    enc._model = _FakeMUSKModel()
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 384, 384))
+    assert grid.shape == (1, 1024, 24, 24)
+    expected = torch.arange(24 * 24, dtype=torch.float32).reshape(24, 24)
+    assert torch.equal(grid[0, 0], expected)
+
+
+def test_musk_dense_rejects_non_native_size_until_resize_or_sliding_window():
+    from slide2vec.encoders.models.musk import MUSK
+
+    enc = MUSK.__new__(MUSK)
+    enc._model = _FakeMUSKModel()
+    with pytest.raises(ValueError, match="native 384x384 input size"):
+        enc.encode_tiles_dense(torch.randn(1, 3, 512, 512))
 
 
 def test_gigapath_dense_transform_is_pooled_only_and_crops():

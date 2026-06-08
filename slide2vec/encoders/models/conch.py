@@ -10,10 +10,66 @@ from typing import Callable
 
 import torch
 from torch import Tensor
+from torchvision.transforms import v2
 from transformers import AutoModel
 
-from slide2vec.encoders.base import TileEncoder, preferred_default_device, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    TileEncoder,
+    preferred_default_device,
+    reshape_tokens_to_grid,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
+
+_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def _normalize_only_transform(
+    *,
+    mean: tuple[float, float, float],
+    std: tuple[float, float, float],
+) -> Callable:
+    return v2.Compose([
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=mean, std=std),
+    ])
+
+
+def _patch_size_from_trunk(trunk) -> tuple[int, int]:
+    patch = trunk.patch_embed.patch_size
+    if isinstance(patch, int):
+        return patch, patch
+    patch_h, patch_w = patch
+    return int(patch_h), int(patch_w)
+
+
+def _encode_trunk_dense(*, trunk, batch: Tensor, encoder_name: str) -> Tensor:
+    if batch.ndim != 4:
+        raise ValueError(
+            "encode_tiles_dense expects a (B, C, H, W) batch, got shape "
+            f"{tuple(batch.shape)}."
+        )
+    _, _, height, width = batch.shape
+    patch_h, patch_w = _patch_size_from_trunk(trunk)
+    if height % patch_h != 0 or width % patch_w != 0:
+        raise ValueError(
+            f"Dense extraction for '{encoder_name}' requires input divisible by "
+            f"the patch size: got {height}x{width}, patch {patch_h}x{patch_w}. "
+            "Pad the tile up to a patch multiple first."
+        )
+    if hasattr(trunk, "forward_features"):
+        tokens = trunk.forward_features(batch)
+    else:
+        tokens = trunk(batch)
+    return reshape_tokens_to_grid(
+        tokens,
+        grid_h=height // patch_h,
+        grid_w=width // patch_w,
+        num_prefix_tokens=int(getattr(trunk, "num_prefix_tokens", 1)),
+        encoder_name=encoder_name,
+    )
 
 
 @register_encoder(
@@ -39,8 +95,30 @@ class CONCH(TileEncoder):
     def get_transform(self) -> Callable:
         return self._transform
 
+    def get_dense_transform(self) -> Callable:
+        try:
+            from conch.open_clip_custom.constants import (
+                OPENAI_DATASET_MEAN,
+                OPENAI_DATASET_STD,
+            )
+
+            mean = tuple(float(v) for v in OPENAI_DATASET_MEAN)
+            std = tuple(float(v) for v in OPENAI_DATASET_STD)
+        except Exception:
+            mean, std = _IMAGENET_MEAN, _IMAGENET_STD
+        return _normalize_only_transform(mean=mean, std=std)
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         return self._model.encode_image(batch, proj_contrast=False, normalize=False)
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        # Use the ViT trunk tokens directly. self._model.visual(...) returns
+        # attentional-pool tokens for captioning/contrast, not a spatial patch grid.
+        return _encode_trunk_dense(
+            trunk=self._model.visual.trunk,
+            batch=batch,
+            encoder_name=type(self).__name__,
+        )
 
     @property
     def encode_dim(self) -> int:
@@ -76,8 +154,18 @@ class CONCHv15(TileEncoder):
     def get_transform(self) -> Callable:
         return self._transform
 
+    def get_dense_transform(self) -> Callable:
+        return _normalize_only_transform(mean=_IMAGENET_MEAN, std=_IMAGENET_STD)
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         return self._model(batch)
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        return _encode_trunk_dense(
+            trunk=self._model.trunk,
+            batch=batch,
+            encoder_name=type(self).__name__,
+        )
 
     @property
     def encode_dim(self) -> int:

@@ -147,6 +147,18 @@ class TileEncoder(Encoder):
             "tokens can be reshaped into a spatial grid."
         )
 
+    @property
+    def patch_size(self) -> tuple[int, int]:
+        """Backbone patch size ``(patch_h, patch_w)`` — only for dense encoders.
+
+        Encoder-authoritative (a property of the frozen model), used to resolve the
+        dense token grid. Default: unsupported, mirroring ``encode_tiles_dense``.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not expose a patch size (only dense-capable "
+            "ViT tile encoders do)."
+        )
+
     def get_dense_transform(self) -> Callable:
         """Photometric (normalization-only) transform for dense extraction.
 
@@ -269,6 +281,10 @@ class TimmTileEncoder(TileEncoder):
             return patch, patch
         patch_h, patch_w = patch
         return int(patch_h), int(patch_w)
+
+    @property
+    def patch_size(self) -> tuple[int, int]:
+        return self._dense_patch_size()
 
     def _dense_num_prefix_tokens(self) -> int:
         """Number of leading non-patch tokens (CLS + register tokens)."""

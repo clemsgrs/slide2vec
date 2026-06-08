@@ -50,6 +50,11 @@ class _PhikonBase(TileEncoder):
             v2.Normalize(mean=self._processor.image_mean, std=self._processor.image_std),
         ])
 
+    @property
+    def patch_size(self) -> tuple[int, int]:
+        patch = int(self._model.config.patch_size)
+        return patch, patch
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         output = self._model(pixel_values=batch)
         return output.last_hidden_state[:, 0, :]  # CLS token

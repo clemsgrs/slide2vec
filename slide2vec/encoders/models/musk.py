@@ -11,8 +11,20 @@ from torch import Tensor
 from torchvision.transforms import v2
 from timm.models import create_model
 
-from slide2vec.encoders.base import TileEncoder, preferred_default_device, resolve_requested_output_variant
+from slide2vec.encoders.base import (
+    TileEncoder,
+    preferred_default_device,
+    reshape_tokens_to_grid,
+    resolve_requested_output_variant,
+)
 from slide2vec.encoders.registry import register_encoder
+
+
+def _as_hw(value: int | tuple[int, int] | list[int]) -> tuple[int, int]:
+    if isinstance(value, int):
+        return value, value
+    height, width = value
+    return int(height), int(width)
 
 
 @register_encoder(
@@ -47,6 +59,13 @@ class MUSK(TileEncoder):
             v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
         ])
 
+    def get_dense_transform(self) -> Callable:
+        return v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+        ])
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         # MUSK's linear-probe / MIL feature-extraction recipe uses out_norm=False
         # (raw embeddings); out_norm=True L2-normalizes and is for zero-shot/retrieval.
@@ -58,6 +77,38 @@ class MUSK(TileEncoder):
             out_norm=False,
             ms_aug=self._output_variant == "ms_aug",
         )[0]
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        if batch.ndim != 4:
+            raise ValueError(
+                "encode_tiles_dense expects a (B, C, H, W) batch, got shape "
+                f"{tuple(batch.shape)}."
+        )
+        _, _, height, width = batch.shape
+        vision_embed = self._model.beit3.vision_embed
+        native_h, native_w = _as_hw(vision_embed.img_size)
+        if (height, width) != (native_h, native_w):
+            raise ValueError(
+                f"Dense extraction for '{type(self).__name__}' currently requires "
+                f"the native {native_h}x{native_w} input size; got {height}x{width}. "
+                "Use native-size tiles or wait for explicit resize/sliding-window "
+                "dense input modes."
+            )
+        patch_h, patch_w = _as_hw(vision_embed.patch_size)
+        tokens = self._model(
+            image=batch,
+            with_head=False,
+            out_norm=False,
+            ms_aug=False,
+            return_global=False,
+        )[0]
+        return reshape_tokens_to_grid(
+            tokens,
+            grid_h=height // patch_h,
+            grid_w=width // patch_w,
+            num_prefix_tokens=1,
+            encoder_name=type(self).__name__,
+        )
 
     @property
     def encode_dim(self) -> int:

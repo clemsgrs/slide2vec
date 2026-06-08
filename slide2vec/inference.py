@@ -90,6 +90,7 @@ def load_model(
     device: str = "auto",
     output_variant: str | None = None,
     allow_non_recommended_settings: bool = False,
+    dynamic_img_size: bool | None = None,
     token: str | None = None,
 ) -> LoadedModel:
     name = canonicalize_model_name(name)
@@ -105,7 +106,20 @@ def load_model(
         hf_login(token=token, add_to_git_credential=False)
 
     encoder_cls = encoder_registry.require(name)
-    encoder = encoder_cls(output_variant=output_variant)
+    # Pass dynamic_img_size / allow_non_recommended_settings ONLY to encoders whose
+    # constructor accepts them (e.g. H-optimus needs both to opt into variable input
+    # size for dense extraction; most others hardcode dynamic_img_size=True and take
+    # neither). Limited to these two named params on purpose — not a generic kwargs
+    # passthrough — so load_model stays a narrow construction contract.
+    import inspect
+
+    ctor_params = inspect.signature(encoder_cls.__init__).parameters
+    extra_kwargs: dict = {}
+    if dynamic_img_size is not None and "dynamic_img_size" in ctor_params:
+        extra_kwargs["dynamic_img_size"] = dynamic_img_size
+    if "allow_non_recommended_settings" in ctor_params:
+        extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
+    encoder = encoder_cls(output_variant=output_variant, **extra_kwargs)
 
     tile_encoder = None
     if resolved_level == "tile":
