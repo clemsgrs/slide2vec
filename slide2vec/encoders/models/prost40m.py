@@ -18,4 +18,5 @@ class Prost40M(TimmTileEncoder):
         super().__init__(
             "hf-hub:waticlems/Prost40M",
             output_variant=output_variant,
+            dynamic_img_size=True,  # enable dense extraction; no-op at native size
         )

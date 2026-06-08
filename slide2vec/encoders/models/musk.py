@@ -48,10 +48,14 @@ class MUSK(TileEncoder):
         ])
 
     def encode_tiles(self, batch: Tensor) -> Tensor:
+        # MUSK's linear-probe / MIL feature-extraction recipe uses out_norm=False
+        # (raw embeddings); out_norm=True L2-normalizes and is for zero-shot/retrieval.
+        # return_global defaults to True (CLS), so [0] is the (B, D) image embedding.
+        # https://github.com/lilab-stanford/MUSK
         return self._model(
             image=batch,
             with_head=False,
-            out_norm=True,
+            out_norm=False,
             ms_aug=self._output_variant == "ms_aug",
         )[0]
 

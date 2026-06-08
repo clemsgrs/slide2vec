@@ -10,6 +10,8 @@ from slide2vec.encoders.base import (
     SlideEncoder,
     TileEncoder,
     TimmTileEncoder,
+    reshape_tokens_to_grid,
+    resolve_recommended_dynamic_img_size,
     resolve_requested_output_variant,
 )
 from slide2vec.encoders.registry import (
@@ -29,6 +31,8 @@ __all__ = [
     "TileEncoder",
     "SlideEncoder",
     "TimmTileEncoder",
+    "reshape_tokens_to_grid",
+    "resolve_recommended_dynamic_img_size",
     "resolve_requested_output_variant",
     "encoder_registry",
     "register_encoder",
