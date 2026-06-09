@@ -114,6 +114,32 @@ Tile-level encoders
      - ``0.25``, ``0.5``, ``1.0``, ``2.0``
      - Karasikov et al. (2025)
 
+Dense tile grids
+~~~~~~~~~~~~~~~~
+
+Dense tile feature extraction is available on tile encoders that implement
+``encode_tiles_dense``. It returns a spatial patch-token tensor ``(B, d, h, w)``
+instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
+
+The following built-in tile presets are covered by the dense encoder interface:
+``conch``, ``conchv15``, ``gigapath``, ``h0-mini``, ``h-optimus-0``,
+``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``musk``,
+``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
+``virchow2``.
+
+Notes:
+
+- Dense grids use patch-token dimensions. For encoders whose pooled output
+  concatenates CLS and mean patch tokens, ``d`` can be smaller than the pooled
+  output dimension ``D``.
+- ``get_dense_transform`` preserves geometry by applying normalization only.
+  Resize, crop, padding, and sliding-window policy are the caller's
+  responsibility.
+- ``musk`` dense extraction currently requires its native 384 x 384 input size.
+- H-Optimus dense extraction at non-native input sizes requires
+  ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
+  constructing the encoder.
+
 
 
 Slide-level encoders

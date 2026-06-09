@@ -68,6 +68,10 @@ Shapes by artifact type:
    * - ``patient_embeddings``
      - ``(D,)``
 
+Dense tile grids are not currently written by :class:`~slide2vec.Pipeline` or
+the CLI. They are exposed through the low-level tile encoder API as
+``encode_tiles_dense(...)``; see :doc:`api` for usage.
+
 
 Embedding Meta Files
 --------------------
