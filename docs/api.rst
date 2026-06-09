@@ -104,6 +104,57 @@ Enable hierarchical mode by setting ``region_tile_multiple`` in
 The tile embeddings tensor will have shape ``(R, T, D)`` instead of ``(N, D)``.
 See :doc:`hierarchical` for the full explanation.
 
+Dense Tile Feature Extraction
+-----------------------------
+
+Some tile encoders can return the spatial grid of ViT patch-token features
+instead of a single pooled vector per tile. This is useful for dense downstream
+tasks where patch-token features must stay registered to the input tile.
+
+Dense extraction is a low-level encoder API:
+
+- ``get_dense_transform()`` applies the encoder's photometric normalization
+  without resize or center-crop, so tile geometry is preserved.
+- ``encode_tiles_dense(batch)`` accepts a normalized ``(B, C, H, W)`` tensor and
+  returns ``(B, d, h, w)``.
+- ``h`` and ``w`` are resolved from the input size and encoder patch size
+  (for example, a 224 px tile with an 8 px patch size returns a 28 x 28 grid).
+
+Example:
+
+.. code-block:: python
+
+   import torch
+   from PIL import Image
+
+   from slide2vec.encoders import encoder_registry
+
+   encoder = encoder_registry.require("lunit")().to("cuda")
+   transform = encoder.get_dense_transform()
+
+   tile = Image.open("/data/tile.png").convert("RGB")
+   batch = transform(tile).unsqueeze(0).to(encoder.device)
+
+   with torch.no_grad():
+       dense = encoder.encode_tiles_dense(batch)
+
+   print(dense.shape)  # torch.Size([1, 384, 28, 28]) for a 224 px Lunit tile
+
+The dense transform deliberately does not resize, crop, or pad. The input
+height and width passed to ``encode_tiles_dense`` must be divisible by the
+encoder patch size, unless the specific encoder is pinned to a native input
+size. Unsupported encoders raise ``NotImplementedError``.
+
+For H-Optimus encoders, non-native dense extraction requires opting into the
+variable-size model setting:
+
+.. code-block:: python
+
+   encoder = encoder_registry.require("h-optimus-0")(
+       dynamic_img_size=True,
+       allow_non_recommended_settings=True,
+   ).to("cuda")
+
 Pipeline
 ---------
 
