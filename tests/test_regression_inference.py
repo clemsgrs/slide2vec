@@ -3892,6 +3892,7 @@ def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch(
         read_spacing_um=0.27,
         tile_size_lv0=3319,
         base_spacing_um=0.27,
+        level_downsamples=[1.0],
     )
 
     geometry = hierarchical.resolve_hierarchical_geometry(preprocessing, tiling_result)
@@ -3900,6 +3901,44 @@ def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch(
     assert geometry["read_region_size_px"] == 3320
     assert geometry["tile_size_lv0"] == 415
     assert geometry["tiles_per_region"] == 64
+
+
+def test_resolve_hierarchical_geometry_uses_hs2p_spacing_plan_for_tile_size(monkeypatch):
+    calls = []
+
+    def fake_plan_spacing_read(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(read_size_px=(415, 415), read_spacing_um=0.27)
+
+    monkeypatch.setattr(hierarchical, "plan_spacing_read", fake_plan_spacing_read)
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        requested_region_size_px=1792,
+        region_tile_multiple=8,
+    )
+    tiling_result = SimpleNamespace(
+        read_tile_size_px=3319,
+        read_spacing_um=0.27,
+        tile_size_lv0=3319,
+        base_spacing_um=0.27,
+        level_downsamples=[1.0, 2.0, 4.0],
+    )
+
+    geometry = hierarchical.resolve_hierarchical_geometry(preprocessing, tiling_result)
+
+    assert calls == [
+        {
+            "requested_spacing_um": 0.5,
+            "level0_spacing_um": 0.27,
+            "level_downsamples": [(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)],
+            "target_size_px": (224, 224),
+            "tolerance": 0.05,
+        }
+    ]
+    assert geometry["read_tile_size_px"] == 415
+    assert geometry["read_region_size_px"] == 3320
+    assert geometry["tile_size_lv0"] == 415
 
 
 def test_resolve_hierarchical_geometry_keeps_level0_footprint_when_spacing_matches_base():
@@ -3916,6 +3955,7 @@ def test_resolve_hierarchical_geometry_keeps_level0_footprint_when_spacing_match
         read_spacing_um=0.486187607049942,
         tile_size_lv0=224,
         base_spacing_um=0.486187607049942,
+        level_downsamples=[1.0],
     )
 
     geometry = hierarchical.resolve_hierarchical_geometry(preprocessing, tiling_result)
@@ -4067,6 +4107,7 @@ def test_compute_hierarchical_embeddings_for_slide_encodes_flat_tile_batches_and
         requested_spacing_um=0.5,
         read_spacing_um=0.5,
         base_spacing_um=0.5,
+        level_downsamples=[1.0],
         read_level=0,
     )
 
