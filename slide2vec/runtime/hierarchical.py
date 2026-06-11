@@ -1,4 +1,5 @@
 import numpy as np
+from hs2p.wsi.geometry import plan_spacing_read
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.utils.coordinates import coordinate_arrays
@@ -17,6 +18,21 @@ def is_hierarchical_preprocessing(preprocessing: PreprocessingConfig | None) -> 
     return preprocessing.region_tile_multiple is not None or preprocessing.requested_region_size_px is not None
 
 
+def _level_downsample_pairs(level_downsamples) -> list[tuple[float, float]]:
+    pairs: list[tuple[float, float]] = []
+    for downsample in level_downsamples:
+        if isinstance(downsample, (tuple, list, np.ndarray)):
+            if len(downsample) == 0:
+                raise ValueError("level_downsamples entries must not be empty")
+            x_value = float(downsample[0])
+            y_value = float(downsample[1]) if len(downsample) > 1 else x_value
+            pairs.append((x_value, y_value))
+        else:
+            value = float(downsample)
+            pairs.append((value, value))
+    return pairs
+
+
 def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_result) -> dict[str, int]:
     if preprocessing.region_tile_multiple is None:
         raise ValueError("Hierarchical preprocessing requires region_tile_multiple")
@@ -28,14 +44,16 @@ def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_res
     multiple = int(preprocessing.region_tile_multiple)
     if requested_region_size_px % multiple != 0:
         raise ValueError("requested_region_size_px must be divisible by region_tile_multiple")
-    read_spacing_um = float(getattr(tiling_result, "read_spacing_um"))
     base_spacing_um = float(getattr(tiling_result, "base_spacing_um"))
-    if abs(read_spacing_um - requested_spacing_um) / requested_spacing_um <= float(preprocessing.tolerance):
-        read_tile_size_px = requested_tile_size_px
-    else:
-        read_tile_size_px = int(
-            round(requested_tile_size_px * requested_spacing_um / read_spacing_um)
-        )
+    read_plan = plan_spacing_read(
+        requested_spacing_um=requested_spacing_um,
+        level0_spacing_um=base_spacing_um,
+        level_downsamples=_level_downsample_pairs(getattr(tiling_result, "level_downsamples")),
+        target_size_px=(requested_tile_size_px, requested_tile_size_px),
+        tolerance=float(preprocessing.tolerance),
+    )
+    read_spacing_um = float(read_plan.read_spacing_um)
+    read_tile_size_px = int(read_plan.read_size_px[0])
     read_region_size_px = read_tile_size_px * multiple
     # Use the actual read geometry that produced the tile crop. When the
     # resolved spacing is considered equivalent to the requested spacing,
