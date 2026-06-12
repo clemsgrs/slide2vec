@@ -208,7 +208,11 @@ be divisible by the encoder patch size, and unsupported encoders raise
 Implementation note: timm ViTs run a fused SDPA kernel that never materializes
 the attention matrix, so it is recomputed from each block's own projection
 (bit-equivalent to the weights the fused kernel applies). HuggingFace encoders
-use ``output_attentions=True`` directly.
+read the weights via ``output_attentions=True``, but modern ``transformers``
+default to an SDPA implementation that silently ignores that flag (it warns and
+returns no attentions); extraction therefore temporarily switches the model to
+the ``eager`` attention implementation for the forward pass and restores the
+previous setting afterwards.
 
 Pipeline
 ---------
