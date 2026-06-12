@@ -155,6 +155,65 @@ variable-size model setting:
        allow_non_recommended_settings=True,
    ).to("cuda")
 
+Dense Attention Map Extraction
+------------------------------
+
+Most ViT tile encoders can also return their frozen per-head **prefix-token
+self-attention** as a dense spatial grid. A frozen ViT's CLS-token attention
+doubles as a per-pixel feature (Ramchandani et al.,
+`arXiv:2602.18747 <https://arxiv.org/abs/2602.18747>`_); this is the attention
+analog of ``encode_tiles_dense`` and reuses the same ``get_dense_transform()``
+(normalization only, geometry preserved).
+
+- ``encode_tiles_attention(batch, *, blocks=(-1,), include_registers=False)``
+  accepts a normalized ``(B, C, H, W)`` tensor and returns ``(B, K, h, w)``.
+- ``K = len(blocks) * (1 + M·include_registers) * nh``, where ``nh`` is the head
+  count and ``M`` the model's register-token count (``0`` for models without
+  registers). Each channel is one prefix-token query row's attention over the
+  patch grid for one head — heads are **never** reduced.
+- Channels are stacked in the deterministic order ``[block][cls, reg…][head]``
+  (block outer, in the order requested; then CLS, then any register tokens; head
+  innermost). The CLS block (the first ``nh`` channels of each block) does not
+  depend on ``include_registers`` — registers only *append* channels.
+- ``blocks`` selects transformer blocks (negative indices count from the end);
+  ``include_registers`` adds the register-token query rows (Darcet et al.) as
+  extra channels for models that carry them (e.g. Hibou).
+
+Example:
+
+.. code-block:: python
+
+   import torch
+   from PIL import Image
+
+   from slide2vec.encoders import encoder_registry
+
+   encoder = encoder_registry.require("lunit")().to("cuda")
+   transform = encoder.get_dense_transform()
+
+   tile = Image.open("/data/tile.png").convert("RGB")
+   batch = transform(tile).unsqueeze(0).to(encoder.device)
+
+   with torch.no_grad():
+       attn = encoder.encode_tiles_attention(batch)  # last block, CLS only
+
+   print(attn.shape)  # (1, nh, 28, 28) for a 224 px Lunit tile
+
+Each value is a softmax weight: a slice of one query row over the patch keys, so
+values are non-negative and a channel's spatial sum is ``<= 1`` (the prefix-token
+key columns carry the remaining mass). As with dense extraction, the input must
+be divisible by the encoder patch size, and unsupported encoders raise
+``NotImplementedError``.
+
+Implementation note: timm ViTs run a fused SDPA kernel that never materializes
+the attention matrix, so it is recomputed from each block's own projection
+(bit-equivalent to the weights the fused kernel applies). HuggingFace encoders
+read the weights via ``output_attentions=True``, but modern ``transformers``
+default to an SDPA implementation that silently ignores that flag (it warns and
+returns no attentions); extraction therefore temporarily switches the model to
+the ``eager`` attention implementation for the forward pass and restores the
+previous setting afterwards.
+
 Pipeline
 ---------
 

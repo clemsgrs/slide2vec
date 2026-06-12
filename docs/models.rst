@@ -140,6 +140,29 @@ Notes:
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
   constructing the encoder.
 
+Dense attention maps
+~~~~~~~~~~~~~~~~~~~~~
+
+Tile encoders that implement ``encode_tiles_attention`` return per-head
+prefix-token self-attention as a spatial grid ``(B, K, h, w)`` — see the
+"Dense Attention Map Extraction" section of :doc:`api` for the channel-order
+contract and knobs.
+
+The following built-in tile presets are covered: ``conch``, ``conchv15``,
+``gigapath``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
+``hibou-l``, ``lunit``, ``midnight``, ``phikon``, ``phikonv2``, ``prost40m``,
+``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+
+Notes:
+
+- ``musk`` is **not** covered: its BEiT3 backbone uses a non-timm attention
+  module, so attention extraction raises ``NotImplementedError`` (dense
+  patch-token extraction is still available).
+- ``hibou-b`` / ``hibou-l`` carry register tokens; pass ``include_registers=True``
+  to add their query rows as extra channels.
+- ``conch`` / ``conchv15`` recover attention from their inner timm ViT trunk, the
+  same trunk their dense extraction uses.
+
 
 
 Slide-level encoders
