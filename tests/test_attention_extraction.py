@@ -20,9 +20,11 @@ import torch.nn.functional as F  # noqa: E402
 from slide2vec.encoders.base import (  # noqa: E402
     TileEncoder,
     TimmTileEncoder,
+    attentions_tuple_to_grids,
     prefix_attention_to_grid,
     resolve_block_indices,
     timm_self_attention_weights,
+    timm_trunk_attention,
 )
 
 
@@ -139,6 +141,41 @@ def test_attention_rows_form_a_distribution_over_grid_is_not_assumed():
         out = enc.encode_tiles_attention(x)
     assert (out >= 0).all()
     assert (out.flatten(2).sum(-1) <= 1.0 + 1e-5).all()
+
+
+# --------------------------------------------------------------------------- #
+# timm_trunk_attention: shared core reused by the timm encoders and the CONCH
+# wrappers (whose .visual.trunk / .trunk is itself a timm VisionTransformer).
+# --------------------------------------------------------------------------- #
+
+
+def test_timm_trunk_attention_matches_encoder_method():
+    """The free function on the trunk == the TimmTileEncoder method (same path)."""
+    enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
+    x = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        via_method = enc.encode_tiles_attention(x, blocks=(-1, -2))
+        via_func = timm_trunk_attention(
+            enc._model, x, blocks=(-1, -2), encoder_name="trunk"
+        )
+    torch.testing.assert_close(via_method, via_func, rtol=0, atol=0)
+
+
+def test_conch_reuses_timm_trunk_attention():
+    """CONCH reads its inner timm trunk via .visual.trunk; the override must match
+    the trunk run directly through the shared function."""
+    from slide2vec.encoders.models.conch import CONCH
+
+    trunk = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)._model
+    enc = CONCH.__new__(CONCH)
+    enc._model = SimpleNamespace(visual=SimpleNamespace(trunk=trunk))
+    x = torch.randn(1, 3, 224, 224)
+    with torch.no_grad():
+        out = enc.encode_tiles_attention(x, blocks=(-1,))
+        direct = timm_trunk_attention(trunk, x, blocks=(-1,), encoder_name="CONCH")
+    nh = trunk.blocks[-1].attn.num_heads
+    assert out.shape == (1, nh, 14, 14)
+    torch.testing.assert_close(out, direct, rtol=0, atol=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -259,6 +296,60 @@ def test_phikon_attention_rejects_indivisible_input():
     enc._model = _FakeHFViTWithAttn(patch_size=16, num_heads=12, num_layers=12)
     with pytest.raises(ValueError, match="divisible by the patch size"):
         enc.encode_tiles_attention(torch.randn(1, 3, 220, 220))
+
+
+def test_attentions_tuple_helper_fails_loud_when_model_returns_none():
+    """A fused-SDPA HF model that ignores output_attentions yields attentions=None;
+    the helper must fail loud rather than crash deep inside the reshape."""
+    with pytest.raises(NotImplementedError, match="output_attentions=True"):
+        attentions_tuple_to_grids(
+            None, num_prefix_tokens=1, blocks=(-1,), include_registers=False,
+            grid_h=14, grid_w=14, encoder_name="e",
+        )
+
+
+class _FakeHFDinoV2:
+    """HF Dinov2 double: callable positionally or via pixel_values, with registers."""
+
+    def __init__(self, *, patch_size, num_heads, num_layers, num_register_tokens=0):
+        self.config = SimpleNamespace(
+            patch_size=patch_size, num_register_tokens=num_register_tokens
+        )
+        self._num_heads = num_heads
+        self._num_layers = num_layers
+        self._num_prefix = 1 + num_register_tokens
+
+    def __call__(self, pixel_values=None, *, output_attentions=False):
+        assert output_attentions is True
+        b, _, h, w = pixel_values.shape
+        n = self._num_prefix + (h // self.config.patch_size) * (w // self.config.patch_size)
+        attentions = tuple(
+            torch.rand(b, self._num_heads, n, n).softmax(dim=-1)
+            for _ in range(self._num_layers)
+        )
+        return _FakeHFAttnOutput(attentions)
+
+
+def test_hibou_attention_includes_registers():
+    from slide2vec.encoders.models.hibou import HibouB
+
+    enc = HibouB.__new__(HibouB)
+    enc._model = _FakeHFDinoV2(patch_size=14, num_heads=12, num_layers=12, num_register_tokens=4)
+    x = torch.randn(1, 3, 224, 224)  # grid 16x16
+    cls_only = enc.encode_tiles_attention(x, include_registers=False)
+    with_reg = enc.encode_tiles_attention(x, include_registers=True)
+    assert cls_only.shape == (1, 12, 16, 16)            # CLS only
+    assert with_reg.shape == (1, (1 + 4) * 12, 16, 16)  # CLS + 4 registers
+
+
+def test_midnight_attention_cls_only():
+    from slide2vec.encoders.models.midnight import Midnight
+
+    enc = Midnight.__new__(Midnight)
+    enc._model = _FakeHFDinoV2(patch_size=14, num_heads=6, num_layers=12)
+    x = torch.randn(2, 3, 224, 224)  # grid 16x16
+    out = enc.encode_tiles_attention(x, blocks=(-1, -2))
+    assert out.shape == (2, 2 * 6, 16, 16)  # 2 blocks * (1 CLS * 6 heads)
 
 
 # --------------------------------------------------------------------------- #

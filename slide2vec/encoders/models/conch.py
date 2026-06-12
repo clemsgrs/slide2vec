@@ -18,6 +18,7 @@ from slide2vec.encoders.base import (
     preferred_default_device,
     reshape_tokens_to_grid,
     resolve_requested_output_variant,
+    timm_trunk_attention,
 )
 from slide2vec.encoders.registry import register_encoder
 
@@ -120,6 +121,22 @@ class CONCH(TileEncoder):
             encoder_name=type(self).__name__,
         )
 
+    def encode_tiles_attention(
+        self,
+        batch: Tensor,
+        *,
+        blocks: tuple[int, ...] = (-1,),
+        include_registers: bool = False,
+    ) -> Tensor:
+        # The ViT trunk is a timm VisionTransformer, so reuse the shared timm path.
+        return timm_trunk_attention(
+            self._model.visual.trunk,
+            batch,
+            blocks=blocks,
+            include_registers=include_registers,
+            encoder_name=type(self).__name__,
+        )
+
     @property
     def encode_dim(self) -> int:
         return 512
@@ -164,6 +181,22 @@ class CONCHv15(TileEncoder):
         return _encode_trunk_dense(
             trunk=self._model.trunk,
             batch=batch,
+            encoder_name=type(self).__name__,
+        )
+
+    def encode_tiles_attention(
+        self,
+        batch: Tensor,
+        *,
+        blocks: tuple[int, ...] = (-1,),
+        include_registers: bool = False,
+    ) -> Tensor:
+        # The ViT trunk is a timm VisionTransformer, so reuse the shared timm path.
+        return timm_trunk_attention(
+            self._model.trunk,
+            batch,
+            blocks=blocks,
+            include_registers=include_registers,
             encoder_name=type(self).__name__,
         )
 

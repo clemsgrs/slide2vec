@@ -11,10 +11,9 @@ from transformers import AutoImageProcessor, AutoModel
 
 from slide2vec.encoders.base import (
     TileEncoder,
+    attentions_tuple_to_grids,
     preferred_default_device,
-    prefix_attention_to_grid,
     reshape_tokens_to_grid,
-    resolve_block_indices,
     resolve_requested_output_variant,
 )
 from slide2vec.encoders.registry import register_encoder
@@ -120,23 +119,15 @@ class _PhikonBase(TileEncoder):
                 f"{patch}. Pad the tile up to a patch multiple first."
             )
         output = self._model(pixel_values=batch, output_attentions=True)
-        attentions = output.attentions  # tuple: per-layer (B, nh, N, N)
-        resolved = resolve_block_indices(
-            blocks, len(attentions), encoder_name=type(self).__name__
+        return attentions_tuple_to_grids(
+            output.attentions,  # tuple: per-layer (B, nh, N, N)
+            num_prefix_tokens=1,
+            blocks=blocks,
+            include_registers=include_registers,
+            grid_h=height // patch,
+            grid_w=width // patch,
+            encoder_name=type(self).__name__,
         )
-        grid_h, grid_w = height // patch, width // patch
-        grids = [
-            prefix_attention_to_grid(
-                attentions[index],
-                num_prefix_tokens=1,
-                include_registers=include_registers,
-                grid_h=grid_h,
-                grid_w=grid_w,
-                encoder_name=type(self).__name__,
-            )
-            for index in resolved
-        ]
-        return torch.cat(grids, dim=1)
 
     @property
     def encode_dim(self) -> int:

@@ -12,6 +12,7 @@ from transformers import AutoModel
 
 from slide2vec.encoders.base import (
     TileEncoder,
+    attentions_tuple_to_grids,
     preferred_default_device,
     reshape_tokens_to_grid,
     resolve_requested_output_variant,
@@ -76,6 +77,43 @@ class _HibouBase(TileEncoder):
             grid_h=height // patch,
             grid_w=width // patch,
             num_prefix_tokens=1 + int(getattr(self._model.config, "num_register_tokens", 0)),
+            encoder_name=type(self).__name__,
+        )
+
+    def encode_tiles_attention(
+        self,
+        batch: Tensor,
+        *,
+        blocks: tuple[int, ...] = (-1,),
+        include_registers: bool = False,
+    ) -> Tensor:
+        """Per-head CLS/register attention maps (HF Dinov2 path).
+
+        Hibou carries register tokens, so ``include_registers`` adds those query
+        rows as extra channels. SDPA-backed HF attention falls back to an eager
+        compute when ``output_attentions=True`` is requested.
+        """
+        if batch.ndim != 4:
+            raise ValueError(
+                "encode_tiles_attention expects a (B, C, H, W) batch, got shape "
+                f"{tuple(batch.shape)}."
+            )
+        _, _, height, width = batch.shape
+        patch = int(self._model.config.patch_size)
+        if height % patch != 0 or width % patch != 0:
+            raise ValueError(
+                f"Attention extraction for '{type(self).__name__}' requires input "
+                f"divisible by the patch size: got {height}x{width}, patch "
+                f"{patch}. Pad the tile up to a patch multiple first."
+            )
+        output = self._model(pixel_values=batch, output_attentions=True)
+        return attentions_tuple_to_grids(
+            output.attentions,
+            num_prefix_tokens=1 + int(getattr(self._model.config, "num_register_tokens", 0)),
+            blocks=blocks,
+            include_registers=include_registers,
+            grid_h=height // patch,
+            grid_w=width // patch,
             encoder_name=type(self).__name__,
         )
 

@@ -214,6 +214,126 @@ def resolve_block_indices(blocks, num_blocks: int, *, encoder_name: str) -> list
     return resolved
 
 
+def timm_trunk_attention(
+    trunk,
+    batch: Tensor,
+    *,
+    blocks: tuple[int, ...] = (-1,),
+    include_registers: bool = False,
+    encoder_name: str,
+) -> Tensor:
+    """Extract per-head prefix-token attention maps from a timm ViT trunk.
+
+    The reusable core of :meth:`TimmTileEncoder.encode_tiles_attention`, factored
+    out so wrapper encoders that embed a timm ``VisionTransformer`` (CONCH's
+    ``visual.trunk``, CONCH v1.5's ``trunk``) reuse the exact same path on their
+    inner trunk — the attention analog of how ``_encode_trunk_dense`` is shared.
+
+    Captures each selected block's attention input via a forward-pre-hook on
+    ``trunk.blocks[i].attn`` (the fused SDPA kernel never materializes the matrix),
+    recomputes the softmax weights (:func:`timm_self_attention_weights`), and folds
+    the prefix-token query rows into spatial grids (:func:`prefix_attention_to_grid`).
+    Patch size and prefix-token count are read from the trunk
+    (``patch_embed.patch_size`` / ``num_prefix_tokens``). Output ``(B, K, h, w)`` in
+    ``[block][cls, reg…][head]`` order.
+    """
+    if batch.ndim != 4:
+        raise ValueError(
+            "encode_tiles_attention expects a (B, C, H, W) batch, got shape "
+            f"{tuple(batch.shape)}."
+        )
+    _, _, height, width = batch.shape
+    patch = trunk.patch_embed.patch_size
+    patch_h, patch_w = (patch, patch) if isinstance(patch, int) else (int(patch[0]), int(patch[1]))
+    if height % patch_h != 0 or width % patch_w != 0:
+        raise ValueError(
+            f"Attention extraction for '{encoder_name}' requires input divisible by "
+            f"the patch size: got {height}x{width}, patch {patch_h}x{patch_w}. Pad "
+            "the tile up to a patch multiple first."
+        )
+    if not hasattr(trunk, "blocks"):
+        raise NotImplementedError(
+            f"{encoder_name} has no '.blocks' transformer stack; attention extraction "
+            "supports timm ViT-style backbones only."
+        )
+    block_list = trunk.blocks
+    resolved = resolve_block_indices(blocks, len(block_list), encoder_name=encoder_name)
+
+    captured: dict[int, Tensor] = {}
+
+    def _make_hook(index: int):
+        def _hook(_module, inputs):
+            captured[index] = inputs[0]
+
+        return _hook
+
+    handles = []
+    for index in sorted(set(resolved)):
+        handles.append(block_list[index].attn.register_forward_pre_hook(_make_hook(index)))
+    try:
+        trunk.forward_features(batch)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    grid_h, grid_w = height // patch_h, width // patch_w
+    num_prefix = int(getattr(trunk, "num_prefix_tokens", 1))
+    grids = []
+    for index in resolved:
+        attn_weights = timm_self_attention_weights(block_list[index].attn, captured[index])
+        grids.append(
+            prefix_attention_to_grid(
+                attn_weights,
+                num_prefix_tokens=num_prefix,
+                include_registers=include_registers,
+                grid_h=grid_h,
+                grid_w=grid_w,
+                encoder_name=encoder_name,
+            )
+        )
+    return torch.cat(grids, dim=1)  # [block] outer (caller order), [cls, reg…][head] inner
+
+
+def attentions_tuple_to_grids(
+    attentions,
+    *,
+    num_prefix_tokens: int,
+    blocks: tuple[int, ...],
+    include_registers: bool,
+    grid_h: int,
+    grid_w: int,
+    encoder_name: str,
+) -> Tensor:
+    """Fold an HF ``output_attentions`` tuple into stacked prefix-token grids.
+
+    HF transformer ViTs expose every block's softmax attention directly (no
+    fused-kernel recompute), as a per-layer tuple of ``(B, nh, N, N)`` tensors.
+    This selects the requested blocks (:func:`resolve_block_indices`), folds each
+    to spatial grids (:func:`prefix_attention_to_grid`), and concatenates them in
+    ``[block][cls, reg…][head]`` order — the shared core of the HF-path encoders
+    (Phikon, Hibou, Midnight), which differ only in ``num_prefix_tokens``.
+    """
+    if not attentions:
+        raise NotImplementedError(
+            f"{encoder_name} returned no attentions; the model must support "
+            "output_attentions=True (an eager/recompute attention implementation, "
+            "not a fused SDPA path that discards the weights)."
+        )
+    resolved = resolve_block_indices(blocks, len(attentions), encoder_name=encoder_name)
+    grids = [
+        prefix_attention_to_grid(
+            attentions[index],
+            num_prefix_tokens=num_prefix_tokens,
+            include_registers=include_registers,
+            grid_h=grid_h,
+            grid_w=grid_w,
+            encoder_name=encoder_name,
+        )
+        for index in resolved
+    ]
+    return torch.cat(grids, dim=1)
+
+
 class Encoder(ABC):
     """Shared lifecycle contract for all encoders."""
 
@@ -480,64 +600,13 @@ class TimmTileEncoder(TileEncoder):
         ``(B, K, h, w)`` in ``[block][cls, reg…][head]`` order — see
         :meth:`TileEncoder.encode_tiles_attention`.
         """
-        if batch.ndim != 4:
-            raise ValueError(
-                "encode_tiles_attention expects a (B, C, H, W) batch, got shape "
-                f"{tuple(batch.shape)}."
-            )
-        _, _, height, width = batch.shape
-        patch_h, patch_w = self._dense_patch_size()
-        if height % patch_h != 0 or width % patch_w != 0:
-            raise ValueError(
-                f"Attention extraction for '{type(self).__name__}' requires input "
-                f"divisible by the patch size: got {height}x{width}, patch "
-                f"{patch_h}x{patch_w}. Pad the tile up to a patch multiple first."
-            )
-        if not hasattr(self._model, "blocks"):
-            raise NotImplementedError(
-                f"{type(self).__name__} has no '.blocks' transformer stack; attention "
-                "extraction supports timm ViT-style backbones only."
-            )
-        block_list = self._model.blocks
-        resolved = resolve_block_indices(
-            blocks, len(block_list), encoder_name=type(self).__name__
+        return timm_trunk_attention(
+            self._model,
+            batch,
+            blocks=blocks,
+            include_registers=include_registers,
+            encoder_name=type(self).__name__,
         )
-
-        captured: dict[int, Tensor] = {}
-
-        def _make_hook(index: int):
-            def _hook(_module, inputs):
-                captured[index] = inputs[0]
-
-            return _hook
-
-        handles = []
-        for index in sorted(set(resolved)):
-            handles.append(block_list[index].attn.register_forward_pre_hook(_make_hook(index)))
-        try:
-            self._model.forward_features(batch)
-        finally:
-            for handle in handles:
-                handle.remove()
-
-        grid_h, grid_w = height // patch_h, width // patch_w
-        num_prefix = self._dense_num_prefix_tokens()
-        grids = []
-        for index in resolved:
-            attn_weights = timm_self_attention_weights(
-                block_list[index].attn, captured[index]
-            )
-            grids.append(
-                prefix_attention_to_grid(
-                    attn_weights,
-                    num_prefix_tokens=num_prefix,
-                    include_registers=include_registers,
-                    grid_h=grid_h,
-                    grid_w=grid_w,
-                    encoder_name=type(self).__name__,
-                )
-            )
-        return torch.cat(grids, dim=1)  # [block] outer (caller order), [cls, reg…][head] inner
 
     @property
     def encode_dim(self) -> int:
