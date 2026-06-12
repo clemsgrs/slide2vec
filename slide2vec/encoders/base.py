@@ -1,6 +1,7 @@
 """Encoder abstractions for tile-level and slide-level feature extraction."""
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Callable
 
 import timm
@@ -12,6 +13,36 @@ from torchvision.transforms import v2
 
 def preferred_default_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@contextmanager
+def hf_eager_attention(model):
+    """Force an HF model onto eager attention for the duration of the block.
+
+    Recent ``transformers`` default to an SDPA attention implementation that
+    *silently ignores* ``output_attentions=True`` (it warns and returns
+    ``attentions=None``), so attention extraction must temporarily switch the
+    model to ``eager``, which materializes the weights. The previous
+    implementation is restored on exit. A no-op for models that lack
+    ``set_attn_implementation`` or are already eager (e.g. some vendored
+    ``trust_remote_code`` backbones that always compute the weights)."""
+    setter = getattr(model, "set_attn_implementation", None)
+    prev = getattr(getattr(model, "config", None), "_attn_implementation", None)
+    changed = False
+    if callable(setter) and prev not in (None, "eager"):
+        try:
+            setter("eager")
+            changed = True
+        except Exception:
+            changed = False
+    try:
+        yield
+    finally:
+        if changed:
+            try:
+                setter(prev)
+            except Exception:
+                pass
 
 
 def resolve_requested_output_variant(

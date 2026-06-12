@@ -14,6 +14,7 @@ from transformers import AutoModel
 from slide2vec.encoders.base import (
     TileEncoder,
     attentions_tuple_to_grids,
+    hf_eager_attention,
     preferred_default_device,
     reshape_tokens_to_grid,
     resolve_requested_output_variant,
@@ -107,7 +108,8 @@ class Midnight(TileEncoder):
                 f"divisible by the patch size: got {height}x{width}, patch "
                 f"{patch}. Pad the tile up to a patch multiple first."
             )
-        output = self._model(batch, output_attentions=True)
+        with hf_eager_attention(self._model):
+            output = self._model(batch, output_attentions=True)
         return attentions_tuple_to_grids(
             output.attentions,
             num_prefix_tokens=1,

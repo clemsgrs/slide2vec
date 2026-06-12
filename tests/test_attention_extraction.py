@@ -330,6 +330,53 @@ class _FakeHFDinoV2:
         return _FakeHFAttnOutput(attentions)
 
 
+class _FakeSdpaHFViT:
+    """HF double mimicking the modern SDPA default: it *drops* attentions
+    (returns None) unless the model is switched to eager via
+    ``set_attn_implementation`` — exactly the trap the real Phikon/Midnight hit."""
+
+    def __init__(self, *, patch_size, num_heads, num_layers):
+        self.config = SimpleNamespace(patch_size=patch_size, _attn_implementation="sdpa")
+        self._num_heads = num_heads
+        self._num_layers = num_layers
+
+    def set_attn_implementation(self, impl):
+        self.config._attn_implementation = impl
+
+    def __call__(self, pixel_values=None, *, output_attentions=False):
+        b, _, h, w = pixel_values.shape
+        n = 1 + (h // self.config.patch_size) * (w // self.config.patch_size)
+        if self.config._attn_implementation != "eager" or not output_attentions:
+            return _FakeHFAttnOutput(None)  # SDPA silently discards the weights
+        attentions = tuple(
+            torch.rand(b, self._num_heads, n, n).softmax(dim=-1)
+            for _ in range(self._num_layers)
+        )
+        return _FakeHFAttnOutput(attentions)
+
+
+def test_phikon_forces_eager_when_sdpa_default():
+    """encode_tiles_attention must switch an SDPA-default model to eager (else it
+    would get attentions=None) and restore the prior implementation afterwards."""
+    from slide2vec.encoders.models.phikon import Phikon
+
+    enc = Phikon.__new__(Phikon)
+    enc._model = _FakeSdpaHFViT(patch_size=16, num_heads=12, num_layers=12)
+    out = enc.encode_tiles_attention(torch.randn(1, 3, 224, 224), blocks=(-1,))
+    assert out.shape == (1, 12, 14, 14)
+    assert enc._model.config._attn_implementation == "sdpa"  # restored
+
+
+def test_midnight_forces_eager_when_sdpa_default():
+    from slide2vec.encoders.models.midnight import Midnight
+
+    enc = Midnight.__new__(Midnight)
+    enc._model = _FakeSdpaHFViT(patch_size=14, num_heads=6, num_layers=12)
+    out = enc.encode_tiles_attention(torch.randn(1, 3, 224, 224))
+    assert out.shape == (1, 6, 16, 16)
+    assert enc._model.config._attn_implementation == "sdpa"  # restored
+
+
 def test_hibou_attention_includes_registers():
     from slide2vec.encoders.models.hibou import HibouB
 
