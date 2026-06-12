@@ -79,6 +79,34 @@ def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model
     assert cfg.tiling.params.requested_tile_size_px == 448
 
 
+def test_get_cfg_from_args_fills_null_spacing_from_model_default(tmp_path: Path):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+                "model:",
+                "  name: conchv15",
+                "tiling:",
+                "  params:",
+                "    requested_spacing_um:",
+                "    requested_tile_size_px: 448",
+            ]
+        )
+    )
+    args = SimpleNamespace(config_file=str(cfg_path), output_dir=None, opts=[], run_on_cpu=False)
+
+    cfg = get_cfg_from_args(args)
+
+    assert cfg.tiling.params.requested_spacing_um == pytest.approx(0.5)
+    assert cfg.tiling.params.requested_tile_size_px == 448
+
+
 def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_path: Path):
     pytest.importorskip("omegaconf")
 

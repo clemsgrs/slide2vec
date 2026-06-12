@@ -41,6 +41,21 @@ def _encoder_derived_cfg(model_name: str) -> dict:
     }
 
 
+def _fill_null_encoder_defaults(cfg, encoder_defaults: dict) -> None:
+    """Fill null leaves with encoder defaults after user/CLI config merging."""
+    defaults_cfg = OmegaConf.create(encoder_defaults)
+    for path in (
+        "tiling.params.requested_tile_size_px",
+        "tiling.params.requested_spacing_um",
+        "speed.precision",
+    ):
+        if OmegaConf.select(cfg, path) is not None:
+            continue
+        default_value = OmegaConf.select(defaults_cfg, path)
+        if default_value is not None:
+            OmegaConf.update(cfg, path, default_value, merge=False)
+
+
 def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> None:
     from slide2vec.encoders.registry import encoder_registry
     from slide2vec.encoders.validation import validate_encoder_config
@@ -88,14 +103,17 @@ def get_cfg_from_args(args):
 
     default_cfg = OmegaConf.create(default_config)
     model_name = OmegaConf.select(requested_cfg, "model.name")
-    spacing = OmegaConf.select(requested_cfg, "tiling.params.requested_spacing_um")
-    tile_size = OmegaConf.select(requested_cfg, "tiling.params.requested_tile_size_px")
-    if model_name and (spacing is None or tile_size is None):
-        encoder_defaults = _encoder_derived_cfg(model_name)
-        if encoder_defaults:
-            default_cfg = OmegaConf.merge(default_cfg, OmegaConf.create(encoder_defaults))
-
     cfg = OmegaConf.merge(default_cfg, user_cfg, cli_cfg)
+    if model_name and any(
+        OmegaConf.select(cfg, path) is None
+        for path in (
+            "tiling.params.requested_tile_size_px",
+            "tiling.params.requested_spacing_um",
+            "speed.precision",
+        )
+    ):
+        encoder_defaults = _encoder_derived_cfg(model_name)
+        _fill_null_encoder_defaults(cfg, encoder_defaults)
     OmegaConf.resolve(cfg)
     validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
     return cfg
