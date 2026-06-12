@@ -12,7 +12,9 @@ from transformers import AutoImageProcessor, AutoModel
 from slide2vec.encoders.base import (
     TileEncoder,
     preferred_default_device,
+    prefix_attention_to_grid,
     reshape_tokens_to_grid,
+    resolve_block_indices,
     resolve_requested_output_variant,
 )
 from slide2vec.encoders.registry import register_encoder
@@ -88,6 +90,53 @@ class _PhikonBase(TileEncoder):
             num_prefix_tokens=1,
             encoder_name=type(self).__name__,
         )
+
+    def encode_tiles_attention(
+        self,
+        batch: Tensor,
+        *,
+        blocks: tuple[int, ...] = (-1,),
+        include_registers: bool = False,
+    ) -> Tensor:
+        """Encode tiles into per-head CLS attention maps (HF transformers path).
+
+        HF ViTs expose every block's softmax attention directly via
+        ``output_attentions=True`` (no fused-kernel recompute needed). Phikon has a
+        single prefix token (CLS, no registers), so ``include_registers`` is a no-op
+        here (``M = 0``). Output ``(B, K, h, w)`` in ``[block][cls][head]`` order —
+        see :meth:`TileEncoder.encode_tiles_attention`.
+        """
+        if batch.ndim != 4:
+            raise ValueError(
+                "encode_tiles_attention expects a (B, C, H, W) batch, got shape "
+                f"{tuple(batch.shape)}."
+            )
+        _, _, height, width = batch.shape
+        patch = int(self._model.config.patch_size)
+        if height % patch != 0 or width % patch != 0:
+            raise ValueError(
+                f"Attention extraction for '{type(self).__name__}' requires input "
+                f"divisible by the patch size: got {height}x{width}, patch "
+                f"{patch}. Pad the tile up to a patch multiple first."
+            )
+        output = self._model(pixel_values=batch, output_attentions=True)
+        attentions = output.attentions  # tuple: per-layer (B, nh, N, N)
+        resolved = resolve_block_indices(
+            blocks, len(attentions), encoder_name=type(self).__name__
+        )
+        grid_h, grid_w = height // patch, width // patch
+        grids = [
+            prefix_attention_to_grid(
+                attentions[index],
+                num_prefix_tokens=1,
+                include_registers=include_registers,
+                grid_h=grid_h,
+                grid_w=grid_w,
+                encoder_name=type(self).__name__,
+            )
+            for index in resolved
+        ]
+        return torch.cat(grids, dim=1)
 
     @property
     def encode_dim(self) -> int:
