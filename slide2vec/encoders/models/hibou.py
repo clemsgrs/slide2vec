@@ -124,6 +124,12 @@ class _HibouBase(TileEncoder):
         return self._encode_dim
 
     @property
+    def patch_size(self) -> tuple[int, int]:
+        # HF Dinov2-style config carries the patch size; expose it for the dense path.
+        patch = int(self._model.config.patch_size)
+        return patch, patch
+
+    @property
     def device(self) -> torch.device:
         return self._device
 
