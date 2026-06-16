@@ -115,6 +115,11 @@ class MUSK(TileEncoder):
         return 2048 if self._output_variant == "ms_aug" else 1024  # cls
 
     @property
+    def patch_size(self) -> tuple[int, int]:
+        # BEiT3 vision embedding carries the patch size; expose it for the dense path.
+        return _as_hw(self._model.beit3.vision_embed.patch_size)
+
+    @property
     def device(self) -> torch.device:
         return self._device
 

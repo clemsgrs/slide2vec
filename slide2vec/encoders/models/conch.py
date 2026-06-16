@@ -142,6 +142,13 @@ class CONCH(TileEncoder):
         return 512
 
     @property
+    def patch_size(self) -> tuple[int, int]:
+        # The CONCH vision trunk is a timm ViT-B/16; expose its patch size so the
+        # dense path can resolve the token grid. open_clip builds the trunk without
+        # dynamic_img_size, so dense extraction must use the native 448 window.
+        return _patch_size_from_trunk(self._model.visual.trunk)
+
+    @property
     def device(self) -> torch.device:
         return self._device
 
@@ -203,6 +210,11 @@ class CONCHv15(TileEncoder):
     @property
     def encode_dim(self) -> int:
         return 768
+
+    @property
+    def patch_size(self) -> tuple[int, int]:
+        # CONCHv15's TITAN trunk is a timm ViT; expose its patch size for the dense path.
+        return _patch_size_from_trunk(self._model.trunk)
 
     @property
     def device(self) -> torch.device:
