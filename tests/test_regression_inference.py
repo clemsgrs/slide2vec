@@ -2594,6 +2594,71 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
     assert recorded.loc["slide-b", "feature_status"] == "tbp"
     assert recorded.loc["slide-b", "aggregation_status"] == "tbp"
 
+
+def test_direct_embed_slides_single_gpu_reconciles_batched_tile_status_on_clean_run(monkeypatch, tmp_path: Path):
+    # Tile-level single-GPU run with fewer slides than TILE_EMBEDDING_FLUSH_INTERVAL:
+    # the incremental callback buffers every completion and never flushes mid-run,
+    # so feature_status is written only by the end-of-run reconciliation. Without
+    # it, a clean run would leave these rows as "tbp" despite the .pt files existing.
+    pytest.importorskip("torch")
+    import slide2vec.inference as inference
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(
+            x=np.array([0, 1]),
+            y=np.array([2, 3]),
+            tile_size_lv0=224,
+            coordinates_npz_path=Path("/tmp/slide-a.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
+        ),
+        SimpleNamespace(
+            x=np.array([4, 5]),
+            y=np.array([6, 7]),
+            tile_size_lv0=224,
+            coordinates_npz_path=Path("/tmp/slide-b.coordinates.npz"),
+            coordinates_meta_path=Path("/tmp/slide-b.coordinates.meta.json"),
+        ),
+    ]
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,,"
+        "success,2,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n"
+        "slide-b,tissue,/tmp/slide-b.svs,,,"
+        "success,2,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
+        lambda slide_records, preprocessing, output_dir, num_workers: (slides, tiling_results, process_list_path),
+    )
+    # Clean run: every slide embeds successfully.
+    monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide",
+        lambda *args, **kwargs: np.zeros((2, 4), dtype=np.float32),
+    )
+
+    model = SimpleNamespace(
+        name="uni2",
+        level="tile",
+        _requested_device="cpu",
+        _load_backend=lambda: SimpleNamespace(),
+    )
+
+    inference.embed_slides(
+        model,
+        slides,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=True, num_gpus=1),
+    )
+
+    assert (tmp_path / "tile_embeddings" / "slide-a.pt").is_file()
+    assert (tmp_path / "tile_embeddings" / "slide-b.pt").is_file()
+    recorded = pd.read_csv(process_list_path).set_index("sample_id")
+    assert recorded.loc["slide-a", "feature_status"] == "success"
+    assert recorded.loc["slide-b", "feature_status"] == "success"
+
+
 def test_slide_level_pipeline_skips_tile_artifacts_when_save_tile_embeddings_is_false(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 

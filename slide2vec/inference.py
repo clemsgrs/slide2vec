@@ -148,6 +148,52 @@ def load_model(
     )
 
 
+def _reconcile_embedding_process_list(
+    *,
+    model,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    process_list_path,
+    embeddable_slides,
+    output_dir,
+):
+    """Reconcile the process_list with the embeddings on disk once, at end of run.
+
+    The incremental persist callback batches its process_list writes for the tile
+    path, so the trailing partial batch is only persisted by this final full-CSV
+    reconciliation. Every single-GPU embedding entry point must call it after its
+    embed loop. Collecting artifacts from disk (rather than the callback's
+    in-memory list) also covers resume-skipped slides. Returns the collected
+    (tile, hierarchical, slide) artifact lists.
+    """
+    persist_tile_embeddings = embedding.should_persist_tile_embeddings(model, execution)
+    persist_hierarchical_embeddings = hierarchical.is_hierarchical_preprocessing(preprocessing)
+    include_slide_embeddings = model.level == "slide"
+    include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
+    tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_pipeline_artifacts(
+        embeddable_slides,
+        output_dir=output_dir,
+        output_format=execution.output_format,
+        include_tile_embeddings=include_tile_embeddings,
+        include_hierarchical_embeddings=persist_hierarchical_embeddings,
+        include_slide_embeddings=include_slide_embeddings,
+    )
+    if process_list_path is not None and Path(process_list_path).is_file():
+        persistence.update_process_list_after_embedding(
+            process_list_path,
+            successful_slides=embeddable_slides,
+            persist_tile_embeddings=persist_tile_embeddings,
+            persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+            include_slide_embeddings=include_slide_embeddings,
+            encoder_name=model.name,
+            output_variant=process_list.resolved_process_list_output_variant(model),
+            tile_artifacts=tile_artifacts,
+            hierarchical_artifacts=hierarchical_artifacts,
+            slide_artifacts=slide_artifacts,
+        )
+    return tile_artifacts, hierarchical_artifacts, slide_artifacts
+
+
 def embed_slides(
     model,
     slides,
@@ -266,6 +312,18 @@ def embed_slides(
                         hierarchical_artifacts=hierarchical_artifacts,
                         slide_artifacts=slide_artifacts,
                     )
+            elif execution.output_dir is not None:
+                # Single-GPU: the incremental callback persisted the embeddings but
+                # batches its process_list writes, so reconcile the full CSV once at
+                # the end (covers the trailing partial batch on a clean run).
+                _reconcile_embedding_process_list(
+                    model=model,
+                    preprocessing=preprocessing,
+                    execution=execution,
+                    process_list_path=process_list_path,
+                    embeddable_slides=embeddable_slides,
+                    output_dir=Path(execution.output_dir),
+                )
             emit_progress(
                 "embedding.finished",
                 slide_count=len(embeddable_slides),
@@ -752,7 +810,6 @@ def run_pipeline(
         persist_tile_embeddings = embedding.should_persist_tile_embeddings(model, execution)
         persist_hierarchical_embeddings = hierarchical.is_hierarchical_preprocessing(resolved_preprocessing)
         include_slide_embeddings = model.level == "slide"
-        include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
         pending_slides, pending_tiling_results = persist_callbacks.pending_local_embedding_records(
             embeddable_slides,
             embeddable_tiling_results,
@@ -790,25 +847,13 @@ def run_pipeline(
                 on_embedded_slide=local_persist_callback,
                 collect_results=False,
             )
-        tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_pipeline_artifacts(
-            embeddable_slides,
+        tile_artifacts, hierarchical_artifacts, slide_artifacts = _reconcile_embedding_process_list(
+            model=model,
+            preprocessing=resolved_preprocessing,
+            execution=execution,
+            process_list_path=process_list_path,
+            embeddable_slides=embeddable_slides,
             output_dir=output_dir,
-            output_format=execution.output_format,
-            include_tile_embeddings=include_tile_embeddings,
-            include_hierarchical_embeddings=persist_hierarchical_embeddings,
-            include_slide_embeddings=include_slide_embeddings,
-        )
-        persistence.update_process_list_after_embedding(
-            process_list_path,
-            successful_slides=embeddable_slides,
-            persist_tile_embeddings=persist_tile_embeddings,
-            persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-            include_slide_embeddings=include_slide_embeddings,
-            encoder_name=model.name,
-            output_variant=process_list.resolved_process_list_output_variant(model),
-            tile_artifacts=tile_artifacts,
-            hierarchical_artifacts=hierarchical_artifacts,
-            slide_artifacts=slide_artifacts,
         )
         emit_progress(
             "embedding.finished",
@@ -907,7 +952,7 @@ def run_pipeline_with_coordinates(
                 slide_artifacts=slide_artifacts,
                 process_list_path=process_list_path,
             )
-        local_persist_callback, tile_or_hier_artifacts, slide_artifacts = persist_callbacks.build_incremental_persist_callback(
+        local_persist_callback, _, _ = persist_callbacks.build_incremental_persist_callback(
             model=model,
             preprocessing=resolved_preprocessing,
             execution=execution,
@@ -922,33 +967,18 @@ def run_pipeline_with_coordinates(
             on_embedded_slide=local_persist_callback,
             collect_results=False,
         )
-        tile_artifacts: list[TileEmbeddingArtifact] = []
-        hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
-        for artifact in tile_or_hier_artifacts:
-            if isinstance(artifact, HierarchicalEmbeddingArtifact):
-                hierarchical_artifacts.append(artifact)
-            elif artifact is not None:
-                tile_artifacts.append(artifact)
-        # The incremental callback batches its process_list writes, so reconcile
-        # the full CSV once at the end (covers the final partial batch and writes
-        # O(1) times rather than once per sample).
-        if process_list_path.is_file():
-            persistence.update_process_list_after_embedding(
-                process_list_path,
-                successful_slides=embeddable_slides,
-                persist_tile_embeddings=embedding.should_persist_tile_embeddings(model, execution),
-                persist_hierarchical_embeddings=hierarchical.is_hierarchical_preprocessing(resolved_preprocessing),
-                include_slide_embeddings=model.level == "slide",
-                encoder_name=model.name,
-                output_variant=process_list.resolved_process_list_output_variant(model),
-                tile_artifacts=tile_artifacts,
-                hierarchical_artifacts=hierarchical_artifacts,
-                slide_artifacts=list(slide_artifacts),
-            )
+        tile_artifacts, hierarchical_artifacts, slide_artifacts = _reconcile_embedding_process_list(
+            model=model,
+            preprocessing=resolved_preprocessing,
+            execution=execution,
+            process_list_path=process_list_path,
+            embeddable_slides=embeddable_slides,
+            output_dir=output_dir,
+        )
         return RunResult(
             tile_artifacts=tile_artifacts,
             hierarchical_artifacts=hierarchical_artifacts,
-            slide_artifacts=list(slide_artifacts),
+            slide_artifacts=slide_artifacts,
             process_list_path=process_list_path,
         )
     except Exception as exc:
