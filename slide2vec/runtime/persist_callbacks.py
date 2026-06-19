@@ -18,6 +18,16 @@ from slide2vec.runtime.persistence import update_process_list_after_embedding
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
 from slide2vec.utils.tiling_io import load_embedding_process_df
 
+# Number of completed tile-level samples to buffer before rewriting the
+# process_list CSV. Each rewrite re-reads and re-writes the *entire* CSV, so
+# doing it once per sample is O(N^2) in I/O when every tile is its own sample
+# (e.g. patch-level benchmarks with hundreds of thousands of tiles). Batching
+# makes it O(N) while only risking the re-embedding of at most this many cheap
+# tile samples after a crash (a clean run reconciles the full CSV at the end).
+# Slide- and hierarchical-level runs (sample == slide: few, expensive samples)
+# keep a flush interval of 1 so every completed slide is checkpointed.
+TILE_EMBEDDING_FLUSH_INTERVAL = 1000
+
 
 def has_complete_local_embedding_outputs(
     sample_id: str,
@@ -141,6 +151,45 @@ def build_incremental_persist_callback(
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
 
+    # Only the pure tile-level path produces the many-cheap-samples workload that
+    # makes per-sample CSV rewrites O(N^2). When the model aggregates to slide
+    # level (or runs hierarchically) the sample is a slide/region — few and
+    # expensive — so checkpoint every one (interval 1). save_tile_embeddings on a
+    # slide-level model still iterates per slide, hence the include_slide check.
+    is_tile_level = (
+        persist_tile_embeddings
+        and not persist_hierarchical_embeddings
+        and not include_slide_embeddings
+    )
+    flush_interval = TILE_EMBEDDING_FLUSH_INTERVAL if is_tile_level else 1
+
+    # Buffered completions awaiting the next batched process_list rewrite.
+    pending_slides: list[SlideSpec] = []
+    pending_tile_artifacts: list[TileEmbeddingArtifact] = []
+    pending_hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
+    pending_slide_artifacts: list[SlideEmbeddingArtifact] = []
+
+    def _flush_process_list() -> None:
+        if not pending_slides:
+            return
+        if process_list_path is not None and process_list_path.is_file():
+            update_process_list_after_embedding(
+                process_list_path,
+                successful_slides=list(pending_slides),
+                persist_tile_embeddings=persist_tile_embeddings,
+                persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+                include_slide_embeddings=include_slide_embeddings,
+                encoder_name=model.name,
+                output_variant=resolved_process_list_output_variant(model),
+                tile_artifacts=list(pending_tile_artifacts),
+                hierarchical_artifacts=list(pending_hierarchical_artifacts),
+                slide_artifacts=list(pending_slide_artifacts),
+            )
+        pending_slides.clear()
+        pending_tile_artifacts.clear()
+        pending_hierarchical_artifacts.clear()
+        pending_slide_artifacts.clear()
+
     def _persist_completed_slide(slide: SlideSpec, tiling_result, embedded_slide: EmbeddedSlide) -> None:
         tile_artifact, slide_artifact = persist_embedded_slide(
             model,
@@ -153,18 +202,16 @@ def build_incremental_persist_callback(
             tile_artifacts.append(tile_artifact)
         if slide_artifact is not None:
             slide_artifacts.append(slide_artifact)
-        if process_list_path is not None and process_list_path.is_file():
-            update_process_list_after_embedding(
-                process_list_path,
-                successful_slides=[slide],
-                persist_tile_embeddings=persist_tile_embeddings,
-                persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-                include_slide_embeddings=include_slide_embeddings,
-                encoder_name=model.name,
-                output_variant=resolved_process_list_output_variant(model),
-                tile_artifacts=[tile_artifact] if isinstance(tile_artifact, TileEmbeddingArtifact) else [],
-                hierarchical_artifacts=[tile_artifact] if isinstance(tile_artifact, HierarchicalEmbeddingArtifact) else [],
-                slide_artifacts=[slide_artifact] if slide_artifact is not None else [],
-            )
+        # Buffer this completion; a slide with no successful artifact is still
+        # recorded so the batched rewrite can mark its feature_status="error".
+        pending_slides.append(slide)
+        if isinstance(tile_artifact, TileEmbeddingArtifact):
+            pending_tile_artifacts.append(tile_artifact)
+        elif isinstance(tile_artifact, HierarchicalEmbeddingArtifact):
+            pending_hierarchical_artifacts.append(tile_artifact)
+        if slide_artifact is not None:
+            pending_slide_artifacts.append(slide_artifact)
+        if len(pending_slides) >= flush_interval:
+            _flush_process_list()
 
     return _persist_completed_slide, tile_artifacts, slide_artifacts

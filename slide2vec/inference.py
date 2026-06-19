@@ -929,6 +929,22 @@ def run_pipeline_with_coordinates(
                 hierarchical_artifacts.append(artifact)
             elif artifact is not None:
                 tile_artifacts.append(artifact)
+        # The incremental callback batches its process_list writes, so reconcile
+        # the full CSV once at the end (covers the final partial batch and writes
+        # O(1) times rather than once per sample).
+        if process_list_path.is_file():
+            persistence.update_process_list_after_embedding(
+                process_list_path,
+                successful_slides=embeddable_slides,
+                persist_tile_embeddings=embedding.should_persist_tile_embeddings(model, execution),
+                persist_hierarchical_embeddings=hierarchical.is_hierarchical_preprocessing(resolved_preprocessing),
+                include_slide_embeddings=model.level == "slide",
+                encoder_name=model.name,
+                output_variant=process_list.resolved_process_list_output_variant(model),
+                tile_artifacts=tile_artifacts,
+                hierarchical_artifacts=hierarchical_artifacts,
+                slide_artifacts=list(slide_artifacts),
+            )
         return RunResult(
             tile_artifacts=tile_artifacts,
             hierarchical_artifacts=hierarchical_artifacts,

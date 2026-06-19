@@ -1578,6 +1578,68 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
     assert recorded.loc["slide-b", "aggregation_status"] == "tbp"
 
 
+def _drive_persist_callback(monkeypatch, tmp_path, *, model_level, num_samples):
+    """Build an incremental persist callback and feed it `num_samples` completions.
+
+    Returns the list of per-write batch sizes recorded by a stubbed
+    ``update_process_list_after_embedding`` (i.e. how the process_list rewrites
+    were grouped).
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text("sample_id\n", encoding="utf-8")
+
+    monkeypatch.setattr(persist_callbacks, "should_persist_tile_embeddings", lambda *a, **k: True)
+    monkeypatch.setattr(persist_callbacks, "is_hierarchical_preprocessing", lambda *a, **k: False)
+    monkeypatch.setattr(persist_callbacks, "resolved_process_list_output_variant", lambda *a, **k: None)
+    monkeypatch.setattr(persist_callbacks, "TILE_EMBEDDING_FLUSH_INTERVAL", 3)
+
+    def fake_persist_embedded_slide(model, embedded_slide, tiling_result, *, preprocessing, execution):
+        artifact = persist_callbacks.TileEmbeddingArtifact(
+            sample_id=embedded_slide.sample_id,
+            path=tmp_path / f"{embedded_slide.sample_id}.pt",
+            metadata_path=tmp_path / f"{embedded_slide.sample_id}.meta.json",
+            format="pt",
+            feature_dim=4,
+            num_tiles=2,
+        )
+        return artifact, None
+
+    monkeypatch.setattr(persist_callbacks, "persist_embedded_slide", fake_persist_embedded_slide)
+
+    batch_sizes: list[int] = []
+    monkeypatch.setattr(
+        persist_callbacks,
+        "update_process_list_after_embedding",
+        lambda *a, **k: batch_sizes.append(len(k["successful_slides"])),
+    )
+
+    model = SimpleNamespace(name="enc", level=model_level)
+    callback, _, _ = persist_callbacks.build_incremental_persist_callback(
+        model=model,
+        preprocessing=SimpleNamespace(),
+        execution=SimpleNamespace(output_dir=tmp_path),
+        process_list_path=process_list_path,
+    )
+    for i in range(num_samples):
+        callback(make_slide(f"s-{i}"), SimpleNamespace(), SimpleNamespace(sample_id=f"s-{i}"))
+    return batch_sizes
+
+
+def test_incremental_persist_callback_batches_tile_level_process_list_writes(monkeypatch, tmp_path: Path):
+    # Tile-level (many cheap samples): writes are batched at the flush interval,
+    # and the trailing partial batch is left for the caller's final reconciliation
+    # (so 7 completions at interval 3 -> two writes of 3, one sample still buffered).
+    batch_sizes = _drive_persist_callback(monkeypatch, tmp_path, model_level="tile", num_samples=7)
+    assert batch_sizes == [3, 3]
+
+
+def test_incremental_persist_callback_checkpoints_slide_level_every_sample(monkeypatch, tmp_path: Path):
+    # Slide-level (few expensive samples): every completion is checkpointed
+    # immediately so a crash never loses an expensive slide embedding.
+    batch_sizes = _drive_persist_callback(monkeypatch, tmp_path, model_level="slide", num_samples=4)
+    assert batch_sizes == [1, 1, 1, 1]
+
+
 def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
