@@ -20,6 +20,8 @@ jobs:
   build:
     name: Build docs
     runs-on: ubuntu-latest
+    # skip docs build for release-* bump PRs (version-only change)
+    if: ${{ !startsWith(github.head_ref, 'release-') }}
     timeout-minutes: 60
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
