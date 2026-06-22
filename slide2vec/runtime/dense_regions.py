@@ -1,0 +1,229 @@
+"""Dense ``(d, h, w)`` grid extraction over **slide regions at coordinates**.
+
+The dense counterpart of the pooled coordinate path (``compute_tile_embeddings_for_slide``
+→ ``run_forward_pass`` → ``encode_tiles``): instead of pooling each region to one vector,
+each sampled ROI is read **spacing-aware** from the slide, run through the encoder's
+normalization-only dense transform (``get_dense_transform`` — NOT the pooled transform,
+which crops), padded up to the encoder's patch multiple, and encoded via
+``encode_tiles_dense`` into a ``(d, grid_h, grid_w)`` token grid.
+
+This is the extraction half of soma's slide-manifest segmentation path: slide2vec reads
+regions + encodes (it already owns the region reader and the dense encode); soma sources
+the ROI coordinates (hs2p annotation sampling) and persists/caches the grids. It mirrors
+the pooled split exactly — extraction here, caching in soma.
+
+Region reads are spacing-aware via hs2p (:meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`):
+the finest pyramid level ``<=`` the requested µm/px is read and downscaled to the exact
+``target_size`` (``area`` for images), so the token grid registers against a mask read at
+the same spacing. The ``wsi`` is injected (any object exposing ``read_region_at_spacing``),
+so the loop is unit-testable offline with a fake reader + a random-weight encoder.
+
+Whole-tile only (one padded forward per region). Sliding-window dense extraction over
+coordinates (``window_size`` < input) is a deferred follow-up — large ROIs that exceed the
+encoder's comfortable field are out of scope for the first increment.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Sequence
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from PIL import Image
+
+from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
+
+_PAD_MODES = {"reflect", "constant", "zero", "replicate"}
+
+
+def _normalize_hw(value: int | tuple[int, int], *, name: str) -> tuple[int, int]:
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError(f"{name} must be positive, got {value}")
+        return value, value
+    try:
+        h, w = value
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an int or an (h, w) pair, got {value!r}") from exc
+    h, w = int(h), int(w)
+    if h <= 0 or w <= 0:
+        raise ValueError(f"{name} must be positive, got {(h, w)}")
+    return h, w
+
+
+def _round_up(value: int, multiple: int) -> int:
+    return ((value + multiple - 1) // multiple) * multiple
+
+
+@dataclass(frozen=True)
+class DenseGridGeometry:
+    """Resolved spatial layout for one dense extraction (slide2vec-owned).
+
+    ``target_size`` is the supervision tile size (h, w); ``encoded_size`` is that rounded
+    up to the patch multiple (pad on bottom/right); ``grid_shape`` is the resulting token
+    grid (grid_h, grid_w). Mirrors soma's ``DenseGridGeometry`` — the dense-grid geometry
+    is extraction geometry and belongs in the extraction engine; soma reads it back from
+    the persisted sidecar.
+    """
+
+    target_size: tuple[int, int]
+    patch_size: tuple[int, int]
+    encoded_size: tuple[int, int]
+    grid_shape: tuple[int, int]
+    pad: tuple[int, int]  # (pad_bottom, pad_right)
+
+
+def compute_dense_geometry(
+    *, target_size: int | tuple[int, int], patch_size: int | tuple[int, int]
+) -> DenseGridGeometry:
+    """Encoded size, token grid, and bottom/right padding for a ``target_size`` tile."""
+    target_h, target_w = _normalize_hw(target_size, name="target_size")
+    patch_h, patch_w = _normalize_hw(patch_size, name="patch_size")
+    encoded_h = _round_up(target_h, patch_h)
+    encoded_w = _round_up(target_w, patch_w)
+    return DenseGridGeometry(
+        target_size=(target_h, target_w),
+        patch_size=(patch_h, patch_w),
+        encoded_size=(encoded_h, encoded_w),
+        grid_shape=(encoded_h // patch_h, encoded_w // patch_w),
+        pad=(encoded_h - target_h, encoded_w - target_w),
+    )
+
+
+def pad_image_to_encoded(
+    tensor: torch.Tensor,
+    geometry: DenseGridGeometry,
+    *,
+    pad_mode: str,
+    image_pad_value: float | None,
+) -> torch.Tensor:
+    """Pad a ``(C, H, W)`` tile (bottom/right) up to ``geometry.encoded_size``."""
+    pad_bottom, pad_right = geometry.pad
+    if pad_bottom == 0 and pad_right == 0:
+        return tensor
+    x = tensor.unsqueeze(0)  # F.pad's 2-D modes need a batch dim
+    pad = (0, pad_right, 0, pad_bottom)  # (left, right, top, bottom)
+    if pad_mode in ("constant", "zero"):
+        x = F.pad(x, pad, mode="constant", value=float(image_pad_value or 0.0))
+    else:
+        x = F.pad(x, pad, mode=pad_mode)
+    return x.squeeze(0)
+
+
+def _resolve_encode_fn(
+    model,
+    *,
+    feature_kind: str,
+    attention_blocks: tuple[int, ...],
+    attention_include_registers: bool,
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    if feature_kind == "patch_features":
+        return model.encode_tiles_dense
+    if feature_kind == "cls_attention":
+        blocks = tuple(int(b) for b in attention_blocks)
+        include_registers = bool(attention_include_registers)
+
+        def encode_fn(window: torch.Tensor) -> torch.Tensor:
+            return model.encode_tiles_attention(
+                window, blocks=blocks, include_registers=include_registers
+            )
+
+        return encode_fn
+    raise ValueError(
+        f"unsupported feature_kind {feature_kind!r}; expected 'patch_features' or 'cls_attention'"
+    )
+
+
+def encode_regions_dense(
+    *,
+    model,
+    device: torch.device | str,
+    wsi,
+    coordinates: Sequence[tuple[int, int]],
+    requested_spacing_um: float,
+    target_size: int | tuple[int, int],
+    tolerance: float = 0.05,
+    pad_mode: str = "reflect",
+    image_pad_value: float | None = None,
+    feature_kind: str = "patch_features",
+    attention_blocks: tuple[int, ...] = (-1,),
+    attention_include_registers: bool = False,
+    batch_size: int = 1,
+    precision: str = "fp32",
+    dense_transform: Callable | None = None,
+) -> np.ndarray:
+    """Encode slide regions at ``coordinates`` into dense grids; return ``(N, d, gh, gw)``.
+
+    Injectable core: takes a constructed dense-capable ``model`` (with
+    ``encode_tiles_dense`` / ``encode_tiles_attention`` / ``patch_size`` /
+    ``get_dense_transform``) and a ``wsi`` exposing
+    ``read_region_at_spacing(location, requested_spacing_um, size, *, tolerance,
+    interpolation)``, so it runs offline in tests with random weights + a fake reader.
+
+    Args:
+        coordinates: ``(x, y)`` top-left locations in **level-0** pixel space (the hs2p
+            tiling convention; passed straight to ``read_region_at_spacing``).
+        requested_spacing_um: µm/px to read each region at.
+        target_size: supervision tile size (int or ``(h, w)``); the region is read at this
+            size at ``requested_spacing_um`` and the token grid registers to it.
+
+    Returns a ``float32`` array of dense grids in coordinate order. ``feature_kind``
+    selects ``encode_tiles_dense`` (patch grid) vs ``encode_tiles_attention`` (CLS-attention
+    grid); both produce a ``(C, gh, gw)`` grid and share this path.
+    """
+    if pad_mode not in _PAD_MODES:
+        raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
+    geometry = compute_dense_geometry(target_size=target_size, patch_size=model.patch_size)
+    if dense_transform is None:
+        dense_transform = model.get_dense_transform()
+    encode_fn = _resolve_encode_fn(
+        model,
+        feature_kind=feature_kind,
+        attention_blocks=attention_blocks,
+        attention_include_registers=attention_include_registers,
+    )
+    target_h, target_w = geometry.target_size
+
+    coords = [(int(x), int(y)) for x, y in coordinates]
+    grid_h, grid_w = geometry.grid_shape
+    if not coords:
+        return np.empty((0, 0, grid_h, grid_w), dtype=np.float32)
+
+    def _read_padded(location: tuple[int, int]) -> torch.Tensor:
+        region = wsi.read_region_at_spacing(
+            location,
+            float(requested_spacing_um),
+            (target_w, target_h),  # hs2p size is (width, height)
+            tolerance=float(tolerance),
+            interpolation="area",
+        )
+        region = np.ascontiguousarray(np.asarray(region)[..., :3])
+        tensor = torch.as_tensor(dense_transform(Image.fromarray(region))).as_subclass(torch.Tensor)
+        if tensor.ndim != 3:
+            raise ValueError(
+                f"dense transform at {location} produced a {tensor.ndim}-D tensor; expected (C, H, W)."
+            )
+        if tuple(int(s) for s in tensor.shape[-2:]) != (target_h, target_w):
+            raise ValueError(
+                f"region at {location} is {tuple(int(s) for s in tensor.shape[-2:])} after the dense "
+                f"transform, but target_size is {(target_h, target_w)}. The dense transform must be "
+                "normalization-only (no resize/crop)."
+            )
+        return pad_image_to_encoded(
+            tensor, geometry, pad_mode=pad_mode, image_pad_value=image_pad_value
+        )
+
+    grids: list[np.ndarray] = []
+    with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
+        for start in range(0, len(coords), max(1, int(batch_size))):
+            chunk = coords[start : start + max(1, int(batch_size))]
+            batch = torch.stack([_read_padded(loc) for loc in chunk]).to(device, non_blocking=True)
+            out = encode_fn(batch)
+            if out.ndim != 4:
+                raise ValueError(
+                    f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
+                )
+            grids.append(out.detach().float().cpu().numpy())
+    return np.concatenate(grids, axis=0)
