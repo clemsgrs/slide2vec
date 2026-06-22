@@ -1,4 +1,5 @@
 
+import copy
 import logging
 import os
 from dataclasses import dataclass, field, replace
@@ -40,6 +41,55 @@ SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
+#: Default annotation-mask vocabulary — plain binary tissue tiling. Mirrors hs2p's
+#: shipped default ``{background: 0, tissue: 1}``; leaving it untouched keeps a run
+#: behaving exactly as a tissue-only run. ``min_coverage.tissue`` is the single source
+#: of truth for the tissue threshold (the standalone ``tissue_threshold`` knob is gone).
+#: A :class:`PreprocessingConfig` ``masks`` value is deep-merged over this default, so
+#: callers only state what they override (e.g. ``{"min_coverage": {"tissue": 0.1}}``).
+DEFAULT_MASKS: dict[str, Any] = {
+    "output_mode": "per_annotation",
+    "pixel_mapping": {"background": 0, "tissue": 1},
+    "colors": {"background": None, "tissue": [157, 219, 129]},
+    "min_coverage": {"background": None, "tissue": 0.01},
+}
+
+
+def _deep_merge_masks(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    """Deep-merge *override* onto a copy of *base* (nested dicts merge key-by-key)."""
+    merged = copy.deepcopy(dict(base))
+    for key, value in override.items():
+        existing = merged.get(key)
+        if isinstance(value, Mapping) and isinstance(existing, dict):
+            merged[key] = _deep_merge_masks(existing, value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def resolve_masks(masks: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Complete a (possibly partial) ``masks`` mapping by merging it over :data:`DEFAULT_MASKS`."""
+    if not masks:
+        return copy.deepcopy(DEFAULT_MASKS)
+    return _deep_merge_masks(DEFAULT_MASKS, masks)
+
+
+def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
+    """Normalize a masks config node (OmegaConf, mapping, or namespace) to a plain dict."""
+    if node is None:
+        return {}
+    try:
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(node):
+            return copy.deepcopy(OmegaConf.to_container(node, resolve=True))  # type: ignore[return-value]
+    except ImportError:
+        pass
+    if isinstance(node, Mapping):
+        return copy.deepcopy(dict(node))
+    return copy.deepcopy(dict(vars(node)))
+
+
 @dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
     """Configuration for slide tiling and preprocessing."""
@@ -62,8 +112,6 @@ class PreprocessingConfig:
     tolerance: float = 0.05
     #: Fractional tile overlap (``0.0`` = no overlap).
     overlap: float = 0.0
-    #: Minimum tissue fraction required to keep a tile (default ``0.01``).
-    tissue_threshold: float = 0.01
     #: Directory containing pre-extracted tile coordinates to reuse, skipping tiling.
     read_coordinates_from: Path | None = None
     #: Directory containing pre-extracted tile images to skip the tiling step entirely.
@@ -90,6 +138,20 @@ class PreprocessingConfig:
     #: Controls whether hs2p writes mask and tiling preview images.
     #: Keys: ``save_mask_preview``, ``save_tiling_preview``, ``downsample``.
     preview: dict[str, Any] = field(default_factory=dict)
+    #: Annotation-mask vocabulary forwarded to hs2p's sampling resolver. Keys:
+    #: ``output_mode``, ``pixel_mapping``, ``colors``, ``min_coverage``. A partial
+    #: mapping is deep-merged over :data:`DEFAULT_MASKS`, so callers only state what
+    #: they override (e.g. ``{"min_coverage": {"tissue": 0.1}}``). The default
+    #: ``{background, tissue}`` block is plain tissue tiling; ``min_coverage.tissue``
+    #: is the single source of truth for the tissue threshold.
+    masks: dict[str, Any] = field(default_factory=dict)
+    #: When annotation sampling is active, tile each class independently (``True``)
+    #: vs jointly across classes (``False``).
+    independent_sampling: bool = True
+
+    def __post_init__(self) -> None:
+        # Complete a (possibly partial) masks mapping against the shipped default.
+        object.__setattr__(self, "masks", resolve_masks(self.masks))
 
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
@@ -121,7 +183,8 @@ class PreprocessingConfig:
             region_tile_multiple=int(region_tile_multiple) if region_tile_multiple is not None else None,
             tolerance=float(tiling.params.tolerance),
             overlap=float(tiling.params.overlap),
-            tissue_threshold=float(tiling.params.tissue_threshold),
+            masks=_masks_to_plain_dict(getattr(tiling, "masks", None)),
+            independent_sampling=bool(getattr(tiling, "independent_sampling", True)),
             read_coordinates_from=Path(read_coordinates_from) if read_coordinates_from else None,
             read_tiles_from=(
                 Path(read_tiles_from) if read_tiles_from else None

@@ -444,7 +444,7 @@ def _build_pipeline_from_config_dict(config: dict[str, Any]):
         requested_tile_size_px=int(params.get("requested_tile_size_px", 256)),
         tolerance=float(params.get("tolerance", 0.05)),
         overlap=float(params.get("overlap", 0.0)),
-        tissue_threshold=float(params.get("tissue_threshold", 0.01)),
+        masks={"min_coverage": {"tissue": float(params.get("tissue_threshold", 0.01))}},
         drop_holes=bool(params.get("drop_holes", False)),
         use_padding=bool(params.get("use_padding", True)),
         read_coordinates_from=None,

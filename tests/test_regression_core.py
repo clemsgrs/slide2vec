@@ -653,7 +653,7 @@ def test_preprocessing_with_backend_preserves_other_fields():
         requested_tile_size_px=256,
         tolerance=0.1,
         overlap=0.2,
-        tissue_threshold=0.4,
+        masks={"min_coverage": {"tissue": 0.4}},
         read_coordinates_from=Path("/tmp/coordinates"),
         read_tiles_from=Path("/tmp/tiles"),
         resume=True,
@@ -673,6 +673,80 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.read_coordinates_from == base.read_coordinates_from
     assert updated.read_tiles_from == base.read_tiles_from
     assert updated is not base
+
+
+def test_masks_min_coverage_tissue_drives_derived_tiling_threshold():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        backend="asap",
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        masks={"min_coverage": {"tissue": 0.37}},
+        independent_sampling=False,
+        segmentation={"method": "hsv", "downsample": 64},
+        preview={
+            "save_mask_preview": False,
+            "save_tiling_preview": False,
+            "downsample": 32,
+            "tissue_contour_color": (157, 219, 129),
+            "mask_overlay_alpha": 0.5,
+        },
+    )
+
+    # the partial masks dict is deep-merged over the default vocabulary
+    assert preprocessing.masks["pixel_mapping"] == {"background": 0, "tissue": 1}
+    assert preprocessing.masks["min_coverage"]["tissue"] == pytest.approx(0.37)
+
+    tiling_cfg = build_hs2p_configs(preprocessing)[0]
+
+    assert tiling_cfg.tissue_threshold == pytest.approx(0.37)
+    assert tiling_cfg.independent_sampling is False
+
+
+def test_preprocessing_from_config_reads_masks_block_and_independent_sampling():
+    cfg = SimpleNamespace(
+        output_dir="/tmp/run-masks",
+        resume=False,
+        speed=SimpleNamespace(num_cucim_workers=4),
+        tiling=SimpleNamespace(
+            backend="asap",
+            read_coordinates_from=None,
+            read_tiles_from=None,
+            on_the_fly=True,
+            gpu_decode=False,
+            adaptive_batching=False,
+            use_supertiles=True,
+            jpeg_backend="turbojpeg",
+            independent_sampling=False,
+            masks=SimpleNamespace(
+                output_mode="per_annotation",
+                pixel_mapping={"background": 0, "tissue": 1},
+                colors={"background": None, "tissue": [157, 219, 129]},
+                min_coverage={"background": None, "tissue": 0.42},
+            ),
+            params=SimpleNamespace(
+                requested_spacing_um=0.5,
+                requested_tile_size_px=224,
+                tolerance=0.05,
+                overlap=0.0,
+            ),
+            seg_params={"downsample": 64},
+            filter_params={"ref_tile_size": 224},
+            preview=SimpleNamespace(
+                save_mask_preview=False,
+                save_tiling_preview=False,
+                downsample=32,
+                tissue_contour_color=(157, 219, 129),
+                mask_overlay_alpha=0.5,
+            ),
+        ),
+    )
+
+    preprocessing = PreprocessingConfig.from_config(cfg)
+
+    assert preprocessing.masks["min_coverage"]["tissue"] == pytest.approx(0.42)
+    assert preprocessing.independent_sampling is False
 
 
 def test_preprocessing_config_defaults_backend_to_auto():
@@ -753,7 +827,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
                 requested_tile_size_px=224,
                 tolerance=0.05,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -980,7 +1053,6 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
                 requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -1020,7 +1092,6 @@ def test_preprocessing_config_from_config_uses_explicit_speed_num_cucim_workers(
                 requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
@@ -1058,7 +1129,6 @@ def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
                 requested_tile_size_px=224,
                 tolerance=0.07,
                 overlap=0.0,
-                tissue_threshold=0.1,
             ),
             seg_params={"downsample": 64},
             filter_params={"ref_tile_size": 224},
