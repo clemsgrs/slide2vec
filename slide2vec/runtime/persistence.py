@@ -261,16 +261,20 @@ def update_process_list_after_embedding(
 
 
 def _normalized_annotation(annotation: Any) -> str | None:
-    """Collapse the flat-layout sentinels (``None``/``"tissue"``) to a single ``None`` key.
+    """Collapse the flat-layout sentinels (``None``/``"tissue"``/``"merged"``) to a single ``None`` key.
 
     Keying the per-class feature-path map on this normalized value lets the flat tissue-only
     path and a real class share one matching rule without the sentinel leaking into lookups.
+    ``"merged"`` (hs2p's merged output-mode label) carries no class and is collapsed to ``None``
+    here, matching :func:`slide2vec.utils.tiling_io.load_tiling_result_from_row`, so its
+    process-list row resolves to the flat embedding path rather than being left unmatched.
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
-    if is_flattened_annotation(str(annotation)):
+    annotation = str(annotation)
+    if annotation == "merged" or is_flattened_annotation(annotation):
         return None
-    return str(annotation)
+    return annotation
 
 
 def _row_annotation_series(df: pd.DataFrame) -> pd.Series:
