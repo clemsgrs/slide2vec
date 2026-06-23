@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import json
 import os
 import shutil
 import signal
@@ -16,9 +17,53 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 from hs2p import SlideSpec
+from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.progress import emit_progress_event, read_progress_events
 from slide2vec.runtime.hierarchical import num_tiles
+
+
+# Sentinel prefix for composite (sample_id, annotation) work-unit keys. Bare sample_ids never carry
+# this prefix, so a real per-class unit can never collide with another sample's flat key.
+_WORK_UNIT_PREFIX = "\x00s2v-unit\x00"
+
+
+def normalize_work_unit_annotation(annotation: str | None) -> str | None:
+    """Collapse flat-layout annotations to ``None`` so flat units key by bare ``sample_id``.
+
+    Mirrors the in-memory single-GPU path and the distributed reconcile
+    (:func:`slide2vec.runtime.artifacts_collect._normalized_row_annotation`): ``None``, hs2p's
+    flat-layout sentinels (:func:`hs2p.fileops.is_flattened_annotation`, e.g. ``"tissue"``), and the
+    merged output-mode label ``"merged"`` all collapse to ``None``. Only genuine per-class
+    annotations survive as a composite key.
+    """
+    if annotation is None:
+        return None
+    annotation = str(annotation)
+    if annotation == "merged" or is_flattened_annotation(annotation):
+        return None
+    return annotation
+
+
+def encode_work_unit(sample_id: str, annotation: str | None) -> str:
+    """Encode a ``(sample_id, annotation)`` distributed work unit as a single string key.
+
+    Flat units (normalized annotation is ``None``) return the bare ``sample_id`` unchanged, so
+    tissue-only / single-class / merged runs produce byte-identical assignments and coordination
+    filenames as before. A genuine per-class unit returns a reversible, collision-free composite.
+    """
+    normalized = normalize_work_unit_annotation(annotation)
+    if normalized is None:
+        return str(sample_id)
+    return _WORK_UNIT_PREFIX + json.dumps([str(sample_id), normalized])
+
+
+def decode_work_unit(key: str) -> tuple[str, str | None]:
+    """Inverse of :func:`encode_work_unit`: ``key`` -> ``(sample_id, annotation_or_none)``."""
+    if isinstance(key, str) and key.startswith(_WORK_UNIT_PREFIX):
+        sample_id, annotation = json.loads(key[len(_WORK_UNIT_PREFIX):])
+        return str(sample_id), annotation
+    return str(key), None
 
 
 @contextmanager

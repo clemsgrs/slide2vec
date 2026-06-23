@@ -5812,3 +5812,39 @@ def test_zero_tile_hierarchical_sidecar_namespaces_per_class(monkeypatch, tmp_pa
 
     _sidecar("tissue")
     assert (tmp_path / "hierarchical_embeddings" / "slide-z.meta.json").is_file()
+
+
+# --- Issue #168: annotation-aware fan-out for the distributed embedding stage ---
+
+
+@pytest.mark.parametrize("annotation", [None, "tissue", "merged"])
+def test_encode_work_unit_collapses_flat_annotation_to_bare_sample_id(annotation):
+    """Flat annotations (None / tissue / merged) must encode to the bare sample_id, byte-identical
+    to the pre-#168 sample_id-keyed assignment and coordination filenames."""
+    from slide2vec.runtime.distributed import encode_work_unit
+
+    assert encode_work_unit("slide-a", annotation) == "slide-a"
+
+
+def test_encode_work_unit_encodes_real_class_reversibly_without_collision():
+    from slide2vec.runtime.distributed import decode_work_unit, encode_work_unit
+
+    tumor = encode_work_unit("slide-a", "tumor")
+    stroma = encode_work_unit("slide-a", "stroma")
+    other_slide = encode_work_unit("slide-b", "tumor")
+
+    # Composite keys for distinct (sample_id, annotation) pairs never collide.
+    assert tumor != stroma
+    assert tumor != other_slide
+    assert tumor != "slide-a"
+
+    # Reversible back to the original (sample_id, normalized annotation) pair.
+    assert decode_work_unit(tumor) == ("slide-a", "tumor")
+    assert decode_work_unit(stroma) == ("slide-a", "stroma")
+
+
+def test_decode_work_unit_returns_flat_annotation_as_none():
+    from slide2vec.runtime.distributed import decode_work_unit, encode_work_unit
+
+    assert decode_work_unit(encode_work_unit("slide-a", None)) == ("slide-a", None)
+    assert decode_work_unit("slide-a") == ("slide-a", None)
