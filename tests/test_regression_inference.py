@@ -1722,6 +1722,117 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     assert captured["kwargs"]["save_tiles"] is False
 
 
+def test_tile_slides_forwards_merged_output_mode_and_selection_strategy(monkeypatch, tmp_path: Path):
+    """End-to-end seam: a ``merged`` masks block with ``independent_sampling: false`` must
+    forward output_mode=merged and selection_strategy=joint_sampling into hs2p's tile_slides."""
+    import slide2vec.inference as inference
+
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        backend="asap",
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        masks={
+            "output_mode": "merged",
+            "pixel_mapping": {"tumor": 2},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        },
+        independent_sampling=False,
+    )
+
+    tiling_pipeline.tile_slides_call(
+        [make_slide("slide-a")],
+        preprocessing,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["kwargs"]["output_mode"] == "merged"
+    assert captured["kwargs"]["selection_strategy"] == "joint_sampling"
+    assert captured["kwargs"]["sampling"] is not None
+
+
+def test_tile_slides_forwards_independent_sampling_selection_strategy(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        backend="asap",
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        masks={
+            "pixel_mapping": {"tumor": 2},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        },
+        independent_sampling=True,
+    )
+
+    tiling_pipeline.tile_slides_call(
+        [make_slide("slide-a")],
+        preprocessing,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["kwargs"]["selection_strategy"] == "independent_sampling"
+    assert captured["kwargs"]["output_mode"] == "per_annotation"
+
+
+def test_prepare_tiled_slides_collapses_merged_row_to_flat_root(monkeypatch, tmp_path: Path):
+    """A merged tiling row (hs2p labels it ``merged``) must load with annotation=None so its
+    embedding artifacts land at the flat output root, not under a ``merged/`` subdir."""
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,merged,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", lambda *args, **kwargs: None)
+
+    captured = {}
+
+    def fake_load(row):
+        from slide2vec.utils.tiling_io import load_tiling_result_from_row
+        import slide2vec.utils.tiling_io as tiling_io
+
+        original = tiling_io.load_tiling_result
+        tiling_io.load_tiling_result = lambda **kwargs: SimpleNamespace()
+        try:
+            result = load_tiling_result_from_row(row)
+        finally:
+            tiling_io.load_tiling_result = original
+        captured["annotation"] = result.annotation
+        return result
+
+    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", fake_load)
+
+    tiling_pipeline.prepare_tiled_slides(
+        [make_slide("slide-a")],
+        DEFAULT_PREPROCESSING,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["annotation"] is None
+
+
 def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
