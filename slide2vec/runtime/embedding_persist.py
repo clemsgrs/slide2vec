@@ -105,6 +105,7 @@ def persist_embedded_slide(
                 backend=resolve_slide_backend(preprocessing, tiling_result),
                 preprocessing=preprocessing,
             ),
+            annotation=annotation,
         )
         return hierarchical_artifact, None
     tile_artifact = None

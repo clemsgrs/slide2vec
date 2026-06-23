@@ -12,6 +12,7 @@ from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    hierarchical_embeddings_subdir,
     load_array,
     load_metadata,
     slide_embeddings_subdir,
@@ -34,10 +35,11 @@ def collect_pipeline_artifacts(
     list[HierarchicalEmbeddingArtifact],
     list[SlideEmbeddingArtifact],
 ]:
-    # ``annotations`` (parallel to ``slide_records``) namespaces the per-class slide-
-    # embedding artifacts back from disk so the end-of-run reconcile re-reads each class's
-    # own ``slide_embeddings/<class>/<id>`` path. When omitted (the default tissue-only
-    # path) slide artifacts load flat, byte-for-byte unchanged.
+    # ``annotations`` (parallel to ``slide_records``) namespaces the per-class slide- and
+    # hierarchical-embedding artifacts back from disk so the end-of-run reconcile re-reads
+    # each class's own ``slide_embeddings/<class>/<id>`` (resp.
+    # ``hierarchical_embeddings/<class>/<id>``) path. When omitted (the default tissue-only
+    # path) both load flat, byte-for-byte unchanged.
     if annotations is None:
         annotations = [None] * len(slide_records)
     tile_artifacts: list[TileEmbeddingArtifact] = []
@@ -48,7 +50,12 @@ def collect_pipeline_artifacts(
             tile_artifacts.append(load_tile_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format))
         if include_hierarchical_embeddings:
             hierarchical_artifacts.append(
-                load_hierarchical_artifact(slide.sample_id, output_dir=output_dir, output_format=output_format)
+                load_hierarchical_artifact(
+                    slide.sample_id,
+                    output_dir=output_dir,
+                    output_format=output_format,
+                    annotation=annotation,
+                )
             )
         if include_slide_embeddings:
             slide_artifacts.append(
@@ -88,9 +95,11 @@ def load_hierarchical_artifact(
     *,
     output_dir: Path,
     output_format: str,
+    annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
-    artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
-    metadata_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.meta.json"
+    hierarchical_dir = output_dir / hierarchical_embeddings_subdir(annotation)
+    artifact_path = hierarchical_dir / f"{sample_id}.{output_format}"
+    metadata_path = hierarchical_dir / f"{sample_id}.meta.json"
     if metadata_path.is_file():
         metadata = load_metadata(metadata_path)
         feature_dim = int(metadata["feature_dim"])
@@ -109,6 +118,7 @@ def load_hierarchical_artifact(
         feature_dim=feature_dim,
         num_regions=num_regions,
         tiles_per_region=tiles_per_region,
+        annotation=annotation,
     )
 
 
@@ -175,12 +185,12 @@ def update_process_list_after_embedding(
     tile_success_ids = {artifact.sample_id for artifact in tile_artifacts}
     hierarchical_success_ids = {artifact.sample_id for artifact in hierarchical_artifacts}
     slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
-    # Slide embeddings fan out per (sample_id, annotation): keep a per-class feature-path
-    # map (and per-class success set) so a multi-label slide records a distinct slide-
-    # embedding path on each annotation row instead of collapsing them all onto one path.
+    # Slide and hierarchical embeddings fan out per (sample_id, annotation): keep a per-class
+    # feature-path map (and per-class success set) so a multi-label slide records a distinct
+    # feature path on each annotation row instead of collapsing them all onto one path.
     # Tissue/None annotations stay in the flat slot, so the default single-row path is
-    # byte-for-byte unchanged. Tile/hierarchical artifacts are sample_id-keyed (their per-
-    # class fan-out is wired by their own slices), so they map to a None annotation key.
+    # byte-for-byte unchanged. Tile artifacts are sample_id-keyed (their per-class fan-out is
+    # wired by their own slice), so they map to a None annotation key.
     slide_path_by_key = {
         (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(artifact.path)
         for artifact in slide_artifacts
@@ -194,7 +204,8 @@ def update_process_list_after_embedding(
         feature_success_ids = slide_success_ids
     elif persist_hierarchical_embeddings:
         feature_path_by_key = {
-            (artifact.sample_id, None): _resolve_path_str(artifact.path) for artifact in hierarchical_artifacts
+            (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(artifact.path)
+            for artifact in hierarchical_artifacts
         }
         feature_kind = "hierarchical"
         feature_success_ids = hierarchical_success_ids
@@ -208,7 +219,7 @@ def update_process_list_after_embedding(
         feature_path_by_key = {}
         feature_kind = None
         feature_success_ids = {slide.sample_id for slide in successful_slides}
-    annotation_aware = bool(slide_artifacts)
+    annotation_aware = bool(slide_artifacts) or (persist_hierarchical_embeddings and bool(hierarchical_artifacts))
     row_annotations = _row_annotation_series(df)
     for slide in successful_slides:
         mask = df["sample_id"].astype(str) == slide.sample_id

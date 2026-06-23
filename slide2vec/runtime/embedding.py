@@ -159,6 +159,7 @@ def write_hierarchical_embedding_artifact(
     *,
     execution: ExecutionOptions,
     metadata: dict[str, Any],
+    annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist hierarchical embeddings")
@@ -168,4 +169,5 @@ def write_hierarchical_embedding_artifact(
         output_dir=execution.output_dir,
         output_format=execution.output_format,
         metadata=metadata,
+        annotation=annotation,
     )
