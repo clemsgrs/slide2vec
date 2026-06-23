@@ -1841,7 +1841,7 @@ def test_build_hs2p_configs_constructs_preview_config():
         requested_tile_size_px=224,
         tolerance=0.05,
         overlap=0.0,
-        tissue_threshold=0.1,
+        masks={"min_coverage": {"tissue": 0.1}},
         segmentation={"downsample": 64, "method": "hsv"},
         filtering={"ref_tile_size": 224},
         preview={
@@ -1858,6 +1858,7 @@ def test_build_hs2p_configs_constructs_preview_config():
     )
 
     assert tiling_cfg.backend == "asap"
+    assert tiling_cfg.tissue_threshold == pytest.approx(0.1)  # derived from masks.min_coverage.tissue
     assert segmentation_cfg.downsample == 64
     assert segmentation_cfg.method == "hsv"
     assert filtering_cfg.ref_tile_size == 224

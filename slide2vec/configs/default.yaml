@@ -26,6 +26,24 @@ tiling:
   read_coordinates_from: # path to an existing directory containing pre-extracted `.coordinates.npz` / `.coordinates.meta.json` artifacts to reuse instead of starting tiling from scratch
   read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
   backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
+  independent_sampling: true # when annotation sampling is active, tile each class separately (independent selection) vs jointly across classes
+  masks:
+    # Annotation-mask vocabulary forwarded to hs2p's sampling resolver. The shipped default
+    # ({background:0, tissue:1}) is plain binary tissue tiling — leave it untouched and the run
+    # behaves exactly as a tissue-only run. Customising the vocabulary (e.g. adding a `tumor`
+    # class with its own pixel value + min_coverage) opts the run into annotation-aware sampling,
+    # where `mask_path` is read as a multi-label raster. The `tissue` min_coverage entry below is
+    # the single source of truth for the tissue threshold.
+    output_mode: per_annotation # per_annotation: one artifact set per sampled class | merged: one set per slide (union of tiles passing any class threshold)
+    pixel_mapping: # {class_name: integer pixel value in the mask raster}
+      background: 0
+      tissue: 1
+    colors: # {class_name: [r, g, b] | null} used when rendering previews
+      background:
+      tissue: [157, 219, 129]
+    min_coverage: # {class_name: float | null}; minimum fraction of a tile that must be covered to keep it; null = don't sample that class
+      background:
+      tissue: 0.1
   params:
     requested_spacing_um: # spacing at which to tile the slide, in microns per pixel; filled from a preset model when available
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
@@ -33,7 +51,6 @@ tiling:
     requested_region_size_px: # size of hierarchical parent regions in pixels; when unset and region_tile_multiple is set, derived from requested_tile_size_px * region_tile_multiple
     region_tile_multiple: # hierarchical region grid width/height in tiles; e.g. 6 means 6x6 tiles per region
     overlap: 0.0 # percentage of overlap between two consecutive tiles (float between 0 and 1)
-    tissue_threshold: 0.1 # minimum fraction of pixels that must be tissue to keep a tile (float between 0 and 1)
   seg_params:
     # downsample controls which pyramid level is read for tissue segmentation.
     # Larger values are faster and use less memory; smaller values can improve mask precision.

@@ -75,7 +75,7 @@ Pass :class:`~slide2vec.PreprocessingConfig` to override tiling defaults:
    preprocessing = PreprocessingConfig(
        requested_spacing_um=0.5,
        requested_tile_size_px=224,
-       tissue_threshold=0.1,
+       masks={"min_coverage": {"tissue": 0.1}},
        backend="auto",
        segmentation={"method": "hsv"},
    )

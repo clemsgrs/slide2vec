@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,8 @@ def serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any
         "region_tile_multiple": preprocessing.region_tile_multiple,
         "tolerance": preprocessing.tolerance,
         "overlap": preprocessing.overlap,
-        "tissue_threshold": preprocessing.tissue_threshold,
+        "masks": copy.deepcopy(preprocessing.masks),
+        "independent_sampling": preprocessing.independent_sampling,
         "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
         "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
         "resume": preprocessing.resume,
@@ -84,7 +86,8 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         ),
         tolerance=float(payload["tolerance"]),
         overlap=float(payload["overlap"]),
-        tissue_threshold=float(payload["tissue_threshold"]),
+        masks=copy.deepcopy(payload["masks"]) if "masks" in payload and payload["masks"] else {},
+        independent_sampling=bool(payload.get("independent_sampling", True)),
         read_coordinates_from=read_coordinates_from,
         read_tiles_from=read_tiles_from,
         resume=bool(payload["resume"]) if "resume" in payload else False,

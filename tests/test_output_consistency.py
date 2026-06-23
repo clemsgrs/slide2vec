@@ -20,7 +20,14 @@ TILING_PARAMS = dict(
     tolerance=0.07,           # override (default: 0.05)
     requested_tile_size_px=224,  # override (default: 256)
     overlap=0.0,
-    tissue_threshold=0.1,     # override (default: 0.01)
+)
+
+# -- tiling.masks -- (min_coverage.tissue is the sole tissue threshold; was tissue_threshold=0.1)
+TILING_MASKS = dict(
+    output_mode="per_annotation",
+    pixel_mapping={"background": 0, "tissue": 1},
+    colors={"background": None, "tissue": [157, 219, 129]},
+    min_coverage={"background": None, "tissue": 0.1},
 )
 
 # -- tiling.seg_params --
@@ -123,6 +130,8 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
             "read_tiles_from": None,
             "on_the_fly": True,
             "backend": "asap",
+            "independent_sampling": True,
+            "masks": TILING_MASKS,
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,
             "filter_params": TILING_FILTER_PARAMS,

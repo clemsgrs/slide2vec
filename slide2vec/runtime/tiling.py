@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
-from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, TilingConfig, load_tiling_result
+from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, load_tiling_result
+from hs2p.configs.resolvers import resolve_tiling_config
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
@@ -44,14 +46,23 @@ def build_hs2p_configs(
         if is_hierarchical_preprocessing(preprocessing)
         else preprocessing.requested_tile_size_px
     )
-    tiling_cfg = TilingConfig(
-        requested_spacing_um=preprocessing.requested_spacing_um,
-        requested_tile_size_px=requested_tile_size_px,
-        tolerance=preprocessing.tolerance,
-        overlap=preprocessing.overlap,
-        tissue_threshold=preprocessing.tissue_threshold,
-        backend=resolve_tiling_backend(preprocessing),
+    # Reuse hs2p's tiling-config resolver so the derived tissue_threshold comes from
+    # masks.min_coverage.tissue (the single source of truth) and independent_sampling
+    # is threaded consistently. The resolver reads attributes, so wrap the masks dict.
+    tiling_adapter = SimpleNamespace(
+        tiling=SimpleNamespace(
+            masks=SimpleNamespace(**dict(preprocessing.masks)),
+            params=SimpleNamespace(
+                requested_spacing_um=preprocessing.requested_spacing_um,
+                requested_tile_size_px=requested_tile_size_px,
+                tolerance=preprocessing.tolerance,
+                overlap=preprocessing.overlap,
+            ),
+            independent_sampling=preprocessing.independent_sampling,
+            backend=resolve_tiling_backend(preprocessing),
+        )
     )
+    tiling_cfg = resolve_tiling_config(tiling_adapter)
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
     preview_cfg = build_preview_config(dict(preprocessing.preview))
