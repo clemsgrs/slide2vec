@@ -66,6 +66,27 @@ def decode_work_unit(key: str) -> tuple[str, str | None]:
     return str(key), None
 
 
+# Reserved separator joining the (percent-encoded) sample_id and class in a composite shard stem.
+# Both halves are percent-encoded with ``safe=""`` so this token can never appear inside either,
+# which keeps the stem reversible and collision-free across (sample_id, annotation) pairs.
+_SHARD_STEM_SEP = ".__cls__."
+
+
+def work_unit_shard_stem(sample_id: str, annotation: str | None) -> str:
+    """Filesystem-safe coordination/shard filename stem for a ``(sample_id, annotation)`` unit.
+
+    Flat units (normalized annotation is ``None``) keep the bare ``sample_id`` unchanged so existing
+    runs produce byte-identical coordination filenames. A genuine per-class unit appends a reversible
+    percent-encoded suffix that cannot collide with another sample's flat stem or with a sibling class.
+    """
+    from urllib.parse import quote
+
+    normalized = normalize_work_unit_annotation(annotation)
+    if normalized is None:
+        return str(sample_id)
+    return f"{quote(str(sample_id), safe='')}{_SHARD_STEM_SEP}{quote(normalized, safe='')}"
+
+
 @contextmanager
 def distributed_coordination_dir(work_dir: Path):
     coordination_dir = Path(tempfile.mkdtemp(prefix="slide2vec-dist-", dir=work_dir))
@@ -241,10 +262,13 @@ def assign_slides_to_ranks(
     heapq.heapify(assigned_ranks)
     sortable = []
     for slide, tiling_result in zip(slide_records, tiling_results):
-        sortable.append((slide.sample_id, num_tiles(tiling_result)))
-    for sample_id, tile_count in sorted(sortable, key=lambda item: (-item[1], item[0])):
+        # Each (sample_id, annotation) is an independent unit balanced by its own tile count; a
+        # slide's classes may land on different ranks. Flat units encode to the bare sample_id.
+        unit_key = encode_work_unit(slide.sample_id, getattr(tiling_result, "annotation", None))
+        sortable.append((unit_key, num_tiles(tiling_result)))
+    for unit_key, tile_count in sorted(sortable, key=lambda item: (-item[1], item[0])):
         assigned_tiles, rank = heapq.heappop(assigned_ranks)
-        assignments[rank].append(sample_id)
+        assignments[rank].append(unit_key)
         heapq.heappush(assigned_ranks, (assigned_tiles + int(tile_count), rank))
     return assignments
 
@@ -287,16 +311,23 @@ def merge_hierarchical_embedding_shards(
     return merged.reshape(int(num_regions), int(tiles_per_region), int(merged.shape[-1]))
 
 
-def load_tile_embedding_shards(coordination_dir: Path, sample_id: str):
-    shard_paths = sorted(coordination_dir.glob(f"{sample_id}.tiles.rank*.pt"))
+def load_tile_embedding_shards(coordination_dir: Path, stem: str):
+    shard_paths = sorted(coordination_dir.glob(f"{glob_escape(stem)}.tiles.rank*.pt"))
     return [torch.load(path, map_location="cpu", weights_only=True) for path in shard_paths]
 
 
-def load_hierarchical_embedding_shards(coordination_dir: Path, sample_id: str):
-    shard_paths = sorted(coordination_dir.glob(f"{sample_id}.hier.rank*.pt"))
+def load_hierarchical_embedding_shards(coordination_dir: Path, stem: str):
+    shard_paths = sorted(coordination_dir.glob(f"{glob_escape(stem)}.hier.rank*.pt"))
     return [torch.load(path, map_location="cpu", weights_only=True) for path in shard_paths]
 
 
-def load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
-    payload_path = coordination_dir / f"{sample_id}.embedded.pt"
+def load_embedded_slide_payload(coordination_dir: Path, stem: str):
+    payload_path = coordination_dir / f"{stem}.embedded.pt"
     return torch.load(payload_path, map_location="cpu", weights_only=True)
+
+
+def glob_escape(text: str) -> str:
+    """Escape glob metacharacters in a shard stem so a literal stem matches itself."""
+    from glob import escape
+
+    return escape(text)

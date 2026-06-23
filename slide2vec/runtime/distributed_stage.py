@@ -16,6 +16,7 @@ from slide2vec.runtime.embedding_pipeline import aggregate_tile_embeddings_for_s
 from slide2vec.runtime.distributed import (
     distributed_coordination_dir,
     assign_slides_to_ranks,
+    encode_work_unit,
     load_embedded_slide_payload,
     load_hierarchical_embedding_shards,
     load_tile_embedding_shards,
@@ -23,7 +24,9 @@ from slide2vec.runtime.distributed import (
     merge_tile_embedding_shards,
     reset_progress_event_logs,
     run_torchrun_worker,
+    work_unit_shard_stem,
 )
+from slide2vec.runtime.embedding import tiling_result_annotation
 from slide2vec.runtime.hierarchical import (
     is_hierarchical_preprocessing,
     num_tiles,
@@ -49,7 +52,7 @@ def build_pipeline_worker_request_payload(
     execution: ExecutionOptions,
     *,
     tiling_input_dir: Path,
-    sample_ids: Sequence[str] | None = None,
+    work_units: Sequence[str] | None = None,
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
     return {
@@ -57,7 +60,7 @@ def build_pipeline_worker_request_payload(
         "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
         "tiling_input_dir": str(tiling_input_dir),
-        "sample_ids": list(sample_ids) if sample_ids is not None else None,
+        "work_units": list(work_units) if work_units is not None else None,
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
@@ -84,7 +87,7 @@ def build_direct_embed_worker_request_payload(
     execution: ExecutionOptions,
     coordination_dir: Path,
     strategy: str,
-    sample_id: str | None,
+    work_unit: str | None,
     assignments: dict[int, list[str]] | None,
     progress_events_path: Path | None = None,
 ) -> dict[str, Any]:
@@ -94,8 +97,8 @@ def build_direct_embed_worker_request_payload(
         "preprocessing": serialize_preprocessing(preprocessing),
         "execution": serialize_execution(execution, preprocessing=preprocessing),
         "coordination_dir": str(coordination_dir),
-        "sample_id": sample_id,
-        "assignments": {str(rank): sample_ids for rank, sample_ids in (assignments or {}).items()},
+        "work_unit": work_unit,
+        "assignments": {str(rank): work_units for rank, work_units in (assignments or {}).items()},
         "progress_events_path": str(progress_events_path) if progress_events_path is not None else None,
     }
 
@@ -108,6 +111,7 @@ def run_distributed_embedding_stage(
     execution: ExecutionOptions,
     output_dir: Path,
     tiling_input_dir: Path | None = None,
+    annotations: Sequence[str | None] | None = None,
     on_progress_event: Callable[[Any], None] | None = None,
 ) -> None:
     if not successful_slides:
@@ -115,12 +119,20 @@ def run_distributed_embedding_stage(
     request_path = output_dir / "embedding_request.json"
     progress_events_path = output_dir / "logs" / "pipeline_worker.progress.jsonl"
     reset_progress_event_logs(progress_events_path)
+    # One composite work unit per (sample_id, annotation). Flat units encode to the bare sample_id,
+    # so tissue-only / single-class / merged runs send a byte-identical payload to pre-#168.
+    if annotations is None:
+        annotations = [None] * len(successful_slides)
+    work_units = [
+        encode_work_unit(slide.sample_id, annotation)
+        for slide, annotation in zip(successful_slides, annotations)
+    ]
     request_payload = build_pipeline_worker_request_payload(
         model,
         preprocessing,
         execution,
         tiling_input_dir=tiling_input_dir or output_dir,
-        sample_ids=[slide.sample_id for slide in successful_slides],
+        work_units=work_units,
         progress_events_path=progress_events_path,
     )
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -154,7 +166,7 @@ def run_distributed_direct_embedding_stage(
     output_dir: Path,
     coordination_dir: Path,
     strategy: str,
-    sample_id: str | None = None,
+    work_unit: str | None = None,
     assignments: dict[int, list[str]] | None = None,
 ) -> None:
     request_path = coordination_dir / "direct_embedding_request.json"
@@ -166,7 +178,7 @@ def run_distributed_direct_embedding_stage(
         execution=execution,
         coordination_dir=coordination_dir,
         strategy=strategy,
-        sample_id=sample_id,
+        work_unit=work_unit,
         assignments=assignments,
         progress_events_path=progress_events_path,
     )
@@ -191,6 +203,9 @@ def embed_single_slide_distributed(
     execution: ExecutionOptions,
     work_dir: Path,
 ) -> EmbeddedSlide:
+    annotation = tiling_result_annotation(tiling_result)
+    work_unit = encode_work_unit(slide.sample_id, annotation)
+    shard_stem = work_unit_shard_stem(slide.sample_id, annotation)
     with distributed_coordination_dir(work_dir) as coordination_dir:
         run_distributed_direct_embedding_stage(
             model,
@@ -199,10 +214,10 @@ def embed_single_slide_distributed(
             output_dir=work_dir,
             coordination_dir=coordination_dir,
             strategy="tile_shard",
-            sample_id=slide.sample_id,
+            work_unit=work_unit,
         )
         if is_hierarchical_preprocessing(preprocessing):
-            shard_payloads = load_hierarchical_embedding_shards(coordination_dir, slide.sample_id)
+            shard_payloads = load_hierarchical_embedding_shards(coordination_dir, shard_stem)
             geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
             tile_embeddings = merge_hierarchical_embedding_shards(
                 shard_payloads,
@@ -210,7 +225,7 @@ def embed_single_slide_distributed(
                 tiles_per_region=int(geometry["tiles_per_region"]),
             )
         else:
-            shard_payloads = load_tile_embedding_shards(coordination_dir, slide.sample_id)
+            shard_payloads = load_tile_embedding_shards(coordination_dir, shard_stem)
             tile_embeddings = merge_tile_embedding_shards(shard_payloads)
         if model.level != "slide":
             return make_embedded_slide(
@@ -263,7 +278,10 @@ def embed_multi_slides_distributed(
         )
         results = []
         for slide, tiling_result in zip(slide_records, tiling_results):
-            payload = load_embedded_slide_payload(coordination_dir, slide.sample_id)
+            shard_stem = work_unit_shard_stem(
+                slide.sample_id, tiling_result_annotation(tiling_result)
+            )
+            payload = load_embedded_slide_payload(coordination_dir, shard_stem)
             slide_embedding = payload["slide_embedding"] if "slide_embedding" in payload else None
             latents = payload["latents"] if "latents" in payload else None
             results.append(

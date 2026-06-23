@@ -137,6 +137,20 @@ def _annotations_parallel_to_slides(
     return annotations
 
 
+class _AnnotationPlaceholder:
+    """Minimal tiling-result stand-in carrying just an ``annotation`` for the resume gate.
+
+    The distributed reconcile has no in-memory tiling results (workers re-load tiles from disk), but
+    :func:`pending_local_embedding_records` keys resume by ``(sample_id, annotation)`` via the tiling
+    result's ``annotation`` attribute. This placeholder threads the process-list annotation through.
+    """
+
+    __slots__ = ("annotation",)
+
+    def __init__(self, annotation: str | None) -> None:
+        self.annotation = annotation
+
+
 def collect_distributed_pipeline_artifacts(
     *,
     model,
@@ -162,9 +176,20 @@ def collect_distributed_pipeline_artifacts(
     annotation_groups = (
         _embeddable_annotation_groups(process_list_path) if annotation_aware else {}
     )
-    pending_slides, _ = pending_local_embedding_records(
+    # The embedding *stage* must fan out per (sample_id, annotation) for every level (tile / slide /
+    # hierarchical) so each class's tiles are actually embedded — independent of whether the
+    # process-list *reconcile* is annotation-aware (tile artifacts stay sample_id-keyed in #167).
+    stage_annotation_groups = _embeddable_annotation_groups(process_list_path)
+    # One annotation per ``successful_slides`` entry (the tiling spine fans out per class). Carry each
+    # on a lightweight placeholder so the resume gate keys by (sample_id, annotation) and the surviving
+    # pending entries hand the stage the right per-class work units.
+    stage_annotations = _annotations_parallel_to_slides(successful_slides, stage_annotation_groups)
+    annotation_placeholders = [
+        _AnnotationPlaceholder(annotation) for annotation in stage_annotations
+    ]
+    pending_slides, pending_placeholders = pending_local_embedding_records(
         successful_slides,
-        [None] * len(successful_slides),
+        annotation_placeholders,
         process_list_path=process_list_path,
         output_dir=output_dir,
         output_format=execution.output_format,
@@ -174,6 +199,7 @@ def collect_distributed_pipeline_artifacts(
         save_latents=execution.save_latents,
         resume=preprocessing.resume,
     )
+    pending_annotations = [placeholder.annotation for placeholder in pending_placeholders]
     skipped_slide_count = len(successful_slides) - len(pending_slides)
     if preprocessing.resume and skipped_slide_count > 0:
         emit_progress(
@@ -244,6 +270,7 @@ def collect_distributed_pipeline_artifacts(
         execution=execution,
         output_dir=output_dir,
         tiling_input_dir=tiling_input_dir,
+        annotations=pending_annotations,
         on_progress_event=_update_process_list_for_finished_slide,
     )
     # ``successful_slides`` is already one entry per (sample_id, annotation) row, so resolve a
