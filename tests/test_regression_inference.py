@@ -334,6 +334,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
         execution,
         output_dir,
         tiling_input_dir=None,
+        annotations=None,
         on_progress_event=None,
     ):
         captured["run_stage"] = {
@@ -343,6 +344,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "execution": execution,
             "output_dir": output_dir,
             "tiling_input_dir": tiling_input_dir,
+            "annotations": annotations,
             "on_progress_event": on_progress_event,
         }
 
@@ -614,6 +616,83 @@ def test_collect_distributed_pipeline_artifacts_records_per_class_slide_paths_fo
     assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
     assert tumor_row["aggregation_status"] == "success"
     assert stroma_row["aggregation_status"] == "success"
+
+
+def test_collect_distributed_pipeline_artifacts_fans_out_per_class_annotations_to_stage(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Issue #168: the distributed embedding stage must receive one work unit per (sample_id,
+    annotation), so every class is embedded. The parent passes the per-class annotations (resolved
+    from the process_list) parallel to the slides."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="tumor")
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    captured = {}
+
+    def fake_stage(*, annotations, successful_slides, **kwargs):
+        captured["annotations"] = list(annotations)
+        captured["sample_ids"] = [s.sample_id for s in successful_slides]
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_stage)
+
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide, slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    assert captured["sample_ids"] == ["slide-a", "slide-a"]
+    assert captured["annotations"] == ["tumor", "stroma"]
 
 
 @pytest.mark.parametrize("annotation", ["tissue", "merged", None])
@@ -1598,7 +1677,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
                 "preprocessing": {},
                 "execution": {},
                 "tiling_input_dir": str(tmp_path),
-                "sample_ids": ["slide-a"],
+                "work_units": ["slide-a"],
             }
         ),
         encoding="utf-8",
@@ -1664,7 +1743,7 @@ def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: 
                 "preprocessing": {},
                 "execution": {},
                 "tiling_input_dir": str(tmp_path),
-                "sample_ids": ["slide-b"],
+                "work_units": ["slide-b"],
             }
         ),
         encoding="utf-8",
@@ -5812,3 +5891,277 @@ def test_zero_tile_hierarchical_sidecar_namespaces_per_class(monkeypatch, tmp_pa
 
     _sidecar("tissue")
     assert (tmp_path / "hierarchical_embeddings" / "slide-z.meta.json").is_file()
+
+
+# --- Issue #168: annotation-aware fan-out for the distributed embedding stage ---
+
+
+@pytest.mark.parametrize("annotation", [None, "tissue", "merged"])
+def test_encode_work_unit_collapses_flat_annotation_to_bare_sample_id(annotation):
+    """Flat annotations (None / tissue / merged) must encode to the bare sample_id, byte-identical
+    to the pre-#168 sample_id-keyed assignment and coordination filenames."""
+    from slide2vec.runtime.distributed import encode_work_unit
+
+    assert encode_work_unit("slide-a", annotation) == "slide-a"
+
+
+def test_encode_work_unit_encodes_real_class_reversibly_without_collision():
+    from slide2vec.runtime.distributed import decode_work_unit, encode_work_unit
+
+    tumor = encode_work_unit("slide-a", "tumor")
+    stroma = encode_work_unit("slide-a", "stroma")
+    other_slide = encode_work_unit("slide-b", "tumor")
+
+    # Composite keys for distinct (sample_id, annotation) pairs never collide.
+    assert tumor != stroma
+    assert tumor != other_slide
+    assert tumor != "slide-a"
+
+    # Reversible back to the original (sample_id, normalized annotation) pair.
+    assert decode_work_unit(tumor) == ("slide-a", "tumor")
+    assert decode_work_unit(stroma) == ("slide-a", "stroma")
+
+
+def test_decode_work_unit_returns_flat_annotation_as_none():
+    from slide2vec.runtime.distributed import decode_work_unit, encode_work_unit
+
+    assert decode_work_unit(encode_work_unit("slide-a", None)) == ("slide-a", None)
+    assert decode_work_unit("slide-a") == ("slide-a", None)
+
+
+def test_assign_slides_to_ranks_balances_per_class_unit_and_splits_siblings():
+    """A multi-class slide fans out into independent (sample_id, annotation) units, each balanced by
+    its own tile count; a slide's classes may land on different ranks (decision #4)."""
+    from slide2vec.runtime.distributed import assign_slides_to_ranks, decode_work_unit
+
+    slides = [make_slide("slide-a"), make_slide("slide-a")]
+    tiling_results = [
+        SimpleNamespace(x=np.arange(9), y=np.arange(9), tile_size_lv0=224, annotation="tumor"),
+        SimpleNamespace(x=np.arange(8), y=np.arange(8), tile_size_lv0=224, annotation="stroma"),
+    ]
+
+    assignments = assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+
+    decoded = {rank: [decode_work_unit(key) for key in keys] for rank, keys in assignments.items()}
+    # Each class is its own unit; the two classes of slide-a land on different ranks.
+    assert decoded == {
+        0: [("slide-a", "tumor")],
+        1: [("slide-a", "stroma")],
+    }
+
+
+def test_assign_slides_to_ranks_flat_units_stay_byte_identical_to_bare_sample_ids():
+    """Tissue-only / merged / None units must produce the exact pre-#168 bare-sample_id assignment."""
+    from slide2vec.runtime.distributed import assign_slides_to_ranks
+
+    slides = [make_slide("slide-a"), make_slide("slide-b")]
+    tiling_results = [
+        SimpleNamespace(x=np.arange(9), y=np.arange(9), tile_size_lv0=224, annotation="tissue"),
+        SimpleNamespace(x=np.arange(8), y=np.arange(8), tile_size_lv0=224, annotation=None),
+    ]
+
+    assignments = assign_slides_to_ranks(slides, tiling_results, num_gpus=2)
+
+    assert assignments == {0: ["slide-a"], 1: ["slide-b"]}
+
+
+@pytest.mark.parametrize("annotation", [None, "tissue", "merged"])
+def test_work_unit_shard_stem_flat_keeps_bare_sample_id(annotation):
+    """Flat units keep the exact pre-#168 bare-sample_id coordination/shard filename stem."""
+    from slide2vec.runtime.distributed import work_unit_shard_stem
+
+    assert work_unit_shard_stem("slide-a", annotation) == "slide-a"
+
+
+def test_work_unit_shard_stem_real_class_is_unique_and_filesystem_safe():
+    from slide2vec.runtime.distributed import work_unit_shard_stem
+
+    tumor = work_unit_shard_stem("slide-a", "tumor")
+    stroma = work_unit_shard_stem("slide-a", "stroma")
+    other = work_unit_shard_stem("slide-b", "tumor")
+
+    # Two classes of one slide on the same rank do not collide, nor with another sample's flat key.
+    assert len({tumor, stroma, other}) == 3
+    assert tumor != "slide-a"
+    # Filesystem-safe: no path separators or NUL bytes that would break a glob/path.
+    for stem in (tumor, stroma, other):
+        assert "/" not in stem and "\x00" not in stem
+
+
+def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_collision(monkeypatch, tmp_path: Path):
+    """Two classes of one slide assigned to the same rank must persist to distinct .embedded.pt
+    files (per (sample_id, annotation) stem), so a sibling class is never overwritten."""
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import direct_embed_worker
+    from slide2vec.runtime.distributed import encode_work_unit
+
+    coordination_dir = tmp_path / "coordination"
+    coordination_dir.mkdir()
+    request_path = tmp_path / "request.json"
+    tumor_unit = encode_work_unit("slide-a", "tumor")
+    stroma_unit = encode_work_unit("slide-a", "stroma")
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {"name": "virchow2", "allow_non_recommended_settings": False},
+                "preprocessing": {},
+                "execution": {},
+                "coordination_dir": str(coordination_dir),
+                "strategy": "slide_shard",
+                "assignments": {"0": [tumor_unit, stroma_unit]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tumor_tr = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224, annotation="tumor")
+    stroma_tr = SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224, annotation="stroma")
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
+    monkeypatch.setattr(direct_embed_worker, "_to_cpu_payload", lambda value: value)
+    monkeypatch.setattr(
+        manifest,
+        "load_successful_tiled_slides",
+        lambda output_dir: ([slide, slide], [tumor_tr, stroma_tr]),
+    )
+
+    def fake_compute(_model, slides, tiling_results, *, on_embedded_slide, **kwargs):
+        for s, tr in zip(slides, tiling_results):
+            embedded = EmbeddedSlide(
+                sample_id=s.sample_id,
+                tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+                slide_embedding=None,
+                x=tr.x,
+                y=tr.y,
+                tile_size_lv0=tr.tile_size_lv0,
+                image_path=s.image_path,
+                mask_path=None,
+            )
+            on_embedded_slide(s, tr, embedded)
+        return []
+
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute)
+
+    assert direct_embed_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+
+    from slide2vec.runtime.distributed import work_unit_shard_stem
+
+    tumor_path = coordination_dir / f"{work_unit_shard_stem('slide-a', 'tumor')}.embedded.pt"
+    stroma_path = coordination_dir / f"{work_unit_shard_stem('slide-a', 'stroma')}.embedded.pt"
+    assert tumor_path.is_file()
+    assert stroma_path.is_file()
+    assert tumor_path != stroma_path
+
+
+def test_compute_embedded_slides_finished_event_carries_annotation(monkeypatch):
+    """The embedding.slide.finished payload must carry the per-class annotation so the #167 live
+    updater matches the right (sample_id, annotation) row."""
+    import slide2vec.progress as progress
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224, annotation="tumor")
+
+    loaded = SimpleNamespace()
+    model = SimpleNamespace(level="tile", _load_backend=lambda: loaded)
+
+    monkeypatch.setattr(
+        embedding_pipeline,
+        "compute_tile_embeddings_for_slide",
+        lambda *args, **kwargs: np.zeros((1, 2), dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        embedding_pipeline,
+        "aggregate_tile_embeddings_for_slide",
+        lambda *args, **kwargs: (None, None),
+    )
+
+    events = []
+    monkeypatch.setattr(progress, "emit_progress", lambda kind, **payload: events.append((kind, payload)))
+    monkeypatch.setattr(embedding_pipeline, "emit_progress", lambda kind, **payload: events.append((kind, payload)))
+
+    embedding_pipeline.compute_embedded_slides(
+        model,
+        [slide],
+        [tiling_result],
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=None),
+        collect_results=False,
+    )
+
+    finished = [payload for kind, payload in events if kind == "embedding.slide.finished"]
+    assert finished, "expected an embedding.slide.finished event"
+    assert finished[0]["annotation"] == "tumor"
+
+
+def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, tmp_path: Path):
+    """Pipeline-worker path: a multi-label slide's classes must NOT collapse by sample_id — every
+    (sample_id, annotation) unit is computed (the bug #168 fixes)."""
+    import torch.distributed as dist
+
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import pipeline_worker
+    from slide2vec.runtime.distributed import encode_work_unit
+
+    tumor_unit = encode_work_unit("slide-a", "tumor")
+    stroma_unit = encode_work_unit("slide-a", "stroma")
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {"name": "virchow2", "allow_non_recommended_settings": False},
+                "preprocessing": {},
+                "execution": {},
+                "tiling_input_dir": str(tmp_path),
+                "work_units": [tumor_unit, stroma_unit],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    slide = make_slide("slide-a")
+    tumor_tr = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224, annotation="tumor")
+    stroma_tr = SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224, annotation="stroma")
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(dist, "is_available", lambda: False)
+    monkeypatch.setattr(dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
+    monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
+    monkeypatch.setattr(
+        manifest,
+        "load_successful_tiled_slides",
+        lambda tiling_input_dir: ([slide, slide], [tumor_tr, stroma_tr]),
+    )
+    monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
+        lambda **kwargs: (lambda *args, **kwargs: None, [], []),
+    )
+
+    def fake_compute(_model, slides, tiling_results, **kwargs):
+        captured["annotations"] = [tr.annotation for tr in tiling_results]
+        return []
+
+    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute)
+
+    assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+    # Both classes of the single slide are embedded — sibling annotations are NOT overwritten.
+    assert sorted(captured["annotations"]) == ["stroma", "tumor"]

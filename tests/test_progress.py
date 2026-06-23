@@ -578,7 +578,7 @@ def test_build_direct_embed_worker_request_payload_includes_progress_events_path
         execution=inference.ExecutionOptions(output_dir=tmp_path),
         coordination_dir=tmp_path / "coord",
         strategy="slide_shard",
-        sample_id=None,
+        work_unit=None,
         assignments={0: ["slide-a"]},
         progress_events_path=tmp_path / "logs" / "direct.progress.jsonl",
     )

@@ -411,6 +411,9 @@ def compute_embedded_slides(
         emit_progress(
             "embedding.slide.finished",
             sample_id=slide.sample_id,
+            # Carry the per-class annotation so the distributed live updater (#167) matches the right
+            # (sample_id, annotation) row rather than collapsing siblings onto the first finished one.
+            annotation=getattr(tiling_result, "annotation", None),
             num_tiles=num_embedding_items(tiling_result, preprocessing),
         )
     return embedded_slides

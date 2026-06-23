@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import json
 import os
 import shutil
 import signal
@@ -16,9 +17,74 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 from hs2p import SlideSpec
+from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.progress import emit_progress_event, read_progress_events
 from slide2vec.runtime.hierarchical import num_tiles
+
+
+# Sentinel prefix for composite (sample_id, annotation) work-unit keys. Bare sample_ids never carry
+# this prefix, so a real per-class unit can never collide with another sample's flat key.
+_WORK_UNIT_PREFIX = "\x00s2v-unit\x00"
+
+
+def normalize_work_unit_annotation(annotation: str | None) -> str | None:
+    """Collapse flat-layout annotations to ``None`` so flat units key by bare ``sample_id``.
+
+    Mirrors the in-memory single-GPU path and the distributed reconcile
+    (:func:`slide2vec.runtime.artifacts_collect._normalized_row_annotation`): ``None``, hs2p's
+    flat-layout sentinels (:func:`hs2p.fileops.is_flattened_annotation`, e.g. ``"tissue"``), and the
+    merged output-mode label ``"merged"`` all collapse to ``None``. Only genuine per-class
+    annotations survive as a composite key.
+    """
+    if annotation is None:
+        return None
+    annotation = str(annotation)
+    if annotation == "merged" or is_flattened_annotation(annotation):
+        return None
+    return annotation
+
+
+def encode_work_unit(sample_id: str, annotation: str | None) -> str:
+    """Encode a ``(sample_id, annotation)`` distributed work unit as a single string key.
+
+    Flat units (normalized annotation is ``None``) return the bare ``sample_id`` unchanged, so
+    tissue-only / single-class / merged runs produce byte-identical assignments and coordination
+    filenames as before. A genuine per-class unit returns a reversible, collision-free composite.
+    """
+    normalized = normalize_work_unit_annotation(annotation)
+    if normalized is None:
+        return str(sample_id)
+    return _WORK_UNIT_PREFIX + json.dumps([str(sample_id), normalized])
+
+
+def decode_work_unit(key: str) -> tuple[str, str | None]:
+    """Inverse of :func:`encode_work_unit`: ``key`` -> ``(sample_id, annotation_or_none)``."""
+    if isinstance(key, str) and key.startswith(_WORK_UNIT_PREFIX):
+        sample_id, annotation = json.loads(key[len(_WORK_UNIT_PREFIX):])
+        return str(sample_id), annotation
+    return str(key), None
+
+
+# Reserved separator joining the (percent-encoded) sample_id and class in a composite shard stem.
+# Both halves are percent-encoded with ``safe=""`` so this token can never appear inside either,
+# which keeps the stem reversible and collision-free across (sample_id, annotation) pairs.
+_SHARD_STEM_SEP = ".__cls__."
+
+
+def work_unit_shard_stem(sample_id: str, annotation: str | None) -> str:
+    """Filesystem-safe coordination/shard filename stem for a ``(sample_id, annotation)`` unit.
+
+    Flat units (normalized annotation is ``None``) keep the bare ``sample_id`` unchanged so existing
+    runs produce byte-identical coordination filenames. A genuine per-class unit appends a reversible
+    percent-encoded suffix that cannot collide with another sample's flat stem or with a sibling class.
+    """
+    from urllib.parse import quote
+
+    normalized = normalize_work_unit_annotation(annotation)
+    if normalized is None:
+        return str(sample_id)
+    return f"{quote(str(sample_id), safe='')}{_SHARD_STEM_SEP}{quote(normalized, safe='')}"
 
 
 @contextmanager
@@ -196,10 +262,13 @@ def assign_slides_to_ranks(
     heapq.heapify(assigned_ranks)
     sortable = []
     for slide, tiling_result in zip(slide_records, tiling_results):
-        sortable.append((slide.sample_id, num_tiles(tiling_result)))
-    for sample_id, tile_count in sorted(sortable, key=lambda item: (-item[1], item[0])):
+        # Each (sample_id, annotation) is an independent unit balanced by its own tile count; a
+        # slide's classes may land on different ranks. Flat units encode to the bare sample_id.
+        unit_key = encode_work_unit(slide.sample_id, getattr(tiling_result, "annotation", None))
+        sortable.append((unit_key, num_tiles(tiling_result)))
+    for unit_key, tile_count in sorted(sortable, key=lambda item: (-item[1], item[0])):
         assigned_tiles, rank = heapq.heappop(assigned_ranks)
-        assignments[rank].append(sample_id)
+        assignments[rank].append(unit_key)
         heapq.heappush(assigned_ranks, (assigned_tiles + int(tile_count), rank))
     return assignments
 
@@ -242,16 +311,23 @@ def merge_hierarchical_embedding_shards(
     return merged.reshape(int(num_regions), int(tiles_per_region), int(merged.shape[-1]))
 
 
-def load_tile_embedding_shards(coordination_dir: Path, sample_id: str):
-    shard_paths = sorted(coordination_dir.glob(f"{sample_id}.tiles.rank*.pt"))
+def load_tile_embedding_shards(coordination_dir: Path, stem: str):
+    shard_paths = sorted(coordination_dir.glob(f"{glob_escape(stem)}.tiles.rank*.pt"))
     return [torch.load(path, map_location="cpu", weights_only=True) for path in shard_paths]
 
 
-def load_hierarchical_embedding_shards(coordination_dir: Path, sample_id: str):
-    shard_paths = sorted(coordination_dir.glob(f"{sample_id}.hier.rank*.pt"))
+def load_hierarchical_embedding_shards(coordination_dir: Path, stem: str):
+    shard_paths = sorted(coordination_dir.glob(f"{glob_escape(stem)}.hier.rank*.pt"))
     return [torch.load(path, map_location="cpu", weights_only=True) for path in shard_paths]
 
 
-def load_embedded_slide_payload(coordination_dir: Path, sample_id: str):
-    payload_path = coordination_dir / f"{sample_id}.embedded.pt"
+def load_embedded_slide_payload(coordination_dir: Path, stem: str):
+    payload_path = coordination_dir / f"{stem}.embedded.pt"
     return torch.load(payload_path, map_location="cpu", weights_only=True)
+
+
+def glob_escape(text: str) -> str:
+    """Escape glob metacharacters in a shard stem so a literal stem matches itself."""
+    from glob import escape
+
+    return escape(text)

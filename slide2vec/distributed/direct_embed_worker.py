@@ -49,12 +49,21 @@ def main(argv=None) -> int:
         )
         preprocessing = deserialize_preprocessing(request["preprocessing"])
         execution = deserialize_execution(request["execution"])
+        from slide2vec.runtime.distributed import (
+            decode_work_unit,
+            encode_work_unit,
+            work_unit_shard_stem,
+        )
+        from slide2vec.runtime.embedding import tiling_result_annotation
+
         load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
         if not callable(load_successful_tiled_slides_fn):
             from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
         slide_records, tiling_results = load_successful_tiled_slides_fn(output_dir)
-        paired_by_sample = {
-            slide.sample_id: (slide, tiling_result)
+        # Key by the composite (sample_id, annotation) work unit so a multi-class slide's sibling
+        # classes never overwrite each other; flat units collapse to the bare sample_id key.
+        paired_by_unit = {
+            encode_work_unit(slide.sample_id, tiling_result_annotation(tiling_result)): (slide, tiling_result)
             for slide, tiling_result in zip(slide_records, tiling_results)
         }
         progress_events_path = request.get("progress_events_path")
@@ -71,8 +80,9 @@ def main(argv=None) -> int:
 
         with context:
             if request["strategy"] == "tile_shard":
-                sample_id = request["sample_id"]
-                slide, tiling_result = paired_by_sample[sample_id]
+                work_unit = request["work_unit"]
+                shard_stem = work_unit_shard_stem(*decode_work_unit(work_unit))
+                slide, tiling_result = paired_by_unit[work_unit]
                 loaded = model._load_backend()
                 if is_hierarchical_preprocessing(preprocessing):
                     geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
@@ -103,7 +113,7 @@ def main(argv=None) -> int:
                         "flat_index": torch.as_tensor(shard_indices, dtype=torch.long),
                         "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
                     }
-                    torch.save(payload, coordination_dir / f"{sample_id}.hier.rank{global_rank}.pt")
+                    torch.save(payload, coordination_dir / f"{shard_stem}.hier.rank{global_rank}.pt")
                 else:
                     num_tiles = len(tiling_result.x)
                     tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
@@ -129,14 +139,14 @@ def main(argv=None) -> int:
                         "tile_index": torch.as_tensor(tile_indices, dtype=torch.long),
                         "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
                     }
-                    torch.save(payload, coordination_dir / f"{sample_id}.tiles.rank{global_rank}.pt")
+                    torch.save(payload, coordination_dir / f"{shard_stem}.tiles.rank{global_rank}.pt")
                 return 0
 
             assigned_ids = list(request.get("assignments", {}).get(str(global_rank), []))
             if not assigned_ids:
                 return 0
-            assigned_slides = [paired_by_sample[sample_id][0] for sample_id in assigned_ids]
-            assigned_tiling_results = [paired_by_sample[sample_id][1] for sample_id in assigned_ids]
+            assigned_slides = [paired_by_unit[unit_key][0] for unit_key in assigned_ids]
+            assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in assigned_ids]
 
             def _persist_embedded_slide(slide, tiling_result, embedded_slide) -> None:
                 payload = {
@@ -144,7 +154,12 @@ def main(argv=None) -> int:
                     "slide_embedding": _to_cpu_payload(embedded_slide.slide_embedding),
                     "latents": _to_cpu_payload(embedded_slide.latents),
                 }
-                torch.save(payload, coordination_dir / f"{embedded_slide.sample_id}.embedded.pt")
+                # Stem by (sample_id, annotation) so two classes of one slide never overwrite each
+                # other; flat units keep the bare-sample_id filename for backward compatibility.
+                stem = work_unit_shard_stem(
+                    embedded_slide.sample_id, tiling_result_annotation(tiling_result)
+                )
+                torch.save(payload, coordination_dir / f"{stem}.embedded.pt")
 
             compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
             if not callable(compute_embedded_slides_fn):

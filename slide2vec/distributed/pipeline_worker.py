@@ -3,7 +3,8 @@ from contextlib import nullcontext
 import json
 from pathlib import Path
 
-from slide2vec.runtime.distributed import assign_slides_to_ranks
+from slide2vec.runtime.distributed import assign_slides_to_ranks, encode_work_unit
+from slide2vec.runtime.embedding import tiling_result_annotation
 
 
 def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
@@ -48,26 +49,29 @@ def main(argv=None) -> int:
         if not callable(load_successful_tiled_slides_fn):
             from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
         slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
-        requested_sample_ids = request.get("sample_ids")
-        if requested_sample_ids is not None:
-            requested_sample_id_set = {str(sample_id) for sample_id in requested_sample_ids}
-            paired = [
-                (slide, tiling_result)
-                for slide, tiling_result in zip(slide_records, tiling_results)
-                if slide.sample_id in requested_sample_id_set
-            ]
-            slide_records = [slide for slide, _ in paired]
-            tiling_results = [tiling_result for _, tiling_result in paired]
+        # Each (sample_id, annotation) row is an independent work unit; key by the composite so a
+        # multi-class slide's sibling classes never overwrite each other. Flat units (None / tissue /
+        # merged) encode to the bare sample_id, byte-identical to pre-#168 single-class runs.
+        paired_by_unit = {
+            encode_work_unit(slide.sample_id, tiling_result_annotation(tiling_result)): (slide, tiling_result)
+            for slide, tiling_result in zip(slide_records, tiling_results)
+        }
+        requested_work_units = request.get("work_units")
+        if requested_work_units is not None:
+            requested_unit_set = {str(unit) for unit in requested_work_units}
+            paired_by_unit = {
+                unit_key: pair
+                for unit_key, pair in paired_by_unit.items()
+                if unit_key in requested_unit_set
+            }
+        slide_records = [slide for slide, _ in paired_by_unit.values()]
+        tiling_results = [tiling_result for _, tiling_result in paired_by_unit.values()]
         assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
         assigned_ids = assignments.get(global_rank, [])
         if not assigned_ids:
             return 0
-        paired_by_sample = {
-            slide.sample_id: (slide, tiling_result)
-            for slide, tiling_result in zip(slide_records, tiling_results)
-        }
-        assigned_slides = [paired_by_sample[sample_id][0] for sample_id in assigned_ids]
-        assigned_tiling_results = [paired_by_sample[sample_id][1] for sample_id in assigned_ids]
+        assigned_slides = [paired_by_unit[unit_key][0] for unit_key in assigned_ids]
+        assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in assigned_ids]
         progress_events_path = request.get("progress_events_path")
         reporter = (
             JsonlProgressReporter(
