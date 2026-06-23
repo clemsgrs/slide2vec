@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import Sequence
 
+import pandas as pd
 from hs2p import SlideSpec
+from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
@@ -19,7 +21,10 @@ from slide2vec.runtime.persistence import (
     collect_pipeline_artifacts,
     update_process_list_after_embedding,
 )
-from slide2vec.runtime.persist_callbacks import pending_local_embedding_records
+from slide2vec.runtime.persist_callbacks import (
+    has_complete_local_embedding_outputs,
+    pending_local_embedding_records,
+)
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
 from slide2vec.progress import emit_progress
 
@@ -52,6 +57,86 @@ def collect_local_pipeline_artifacts(
     return tile_artifacts, hierarchical_artifacts, slide_artifacts
 
 
+def _embeddable_annotation_groups(
+    process_list_path: Path,
+) -> dict[str, list[str | None]]:
+    """Map each ``sample_id`` to its embeddable per-class annotations, in process-list row order.
+
+    The process_list already carries one row per ``(sample_id, annotation)`` after hs2p tiling, so
+    it is the source of truth for which classes fanned out per slide (the distributed workers
+    re-load tiles from disk and have no in-memory tiling results to re-derive this from). Only rows
+    with ``num_tiles > 0`` are kept, because :func:`partition_slides_by_tile_count` drops zero-tile
+    rows before the embedding stage — so the kept annotations line up 1:1 with ``successful_slides``.
+    Flat-layout rows (see :func:`_normalized_row_annotation`) collapse to a ``None`` annotation so the
+    default tissue-only path stays on the flat embedding path. Row order is preserved (rather than
+    deduplicated) so each ``successful_slides`` entry can claim exactly one annotation.
+    """
+    if process_list_path is None or not Path(process_list_path).is_file():
+        return {}
+    df = pd.read_csv(process_list_path)
+    if "sample_id" not in df.columns:
+        return {}
+    has_annotation = "annotation" in df.columns
+    has_num_tiles = "num_tiles" in df.columns
+    groups: dict[str, list[str | None]] = {}
+    for _, row in df.iterrows():
+        if has_num_tiles and not _has_tiles(row["num_tiles"]):
+            continue
+        sample_id = str(row["sample_id"])
+        annotation = row["annotation"] if has_annotation else None
+        groups.setdefault(sample_id, []).append(_normalized_row_annotation(annotation))
+    return groups
+
+
+def _has_tiles(num_tiles) -> bool:
+    if num_tiles is None or (isinstance(num_tiles, float) and pd.isna(num_tiles)):
+        return False
+    try:
+        return int(num_tiles) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _normalized_row_annotation(annotation) -> str | None:
+    """Collapse a process-list ``annotation`` cell to the per-class key (``None`` for the flat path).
+
+    Mirrors the in-memory single-GPU path: ``None``/NaN and hs2p's flat-layout sentinels
+    (:func:`hs2p.fileops.is_flattened_annotation`, e.g. ``"tissue"``) land flat, and the merged
+    output-mode label ``"merged"`` is collapsed to ``None`` exactly as
+    :func:`slide2vec.utils.tiling_io.load_tiling_result_from_row` does — so the distributed reconcile
+    keys those rows to the flat embedding path with no per-class subdir.
+    """
+    if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
+        return None
+    annotation = str(annotation)
+    if annotation == "merged" or is_flattened_annotation(annotation):
+        return None
+    return annotation
+
+
+def _annotations_parallel_to_slides(
+    slides: Sequence[SlideSpec],
+    annotation_groups: dict[str, list[str | None]],
+) -> list[str | None]:
+    """Build an ``annotations`` list aligned 1:1 with ``slides``.
+
+    ``successful_slides`` already has one entry per ``(sample_id, annotation)`` row (the tiling spine
+    fans out per class before the embedding stage), but the :class:`SlideSpec` carries no annotation.
+    Consume each sample's recorded annotations in process-list row order so the i-th slide entry
+    claims the i-th annotation for that sample — exactly the parallel ``slides``/``annotations`` pair
+    the single-GPU reconcile threads through :func:`collect_pipeline_artifacts`. Samples with no
+    recorded class fall back to ``None`` (the flat path).
+    """
+    cursors: dict[str, int] = {}
+    annotations: list[str | None] = []
+    for slide in slides:
+        group = annotation_groups.get(slide.sample_id, [])
+        index = cursors.get(slide.sample_id, 0)
+        annotations.append(group[index] if index < len(group) else None)
+        cursors[slide.sample_id] = index + 1
+    return annotations
+
+
 def collect_distributed_pipeline_artifacts(
     *,
     model,
@@ -70,6 +155,13 @@ def collect_distributed_pipeline_artifacts(
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
+    # Slide- and hierarchical-embedding artifacts fan out per (sample_id, annotation); the process
+    # list (one row per pair after hs2p tiling) is the source of truth for which classes exist.
+    # Tile embeddings are sample_id-keyed only, so they don't need the per-class resolution.
+    annotation_aware = include_slide_embeddings or persist_hierarchical_embeddings
+    annotation_groups = (
+        _embeddable_annotation_groups(process_list_path) if annotation_aware else {}
+    )
     pending_slides, _ = pending_local_embedding_records(
         successful_slides,
         [None] * len(successful_slides),
@@ -101,13 +193,35 @@ def collect_distributed_pipeline_artifacts(
         slide = slide_by_sample_id.get(sample_id)
         if slide is None or sample_id in live_updated_sample_ids:
             return
+        # A multi-class slide emits one finished event per (sample_id, annotation) item, and the
+        # other classes may still be running on another rank. Wait until *every* annotation row for
+        # the sample is persisted on disk before the whole-sample rewrite, so we never (a) load a
+        # sibling artifact that isn't there yet, nor (b) flip a still-running sibling's row to error.
+        sample_annotations = list(dict.fromkeys(annotation_groups.get(sample_id, [None]) or [None]))
+        all_ready = all(
+            has_complete_local_embedding_outputs(
+                sample_id,
+                output_dir=output_dir,
+                output_format=execution.output_format,
+                persist_tile_embeddings=persist_tile_embeddings,
+                persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+                include_slide_embeddings=include_slide_embeddings,
+                save_latents=execution.save_latents,
+                annotation=annotation,
+            )
+            for annotation in sample_annotations
+        )
+        if not all_ready:
+            return
+        slides_for_update = [slide] * len(sample_annotations)
         tile_artifacts, hierarchical_artifacts, slide_artifacts = collect_pipeline_artifacts(
-            [slide],
+            slides_for_update,
             output_dir=output_dir,
             output_format=execution.output_format,
             include_tile_embeddings=include_tile_embeddings,
             include_hierarchical_embeddings=persist_hierarchical_embeddings,
             include_slide_embeddings=include_slide_embeddings,
+            annotations=sample_annotations if annotation_aware else None,
         )
         update_process_list_after_embedding(
             process_list_path,
@@ -132,6 +246,9 @@ def collect_distributed_pipeline_artifacts(
         tiling_input_dir=tiling_input_dir,
         on_progress_event=_update_process_list_for_finished_slide,
     )
+    # ``successful_slides`` is already one entry per (sample_id, annotation) row, so resolve a
+    # parallel annotations list (not an expansion) to re-read each entry's namespaced artifact.
+    annotations_for_collect = _annotations_parallel_to_slides(successful_slides, annotation_groups)
     tile_artifacts, hierarchical_artifacts, slide_artifacts = collect_pipeline_artifacts(
         successful_slides,
         output_dir=output_dir,
@@ -139,6 +256,7 @@ def collect_distributed_pipeline_artifacts(
         include_tile_embeddings=include_tile_embeddings,
         include_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
+        annotations=annotations_for_collect if annotation_aware else None,
     )
     update_process_list_after_embedding(
         process_list_path,

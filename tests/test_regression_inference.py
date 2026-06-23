@@ -346,7 +346,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "on_progress_event": on_progress_event,
         }
 
-    def fake_collect(slides, *, output_dir, output_format, include_tile_embeddings, include_hierarchical_embeddings, include_slide_embeddings):
+    def fake_collect(slides, *, output_dir, output_format, include_tile_embeddings, include_hierarchical_embeddings, include_slide_embeddings, annotations=None):
         captured["collect"] = {
             "slides": slides,
             "output_dir": output_dir,
@@ -354,6 +354,7 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
             "include_tile_embeddings": include_tile_embeddings,
             "include_hierarchical_embeddings": include_hierarchical_embeddings,
             "include_slide_embeddings": include_slide_embeddings,
+            "annotations": annotations,
         }
         return ["tile-artifact"], [], ["slide-artifact"]
 
@@ -408,6 +409,9 @@ def test_collect_distributed_pipeline_artifacts_runs_stage_collects_and_updates(
     assert captured["collect"]["include_tile_embeddings"] is True
     assert captured["collect"]["include_hierarchical_embeddings"] is False
     assert captured["collect"]["include_slide_embeddings"] is True
+    # No annotation rows in the process_list (none written) -> single flat (None) annotation, so the
+    # tissue-only / default path stays on the flat embedding path.
+    assert captured["collect"]["annotations"] == [None]
 
     assert captured["update"]["process_list_path"] == process_list_path
     assert captured["update"]["successful_slides"] == [slide]
@@ -516,6 +520,409 @@ def test_collect_distributed_pipeline_artifacts_resume_skips_completed_hierarchi
 
     assert [slide.sample_id for slide in captured["run_stage_slides"]] == ["slide-pending"]
     assert [slide.sample_id for slide in captured["collect_slides"]] == ["slide-done", "slide-pending"]
+
+
+def test_collect_distributed_pipeline_artifacts_records_per_class_slide_paths_for_multi_label(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Issue #166: the distributed (multi-GPU) reconcile must record one process_list row per
+    (sample_id, annotation) with the correct per-class slide-embedding feature path, matching the
+    single-GPU annotation reconcile (rather than collapsing every annotation row onto the flat
+    path).
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    # Mirror the fresh-run tiling process_list: one row per (sample_id, annotation), feature columns
+    # not yet present (the reconcile adds them).
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="stroma",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    # No-op stage (no live finished events) so this asserts the END-OF-RUN reconcile alone records
+    # the per-class paths; the live per-finished-slide updater is covered separately.
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
+
+    # ``successful_slides`` carries one SlideSpec per (sample_id, annotation) row (the tiling spine
+    # already fanned out per class before the embedding stage).
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide, slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    df = pd.read_csv(process_list_path)
+    tumor_row = df[df["annotation"] == "tumor"].iloc[0]
+    stroma_row = df[df["annotation"] == "stroma"].iloc[0]
+    assert tumor_row["feature_path"] == str((tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt").resolve())
+    assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
+    assert tumor_row["aggregation_status"] == "success"
+    assert stroma_row["aggregation_status"] == "success"
+
+
+@pytest.mark.parametrize("annotation", ["tissue", "merged", None])
+def test_collect_distributed_pipeline_artifacts_keeps_flat_path_for_flattened_annotation(
+    monkeypatch,
+    tmp_path: Path,
+    annotation,
+):
+    """Issue #166 (parity): tissue / merged / None annotations stay on the flat slide_embeddings
+    path (no per-class subdir) in the distributed reconcile, mirroring is_flattened_annotation.
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": annotation,
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": None,
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            }
+        ],
+    )
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path)
+
+    slide = make_slide("slide-a")
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
+
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    df = pd.read_csv(process_list_path)
+    row = df.iloc[0]
+    assert row["feature_path"] == str((tmp_path / "slide_embeddings" / "slide-a.pt").resolve())
+    assert "slide_embeddings/tissue" not in row["feature_path"]
+    assert "slide_embeddings/merged" not in row["feature_path"]
+
+
+def test_collect_distributed_pipeline_artifacts_aligns_annotations_skipping_zero_tile_rows(
+    monkeypatch,
+    tmp_path: Path,
+):
+    """Issue #166 (alignment): when one class has zero tiles it is dropped from ``successful_slides``
+    before embedding, so the surviving slide entry must claim the embeddable class's annotation — not
+    the (positionally-first) zero-tile one.
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 0,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 3,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", lambda *args, **kwargs: None)
+
+    # Only the stroma row is embeddable (tumor has zero tiles), so the single surviving slide entry
+    # must resolve to stroma's namespaced artifact.
+    _, _, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    assert [a.annotation for a in slide_artifacts] == ["stroma"]
+    assert [a.path for a in slide_artifacts] == [tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt"]
+    df = pd.read_csv(process_list_path)
+    stroma_row = df[df["annotation"] == "stroma"].iloc[0]
+    assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
+
+
+def test_distributed_live_updater_fans_out_multi_class_finished_slide(monkeypatch, tmp_path: Path):
+    """Issue #166 (live updater): a single ``embedding.slide.finished`` event for a multi-class slide
+    must update every (sample_id, annotation) row's feature path, not just the first. Isolates the
+    live updater by no-op'ing the end-of-run reconcile.
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="tumor")
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    captured = {}
+
+    def fake_run_stage(*, on_progress_event=None, **kwargs):
+        if on_progress_event is not None:
+            on_progress_event(
+                SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"})
+            )
+        # Snapshot the process_list *after* the live update but *before* the final reconcile.
+        captured["after_live_update"] = pd.read_csv(process_list_path)
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)
+
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    df = captured["after_live_update"]
+    tumor_row = df[df["annotation"] == "tumor"].iloc[0]
+    stroma_row = df[df["annotation"] == "stroma"].iloc[0]
+    assert tumor_row["feature_path"] == str((tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt").resolve())
+    assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
+
+
+def test_distributed_live_updater_defers_until_all_classes_persisted(monkeypatch, tmp_path: Path):
+    """Issue #166 (live updater safety): a multi-class slide emits one finished event per class, and
+    siblings may still be running on another rank. An early event (only one class on disk) must NOT
+    crash loading the missing sibling and must NOT flip the unfinished row to error — it defers; a
+    later event (once both classes are persisted) does the full per-class update.
+    """
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    # Only tumor is persisted at the first event; stroma is still in flight.
+    write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="tumor")
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="prism", level="slide")
+
+    captured = {}
+
+    def fake_run_stage(*, on_progress_event=None, **kwargs):
+        # First finished event: stroma's embedding not yet on disk.
+        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        captured["after_first_event"] = pd.read_csv(process_list_path)
+        # Stroma finishes and persists, then its finished event arrives.
+        write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
+        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        captured["after_second_event"] = pd.read_csv(process_list_path)
+
+    monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)
+
+    # Must not raise even though stroma's artifact is missing at the first event.
+    artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=model,
+        successful_slides=[slide, slide],
+        process_list_path=process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+        output_dir=tmp_path,
+    )
+
+    # The first event deferred: the process_list was left untouched (no feature columns written, so
+    # no row was flipped to error or given a path prematurely).
+    first = captured["after_first_event"]
+    assert "feature_path" not in first.columns
+    assert "aggregation_status" not in first.columns
+
+    # The second event (both classes persisted) records each class's namespaced path.
+    second = captured["after_second_event"]
+    tumor_row = second[second["annotation"] == "tumor"].iloc[0]
+    stroma_row = second[second["annotation"] == "stroma"].iloc[0]
+    assert tumor_row["feature_path"] == str((tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt").resolve())
+    assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
+    assert tumor_row["aggregation_status"] == "success"
+    assert stroma_row["aggregation_status"] == "success"
 
 
 def test_has_complete_local_embedding_outputs_uses_hierarchical_artifacts_for_hierarchical_preprocessing(
