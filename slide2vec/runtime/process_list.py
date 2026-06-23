@@ -149,14 +149,38 @@ def record_slide_metadata_in_process_list(
         for slide in slide_records
         if slide.spacing_at_level_0 is not None
     }
-    mask_preview_by_sample_id = {
-        str(artifact.sample_id): _resolve_path_str(artifact.mask_preview_path)
-        for artifact in tiling_artifacts
-    }
-    tiling_preview_by_sample_id = {
-        str(artifact.sample_id): _resolve_path_str(artifact.tiling_preview_path)
-        for artifact in tiling_artifacts
-    }
+    def _normalize_annotation(value: Any) -> str | None:
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            return None
+        return str(value)
+
+    # Annotation mode emits one artifact per (sample_id, annotation); the tissue/default
+    # path emits a single artifact per sample_id (annotation tissue/None). Key previews on
+    # the (sample_id, annotation) pair so each per-class tiling preview lands on its own row
+    # instead of collapsing onto sample_id, while the multi-label mask preview (shared across
+    # a slide's classes) still maps correctly. A sample_id-only fallback keeps the plain
+    # tissue path — and any artifact that omits an annotation — byte-for-byte unchanged.
+    mask_preview_by_pair: dict[tuple[str, str], str | None] = {}
+    tiling_preview_by_pair: dict[tuple[str, str], str | None] = {}
+    mask_preview_by_sample_id: dict[str, str | None] = {}
+    tiling_preview_by_sample_id: dict[str, str | None] = {}
+    for artifact in tiling_artifacts:
+        sample_id = str(artifact.sample_id)
+        mask_path = _resolve_path_str(artifact.mask_preview_path)
+        tiling_path = _resolve_path_str(artifact.tiling_preview_path)
+        annotation = _normalize_annotation(getattr(artifact, "annotation", None))
+        if annotation is not None:
+            mask_preview_by_pair[(sample_id, annotation)] = mask_path
+            tiling_preview_by_pair[(sample_id, annotation)] = tiling_path
+        mask_preview_by_sample_id[sample_id] = mask_path
+        tiling_preview_by_sample_id[sample_id] = tiling_path
+
+    def _map_preview_path(row: dict, by_pair: dict, by_sample_id: dict) -> str | None:
+        sample_id = str(row["sample_id"])
+        annotation = _normalize_annotation(row.get("annotation"))
+        if annotation is not None and (sample_id, annotation) in by_pair:
+            return by_pair[(sample_id, annotation)]
+        return by_sample_id.get(sample_id)
     process_df = pd.read_csv(process_list_path)
     if "requested_backend" not in process_df.columns:
         process_df["requested_backend"] = [None] * len(process_df)
@@ -192,15 +216,31 @@ def record_slide_metadata_in_process_list(
     if backend_by_sample_id:
         mapped_backend = process_df["sample_id"].astype(str).map(backend_by_sample_id)
         process_df["backend"] = process_df["backend"].where(process_df["backend"].notna(), mapped_backend)
-    mapped_mask_preview_paths = process_df["sample_id"].astype(str).map(mask_preview_by_sample_id)
+    has_annotation_column = "annotation" in process_df.columns
+    mapped_mask_preview_paths = []
+    mapped_tiling_preview_paths = []
+    for row in process_df.to_dict("records"):
+        if not has_annotation_column:
+            row = {**row, "annotation": None}
+        mapped_mask_preview_paths.append(
+            _map_preview_path(row, mask_preview_by_pair, mask_preview_by_sample_id)
+        )
+        mapped_tiling_preview_paths.append(
+            _map_preview_path(row, tiling_preview_by_pair, tiling_preview_by_sample_id)
+        )
+    mapped_mask_preview_series = pd.Series(
+        mapped_mask_preview_paths, index=process_df.index, dtype="object"
+    )
+    mapped_tiling_preview_series = pd.Series(
+        mapped_tiling_preview_paths, index=process_df.index, dtype="object"
+    )
     process_df["mask_preview_path"] = process_df["mask_preview_path"].where(
         process_df["mask_preview_path"].notna(),
-        mapped_mask_preview_paths,
+        mapped_mask_preview_series,
     )
-    mapped_tiling_preview_paths = process_df["sample_id"].astype(str).map(tiling_preview_by_sample_id)
     process_df["tiling_preview_path"] = process_df["tiling_preview_path"].where(
         process_df["tiling_preview_path"].notna(),
-        mapped_tiling_preview_paths,
+        mapped_tiling_preview_series,
     )
     atomic_write_dataframe_csv(process_df, process_list_path)
 

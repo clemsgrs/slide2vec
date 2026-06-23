@@ -1957,6 +1957,56 @@ def test_prepare_tiled_slides_records_preview_paths_in_process_list(monkeypatch,
     assert Path(recorded.loc[0, "tiling_preview_path"]) == Path("/tmp/preview/tiling/slide-a.png").resolve()
 
 
+def test_prepare_tiled_slides_records_per_annotation_preview_paths_in_process_list(
+    monkeypatch, tmp_path: Path
+):
+    """In annotation mode hs2p emits one (sample_id, annotation) row plus one artifact per
+    class. Each row must record its own per-class tiling preview while sharing the
+    multi-label mask preview, instead of collapsing on sample_id alone."""
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-a,tumor,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.tumor.coordinates.npz,/tmp/slide-a.tumor.coordinates.meta.json,,\n"
+        "slide-a,stroma,/tmp/slide-a.svs,,asap,asap,success,1,/tmp/slide-a.stroma.coordinates.npz,/tmp/slide-a.stroma.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+
+    tiling_artifacts = [
+        SimpleNamespace(
+            sample_id="slide-a",
+            annotation="tumor",
+            mask_preview_path=Path("/tmp/preview/mask/slide-a.png"),
+            tiling_preview_path=Path("/tmp/preview/tiling/tumor/slide-a.png"),
+        ),
+        SimpleNamespace(
+            sample_id="slide-a",
+            annotation="stroma",
+            mask_preview_path=Path("/tmp/preview/mask/slide-a.png"),
+            tiling_preview_path=Path("/tmp/preview/tiling/stroma/slide-a.png"),
+        ),
+    ]
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", lambda *args, **kwargs: tiling_artifacts)
+    monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", lambda row: SimpleNamespace())
+
+    slide = make_slide("slide-a")
+
+    tiling_pipeline.prepare_tiled_slides(
+        [slide],
+        DEFAULT_PREPROCESSING,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    recorded = pd.read_csv(process_list_path).set_index("annotation")
+    # Shared multi-label mask preview on every row.
+    assert Path(recorded.loc["tumor", "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png").resolve()
+    assert Path(recorded.loc["stroma", "mask_preview_path"]) == Path("/tmp/preview/mask/slide-a.png").resolve()
+    # Per-class tiling preview on its own row, not collapsed onto a single sample_id.
+    assert Path(recorded.loc["tumor", "tiling_preview_path"]) == Path("/tmp/preview/tiling/tumor/slide-a.png").resolve()
+    assert Path(recorded.loc["stroma", "tiling_preview_path"]) == Path("/tmp/preview/tiling/stroma/slide-a.png").resolve()
+
+
 def test_prepare_tiled_slides_resume_preserves_embedding_and_existing_preview_metadata(
     monkeypatch,
     tmp_path: Path,
@@ -4549,6 +4599,58 @@ def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeyp
     assert captured["kwargs"]["selection_strategy"] == "independent_sampling"
     assert captured["kwargs"]["output_mode"] == "per_annotation"
     assert Path(captured["slides"][0].mask_path) == Path("/tmp/slide-a-mask.png")
+
+
+def test_tile_slides_call_forwards_preview_and_class_colors_for_annotation_mode(
+    monkeypatch, tmp_path: Path
+):
+    """Annotation mode must hand hs2p the PreviewConfig AND a sampling spec whose
+    color_mapping carries masks.colors, so the multi-label mask preview and per-class
+    tiling previews render with the configured colors."""
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        on_the_fly=True,
+        masks={
+            "pixel_mapping": {"tumor": 2, "stroma": 3},
+            "colors": {"tumor": [255, 0, 0], "stroma": [0, 0, 255]},
+            "min_coverage": {"tumor": 0.5, "stroma": 0.5},
+        },
+        independent_sampling=True,
+    )
+    slide = manifest.coerce_slide_spec(
+        {
+            "sample_id": "slide-a",
+            "image_path": "/tmp/slide-a.svs",
+            "mask_path": "/tmp/slide-a-mask.png",
+        }
+    )
+
+    tiling_pipeline.tile_slides_call(
+        [slide],
+        preprocessing,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    preview = captured["kwargs"]["preview"]
+    assert preview is not None
+    assert preview.save_mask_preview is True
+    assert preview.save_tiling_preview is True
+
+    sampling = captured["kwargs"]["sampling"]
+    assert sampling is not None
+    # masks.colors must reach the sampling spec hs2p uses to render the previews, so
+    # each class is drawn with its configured color.
+    assert sampling.color_mapping is not None
+    assert sampling.color_mapping["tumor"] == [255, 0, 0]
+    assert sampling.color_mapping["stroma"] == [0, 0, 255]
 
 
 def test_tile_slides_call_default_masks_block_forwards_no_sampling(monkeypatch, tmp_path: Path):
