@@ -597,6 +597,7 @@ def embed_tiles(
                 features,
                 execution=execution,
                 metadata=metadata,
+                annotation=embedding.tiling_result_annotation(tiling_result),
             )
         artifacts.append(artifact)
     return artifacts

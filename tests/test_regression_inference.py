@@ -1660,6 +1660,9 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
             "preview",
             None,
             False,
+            None,
+            None,
+            None,
         ),
     )
 
@@ -1703,6 +1706,9 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
             "preview",
             None,
             False,
+            None,
+            None,
+            None,
         ),
     )
 
@@ -1806,6 +1812,9 @@ def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Pa
             "preview",
             None,
             False,
+            None,
+            None,
+            None,
         ),
     )
 
@@ -1853,9 +1862,17 @@ def test_build_hs2p_configs_constructs_preview_config():
         },
     )
 
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = (
-        runtime_tiling.build_hs2p_configs(preprocessing)
-    )
+    (
+        tiling_cfg,
+        segmentation_cfg,
+        filtering_cfg,
+        preview_cfg,
+        read_coordinates_from,
+        resume,
+        sampling,
+        selection_strategy,
+        output_mode,
+    ) = runtime_tiling.build_hs2p_configs(preprocessing)
 
     assert tiling_cfg.backend == "asap"
     assert tiling_cfg.tissue_threshold == pytest.approx(0.1)  # derived from masks.min_coverage.tissue
@@ -3917,7 +3934,7 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
     monkeypatch.setattr(
         embedding_persist,
         "write_tile_embedding_artifact",
-        lambda sample_id, features, *, execution, metadata: captured.setdefault("metadata", metadata) or SimpleNamespace(),
+        lambda sample_id, features, *, execution, metadata, annotation=None: captured.setdefault("metadata", metadata) or SimpleNamespace(),
     )
 
     embedding_persist.persist_embedded_slide(
@@ -4334,3 +4351,254 @@ def test_scale_coordinates_identity_when_spacings_equal():
     coords = np.array([[10, 20], [30, 40]])
     result = scale_coordinates(coords, base_spacing_um=0.5, spacing=0.5)
     np.testing.assert_array_equal(result, [[10, 20], [30, 40]])
+
+
+# --- Issue #155: per-annotation tile-embedding spine (top-seam) ---
+
+
+def _write_process_list(path: Path, rows: list[dict]) -> None:
+    columns = [
+        "sample_id",
+        "annotation",
+        "image_path",
+        "mask_path",
+        "requested_backend",
+        "backend",
+        "spacing_at_level_0",
+        "tiling_status",
+        "num_tiles",
+        "coordinates_npz_path",
+        "coordinates_meta_path",
+        "tiles_tar_path",
+        "mask_preview_path",
+        "tiling_preview_path",
+        "error",
+        "traceback",
+    ]
+    pd.DataFrame(rows, columns=columns).to_csv(path, index=False)
+
+
+def _fake_tiling_result_loader(monkeypatch):
+    """Make tiling_io.load_tiling_result return a minimal in-memory result (no file IO)."""
+    def _fake_load_tiling_result(*, coordinates_npz_path, coordinates_meta_path):
+        return SimpleNamespace(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=1,
+            backend="asap",
+        )
+
+    from slide2vec.utils import tiling_io
+    monkeypatch.setattr(tiling_io, "load_tiling_result", _fake_load_tiling_result)
+
+
+def test_prepare_tiled_slides_preserves_per_annotation_rows(monkeypatch, tmp_path: Path):
+    """A multi-label slide yields one (slide, tiling_result) pair per (sample_id, annotation),
+    each tiling_result carrying its annotation from the process-list row."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    _fake_tiling_result_loader(monkeypatch)
+    monkeypatch.setattr(
+        tiling_pipeline, "tile_slides_with_progress", lambda *args, **kwargs: []
+    )
+    monkeypatch.setattr(
+        tiling_pipeline, "record_slide_metadata_in_process_list", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        tiling_pipeline, "restore_resume_metadata_after_tiling", lambda *args, **kwargs: None
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    successful_slides, tiling_results, returned_path = tiling_pipeline.prepare_tiled_slides(
+        [slide],
+        DEFAULT_PREPROCESSING,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert returned_path == process_list_path
+    assert [s.sample_id for s in successful_slides] == ["slide-a", "slide-a"]
+    assert [tr.annotation for tr in tiling_results] == ["tumor", "stroma"]
+
+
+def test_persist_embedded_slide_namespaces_tile_embeddings_per_class(tmp_path: Path):
+    """Real classes land under tile_embeddings/<class>/; tissue/None stay flat."""
+    model = SimpleNamespace(name="virchow2", level="tile")
+    execution = ExecutionOptions(output_dir=tmp_path)
+
+    def _persist(annotation):
+        tiling_result = SimpleNamespace(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=1,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path("/tmp/c.npz"),
+            coordinates_meta_path=Path("/tmp/c.meta.json"),
+            tiles_tar_path=None,
+        )
+        embedded = EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 4), dtype=np.float32),
+            slide_embedding=None,
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=Path("/tmp/slide-a-mask.png"),
+        )
+        tile_artifact, _ = embedding_persist.persist_embedded_slide(
+            model,
+            embedded,
+            tiling_result,
+            preprocessing=DEFAULT_PREPROCESSING,
+            execution=execution,
+        )
+        return tile_artifact
+
+    tumor_artifact = _persist("tumor")
+    assert tumor_artifact.path == tmp_path / "tile_embeddings" / "tumor" / "slide-a.pt"
+
+    tissue_artifact = _persist("tissue")
+    assert tissue_artifact.path == tmp_path / "tile_embeddings" / "slide-a.pt"
+
+    none_artifact = _persist(None)
+    assert none_artifact.path == tmp_path / "tile_embeddings" / "slide-a.pt"
+
+
+def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeypatch, tmp_path: Path):
+    """Customized masks block forwards a sampling spec, selection strategy, output mode AND the
+    slide's annotation mask to hs2p — the wiring that lets hs2p enforce a required raster."""
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["slides"] = list(slides)
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        on_the_fly=True,
+        masks={
+            "pixel_mapping": {"tumor": 2},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        },
+        independent_sampling=True,
+    )
+    slide = manifest.coerce_slide_spec(
+        {
+            "sample_id": "slide-a",
+            "image_path": "/tmp/slide-a.svs",
+            "mask_path": "/tmp/slide-a-mask.png",
+        }
+    )
+
+    tiling_pipeline.tile_slides_call(
+        [slide],
+        preprocessing,
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["kwargs"]["sampling"] is not None
+    assert "tumor" in captured["kwargs"]["sampling"].active_annotations
+    assert captured["kwargs"]["selection_strategy"] == "independent_sampling"
+    assert captured["kwargs"]["output_mode"] == "per_annotation"
+    assert Path(captured["slides"][0].mask_path) == Path("/tmp/slide-a-mask.png")
+
+
+def test_tile_slides_call_default_masks_block_forwards_no_sampling(monkeypatch, tmp_path: Path):
+    """Default masks block leaves the plain tissue path unchanged: no sampling forwarded."""
+    captured = {}
+
+    def fake_tile_slides(slides, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
+
+    tiling_pipeline.tile_slides_call(
+        [make_slide("slide-a")],
+        replace(DEFAULT_PREPROCESSING, on_the_fly=True),
+        output_dir=tmp_path,
+        num_workers=0,
+    )
+
+    assert captured["kwargs"]["sampling"] is None
+    assert captured["kwargs"]["selection_strategy"] is None
+    assert captured["kwargs"]["output_mode"] is None
+
+
+def test_zero_tile_sidecar_namespaces_per_class(tmp_path: Path):
+    """Zero-tile sidecars for a real class land under tile_embeddings/<class>/; tissue stays flat."""
+    model = SimpleNamespace(name="virchow2", level="tile")
+
+    def _sidecar(annotation):
+        tiling_result = SimpleNamespace(
+            x=np.array([], dtype=np.int64),
+            y=np.array([], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=0,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path("/tmp/c.npz"),
+            coordinates_meta_path=Path("/tmp/c.meta.json"),
+            tiles_tar_path=None,
+        )
+        slide = make_slide("slide-z", mask_path=Path("/tmp/slide-z-mask.png"))
+        process_list.write_zero_tile_embedding_sidecars(
+            [(slide, tiling_result)],
+            model=model,
+            preprocessing=DEFAULT_PREPROCESSING,
+            output_dir=tmp_path,
+            output_format="pt",
+        )
+
+    _sidecar("tumor")
+    assert (tmp_path / "tile_embeddings" / "tumor" / "slide-z.meta.json").is_file()
+
+    _sidecar("tissue")
+    assert (tmp_path / "tile_embeddings" / "slide-z.meta.json").is_file()

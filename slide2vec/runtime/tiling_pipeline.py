@@ -62,7 +62,17 @@ def tile_slides_call(
     num_workers: int,
 ) -> list[Any]:
     preload_asap_wholeslidedata(preprocessing)
-    tiling_cfg, segmentation_cfg, filtering_cfg, preview_cfg, read_coordinates_from, resume = build_hs2p_configs(preprocessing)
+    (
+        tiling_cfg,
+        segmentation_cfg,
+        filtering_cfg,
+        preview_cfg,
+        read_coordinates_from,
+        resume,
+        sampling,
+        selection_strategy,
+        output_mode,
+    ) = build_hs2p_configs(preprocessing)
     def _run_tile_slides():
         return tile_slides(
             slides,
@@ -76,6 +86,9 @@ def tile_slides_call(
             resume=resume,
             save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
             jpeg_backend=preprocessing.jpeg_backend,
+            sampling=sampling,
+            selection_strategy=selection_strategy,
+            output_mode=output_mode,
         )
 
     with bridge_hs2p_progress_to_slide2vec():
@@ -135,21 +148,24 @@ def prepare_tiled_slides(
     tiling_results = []
     successful_slides = []
     for slide in slide_records:
-        row = process_df.loc[process_df["sample_id"] == slide.sample_id]
-        if row.empty:
+        rows = process_df.loc[process_df["sample_id"] == slide.sample_id]
+        if rows.empty:
             raise ValueError(f"No process-list entry found for sample_id={slide.sample_id}")
-        row_dict = row.iloc[0].to_dict()
-        if "tiling_status" not in row_dict or row_dict["tiling_status"] != "success":
-            error_message = row_dict["error"] if "error" in row_dict else ""
-            raise RuntimeError(f"Tiling failed for {slide.sample_id}: {error_message}")
-        num_tiles = row_dict.get("num_tiles", 0)
-        if num_tiles == 0 or pd.isna(row_dict.get("coordinates_npz_path")):
-            logging.getLogger(__name__).warning(
-                f"Skipping {slide.sample_id}: no tiles extracted"
-            )
-            continue
-        successful_slides.append(slide)
-        tiling_results.append(load_tiling_result_from_row(row_dict))
+        # Annotation sampling emits one row per (sample_id, annotation); the plain tissue
+        # path emits exactly one. Walk every row so per-class results each get their own
+        # (slide, tiling_result) pair downstream — the tiling_result carries the annotation.
+        for row_dict in rows.to_dict("records"):
+            if "tiling_status" not in row_dict or row_dict["tiling_status"] != "success":
+                error_message = row_dict["error"] if "error" in row_dict else ""
+                raise RuntimeError(f"Tiling failed for {slide.sample_id}: {error_message}")
+            num_tiles = row_dict.get("num_tiles", 0)
+            if num_tiles == 0 or pd.isna(row_dict.get("coordinates_npz_path")):
+                logging.getLogger(__name__).warning(
+                    f"Skipping {slide.sample_id}: no tiles extracted"
+                )
+                continue
+            successful_slides.append(slide)
+            tiling_results.append(load_tiling_result_from_row(row_dict))
     return successful_slides, tiling_results, process_list_path
 
 
