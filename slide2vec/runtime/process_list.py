@@ -17,7 +17,11 @@ from slide2vec.runtime.hierarchical import (
     num_tiles,
     resolve_hierarchical_geometry,
 )
-from slide2vec.runtime.embedding import build_hierarchical_embedding_metadata, build_tile_embedding_metadata
+from slide2vec.runtime.embedding import (
+    build_hierarchical_embedding_metadata,
+    build_tile_embedding_metadata,
+    tiling_result_annotation,
+)
 from slide2vec.runtime.tiling import resolve_slide_backend
 from slide2vec.utils.tiling_io import atomic_write_dataframe_csv, load_tiling_result_from_row
 
@@ -78,6 +82,7 @@ def write_zero_tile_embedding_sidecars(
             output_format=output_format,
             feature_dim=None,
             num_tiles=0,
+            annotation=tiling_result_annotation(tiling_result),
             metadata=build_tile_embedding_metadata(
                 model=model,
                 tiling_result=tiling_result,

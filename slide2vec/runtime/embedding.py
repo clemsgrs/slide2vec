@@ -17,6 +17,16 @@ from slide2vec.artifacts import (
 from slide2vec.runtime.hierarchical import resolve_hierarchical_geometry
 
 
+def tiling_result_annotation(tiling_result) -> str | None:
+    """Annotation class carried by a tiling result (from its process-list row).
+
+    ``None``/``"tissue"`` mean the flat tissue-only layout (see
+    :func:`slide2vec.artifacts.tile_embeddings_subdir`); any other label namespaces the
+    tile-embedding artifacts under a per-class subdirectory.
+    """
+    return getattr(tiling_result, "annotation", None)
+
+
 def should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
     if model.level in {"slide", "patient"}:
         return bool(execution.save_tile_embeddings)
@@ -100,6 +110,7 @@ def write_tile_embedding_artifact(
     *,
     execution: ExecutionOptions,
     metadata: dict[str, Any],
+    annotation: str | None = None,
 ) -> TileEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
@@ -110,6 +121,7 @@ def write_tile_embedding_artifact(
         output_format=execution.output_format,
         metadata=metadata,
         tile_index=np.arange(_num_rows(features), dtype=np.int64),
+        annotation=annotation,
     )
 
 

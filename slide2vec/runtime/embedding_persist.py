@@ -16,6 +16,7 @@ from slide2vec.runtime.embedding import (
     build_tile_embedding_metadata,
     build_slide_embedding_metadata,
     should_persist_tile_embeddings,
+    tiling_result_annotation,
     write_hierarchical_embedding_artifact,
     write_slide_embedding_artifact,
     write_tile_embedding_artifact,
@@ -72,6 +73,7 @@ def persist_embedded_slide(
 ) -> tuple[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact | None, SlideEmbeddingArtifact | None]:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist embedded slides")
+    annotation = tiling_result_annotation(tiling_result)
     if num_rows(embedded_slide.tile_embeddings) == 0:
         write_tile_embedding_metadata(
             embedded_slide.sample_id,
@@ -79,6 +81,7 @@ def persist_embedded_slide(
             output_format=execution.output_format,
             feature_dim=None,
             num_tiles=0,
+            annotation=annotation,
             metadata=build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,
@@ -110,6 +113,7 @@ def persist_embedded_slide(
             embedded_slide.sample_id,
             embedded_slide.tile_embeddings,
             execution=execution,
+            annotation=annotation,
             metadata=build_tile_embedding_metadata(
                 model,
                 tiling_result=tiling_result,

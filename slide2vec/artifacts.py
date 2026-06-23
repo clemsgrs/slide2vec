@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from hs2p.fileops import is_flattened_annotation
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -90,6 +91,19 @@ def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def tile_embeddings_subdir(annotation: str | None) -> str:
+    """Namespace the ``tile_embeddings`` output dir per annotation class.
+
+    Reuses hs2p's flatten rule (the single source of truth): ``None`` and the sentinel
+    ``"tissue"`` collapse to the flat ``tile_embeddings`` root, so the default tissue-only
+    path is byte-for-byte unchanged; any real class label gets its own
+    ``tile_embeddings/<class>`` subdirectory.
+    """
+    if is_flattened_annotation(annotation):
+        return "tile_embeddings"
+    return f"tile_embeddings/{annotation}"
+
+
 def _setup_artifact_paths(
     output_dir: str | Path, subdir: str, sample_id: str, output_format: str
 ) -> tuple[Path, Path]:
@@ -142,9 +156,12 @@ def write_tile_embeddings(
     output_format: str = "pt",
     metadata: dict[str, Any] | None = None,
     tile_index: Any | None = None,
+    annotation: str | None = None,
 ) -> TileEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "tile_embeddings", sample_id, output_format)
+    artifact_path, metadata_path = _setup_artifact_paths(
+        output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
+    )
     feature_array = _ensure_array(features)
     if output_format == "pt":
         torch.save(_ensure_tensor(features), artifact_path)
@@ -180,9 +197,12 @@ def write_tile_embedding_metadata(
     feature_dim: int | None = None,
     num_tiles: int = 0,
     metadata: dict[str, Any] | None = None,
+    annotation: str | None = None,
 ) -> Path:
     output_format = _validate_output_format(output_format)
-    _, metadata_path = _setup_artifact_paths(output_dir, "tile_embeddings", sample_id, output_format)
+    _, metadata_path = _setup_artifact_paths(
+        output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
+    )
     tile_metadata = _build_tile_embedding_metadata(
         sample_id,
         output_format=output_format,

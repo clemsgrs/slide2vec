@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, load_tiling_result
-from hs2p.configs.resolvers import resolve_tiling_config
+from hs2p.configs.resolvers import resolve_sampling_request, resolve_tiling_config
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
@@ -63,6 +63,15 @@ def build_hs2p_configs(
         )
     )
     tiling_cfg = resolve_tiling_config(tiling_adapter)
+    # Resolve the annotation-sampling invocation from the same masks subtree. A masks block
+    # left at hs2p's shipped default ({background:0, tissue:1}) yields (None, None, None) so
+    # the plain binary-tissue path is byte-for-byte unchanged; any customization (a new class,
+    # an extra pixel value) opts the run into multi-label annotation sampling. The resolver
+    # validates the masks config (duplicate values, unsafe label names, out-of-range values)
+    # and raises ValueError up front, before any slide is opened.
+    sampling, selection_strategy, output_mode = resolve_sampling_request(
+        tiling_adapter, tiling=tiling_cfg
+    )
     segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
     filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
     preview_cfg = build_preview_config(dict(preprocessing.preview))
@@ -73,6 +82,9 @@ def build_hs2p_configs(
         preview_cfg,
         preprocessing.read_coordinates_from,
         preprocessing.resume,
+        sampling,
+        selection_strategy,
+        output_mode,
     )
 
 

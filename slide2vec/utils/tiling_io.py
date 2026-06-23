@@ -238,6 +238,10 @@ def load_tiling_result_from_row(row):
     )
     setattr(tiling_result, "coordinates_npz_path", coordinates_npz_path)
     setattr(tiling_result, "coordinates_meta_path", coordinates_meta_path)
+    annotation = row.get("annotation")
+    if annotation is not None and pd.isna(annotation):
+        annotation = None
+    setattr(tiling_result, "annotation", annotation if annotation is None else str(annotation))
     setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
     setattr(tiling_result, "mask_preview_path", _optional_path(row.get("mask_preview_path")))
     setattr(tiling_result, "tiling_preview_path", _optional_path(row.get("tiling_preview_path")))

@@ -749,6 +749,125 @@ def test_preprocessing_from_config_reads_masks_block_and_independent_sampling():
     assert preprocessing.independent_sampling is False
 
 
+def _masks_preprocessing(masks, *, independent_sampling=True):
+    return PreprocessingConfig(
+        backend="asap",
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        masks=masks,
+        independent_sampling=independent_sampling,
+        segmentation={"method": "hsv", "downsample": 64},
+        preview={
+            "save_mask_preview": False,
+            "save_tiling_preview": False,
+            "downsample": 32,
+            "tissue_contour_color": (157, 219, 129),
+            "mask_overlay_alpha": 0.5,
+        },
+    )
+
+
+def test_default_masks_block_yields_no_sampling():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing({"min_coverage": {"tissue": 0.37}})
+
+    configs = build_hs2p_configs(preprocessing)
+    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
+
+    assert sampling is None
+    assert selection_strategy is None
+    assert output_mode is None
+
+
+def test_customized_masks_block_yields_independent_per_annotation_sampling():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"tumor": 2},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        },
+        independent_sampling=True,
+    )
+
+    configs = build_hs2p_configs(preprocessing)
+    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
+
+    assert sampling is not None
+    assert "tumor" in sampling.active_annotations
+    assert selection_strategy == "independent_sampling"
+    assert output_mode == "per_annotation"
+
+
+def test_invalid_masks_block_with_duplicate_pixel_values_fails_fast():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"tumor": 1},
+            "min_coverage": {"tumor": 0.5},
+        }
+    )
+
+    with pytest.raises(ValueError, match="unique"):
+        build_hs2p_configs(preprocessing)
+
+
+def test_invalid_masks_block_with_unsafe_class_name_fails_fast():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"../escape": 2},
+            "min_coverage": {"../escape": 0.5},
+        }
+    )
+
+    with pytest.raises(ValueError, match="path component"):
+        build_hs2p_configs(preprocessing)
+
+
+def test_invalid_masks_block_with_out_of_range_value_fails_fast():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"tumor": 70000},
+            "min_coverage": {"tumor": 0.5},
+        }
+    )
+
+    with pytest.raises(ValueError, match="range"):
+        build_hs2p_configs(preprocessing)
+
+
+def test_write_tile_embeddings_namespaces_real_class_under_subdir(tmp_path: Path):
+    features = np.arange(8, dtype=np.float32).reshape(2, 4)
+    artifact = write_tile_embeddings(
+        "sample-a",
+        features,
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation="tumor",
+    )
+    assert artifact.path == tmp_path / "tile_embeddings" / "tumor" / "sample-a.npz"
+
+
+def test_write_tile_embeddings_flattens_tissue_annotation(tmp_path: Path):
+    features = np.arange(8, dtype=np.float32).reshape(2, 4)
+    for annotation in (None, "tissue"):
+        artifact = write_tile_embeddings(
+            f"sample-{annotation}",
+            features,
+            output_dir=tmp_path,
+            output_format="npz",
+            annotation=annotation,
+        )
+        assert artifact.path == tmp_path / "tile_embeddings" / f"sample-{annotation}.npz"
+
+
 def test_preprocessing_config_defaults_backend_to_auto():
     assert DEFAULT_PREPROCESSING.backend == "auto"
 
