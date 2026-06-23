@@ -3,13 +3,18 @@
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+import pandas as pd
 from hs2p import SlideSpec
+from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    slide_embeddings_subdir,
+    slide_latents_subdir,
+    tile_embeddings_subdir,
 )
 from slide2vec.runtime.embedding import should_persist_tile_embeddings
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
@@ -38,28 +43,52 @@ def has_complete_local_embedding_outputs(
     persist_hierarchical_embeddings: bool,
     include_slide_embeddings: bool,
     save_latents: bool,
+    annotation: str | None = None,
 ) -> bool:
+    tile_subdir = tile_embeddings_subdir(annotation)
     if persist_hierarchical_embeddings:
         hierarchical_artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
         if not hierarchical_artifact_path.is_file():
             return False
     elif persist_tile_embeddings:
-        tile_artifact_path = output_dir / "tile_embeddings" / f"{sample_id}.{output_format}"
+        tile_artifact_path = output_dir / tile_subdir / f"{sample_id}.{output_format}"
         if not tile_artifact_path.is_file():
             return False
     if include_slide_embeddings:
-        slide_artifact_path = output_dir / "slide_embeddings" / f"{sample_id}.{output_format}"
+        slide_subdir = slide_embeddings_subdir(annotation)
+        slide_artifact_path = output_dir / slide_subdir / f"{sample_id}.{output_format}"
         if not slide_artifact_path.is_file():
             return False
         if save_latents:
             latent_suffix = "pt" if output_format == "pt" else "npz"
-            latent_path = output_dir / "slide_latents" / f"{sample_id}.{latent_suffix}"
+            latent_path = output_dir / slide_latents_subdir(annotation) / f"{sample_id}.{latent_suffix}"
             if not latent_path.is_file():
                 return False
     return True
 
 
-def completed_local_embedding_sample_ids(
+def _normalized_resume_annotation(annotation) -> str | None:
+    """Collapse flat-layout sentinels (``None``/NaN/``"tissue"``) to a single ``None`` key.
+
+    Resume keys must agree across the process-list rows (which carry ``"tissue"`` for the
+    default path) and the in-memory tiling results (which may carry ``None``), and must line
+    up with the namespaced slide-embedding artifact paths (where tissue/None are flat). One
+    normalization rule, shared by both sides, keeps the default tissue path's single resume
+    key stable while giving real classes their own keys.
+    """
+    if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
+        return None
+    if is_flattened_annotation(str(annotation)):
+        return None
+    return str(annotation)
+
+
+def _row_annotation(row) -> str | None:
+    """Normalized annotation carried by a process-list row (flat-layout aware)."""
+    return _normalized_resume_annotation(row.get("annotation"))
+
+
+def completed_local_embedding_keys(
     process_list_path: Path,
     *,
     output_dir: Path,
@@ -68,14 +97,23 @@ def completed_local_embedding_sample_ids(
     persist_hierarchical_embeddings: bool,
     include_slide_embeddings: bool,
     save_latents: bool,
-) -> set[str]:
+) -> set[tuple[str, str | None]]:
+    """Completed (sample_id, annotation) keys for local resume.
+
+    Keying by ``(sample_id, annotation)`` (rather than ``sample_id`` alone) lets a multi-
+    label slide resume per class: a class whose namespaced slide/tile artifact is still
+    missing stays pending even when a sibling class on the same slide is complete. The flat
+    tissue-only path normalizes its annotation to ``None`` so its single-row behaviour is
+    unchanged.
+    """
     process_df = load_embedding_process_df(
         process_list_path,
         include_aggregation_status=include_slide_embeddings,
     )
-    completed_ids: set[str] = set()
+    completed_keys: set[tuple[str, str | None]] = set()
     for row in process_df.to_dict("records"):
         sample_id = str(row["sample_id"])
+        annotation = _row_annotation(row)
         if "tiling_status" not in row or row["tiling_status"] != "success":
             continue
         if persist_tile_embeddings and ("feature_status" not in row or row["feature_status"] != "success"):
@@ -90,10 +128,11 @@ def completed_local_embedding_sample_ids(
             persist_hierarchical_embeddings=persist_hierarchical_embeddings,
             include_slide_embeddings=include_slide_embeddings,
             save_latents=save_latents,
+            annotation=annotation,
         ):
             continue
-        completed_ids.add(sample_id)
-    return completed_ids
+        completed_keys.add((sample_id, annotation))
+    return completed_keys
 
 
 def pending_local_embedding_records(
@@ -112,7 +151,7 @@ def pending_local_embedding_records(
     if not resume:
         return list(successful_slides), list(tiling_results)
 
-    completed_ids = completed_local_embedding_sample_ids(
+    completed_keys = completed_local_embedding_keys(
         process_list_path,
         output_dir=output_dir,
         output_format=output_format,
@@ -124,11 +163,22 @@ def pending_local_embedding_records(
     pending_slides: list[SlideSpec] = []
     pending_tiling_results: list[Any] = []
     for slide, tiling_result in zip(successful_slides, tiling_results):
-        if slide.sample_id in completed_ids:
+        annotation = _tiling_result_annotation(tiling_result)
+        if (slide.sample_id, annotation) in completed_keys:
             continue
         pending_slides.append(slide)
         pending_tiling_results.append(tiling_result)
     return pending_slides, pending_tiling_results
+
+
+def _tiling_result_annotation(tiling_result) -> str | None:
+    """Normalized annotation carried by a tiling result (flat-layout aware).
+
+    ``None`` placeholders (the distributed path passes ``None`` for each tiling result) and
+    the ``"tissue"`` sentinel collapse to ``None`` so resume keys line up with the flat
+    slide-embedding artifact paths.
+    """
+    return _normalized_resume_annotation(getattr(tiling_result, "annotation", None))
 
 
 def build_incremental_persist_callback(

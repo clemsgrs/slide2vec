@@ -4558,6 +4558,257 @@ def test_persist_embedded_slide_namespaces_tile_embeddings_per_class(tmp_path: P
     assert none_artifact.path == tmp_path / "tile_embeddings" / "slide-a.pt"
 
 
+# --- Issue #156: per-annotation slide embeddings (top-seam) ---
+
+
+def test_persist_embedded_slide_namespaces_slide_embeddings_per_class(tmp_path: Path):
+    """Slide embeddings land under slide_embeddings/<class>/ for real classes; tissue/None stay flat.
+
+    Each active class gets its own pooled slide embedding namespaced by class, reusing the
+    same flatten rule as tile embeddings, and the artifact carries its annotation.
+    """
+    model = SimpleNamespace(name="prov-gigapath", level="slide")
+    execution = ExecutionOptions(output_dir=tmp_path, save_tile_embeddings=False)
+
+    def _persist(annotation):
+        tiling_result = SimpleNamespace(
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=1,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path("/tmp/c.npz"),
+            coordinates_meta_path=Path("/tmp/c.meta.json"),
+            tiles_tar_path=None,
+        )
+        embedded = EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 4), dtype=np.float32),
+            slide_embedding=np.zeros((8,), dtype=np.float32),
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=Path("/tmp/slide-a-mask.png"),
+        )
+        _, slide_artifact = embedding_persist.persist_embedded_slide(
+            model,
+            embedded,
+            tiling_result,
+            preprocessing=DEFAULT_PREPROCESSING,
+            execution=execution,
+        )
+        return slide_artifact
+
+    tumor_artifact = _persist("tumor")
+    assert tumor_artifact.path == tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt"
+    assert tumor_artifact.annotation == "tumor"
+
+    tissue_artifact = _persist("tissue")
+    assert tissue_artifact.path == tmp_path / "slide_embeddings" / "slide-a.pt"
+    assert tissue_artifact.annotation == "tissue"
+
+    none_artifact = _persist(None)
+    assert none_artifact.path == tmp_path / "slide_embeddings" / "slide-a.pt"
+    assert none_artifact.annotation is None
+
+
+def test_update_process_list_records_per_class_slide_feature_paths(tmp_path: Path):
+    """A multi-label slide records a distinct per-class slide-embedding feature path on each
+    (sample_id, annotation) row rather than collapsing them onto one path."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+
+    tumor_artifact = write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    stroma_artifact = write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="stroma",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    persistence.update_process_list_after_embedding(
+        process_list_path,
+        successful_slides=[slide, slide],
+        persist_tile_embeddings=False,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=True,
+        encoder_name="prov-gigapath",
+        output_variant=None,
+        tile_artifacts=[],
+        hierarchical_artifacts=[],
+        slide_artifacts=[tumor_artifact, stroma_artifact],
+    )
+
+    df = pd.read_csv(process_list_path)
+    tumor_row = df[df["annotation"] == "tumor"].iloc[0]
+    stroma_row = df[df["annotation"] == "stroma"].iloc[0]
+    assert tumor_row["feature_path"] == str((tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt").resolve())
+    assert stroma_row["feature_path"] == str((tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt").resolve())
+    assert tumor_row["aggregation_status"] == "success"
+    assert stroma_row["aggregation_status"] == "success"
+
+
+def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path: Path):
+    """Local resume dedups pending work by (sample_id, annotation) for slide embeddings: a class
+    whose slide artifact is missing stays pending even when a sibling class is complete."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    # Mark both rows feature/aggregation success in the CSV...
+    df = pd.read_csv(process_list_path)
+    df["feature_status"] = "success"
+    df["aggregation_status"] = "success"
+    df.to_csv(process_list_path, index=False)
+
+    # ...but only the tumor slide artifact exists on disk.
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    tumor_tr = SimpleNamespace(annotation="tumor")
+    stroma_tr = SimpleNamespace(annotation="stroma")
+    pending_slides, pending_results = persist_callbacks.pending_local_embedding_records(
+        [slide, slide],
+        [tumor_tr, stroma_tr],
+        process_list_path=process_list_path,
+        output_dir=tmp_path,
+        output_format="pt",
+        persist_tile_embeddings=False,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=True,
+        save_latents=False,
+        resume=True,
+    )
+
+    assert [tr.annotation for tr in pending_results] == ["stroma"]
+    assert len(pending_slides) == 1
+
+
+def test_collect_pipeline_artifacts_reloads_per_class_slide_embeddings(tmp_path: Path):
+    """The end-of-run reconcile reloads each class's namespaced slide-embedding artifact when
+    given per-row annotations, so the per-class feature path is recorded rather than the flat one."""
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="stroma",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    _, _, slide_artifacts = persistence.collect_pipeline_artifacts(
+        [slide, slide],
+        output_dir=tmp_path,
+        output_format="pt",
+        include_tile_embeddings=False,
+        include_hierarchical_embeddings=False,
+        include_slide_embeddings=True,
+        annotations=["tumor", "stroma"],
+    )
+
+    assert [a.path for a in slide_artifacts] == [
+        tmp_path / "slide_embeddings" / "tumor" / "slide-a.pt",
+        tmp_path / "slide_embeddings" / "stroma" / "slide-a.pt",
+    ]
+    assert [a.annotation for a in slide_artifacts] == ["tumor", "stroma"]
+
+
 def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeypatch, tmp_path: Path):
     """Customized masks block forwards a sampling spec, selection strategy, output mode AND the
     slide's annotation mask to hs2p — the wiring that lets hs2p enforce a required raster."""
