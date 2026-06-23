@@ -156,6 +156,7 @@ def _reconcile_embedding_process_list(
     process_list_path,
     embeddable_slides,
     output_dir,
+    embeddable_tiling_results=None,
 ):
     """Reconcile the process_list with the embeddings on disk once, at end of run.
 
@@ -170,6 +171,15 @@ def _reconcile_embedding_process_list(
     persist_hierarchical_embeddings = hierarchical.is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
+    annotations = None
+    if include_slide_embeddings and embeddable_tiling_results is not None:
+        # Re-read each class's namespaced slide-embedding artifact so the final reconcile
+        # records the per-class feature path instead of collapsing every annotation row
+        # onto the flat path. The default tissue-only path leaves annotations None.
+        annotations = [
+            embedding.tiling_result_annotation(tiling_result)
+            for tiling_result in embeddable_tiling_results
+        ]
     tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_pipeline_artifacts(
         embeddable_slides,
         output_dir=output_dir,
@@ -177,6 +187,7 @@ def _reconcile_embedding_process_list(
         include_tile_embeddings=include_tile_embeddings,
         include_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
+        annotations=annotations,
     )
     if process_list_path is not None and Path(process_list_path).is_file():
         persistence.update_process_list_after_embedding(
@@ -323,6 +334,7 @@ def embed_slides(
                     process_list_path=process_list_path,
                     embeddable_slides=embeddable_slides,
                     output_dir=Path(execution.output_dir),
+                    embeddable_tiling_results=embeddable_tiling_results,
                 )
             emit_progress(
                 "embedding.finished",
@@ -855,6 +867,7 @@ def run_pipeline(
             process_list_path=process_list_path,
             embeddable_slides=embeddable_slides,
             output_dir=output_dir,
+            embeddable_tiling_results=embeddable_tiling_results,
         )
         emit_progress(
             "embedding.finished",
@@ -975,6 +988,7 @@ def run_pipeline_with_coordinates(
             process_list_path=process_list_path,
             embeddable_slides=embeddable_slides,
             output_dir=output_dir,
+            embeddable_tiling_results=embeddable_tiling_results,
         )
         return RunResult(
             tile_artifacts=tile_artifacts,

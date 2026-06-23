@@ -131,5 +131,6 @@ def persist_embedded_slide(
             execution=execution,
             metadata=build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
             latents=embedded_slide.latents,
+            annotation=annotation,
         )
     return tile_artifact, slide_artifact

@@ -30,6 +30,7 @@ class SlideEmbeddingArtifact:
     format: str
     feature_dim: int
     latent_path: Path | None = None
+    annotation: str | None = None
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -102,6 +103,26 @@ def tile_embeddings_subdir(annotation: str | None) -> str:
     if is_flattened_annotation(annotation):
         return "tile_embeddings"
     return f"tile_embeddings/{annotation}"
+
+
+def slide_embeddings_subdir(annotation: str | None) -> str:
+    """Namespace the ``slide_embeddings`` output dir per annotation class.
+
+    Reuses hs2p's flatten rule (the single source of truth, shared with
+    :func:`tile_embeddings_subdir`): ``None`` and the sentinel ``"tissue"`` collapse to the
+    flat ``slide_embeddings`` root, so the default tissue-only path is byte-for-byte
+    unchanged; any real class label gets its own ``slide_embeddings/<class>`` subdirectory.
+    """
+    if is_flattened_annotation(annotation):
+        return "slide_embeddings"
+    return f"slide_embeddings/{annotation}"
+
+
+def slide_latents_subdir(annotation: str | None) -> str:
+    """Namespace the ``slide_latents`` output dir per annotation class (mirrors slide embeddings)."""
+    if is_flattened_annotation(annotation):
+        return "slide_latents"
+    return f"slide_latents/{annotation}"
 
 
 def _setup_artifact_paths(
@@ -222,9 +243,12 @@ def write_slide_embeddings(
     output_format: str = "pt",
     metadata: dict[str, Any] | None = None,
     latents: Any | None = None,
+    annotation: str | None = None,
 ) -> SlideEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "slide_embeddings", sample_id, output_format)
+    artifact_path, metadata_path = _setup_artifact_paths(
+        output_dir, slide_embeddings_subdir(annotation), sample_id, output_format
+    )
     embedding_array = _ensure_array(embedding)
     latent_path = None
     if output_format == "pt":
@@ -232,7 +256,9 @@ def write_slide_embeddings(
     else:
         np.savez_compressed(artifact_path, features=embedding_array)
     if latents is not None:
-        latent_path, _ = _setup_artifact_paths(output_dir, "slide_latents", sample_id, output_format)
+        latent_path, _ = _setup_artifact_paths(
+            output_dir, slide_latents_subdir(annotation), sample_id, output_format
+        )
         if output_format == "pt":
             torch.save(_ensure_tensor(latents), latent_path)
         else:
@@ -254,6 +280,7 @@ def write_slide_embeddings(
         format=output_format,
         feature_dim=slide_metadata["feature_dim"],
         latent_path=latent_path,
+        annotation=annotation,
     )
 
 

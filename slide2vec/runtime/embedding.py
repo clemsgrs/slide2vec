@@ -138,6 +138,7 @@ def write_slide_embedding_artifact(
     execution: ExecutionOptions,
     metadata: dict[str, Any],
     latents=None,
+    annotation: str | None = None,
 ) -> SlideEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
@@ -148,6 +149,7 @@ def write_slide_embedding_artifact(
         output_format=execution.output_format,
         metadata=metadata,
         latents=latents,
+        annotation=annotation,
     )
 
 
