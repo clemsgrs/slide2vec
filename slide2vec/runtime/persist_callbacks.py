@@ -12,6 +12,7 @@ from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    hierarchical_embeddings_subdir,
     slide_embeddings_subdir,
     slide_latents_subdir,
     tile_embeddings_subdir,
@@ -47,7 +48,8 @@ def has_complete_local_embedding_outputs(
 ) -> bool:
     tile_subdir = tile_embeddings_subdir(annotation)
     if persist_hierarchical_embeddings:
-        hierarchical_artifact_path = output_dir / "hierarchical_embeddings" / f"{sample_id}.{output_format}"
+        hierarchical_subdir = hierarchical_embeddings_subdir(annotation)
+        hierarchical_artifact_path = output_dir / hierarchical_subdir / f"{sample_id}.{output_format}"
         if not hierarchical_artifact_path.is_file():
             return False
     elif persist_tile_embeddings:

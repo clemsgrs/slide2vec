@@ -5066,3 +5066,342 @@ def test_zero_tile_sidecar_namespaces_per_class(tmp_path: Path):
 
     _sidecar("tissue")
     assert (tmp_path / "tile_embeddings" / "slide-z.meta.json").is_file()
+
+
+# --- Issue #157: per-annotation hierarchical (region) embeddings (top-seam) ---
+
+
+HIERARCHICAL_PREPROCESSING = replace(
+    DEFAULT_PREPROCESSING,
+    requested_region_size_px=448,
+    region_tile_multiple=2,
+)
+
+
+def test_write_hierarchical_embeddings_namespaces_per_class(tmp_path: Path):
+    """Region embeddings land under hierarchical_embeddings/<class>/ for real classes; tissue/None
+    stay flat. The artifact carries its annotation, reusing the shared flatten rule."""
+    tumor_artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    assert tumor_artifact.path == tmp_path / "hierarchical_embeddings" / "tumor" / "slide-a.pt"
+    assert tumor_artifact.annotation == "tumor"
+
+    tissue_artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tissue",
+    )
+    assert tissue_artifact.path == tmp_path / "hierarchical_embeddings" / "slide-a.pt"
+    assert tissue_artifact.annotation == "tissue"
+
+    none_artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation=None,
+    )
+    assert none_artifact.path == tmp_path / "hierarchical_embeddings" / "slide-a.pt"
+    assert none_artifact.annotation is None
+
+
+def test_persist_embedded_slide_namespaces_hierarchical_embeddings_per_class(monkeypatch, tmp_path: Path):
+    """When region tiling is enabled, per-class region embeddings land under
+    hierarchical_embeddings/<class>/; tissue/None stay flat. The artifact carries its annotation."""
+    model = SimpleNamespace(name="virchow2", level="tile")
+    execution = ExecutionOptions(output_dir=tmp_path)
+
+    # build_hierarchical_embedding_metadata resolves region geometry from the tiling result; stub
+    # it so the test stays IO-free while still exercising the per-class namespacing seam.
+    monkeypatch.setattr(
+        embedding_persist,
+        "build_hierarchical_embedding_metadata",
+        lambda *args, **kwargs: {"image_path": "/tmp/slide-a.svs"},
+    )
+
+    def _persist(annotation):
+        tiling_result = SimpleNamespace(
+            x=np.array([0, 1, 2, 3], dtype=np.int64),
+            y=np.array([0, 0, 1, 1], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=4,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path("/tmp/c.npz"),
+            coordinates_meta_path=Path("/tmp/c.meta.json"),
+            tiles_tar_path=None,
+        )
+        embedded = EmbeddedSlide(
+            sample_id="slide-a",
+            tile_embeddings=np.zeros((1, 4, 8), dtype=np.float32),
+            slide_embedding=None,
+            x=np.array([0], dtype=np.int64),
+            y=np.array([1], dtype=np.int64),
+            tile_size_lv0=224,
+            image_path=Path("/tmp/slide-a.svs"),
+            mask_path=Path("/tmp/slide-a-mask.png"),
+        )
+        hierarchical_artifact, _ = embedding_persist.persist_embedded_slide(
+            model,
+            embedded,
+            tiling_result,
+            preprocessing=HIERARCHICAL_PREPROCESSING,
+            execution=execution,
+        )
+        return hierarchical_artifact
+
+    tumor_artifact = _persist("tumor")
+    assert tumor_artifact.path == tmp_path / "hierarchical_embeddings" / "tumor" / "slide-a.pt"
+    assert tumor_artifact.annotation == "tumor"
+
+    tissue_artifact = _persist("tissue")
+    assert tissue_artifact.path == tmp_path / "hierarchical_embeddings" / "slide-a.pt"
+    assert tissue_artifact.annotation == "tissue"
+
+    none_artifact = _persist(None)
+    assert none_artifact.path == tmp_path / "hierarchical_embeddings" / "slide-a.pt"
+    assert none_artifact.annotation is None
+
+
+def test_update_process_list_records_per_class_hierarchical_feature_paths(tmp_path: Path):
+    """A multi-label slide records a distinct per-class hierarchical feature path on each
+    (sample_id, annotation) row rather than collapsing them onto one path."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 4,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 4,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+
+    tumor_artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    stroma_artifact = write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="stroma",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    persistence.update_process_list_after_embedding(
+        process_list_path,
+        successful_slides=[slide, slide],
+        persist_tile_embeddings=False,
+        persist_hierarchical_embeddings=True,
+        include_slide_embeddings=False,
+        encoder_name="virchow2",
+        output_variant=None,
+        tile_artifacts=[],
+        hierarchical_artifacts=[tumor_artifact, stroma_artifact],
+        slide_artifacts=[],
+    )
+
+    df = pd.read_csv(process_list_path)
+    tumor_row = df[df["annotation"] == "tumor"].iloc[0]
+    stroma_row = df[df["annotation"] == "stroma"].iloc[0]
+    assert tumor_row["feature_path"] == str(
+        (tmp_path / "hierarchical_embeddings" / "tumor" / "slide-a.pt").resolve()
+    )
+    assert stroma_row["feature_path"] == str(
+        (tmp_path / "hierarchical_embeddings" / "stroma" / "slide-a.pt").resolve()
+    )
+    assert tumor_row["feature_kind"] == "hierarchical"
+    assert stroma_row["feature_kind"] == "hierarchical"
+
+
+def test_resume_gate_keys_hierarchical_embeddings_by_sample_id_and_annotation(tmp_path: Path):
+    """Local resume dedups pending work by (sample_id, annotation) for hierarchical embeddings: a
+    class whose region artifact is missing stays pending even when a sibling class is complete."""
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "tumor",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 4,
+                "coordinates_npz_path": "/tmp/slide-a.tumor.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.tumor.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+            {
+                "sample_id": "slide-a",
+                "annotation": "stroma",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 4,
+                "coordinates_npz_path": "/tmp/slide-a.stroma.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.stroma.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            },
+        ],
+    )
+    df = pd.read_csv(process_list_path)
+    df["feature_status"] = "success"
+    df.to_csv(process_list_path, index=False)
+
+    # Only the tumor region artifact exists on disk.
+    write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    tumor_tr = SimpleNamespace(annotation="tumor")
+    stroma_tr = SimpleNamespace(annotation="stroma")
+    pending_slides, pending_results = persist_callbacks.pending_local_embedding_records(
+        [slide, slide],
+        [tumor_tr, stroma_tr],
+        process_list_path=process_list_path,
+        output_dir=tmp_path,
+        output_format="pt",
+        persist_tile_embeddings=True,
+        persist_hierarchical_embeddings=True,
+        include_slide_embeddings=False,
+        save_latents=False,
+        resume=True,
+    )
+
+    assert [tr.annotation for tr in pending_results] == ["stroma"]
+    assert len(pending_slides) == 1
+
+
+def test_collect_pipeline_artifacts_reloads_per_class_hierarchical_embeddings(tmp_path: Path):
+    """The end-of-run reconcile reloads each class's namespaced hierarchical artifact when given
+    per-row annotations, so the per-class feature path is recorded rather than the flat one."""
+    write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="tumor",
+    )
+    write_hierarchical_embeddings(
+        "slide-a",
+        np.zeros((1, 4, 8), dtype=np.float32),
+        output_dir=tmp_path,
+        annotation="stroma",
+    )
+
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    _, hierarchical_artifacts, _ = persistence.collect_pipeline_artifacts(
+        [slide, slide],
+        output_dir=tmp_path,
+        output_format="pt",
+        include_tile_embeddings=False,
+        include_hierarchical_embeddings=True,
+        include_slide_embeddings=False,
+        annotations=["tumor", "stroma"],
+    )
+
+    assert [a.path for a in hierarchical_artifacts] == [
+        tmp_path / "hierarchical_embeddings" / "tumor" / "slide-a.pt",
+        tmp_path / "hierarchical_embeddings" / "stroma" / "slide-a.pt",
+    ]
+    assert [a.annotation for a in hierarchical_artifacts] == ["tumor", "stroma"]
+
+
+def test_zero_tile_hierarchical_sidecar_namespaces_per_class(monkeypatch, tmp_path: Path):
+    """Zero-tile hierarchical sidecars for a real class land under hierarchical_embeddings/<class>/;
+    tissue stays flat."""
+    model = SimpleNamespace(name="virchow2", level="tile")
+    monkeypatch.setattr(
+        process_list,
+        "build_hierarchical_embedding_metadata",
+        lambda *args, **kwargs: {"image_path": "/tmp/slide-z.svs"},
+    )
+    monkeypatch.setattr(
+        process_list,
+        "resolve_hierarchical_geometry",
+        lambda *args, **kwargs: {"tiles_per_region": 4},
+    )
+
+    def _sidecar(annotation):
+        tiling_result = SimpleNamespace(
+            x=np.array([], dtype=np.int64),
+            y=np.array([], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=0,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path("/tmp/c.npz"),
+            coordinates_meta_path=Path("/tmp/c.meta.json"),
+            tiles_tar_path=None,
+        )
+        slide = make_slide("slide-z", mask_path=Path("/tmp/slide-z-mask.png"))
+        process_list.write_zero_tile_embedding_sidecars(
+            [(slide, tiling_result)],
+            model=model,
+            preprocessing=HIERARCHICAL_PREPROCESSING,
+            output_dir=tmp_path,
+            output_format="pt",
+        )
+
+    _sidecar("tumor")
+    assert (tmp_path / "hierarchical_embeddings" / "tumor" / "slide-z.meta.json").is_file()
+
+    _sidecar("tissue")
+    assert (tmp_path / "hierarchical_embeddings" / "slide-z.meta.json").is_file()

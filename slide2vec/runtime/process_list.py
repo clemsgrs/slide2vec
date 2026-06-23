@@ -74,6 +74,7 @@ def write_zero_tile_embedding_sidecars(
                     backend=resolve_slide_backend(preprocessing, tiling_result),
                     preprocessing=preprocessing,
                 ),
+                annotation=tiling_result_annotation(tiling_result),
             )
             continue
         write_tile_embedding_metadata(

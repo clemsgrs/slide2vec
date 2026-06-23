@@ -60,6 +60,7 @@ class HierarchicalEmbeddingArtifact:
     feature_dim: int
     num_regions: int
     tiles_per_region: int
+    annotation: str | None = None
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -123,6 +124,20 @@ def slide_latents_subdir(annotation: str | None) -> str:
     if is_flattened_annotation(annotation):
         return "slide_latents"
     return f"slide_latents/{annotation}"
+
+
+def hierarchical_embeddings_subdir(annotation: str | None) -> str:
+    """Namespace the ``hierarchical_embeddings`` output dir per annotation class.
+
+    Reuses hs2p's flatten rule (the single source of truth, shared with
+    :func:`tile_embeddings_subdir` and :func:`slide_embeddings_subdir`): ``None`` and the
+    sentinel ``"tissue"`` collapse to the flat ``hierarchical_embeddings`` root, so the
+    default tissue-only path is byte-for-byte unchanged; any real class label gets its own
+    ``hierarchical_embeddings/<class>`` subdirectory.
+    """
+    if is_flattened_annotation(annotation):
+        return "hierarchical_embeddings"
+    return f"hierarchical_embeddings/{annotation}"
 
 
 def _setup_artifact_paths(
@@ -330,9 +345,12 @@ def write_hierarchical_embeddings(
     output_dir: str | Path,
     output_format: str = "pt",
     metadata: dict[str, Any] | None = None,
+    annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
-    artifact_path, metadata_path = _setup_artifact_paths(output_dir, "hierarchical_embeddings", sample_id, output_format)
+    artifact_path, metadata_path = _setup_artifact_paths(
+        output_dir, hierarchical_embeddings_subdir(annotation), sample_id, output_format
+    )
     feature_array = _ensure_array(features)
     if feature_array.ndim != 3:
         raise ValueError(
@@ -362,4 +380,5 @@ def write_hierarchical_embeddings(
         feature_dim=int(hierarchical_metadata["feature_dim"]),
         num_regions=int(hierarchical_metadata["num_regions"]),
         tiles_per_region=int(hierarchical_metadata["tiles_per_region"]),
+        annotation=annotation,
     )
