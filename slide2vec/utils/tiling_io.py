@@ -241,7 +241,15 @@ def load_tiling_result_from_row(row):
     annotation = row.get("annotation")
     if annotation is not None and pd.isna(annotation):
         annotation = None
-    setattr(tiling_result, "annotation", annotation if annotation is None else str(annotation))
+    annotation = annotation if annotation is None else str(annotation)
+    # The merged output mode (hs2p's CoordinateOutputMode.MERGED) emits a single per-slide
+    # coordinate set over the union of tiles passing any active class threshold. hs2p labels
+    # that process-list row "merged" so it is not mistaken for plain tissue, but it carries no
+    # class — collapse it to None here so the flatten rule (is_flattened_annotation) lands its
+    # artifacts at the flat output root, with no per-class subdir.
+    if annotation == "merged":
+        annotation = None
+    setattr(tiling_result, "annotation", annotation)
     setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
     setattr(tiling_result, "mask_preview_path", _optional_path(row.get("mask_preview_path")))
     setattr(tiling_result, "tiling_preview_path", _optional_path(row.get("tiling_preview_path")))

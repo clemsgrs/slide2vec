@@ -801,6 +801,85 @@ def test_customized_masks_block_yields_independent_per_annotation_sampling():
     assert output_mode == "per_annotation"
 
 
+def test_merged_output_mode_yields_merged_with_joint_selection():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "output_mode": "merged",
+            "pixel_mapping": {"tumor": 2},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        },
+        independent_sampling=False,
+    )
+
+    configs = build_hs2p_configs(preprocessing)
+    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
+
+    assert sampling is not None
+    assert output_mode == "merged"
+    assert selection_strategy == "joint_sampling"
+
+
+def test_independent_sampling_toggle_selects_selection_strategy():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    customized = {
+        "pixel_mapping": {"tumor": 2},
+        "colors": {"tumor": [255, 0, 0]},
+        "min_coverage": {"tumor": 0.5},
+    }
+
+    independent = build_hs2p_configs(
+        _masks_preprocessing(customized, independent_sampling=True)
+    )
+    joint = build_hs2p_configs(
+        _masks_preprocessing(customized, independent_sampling=False)
+    )
+
+    assert independent[-2] == "independent_sampling"
+    assert joint[-2] == "joint_sampling"
+
+
+def test_merged_annotation_label_collapses_to_flat_root(tmp_path: Path):
+    """A merged tiling row is labelled ``merged`` by hs2p, but carries no class — it must
+    collapse to the flat output root (no per-class subdir), exactly like tissue/None."""
+    from slide2vec.utils.tiling_io import load_tiling_result_from_row
+
+    coordinates_meta_path = tmp_path / "slide-a.coordinates.meta.json"
+    coordinates_meta_path.write_text("{}", encoding="utf-8")
+
+    def fake_load_tiling_result(**kwargs):
+        return SimpleNamespace()
+
+    import slide2vec.utils.tiling_io as tiling_io
+
+    original = tiling_io.load_tiling_result
+    tiling_io.load_tiling_result = fake_load_tiling_result
+    try:
+        result = load_tiling_result_from_row(
+            {
+                "annotation": "merged",
+                "coordinates_npz_path": str(tmp_path / "slide-a.coordinates.npz"),
+                "coordinates_meta_path": str(coordinates_meta_path),
+            }
+        )
+    finally:
+        tiling_io.load_tiling_result = original
+
+    # Merged carries no class label; the flatten rule sends it to the flat root.
+    assert result.annotation is None
+    artifact = write_tile_embeddings(
+        "slide-a",
+        np.arange(8, dtype=np.float32).reshape(2, 4),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation=result.annotation,
+    )
+    assert artifact.path == tmp_path / "tile_embeddings" / "slide-a.npz"
+
+
 def test_invalid_masks_block_with_duplicate_pixel_values_fails_fast():
     from slide2vec.runtime.tiling import build_hs2p_configs
 
