@@ -2498,7 +2498,7 @@ def test_build_hs2p_configs_constructs_preview_config():
     ) = runtime_tiling.build_hs2p_configs(preprocessing)
 
     assert tiling_cfg.backend == "asap"
-    assert tiling_cfg.tissue_threshold == pytest.approx(0.1)  # derived from masks.min_coverage.tissue
+    assert tiling_cfg.min_coverage["tissue"] == pytest.approx(0.1)  # resolved from masks.min_coverage.tissue
     assert segmentation_cfg.downsample == 64
     assert segmentation_cfg.method == "hsv"
     assert filtering_cfg.ref_tile_size == 224
