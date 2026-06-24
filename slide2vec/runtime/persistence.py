@@ -265,14 +265,15 @@ def _normalized_annotation(annotation: Any) -> str | None:
 
     Keying the per-class feature-path map on this normalized value lets the flat tissue-only
     path and a real class share one matching rule without the sentinel leaking into lookups.
-    ``"merged"`` (hs2p's merged output-mode label) carries no class and is collapsed to ``None``
-    here, matching :func:`slide2vec.utils.tiling_io.load_tiling_result_from_row`, so its
-    process-list row resolves to the flat embedding path rather than being left unmatched.
+    Flattening is decided solely by :func:`hs2p.fileops.is_flattened_annotation` (the single
+    source of truth), which flattens ``None``/``"tissue"``/``"merged"`` to the flat root, so
+    ``"merged"`` (hs2p's merged output-mode label, which carries no class) resolves to the flat
+    embedding path rather than being left unmatched.
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
     annotation = str(annotation)
-    if annotation == "merged" or is_flattened_annotation(annotation):
+    if is_flattened_annotation(annotation):
         return None
     return annotation
 
