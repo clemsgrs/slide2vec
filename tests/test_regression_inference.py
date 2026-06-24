@@ -1557,6 +1557,27 @@ def test_make_embedded_slide_carries_tiling_artifact_fields():
     assert embedded.num_tiles == 7
     assert embedded.mask_preview_path == Path("/tmp/slide-a-mask-preview.png")
     assert embedded.tiling_preview_path == Path("/tmp/slide-a-tiling-preview.png")
+    # A tiling_result with no annotation attr yields the helper default (None).
+    assert embedded.annotation is None
+
+
+@pytest.mark.parametrize("annotation", ["tissue", "merged", "tumor"])
+def test_make_embedded_slide_carries_per_class_annotation(annotation):
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0], dtype=np.int64),
+        y=np.array([1], dtype=np.int64),
+        tile_size_lv0=224,
+        num_tiles=3,
+        annotation=annotation,
+    )
+    embedded = embedding_persist.make_embedded_slide(
+        slide=slide,
+        tiling_result=tiling_result,
+        tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+        slide_embedding=None,
+    )
+    assert embedded.annotation == annotation
 
 
 def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch, tmp_path: Path):

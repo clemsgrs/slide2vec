@@ -56,6 +56,7 @@ def make_embedded_slide(
         tile_size_lv0=int(tiling_result.tile_size_lv0),
         image_path=slide.image_path,
         mask_path=slide.mask_path,
+        annotation=tiling_result_annotation(tiling_result),
         num_tiles=int(n_tiles) if n_tiles is not None else len(x_values),
         mask_preview_path=Path(mask_preview_path) if mask_preview_path is not None else None,
         tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
