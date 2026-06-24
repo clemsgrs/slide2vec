@@ -351,6 +351,11 @@ class EmbeddedSlide:
     image_path: Path
     #: Path to the tissue mask used for tiling, if any.
     mask_path: Path | None = None
+    #: Annotation class this bag of tiles was sampled for. ``"tissue"`` for the
+    #: default tissue-only path, ``"merged"`` for the union output mode, or the
+    #: class name (e.g. ``"tumor"``) when annotation-aware sampling fans a slide
+    #: out into one bag per class. See :ref:`annotation-aware-sampling`.
+    annotation: str | None = None
     #: Number of tiles extracted from the slide.
     num_tiles: int | None = None
     #: Path to the mask preview image, if generated.
