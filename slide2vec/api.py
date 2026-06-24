@@ -354,7 +354,7 @@ class EmbeddedSlide:
     #: Annotation class this bag of tiles was sampled for. ``"tissue"`` for the
     #: default tissue-only path, ``"merged"`` for the union output mode, or the
     #: class name (e.g. ``"tumor"``) when annotation-aware sampling fans a slide
-    #: out into one bag per class. See :ref:`annotation-aware-sampling`.
+    #: out into one bag per class. See the annotation-aware sampling documentation.
     annotation: str | None = None
     #: Number of tiles extracted from the slide.
     num_tiles: int | None = None
@@ -447,12 +447,13 @@ class Model:
         self,
         slide: SlideInput,
         *,
+        annotation: str | list[str] | None = None,
         preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
         sample_id: str | None = None,
         mask_path: PathLike | None = None,
         spacing_at_level_0: float | None = None,
-    ) -> EmbeddedSlide:
+    ) -> EmbeddedSlide | list[EmbeddedSlide]:
         if isinstance(slide, (str, Path)):
             slide = {
                 "sample_id": sample_id or Path(slide).stem,
@@ -464,31 +465,42 @@ class Model:
             raise ValueError(
                 "sample_id, mask_path, and spacing_at_level_0 overrides are only supported when slide is a path-like input"
             )
-        return self.embed_slides(
+        requested = None if isinstance(annotation, str) else annotation
+        grouped = self.embed_slides(
             [slide],
+            annotations=requested,
             preprocessing=preprocessing,
             execution=execution,
-        )[0]
+        )
+        # Single slide in → at most one outer key out. Flatten to the inner
+        # {label: EmbeddedSlide} mapping (empty when the run produced nothing).
+        bags: dict[str, EmbeddedSlide] = {}
+        for inner in grouped.values():
+            bags = inner
+            break
+        return _select_embedded_bag(bags, annotation)
 
     def embed_slides(
         self,
         slides: SlideSequence,
         *,
+        annotations: list[str] | None = None,
         preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
-    ) -> list[EmbeddedSlide]:
+    ) -> dict[str, dict[str, EmbeddedSlide]]:
         from slide2vec.inference import embed_slides
 
         resolved = _coerce_execution_options(execution, model=self)
         resolved_preprocessing = _resolve_direct_api_preprocessing(self, preprocessing)
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             _validate_model_config(self, resolved_preprocessing, resolved)
-            return embed_slides(
+            embedded = embed_slides(
                 self,
                 slides,
                 preprocessing=resolved_preprocessing,
                 execution=resolved,
             )
+        return _group_embedded_slides(embedded, annotations=annotations)
 
     def embed_patient(
         self,
@@ -653,6 +665,77 @@ class Pipeline:
                 preprocessing=resolved_preprocessing,
                 execution=self.execution,
             )
+
+
+def _select_embedded_bag(
+    bags: Mapping[str, EmbeddedSlide],
+    annotation: str | list[str] | None,
+) -> EmbeddedSlide | list[EmbeddedSlide]:
+    """Select per-class bag(s) from a single slide's ``{label: EmbeddedSlide}`` map.
+
+    numpy-style shape-in/shape-out:
+
+    - a single class string returns one :class:`EmbeddedSlide`;
+    - a list of class strings returns a list in the requested order;
+    - ``None`` returns the single bag when the run produced exactly one,
+      otherwise raises naming the available bags and directing to
+      :meth:`Model.embed_slides`.
+
+    Requesting a class the run did not produce raises naming what is available.
+    """
+    available = sorted(bags)
+    if isinstance(annotation, str):
+        if annotation not in bags:
+            raise ValueError(
+                f"embed_slide() found no '{annotation}' annotation bag for this "
+                f"slide; available bags: {available}."
+            )
+        return bags[annotation]
+    if annotation is not None:
+        selected: list[EmbeddedSlide] = []
+        for label in annotation:
+            if label not in bags:
+                raise ValueError(
+                    f"embed_slide() found no '{label}' annotation bag for this "
+                    f"slide; available bags: {available}."
+                )
+            selected.append(bags[label])
+        return selected
+    if len(bags) == 1:
+        return next(iter(bags.values()))
+    raise ValueError(
+        f"embed_slide() received {len(bags)} annotation bags for this slide "
+        f"({available}); annotation-aware sampling produces one bag per class. "
+        "Pass annotation=... to select a class, or use Model.embed_slides(...) "
+        "to receive every per-class EmbeddedSlide (each carries its .annotation)."
+    )
+
+
+def _group_embedded_slides(
+    embedded: Sequence[EmbeddedSlide],
+    *,
+    annotations: list[str] | None = None,
+) -> dict[str, dict[str, EmbeddedSlide]]:
+    """Group flat per-row :class:`EmbeddedSlide` results into a nested mapping.
+
+    The outer key is ``sample_id``; the inner key is the bag's informative
+    annotation label (``"tissue"``/``"merged"``/class name), never ``None``.
+    A bag whose ``.annotation`` is ``None`` (defensive — post-#173 real runs
+    always carry a label) does not produce a ``None`` key.
+
+    When *annotations* is given, the inner keys are restricted to the named
+    classes (in encounter order).
+    """
+    requested = None if annotations is None else set(annotations)
+    grouped: dict[str, dict[str, EmbeddedSlide]] = {}
+    for bag in embedded:
+        label = bag.annotation
+        if label is None:
+            continue
+        if requested is not None and label not in requested:
+            continue
+        grouped.setdefault(bag.sample_id, {})[label] = bag
+    return grouped
 
 
 def _coerce_execution_options(

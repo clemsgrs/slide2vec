@@ -23,6 +23,20 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 
+def _make_embedded_slide(sample_id="slide-a", annotation="tissue", image_path=None):
+    return EmbeddedSlide(
+        sample_id=sample_id,
+        tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+        slide_embedding=None,
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path(image_path or f"/tmp/{sample_id}.svs"),
+        mask_path=None,
+        annotation=annotation,
+    )
+
+
 def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch):
     model = Model.from_preset("virchow2")
     expected = EmbeddedSlide(
@@ -34,6 +48,7 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
+        annotation="tissue",
     )
     captured = {}
 
@@ -56,6 +71,131 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
     assert captured["slides"][0]["sample_id"] == "slide-a"
 
 
+def test_embed_slides_returns_nested_dict_keyed_by_sample_and_label(monkeypatch):
+    model = Model.from_preset("virchow2")
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [slide_a])
+
+    result = model.embed_slides(["/tmp/slide-a.svs"], preprocessing=DEFAULT_PREPROCESSING)
+
+    assert result == {"slide-a": {"tissue": slide_a}}
+
+
+def test_embed_slide_returns_single_bag_for_one_bag_run(monkeypatch):
+    model = Model.from_preset("virchow2")
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [slide_a])
+
+    result = model.embed_slide("/tmp/slide-a.svs", preprocessing=DEFAULT_PREPROCESSING)
+
+    assert result is slide_a
+
+
+def test_embed_slide_selects_single_class_by_string(monkeypatch):
+    model = Model.from_preset("virchow2")
+    tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [tumor, stroma])
+
+    result = model.embed_slide(
+        "/tmp/slide-a.svs", annotation="stroma", preprocessing=DEFAULT_PREPROCESSING
+    )
+
+    assert result is stroma
+
+
+def test_embed_slide_selects_list_of_classes_in_requested_order(monkeypatch):
+    model = Model.from_preset("virchow2")
+    tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [tumor, stroma])
+
+    result = model.embed_slide(
+        "/tmp/slide-a.svs",
+        annotation=["stroma", "tumor"],
+        preprocessing=DEFAULT_PREPROCESSING,
+    )
+
+    assert result == [stroma, tumor]
+
+
+def test_embed_slide_unknown_class_names_available(monkeypatch):
+    model = Model.from_preset("virchow2")
+    tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [tumor, stroma])
+
+    with pytest.raises(ValueError, match="stroma"):
+        model.embed_slide(
+            "/tmp/slide-a.svs", annotation="lymphocytes", preprocessing=DEFAULT_PREPROCESSING
+        )
+
+
+def test_embed_slide_raises_when_run_fans_out_into_multiple_bags(monkeypatch):
+    model = Model.from_preset("virchow2")
+    tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [tumor, stroma])
+
+    with pytest.raises(ValueError, match="embed_slides"):
+        model.embed_slide("/tmp/slide-a.svs", preprocessing=DEFAULT_PREPROCESSING)
+
+
+def test_embed_slides_groups_multiple_samples_and_classes(monkeypatch):
+    model = Model.from_preset("virchow2")
+    a_tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    a_stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+    b_tumor = _make_embedded_slide(sample_id="slide-b", annotation="tumor")
+
+    monkeypatch.setattr(
+        "slide2vec.inference.embed_slides", lambda *a, **k: [a_tumor, a_stroma, b_tumor]
+    )
+
+    result = model.embed_slides(
+        ["/tmp/slide-a.svs", "/tmp/slide-b.svs"], preprocessing=DEFAULT_PREPROCESSING
+    )
+
+    assert result == {
+        "slide-a": {"tumor": a_tumor, "stroma": a_stroma},
+        "slide-b": {"tumor": b_tumor},
+    }
+
+
+def test_embed_slides_restricts_inner_keys_to_named_annotations(monkeypatch):
+    model = Model.from_preset("virchow2")
+    tumor = _make_embedded_slide(sample_id="slide-a", annotation="tumor")
+    stroma = _make_embedded_slide(sample_id="slide-a", annotation="stroma")
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *a, **k: [tumor, stroma])
+
+    result = model.embed_slides(
+        ["/tmp/slide-a.svs"], annotations=["tumor"], preprocessing=DEFAULT_PREPROCESSING
+    )
+
+    assert result == {"slide-a": {"tumor": tumor}}
+
+
+def test_embed_slides_never_produces_none_keys(monkeypatch):
+    model = Model.from_preset("virchow2")
+    labelled = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+    unlabelled = _make_embedded_slide(sample_id="slide-a", annotation=None)
+
+    monkeypatch.setattr(
+        "slide2vec.inference.embed_slides", lambda *a, **k: [labelled, unlabelled]
+    )
+
+    result = model.embed_slides(["/tmp/slide-a.svs"], preprocessing=DEFAULT_PREPROCESSING)
+
+    assert result == {"slide-a": {"tissue": labelled}}
+    assert None not in result["slide-a"]
+
+
 def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
     model = Model.from_preset("virchow2")
     expected = EmbeddedSlide(
@@ -67,6 +207,7 @@ def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
+        annotation="tissue",
     )
     monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [expected])
 
@@ -81,28 +222,9 @@ def test_model_embed_slide_allows_multi_gpu_execution(monkeypatch):
 
 def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monkeypatch):
     model = Model.from_preset("virchow2")
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-        EmbeddedSlide(
-            sample_id="slide-b",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([1], dtype=np.int64),
-            y=np.array([1], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-b.svs"),
-            mask_path=None,
-        ),
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+    slide_b = _make_embedded_slide(sample_id="slide-b", annotation="tissue")
+    expected = [slide_a, slide_b]
     captured = {}
 
     def fake_embed_slides(model_arg, slides, **kwargs):
@@ -118,7 +240,10 @@ def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monke
         preprocessing=DEFAULT_PREPROCESSING,
     )
 
-    assert result == expected
+    assert result == {
+        "slide-a": {"tissue": slide_a},
+        "slide-b": {"tissue": slide_b},
+    }
     assert captured["model"] is model
     assert captured["slides"] == ["/tmp/slide-a.svs", "/tmp/slide-b.svs"]
     assert isinstance(captured["kwargs"]["preprocessing"], PreprocessingConfig)
@@ -126,28 +251,9 @@ def test_model_embed_slides_delegates_to_inference_and_returns_its_results(monke
 
 def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monkeypatch):
     model = Model.from_preset("virchow2")
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-        EmbeddedSlide(
-            sample_id="slide-b",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([1], dtype=np.int64),
-            y=np.array([1], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-b.svs"),
-            mask_path=None,
-        ),
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+    slide_b = _make_embedded_slide(sample_id="slide-b", annotation="tissue")
+    expected = [slide_a, slide_b]
     captured = {}
 
     def fake_embed_slides(model_arg, slides, **kwargs):
@@ -164,7 +270,10 @@ def test_model_embed_slides_passes_multi_gpu_execution_through_to_inference(monk
         execution=ExecutionOptions(num_gpus=2),
     )
 
-    assert result == expected
+    assert result == {
+        "slide-a": {"tissue": slide_a},
+        "slide-b": {"tissue": slide_b},
+    }
     assert captured["model"] is model
     assert captured["slides"] == ["/tmp/slide-a.svs", "/tmp/slide-b.svs"]
     assert captured["kwargs"]["execution"].num_gpus == 2
@@ -176,24 +285,13 @@ def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
     model = Model.from_preset("virchow2")
     reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     captured = {}
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        )
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
 
     monkeypatch.setattr(progress, "create_api_progress_reporter", lambda **kwargs: reporter)
 
     def fake_embed_slides(model_arg, slides, **kwargs):
         captured["reporter"] = progress.get_progress_reporter()
-        return expected
+        return [slide_a]
 
     monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
 
@@ -202,7 +300,7 @@ def test_model_embed_slides_auto_installs_progress_reporter(monkeypatch):
         preprocessing=DEFAULT_PREPROCESSING,
     )
 
-    assert result == expected
+    assert result == {"slide-a": {"tissue": slide_a}}
     assert captured["reporter"] is reporter
     assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
 
@@ -214,24 +312,13 @@ def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
     outer_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     replacement_reporter = SimpleNamespace(close=lambda: None, emit=lambda event: None)
     captured = {}
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        )
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
 
     monkeypatch.setattr(progress, "create_api_progress_reporter", lambda **kwargs: replacement_reporter)
 
     def fake_embed_slides(model_arg, slides, **kwargs):
         captured["reporter"] = progress.get_progress_reporter()
-        return expected
+        return [slide_a]
 
     monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
 
@@ -241,7 +328,7 @@ def test_model_embed_slides_preserves_existing_progress_reporter(monkeypatch):
             preprocessing=DEFAULT_PREPROCESSING,
         )
 
-    assert result == expected
+    assert result == {"slide-a": {"tissue": slide_a}}
     assert captured["reporter"] is outer_reporter
 
 
@@ -256,6 +343,7 @@ def test_model_embed_slide_infers_preprocessing_from_single_spacing_model(monkey
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
+        annotation="tissue",
     )
     captured = {}
 
@@ -292,6 +380,7 @@ def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_prep
         tile_size_lv0=224,
         image_path=Path("/tmp/slide-a.svs"),
         mask_path=None,
+        annotation="tissue",
     )
     captured = {}
 
@@ -365,20 +454,10 @@ def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
     caplog: pytest.LogCaptureFixture,
 ):
     model = Model.from_preset("virchow2", allow_non_recommended_settings=True)
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+    expected = {"slide-a": {"tissue": slide_a}}
 
-    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [slide_a])
 
     with caplog.at_level("WARNING", logger="slide2vec"):
         result = model.embed_slides(
@@ -407,20 +486,10 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
     caplog: pytest.LogCaptureFixture,
 ):
     model = Model.from_preset("virchow2", allow_non_recommended_settings=True)
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-    ]
+    slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")
+    expected = {"slide-a": {"tissue": slide_a}}
 
-    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [slide_a])
 
     with caplog.at_level("WARNING", logger="slide2vec"):
         result = model.embed_slides(
@@ -435,20 +504,19 @@ def test_model_embed_slides_warns_when_non_recommended_precision_is_allowed(
 
 def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch):
     model = Model.from_preset("prism", device="cpu")
-    expected = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=np.zeros((2,), dtype=np.float32),
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-    ]
+    slide_a = EmbeddedSlide(
+        sample_id="slide-a",
+        tile_embeddings=np.zeros((1, 2), dtype=np.float32),
+        slide_embedding=np.zeros((2,), dtype=np.float32),
+        x=np.array([0], dtype=np.int64),
+        y=np.array([0], dtype=np.int64),
+        tile_size_lv0=224,
+        image_path=Path("/tmp/slide-a.svs"),
+        mask_path=None,
+        annotation="tissue",
+    )
 
-    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: expected)
+    monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [slide_a])
 
     result = model.embed_slides(
         [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
@@ -456,7 +524,7 @@ def test_model_embed_slides_allows_cpu_execution_with_fp32_precision(monkeypatch
         execution=ExecutionOptions(precision="fp32"),
     )
 
-    assert result == expected
+    assert result == {"slide-a": {"tissue": slide_a}}
 
 
 def test_model_embed_tiles_requires_output_dir_at_api_boundary():
