@@ -32,15 +32,15 @@ def normalize_work_unit_annotation(annotation: str | None) -> str | None:
     """Collapse flat-layout annotations to ``None`` so flat units key by bare ``sample_id``.
 
     Mirrors the in-memory single-GPU path and the distributed reconcile
-    (:func:`slide2vec.runtime.artifacts_collect._normalized_row_annotation`): ``None``, hs2p's
-    flat-layout sentinels (:func:`hs2p.fileops.is_flattened_annotation`, e.g. ``"tissue"``), and the
-    merged output-mode label ``"merged"`` all collapse to ``None``. Only genuine per-class
+    (:func:`slide2vec.runtime.artifacts_collect._normalized_row_annotation`): hs2p's flat-layout
+    sentinels (:func:`hs2p.fileops.is_flattened_annotation`, the single source of truth — it
+    flattens ``None``/``"tissue"``/``"merged"``) all collapse to ``None``. Only genuine per-class
     annotations survive as a composite key.
     """
     if annotation is None:
         return None
     annotation = str(annotation)
-    if annotation == "merged" or is_flattened_annotation(annotation):
+    if is_flattened_annotation(annotation):
         return None
     return annotation
 

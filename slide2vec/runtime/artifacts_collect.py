@@ -101,15 +101,14 @@ def _normalized_row_annotation(annotation) -> str | None:
     """Collapse a process-list ``annotation`` cell to the per-class key (``None`` for the flat path).
 
     Mirrors the in-memory single-GPU path: ``None``/NaN and hs2p's flat-layout sentinels
-    (:func:`hs2p.fileops.is_flattened_annotation`, e.g. ``"tissue"``) land flat, and the merged
-    output-mode label ``"merged"`` is collapsed to ``None`` exactly as
-    :func:`slide2vec.utils.tiling_io.load_tiling_result_from_row` does — so the distributed reconcile
-    keys those rows to the flat embedding path with no per-class subdir.
+    (:func:`hs2p.fileops.is_flattened_annotation` — the single source of truth, which flattens
+    ``None``/``"tissue"``/``"merged"``) land flat — so the distributed reconcile keys those rows
+    to the flat embedding path with no per-class subdir.
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
     annotation = str(annotation)
-    if annotation == "merged" or is_flattened_annotation(annotation):
+    if is_flattened_annotation(annotation):
         return None
     return annotation
 
