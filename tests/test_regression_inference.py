@@ -1138,6 +1138,7 @@ def test_model_embed_slide_updates_process_list_feature_status_and_path_in_distr
         tile_size_lv0=224,
         image_path=slide_path,
         mask_path=None,
+        annotation="tissue",
         num_tiles=1,
     )
 
