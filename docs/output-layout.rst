@@ -37,6 +37,38 @@ Directory Structure
    └── config.yaml
 
 
+Per-Annotation Namespacing
+--------------------------
+
+The layout above is the tissue-only (default) case. When
+:ref:`annotation-aware sampling <annotation-aware-sampling>` is
+enabled, each sampled class gets its own ``<class>/`` subdirectory under every
+embedding directory, and the tiling artifacts are namespaced the same way:
+
+.. code-block:: text
+
+   <output_dir>/
+   ├── tile_embeddings/
+   │   ├── tumor/<sample_id>.pt
+   │   └── stroma/<sample_id>.pt
+   ├── slide_embeddings/
+   │   ├── tumor/<sample_id>.pt
+   │   └── stroma/<sample_id>.pt
+   ├── tiles/
+   │   ├── tumor/<sample_id>.coordinates.npz
+   │   └── stroma/<sample_id>.coordinates.npz
+   └── preview/
+       ├── mask/<sample_id>.png            ← one multi-label mask preview per slide
+       └── tiling/
+           ├── tumor/<sample_id>.png
+           └── stroma/<sample_id>.png
+
+The ``tissue`` class (and the ``merged`` ``output_mode``) carry no class label
+and collapse to the flat root shown earlier — there is no ``tissue/``
+subdirectory. ``process_list.csv`` has one row per ``(sample_id, annotation)``
+pair, each recording that class's own ``feature_path``.
+
+
 Embedding Files
 ---------------
 

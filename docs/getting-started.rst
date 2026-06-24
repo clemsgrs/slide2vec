@@ -81,6 +81,10 @@ Pass :class:`~slide2vec.PreprocessingConfig` to override tiling defaults:
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
+To restrict feature extraction to specific annotated classes (e.g. embed only
+tumor-annotated tiles), customize the ``masks`` block — see
+:ref:`annotation-aware-sampling`.
+
 See :doc:`preprocessing` for advanced settings.
 
 .. _execution-options:
