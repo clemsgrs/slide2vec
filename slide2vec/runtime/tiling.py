@@ -46,9 +46,10 @@ def build_hs2p_configs(
         if is_hierarchical_preprocessing(preprocessing)
         else preprocessing.requested_tile_size_px
     )
-    # Reuse hs2p's tiling-config resolver so the derived tissue_threshold comes from
-    # masks.min_coverage.tissue (the single source of truth) and independent_sampling
-    # is threaded consistently. The resolver reads attributes, so wrap the masks dict.
+    # Reuse hs2p's tiling-config resolver so the resolved min_coverage map comes from
+    # masks.min_coverage (the single source of truth; min_coverage["tissue"] is the tissue
+    # threshold) and independent_sampling is threaded consistently. The resolver reads
+    # attributes, so wrap the masks dict.
     tiling_adapter = SimpleNamespace(
         tiling=SimpleNamespace(
             masks=SimpleNamespace(**dict(preprocessing.masks)),

@@ -700,7 +700,7 @@ def test_masks_min_coverage_tissue_drives_derived_tiling_threshold():
 
     tiling_cfg = build_hs2p_configs(preprocessing)[0]
 
-    assert tiling_cfg.tissue_threshold == pytest.approx(0.37)
+    assert tiling_cfg.min_coverage["tissue"] == pytest.approx(0.37)
     assert tiling_cfg.independent_sampling is False
 
 
