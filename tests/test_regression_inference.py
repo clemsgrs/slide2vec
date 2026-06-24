@@ -2301,9 +2301,10 @@ def test_tile_slides_forwards_independent_sampling_selection_strategy(monkeypatc
     assert captured["kwargs"]["output_mode"] == "per_annotation"
 
 
-def test_prepare_tiled_slides_collapses_merged_row_to_flat_root(monkeypatch, tmp_path: Path):
-    """A merged tiling row (hs2p labels it ``merged``) must load with annotation=None so its
-    embedding artifacts land at the flat output root, not under a ``merged/`` subdir."""
+def test_prepare_tiled_slides_preserves_merged_row_label(monkeypatch, tmp_path: Path):
+    """A merged tiling row (hs2p labels it ``merged``) must load with its informative label
+    intact (annotation == "merged"), not blanked to None. Artifact placement still flattens
+    to the output root downstream via hs2p's ``is_flattened_annotation``."""
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
         "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
@@ -2337,7 +2338,10 @@ def test_prepare_tiled_slides_collapses_merged_row_to_flat_root(monkeypatch, tmp
         num_workers=0,
     )
 
-    assert captured["annotation"] is None
+    assert captured["annotation"] == "merged"
+    from hs2p.fileops import is_flattened_annotation
+
+    assert is_flattened_annotation(captured["annotation"]) is True
 
 
 def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Path):

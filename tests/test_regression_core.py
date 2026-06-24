@@ -842,9 +842,10 @@ def test_independent_sampling_toggle_selects_selection_strategy():
     assert joint[-2] == "joint_sampling"
 
 
-def test_merged_annotation_label_collapses_to_flat_root(tmp_path: Path):
-    """A merged tiling row is labelled ``merged`` by hs2p, but carries no class — it must
-    collapse to the flat output root (no per-class subdir), exactly like tissue/None."""
+def test_merged_annotation_label_survives_round_trip_to_flat_root(tmp_path: Path):
+    """A merged tiling row is labelled ``merged`` by hs2p. The informative label must
+    survive the round-trip (no collapse to ``None``), yet artifacts still land at the flat
+    output root because hs2p's ``is_flattened_annotation`` flattens ``"merged"``."""
     from slide2vec.utils.tiling_io import load_tiling_result_from_row
 
     coordinates_meta_path = tmp_path / "slide-a.coordinates.meta.json"
@@ -868,8 +869,8 @@ def test_merged_annotation_label_collapses_to_flat_root(tmp_path: Path):
     finally:
         tiling_io.load_tiling_result = original
 
-    # Merged carries no class label; the flatten rule sends it to the flat root.
-    assert result.annotation is None
+    # The informative label survives the round-trip; it is not blanked to None.
+    assert result.annotation == "merged"
     artifact = write_tile_embeddings(
         "slide-a",
         np.arange(8, dtype=np.float32).reshape(2, 4),
@@ -877,7 +878,82 @@ def test_merged_annotation_label_collapses_to_flat_root(tmp_path: Path):
         output_format="npz",
         annotation=result.annotation,
     )
+    # ...but placement is decided by is_flattened_annotation, so it still lands flat.
     assert artifact.path == tmp_path / "tile_embeddings" / "slide-a.npz"
+
+
+def test_tissue_annotation_survives_round_trip_to_flat_root(tmp_path: Path):
+    """A ``"tissue"`` row keeps its informative label through the round-trip while still
+    resolving to flat-root placement via ``is_flattened_annotation``."""
+    from slide2vec.utils.tiling_io import load_tiling_result_from_row
+
+    coordinates_meta_path = tmp_path / "slide-t.coordinates.meta.json"
+    coordinates_meta_path.write_text("{}", encoding="utf-8")
+
+    def fake_load_tiling_result(**kwargs):
+        return SimpleNamespace()
+
+    import slide2vec.utils.tiling_io as tiling_io
+
+    original = tiling_io.load_tiling_result
+    tiling_io.load_tiling_result = fake_load_tiling_result
+    try:
+        result = load_tiling_result_from_row(
+            {
+                "annotation": "tissue",
+                "coordinates_npz_path": str(tmp_path / "slide-t.coordinates.npz"),
+                "coordinates_meta_path": str(coordinates_meta_path),
+            }
+        )
+    finally:
+        tiling_io.load_tiling_result = original
+
+    assert result.annotation == "tissue"
+    artifact = write_tile_embeddings(
+        "slide-t",
+        np.arange(8, dtype=np.float32).reshape(2, 4),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation=result.annotation,
+    )
+    assert artifact.path == tmp_path / "tile_embeddings" / "slide-t.npz"
+
+
+def test_real_class_annotation_survives_round_trip_to_per_class_subdir(tmp_path: Path):
+    """A genuine class label (e.g. ``"tumor"``) survives the round-trip and routes to its
+    own per-class subdir, since ``is_flattened_annotation`` does not flatten it."""
+    from slide2vec.utils.tiling_io import load_tiling_result_from_row
+
+    coordinates_meta_path = tmp_path / "slide-u.coordinates.meta.json"
+    coordinates_meta_path.write_text("{}", encoding="utf-8")
+
+    def fake_load_tiling_result(**kwargs):
+        return SimpleNamespace()
+
+    import slide2vec.utils.tiling_io as tiling_io
+
+    original = tiling_io.load_tiling_result
+    tiling_io.load_tiling_result = fake_load_tiling_result
+    try:
+        result = load_tiling_result_from_row(
+            {
+                "annotation": "tumor",
+                "coordinates_npz_path": str(tmp_path / "slide-u.coordinates.npz"),
+                "coordinates_meta_path": str(coordinates_meta_path),
+            }
+        )
+    finally:
+        tiling_io.load_tiling_result = original
+
+    assert result.annotation == "tumor"
+    artifact = write_tile_embeddings(
+        "slide-u",
+        np.arange(8, dtype=np.float32).reshape(2, 4),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation=result.annotation,
+    )
+    assert artifact.path == tmp_path / "tile_embeddings" / "tumor" / "slide-u.npz"
 
 
 def test_invalid_masks_block_with_duplicate_pixel_values_fails_fast():
