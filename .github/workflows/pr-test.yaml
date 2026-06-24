@@ -31,6 +31,11 @@ jobs:
         if: ${{ github.event_name == 'pull_request' }}
         uses: dorny/paths-filter@v3
         with:
+          # `every`: a changed file counts toward `code` only if it matches ALL
+          # patterns — i.e. it is under '**' AND not docs/, *.md, or *.rst. With the
+          # default `some` quantifier the leading '**' alone matches every file
+          # (docs included), so `code` would always be true and never skip.
+          predicate-quantifier: 'every'
           filters: |
             code:
               - '**'
