@@ -1,6 +1,14 @@
 name: Test suite
 
 on:
+  # Seed the Buildx GHA cache on the default branch. GitHub Actions cache is
+  # branch-scoped: a run can only restore caches created on its own ref or on the
+  # default branch. Without a push-to-main build, every PR writes its cache to its
+  # own PR scope (invisible to all other PRs) and the shared default-branch cache
+  # is never populated, so each PR rebuilds the entire image from scratch (~15 min).
+  # Building on push to main populates the cache every PR can then restore from.
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
@@ -80,13 +88,17 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Guard required secret (if needed)
-        if: ${{ github.event_name != 'pull_request' }}  # or drop the condition if PRs from same repo need it
+        if: ${{ github.event_name == 'workflow_dispatch' }}  # only the manual full-suite run needs the token up front
         run: |
           set -euo pipefail
           test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
 
+      # Push-to-main runs are cache-seeding only: they build and export the image
+      # layers so PRs can restore them, but skip the ~16-min PRISM consistency test
+      # (the merged PR already ran it). Tests run on PRs that touch code and on
+      # manual dispatch.
       - name: Run test suite in container
-        if: ${{ steps.changes.outputs.code == 'true' || github.event_name != 'pull_request' }}
+        if: ${{ (github.event_name == 'pull_request' && steps.changes.outputs.code == 'true') || github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
           # Dependencies (torch, xformers, transformers, hs2p, pytest, ...) are
