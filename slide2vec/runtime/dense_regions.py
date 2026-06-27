@@ -39,8 +39,30 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+from slide2vec.runtime.batching import autocast_dtype
 from slide2vec.runtime.dense_sliding import encode_dense_sliding
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
+
+
+def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) -> "torch.dtype":
+    """Resolve the dtype emitted grids are materialized in.
+
+    Defaults (``output_dtype is None``) to the model's compute precision — fp16 runs
+    yield fp16 grids — so the engine no longer force-upcasts everything to float32.
+    numpy has no bfloat16, so a bf16 compute precision widens to float32 (its lossless
+    container) and an *explicit* ``torch.bfloat16`` request is rejected: the grid is
+    materialized via ``.numpy()`` and bfloat16 cannot cross that boundary.
+    """
+    if output_dtype is None:
+        compute = autocast_dtype(torch, precision)  # float16 | bfloat16 | None(fp32)
+        return torch.float16 if compute == torch.float16 else torch.float32
+    if output_dtype == torch.bfloat16:
+        raise ValueError(
+            "output_dtype=torch.bfloat16 cannot be materialized as a numpy grid; "
+            "request torch.float16 or torch.float32"
+        )
+    return output_dtype
+
 
 _PAD_MODES = {"reflect", "constant", "zero", "replicate"}
 
@@ -161,14 +183,16 @@ def iter_regions_dense(
     attention_include_registers: bool = False,
     batch_size: int = 1,
     precision: str = "fp32",
+    output_dtype: "torch.dtype | None" = None,
     dense_transform: Callable | None = None,
 ) -> Iterator[np.ndarray]:
     """Stream slide regions at ``coordinates`` into dense grids, one per coordinate.
 
-    Yields one ``(d, grid_h, grid_w)`` ``float32`` grid per coordinate, in coordinate
-    order. Regions are read and encoded one ``batch_size`` chunk at a time, so resident
-    host memory is bounded by ``batch_size`` rather than by a slide's ROI count (the loop
-    holds at most one batch of grids resident — no per-slide accumulation).
+    Yields one ``(d, grid_h, grid_w)`` grid per coordinate, in coordinate order, in the
+    model's compute ``precision`` by default (fp16 runs yield fp16 grids; see
+    ``output_dtype``). Regions are read and encoded one ``batch_size`` chunk at a time, so
+    resident host memory is bounded by ``batch_size`` rather than by a slide's ROI count
+    (the loop holds at most one batch of grids resident — no per-slide accumulation).
 
     Injectable core: takes a constructed dense-capable ``model`` (with
     ``encode_tiles_dense`` / ``encode_tiles_attention`` / ``patch_size`` /
@@ -194,8 +218,12 @@ def iter_regions_dense(
             sliding is internal to extraction.
         overlap: fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
             ``window_size is None``); the stride is ``window * (1 - overlap)``.
+        output_dtype: torch dtype the grids are materialized in. ``None`` (default) follows
+            the compute ``precision`` — fp16 → fp16, fp32 → fp32, bf16 → fp32 (numpy has no
+            bfloat16). Pass e.g. ``torch.float32`` to force a lossless cache regardless of
+            precision; an explicit ``torch.bfloat16`` is rejected (cannot cross ``.numpy()``).
 
-    Yields ``float32`` grids in coordinate order; empty ``coordinates`` yields nothing.
+    Yields grids in coordinate order in ``output_dtype``; empty ``coordinates`` yields nothing.
     ``feature_kind`` selects ``encode_tiles_dense`` (patch grid) vs
     ``encode_tiles_attention`` (CLS-attention grid); both produce a ``(C, gh, gw)`` grid and
     share this path. Each yielded grid is a standalone contiguous copy, so it does not pin
@@ -203,6 +231,7 @@ def iter_regions_dense(
     """
     if pad_mode not in _PAD_MODES:
         raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
+    resolved_output_dtype = _resolve_output_dtype(output_dtype, precision)
     geometry = compute_dense_geometry(target_size=target_size, patch_size=model.patch_size)
     if dense_transform is None:
         dense_transform = model.get_dense_transform()
@@ -262,7 +291,7 @@ def iter_regions_dense(
                     raise ValueError(
                         f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
                     )
-                batch_np = out.detach().float().cpu().numpy()
+                batch_np = out.detach().to(resolved_output_dtype).cpu().numpy()
                 for i in range(batch_np.shape[0]):
                     # Standalone C-contiguous copy: a per-row view would pin the whole
                     # batch alive (the blended sliding output is contiguous, so a view of

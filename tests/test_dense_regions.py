@@ -18,6 +18,7 @@ timm = pytest.importorskip("timm")
 
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime.dense_regions import (  # noqa: E402
+    _resolve_output_dtype,
     compute_dense_geometry,
     iter_regions_dense,
     pad_image_to_encoded,
@@ -217,5 +218,47 @@ def test_iter_regions_dense_validates_eagerly_before_any_read(kwargs):
         iter_regions_dense(
             model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
             requested_spacing_um=0.5, target_size=target_size, **kwargs,
+        )
+    assert wsi.calls == []
+
+
+@pytest.mark.parametrize(
+    "precision,expected",
+    [("fp16", torch.float16), ("fp32", torch.float32), ("bf16", torch.float32)],
+    ids=["fp16->fp16", "fp32->fp32", "bf16->fp32(numpy-safe)"],
+)
+def test_resolve_output_dtype_defaults_follow_precision(precision, expected):
+    # output_dtype=None tracks the compute precision; bf16 widens to fp32 (numpy has no
+    # bfloat16). An explicit dtype overrides; an explicit bfloat16 is rejected.
+    assert _resolve_output_dtype(None, precision) is expected
+    assert _resolve_output_dtype(torch.float32, precision) is torch.float32
+    assert _resolve_output_dtype(torch.float16, precision) is torch.float16
+    with pytest.raises(ValueError):
+        _resolve_output_dtype(torch.bfloat16, precision)
+
+
+@pytest.mark.parametrize("dtype,np_dtype", [(torch.float16, np.float16), (torch.float32, np.float32)])
+def test_iter_regions_dense_honours_output_dtype(dtype, np_dtype):
+    """An explicit output_dtype materializes the grids in that dtype, deterministically."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    grids = list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
+        requested_spacing_um=0.5, target_size=target_size, output_dtype=dtype,
+    ))
+    assert len(grids) == 1
+    assert grids[0].dtype == np_dtype
+
+
+def test_iter_regions_dense_rejects_bfloat16_output_eagerly():
+    """output_dtype=bfloat16 (uncrossable by .numpy()) raises at the call site, no read."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    with pytest.raises(ValueError):
+        iter_regions_dense(
+            model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
+            requested_spacing_um=0.5, target_size=target_size, output_dtype=torch.bfloat16,
         )
     assert wsi.calls == []
