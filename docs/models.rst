@@ -86,7 +86,7 @@ Tile-level encoders
    * - ``virchow2``
      - `Virchow2 <https://huggingface.co/paige-ai/Virchow2>`_
      - 1280 / 2560
-     - ``0.5``, ``1.0``, ``2.0``
+     - ``0.25``, ``0.5``, ``1.0``, ``2.0``
      - Zimmermann et al. (2024)
    * - ``uni2``
      - `UNI2 <https://huggingface.co/MahmoodLab/UNI2-h>`_

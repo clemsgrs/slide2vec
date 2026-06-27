@@ -71,7 +71,7 @@ class Virchow(_VirchowBase):
     },
     default_output_variant="cls_patch_mean",
     input_size=224,
-    supported_spacing_um=[0.5, 1.0, 2.0],
+    supported_spacing_um=[0.25, 0.5, 1.0, 2.0],
     precision="fp16",
     source="paige-ai/Virchow2",
 )
