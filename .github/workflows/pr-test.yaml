@@ -89,8 +89,20 @@ jobs:
         if: ${{ steps.changes.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: |
           set -euo pipefail
+          # Dependencies (torch, xformers, transformers, hs2p, pytest, ...) are
+          # baked into the image, so install only the mounted source with
+          # --no-deps. The timing notices below split install vs. test wall-clock
+          # so we can see where this step's time actually goes.
           docker run --rm \
             -e HF_TOKEN="$HF_TOKEN" \
             -v "$GITHUB_WORKSPACE:/opt/app" \
             slide2vec-ci:${{ github.sha }} \
-            bash -lc "python -m pip install --no-cache-dir '/opt/app[prism,asap]' pytest pytest-cov && python -m pytest -q tests"
+            bash -lc '
+              set -euo pipefail
+              t0=$SECONDS
+              python -m pip install --no-cache-dir --no-deps -e /opt/app
+              echo "::notice::pip install (source only) took $((SECONDS - t0))s"
+              t1=$SECONDS
+              python -m pytest -q --durations=15 tests
+              echo "::notice::pytest took $((SECONDS - t1))s"
+            '
