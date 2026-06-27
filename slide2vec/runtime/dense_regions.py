@@ -5,7 +5,10 @@ The dense counterpart of the pooled coordinate path (``compute_tile_embeddings_f
 each sampled ROI is read **spacing-aware** from the slide, run through the encoder's
 normalization-only dense transform (``get_dense_transform`` — NOT the pooled transform,
 which crops), padded up to the encoder's patch multiple, and encoded via
-``encode_tiles_dense`` into a ``(d, grid_h, grid_w)`` token grid.
+``encode_tiles_dense`` into a ``(d, grid_h, grid_w)`` token grid. ``iter_regions_dense``
+**streams** these grids — yielding one per coordinate, in coordinate order, holding at most
+one ``batch_size`` chunk resident — so host memory is bounded by ``batch_size`` rather than
+by a slide's ROI count.
 
 This is the extraction half of soma's slide-manifest segmentation path: slide2vec reads
 regions + encodes (it already owns the region reader and the dense encode); soma sources
@@ -26,7 +29,7 @@ encoder's comfortable field are out of scope for the first increment.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from typing import Callable, Iterator, Sequence
 
 import numpy as np
 import torch
@@ -136,7 +139,7 @@ def _resolve_encode_fn(
     )
 
 
-def encode_regions_dense(
+def iter_regions_dense(
     *,
     model,
     device: torch.device | str,
@@ -153,14 +156,23 @@ def encode_regions_dense(
     batch_size: int = 1,
     precision: str = "fp32",
     dense_transform: Callable | None = None,
-) -> np.ndarray:
-    """Encode slide regions at ``coordinates`` into dense grids; return ``(N, d, gh, gw)``.
+) -> Iterator[np.ndarray]:
+    """Stream slide regions at ``coordinates`` into dense grids, one per coordinate.
+
+    Yields one ``(d, grid_h, grid_w)`` ``float32`` grid per coordinate, in coordinate
+    order. Regions are read and encoded one ``batch_size`` chunk at a time, so resident
+    host memory is bounded by ``batch_size`` rather than by a slide's ROI count (the loop
+    holds at most one batch of grids resident — no per-slide accumulation).
 
     Injectable core: takes a constructed dense-capable ``model`` (with
     ``encode_tiles_dense`` / ``encode_tiles_attention`` / ``patch_size`` /
     ``get_dense_transform``) and a ``wsi`` exposing
     ``read_region_at_spacing(location, requested_spacing_um, size, *, tolerance,
     interpolation)``, so it runs offline in tests with random weights + a fake reader.
+
+    Arguments are validated and geometry is resolved **eagerly** (before any region is
+    read): an invalid ``pad_mode`` or ``feature_kind`` raises at the call site, not on the
+    first ``next()``. Iteration itself is lazy — reads advance one batch at a time.
 
     Args:
         coordinates: ``(x, y)`` top-left locations in **level-0** pixel space (the hs2p
@@ -169,9 +181,11 @@ def encode_regions_dense(
         target_size: supervision tile size (int or ``(h, w)``); the region is read at this
             size at ``requested_spacing_um`` and the token grid registers to it.
 
-    Returns a ``float32`` array of dense grids in coordinate order. ``feature_kind``
-    selects ``encode_tiles_dense`` (patch grid) vs ``encode_tiles_attention`` (CLS-attention
-    grid); both produce a ``(C, gh, gw)`` grid and share this path.
+    Yields ``float32`` grids in coordinate order; empty ``coordinates`` yields nothing.
+    ``feature_kind`` selects ``encode_tiles_dense`` (patch grid) vs
+    ``encode_tiles_attention`` (CLS-attention grid); both produce a ``(C, gh, gw)`` grid and
+    share this path. Each yielded grid is a standalone contiguous copy, so it does not pin
+    the rest of its batch's memory alive.
     """
     if pad_mode not in _PAD_MODES:
         raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
@@ -185,11 +199,8 @@ def encode_regions_dense(
         attention_include_registers=attention_include_registers,
     )
     target_h, target_w = geometry.target_size
-
     coords = [(int(x), int(y)) for x, y in coordinates]
-    grid_h, grid_w = geometry.grid_shape
-    if not coords:
-        return np.empty((0, 0, grid_h, grid_w), dtype=np.float32)
+    step = max(1, int(batch_size))
 
     def _read_padded(location: tuple[int, int]) -> torch.Tensor:
         region = wsi.read_region_at_spacing(
@@ -215,15 +226,21 @@ def encode_regions_dense(
             tensor, geometry, pad_mode=pad_mode, image_pad_value=image_pad_value
         )
 
-    grids: list[np.ndarray] = []
-    with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
-        for start in range(0, len(coords), max(1, int(batch_size))):
-            chunk = coords[start : start + max(1, int(batch_size))]
-            batch = torch.stack([_read_padded(loc) for loc in chunk]).to(device, non_blocking=True)
-            out = encode_fn(batch)
-            if out.ndim != 4:
-                raise ValueError(
-                    f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
+    def _stream() -> Iterator[np.ndarray]:
+        with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
+            for start in range(0, len(coords), step):
+                chunk = coords[start : start + step]
+                batch = torch.stack([_read_padded(loc) for loc in chunk]).to(
+                    device, non_blocking=True
                 )
-            grids.append(out.detach().float().cpu().numpy())
-    return np.concatenate(grids, axis=0)
+                out = encode_fn(batch)
+                if out.ndim != 4:
+                    raise ValueError(
+                        f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
+                    )
+                batch_np = out.detach().float().cpu().numpy()
+                for i in range(batch_np.shape[0]):
+                    # Standalone contiguous copy: a per-row view would pin the whole batch.
+                    yield np.ascontiguousarray(batch_np[i])
+
+    return _stream()
