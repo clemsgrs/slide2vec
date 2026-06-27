@@ -1,0 +1,79 @@
+name: Heavy test suite
+
+# Scaffolding for running the `heavy`-marked, real-weight CPU-inference tests
+# (currently just the PRISM end-to-end pooled-feature consistency check) off the
+# critical path. Reuses the same Dockerfile.ci image and its GHA-cached layer.
+#
+# Status: the PR suite currently runs the heavy tests inline, so the daily
+# schedule below is intentionally DISABLED — this workflow is manual-dispatch
+# only for now. Re-enable the `schedule:` trigger if/when we move the heavy tests
+# out of the PR suite again (also re-add `-m "not heavy"` to pr-test.yaml then).
+
+on:
+  # schedule:
+  #   - cron: '0 3 * * *'  # 03:00 UTC daily — re-enable to run heavy tests nightly
+  workflow_dispatch:
+
+jobs:
+  heavy-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+      actions: write  # needed for Buildx GHA cache
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Free disk space on runner
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          docker system prune -af || true
+          sudo apt-get clean
+          df -h
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: false
+          load: true
+          tags: slide2vec-ci:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Guard required secret
+        run: |
+          set -euo pipefail
+          test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
+
+      - name: Run heavy test suite in container
+        run: |
+          set -euo pipefail
+          # Dependencies are baked into the image; install only the mounted source.
+          docker run --rm \
+            -e HF_TOKEN="$HF_TOKEN" \
+            -v "$GITHUB_WORKSPACE:/opt/app" \
+            slide2vec-ci:${{ github.sha }} \
+            bash -lc '
+              set -euo pipefail
+              python -m pip install --no-cache-dir --no-deps -e /opt/app
+              python -m pytest -q -m heavy --durations=15 tests
+            '

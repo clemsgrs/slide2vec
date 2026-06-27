@@ -101,6 +101,7 @@ def mask_path() -> Path:
     return p
 
 
+@pytest.mark.heavy
 @pytest.mark.skipif(
     not os.environ.get("HF_TOKEN"),
     reason="HF_TOKEN required for model weight download",
