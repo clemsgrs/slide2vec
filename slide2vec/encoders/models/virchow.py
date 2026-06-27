@@ -16,8 +16,6 @@ _VIRCHOW_OUTPUT_DIMS = {
 class _VirchowBase(TimmTileEncoder):
     """Base for Virchow models that concat CLS + mean-pooled patch tokens."""
 
-    _num_prefix_tokens: int = 1  # Override in subclass if needed
-
     def __init__(self, model_name: str, *, output_variant: str | None = None):
         self._output_variant = resolve_requested_output_variant(
             output_variant,
@@ -36,7 +34,7 @@ class _VirchowBase(TimmTileEncoder):
         cls_token = output[:, 0]
         if self._output_variant == "cls":
             return cls_token
-        patch_tokens = output[:, self._num_prefix_tokens:]
+        patch_tokens = output[:, self._model.num_prefix_tokens:]
         return torch.cat([cls_token, patch_tokens.mean(dim=1)], dim=-1)
 
     @property
@@ -57,8 +55,6 @@ class _VirchowBase(TimmTileEncoder):
     source="paige-ai/Virchow",
 )
 class Virchow(_VirchowBase):
-    _num_prefix_tokens = 1
-
     def __init__(self, *, output_variant: str | None = None):
         super().__init__("hf-hub:paige-ai/Virchow", output_variant=output_variant)
 
@@ -76,7 +72,5 @@ class Virchow(_VirchowBase):
     source="paige-ai/Virchow2",
 )
 class Virchow2(_VirchowBase):
-    _num_prefix_tokens = 5  # 1 CLS + 4 register tokens
-
     def __init__(self, *, output_variant: str | None = None):
         super().__init__("hf-hub:paige-ai/Virchow2", output_variant=output_variant)

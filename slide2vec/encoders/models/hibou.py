@@ -54,6 +54,13 @@ class _HibouBase(TileEncoder):
             v2.Normalize(mean=_HIBOU_MEAN, std=_HIBOU_STD),
         ])
 
+    @property
+    def _num_prefix_tokens(self) -> int:
+        # CLS + register tokens. Dinov2-with-registers carries the register tokens
+        # between the CLS and patch tokens, so both the dense and attention paths
+        # must strip them; deriving the count from config keeps the two in sync.
+        return 1 + int(getattr(self._model.config, "num_register_tokens", 0))
+
     def encode_tiles(self, batch: Tensor) -> Tensor:
         output = self._model(pixel_values=batch)
         return output.pooler_output
@@ -77,7 +84,7 @@ class _HibouBase(TileEncoder):
             output.last_hidden_state,
             grid_h=height // patch,
             grid_w=width // patch,
-            num_prefix_tokens=1 + int(getattr(self._model.config, "num_register_tokens", 0)),
+            num_prefix_tokens=self._num_prefix_tokens,
             encoder_name=type(self).__name__,
         )
 
@@ -111,7 +118,7 @@ class _HibouBase(TileEncoder):
             output = self._model(pixel_values=batch, output_attentions=True)
         return attentions_tuple_to_grids(
             output.attentions,
-            num_prefix_tokens=1 + int(getattr(self._model.config, "num_register_tokens", 0)),
+            num_prefix_tokens=self._num_prefix_tokens,
             blocks=blocks,
             include_registers=include_registers,
             grid_h=height // patch,

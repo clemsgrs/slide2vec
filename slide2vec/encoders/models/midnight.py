@@ -36,6 +36,18 @@ class Midnight(TileEncoder):
         self._model = AutoModel.from_pretrained("kaiko-ai/midnight").eval()
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
+        # The pooled, dense, and attention paths all assume a single CLS prefix
+        # token (kaiko's reference recipe pools over output[:, 1:]). If a future
+        # checkpoint adds register tokens, that assumption silently folds them into
+        # the patch mean and mislabels the dense/attention grids — fail loudly here.
+        num_register_tokens = int(getattr(self._model.config, "num_register_tokens", 0))
+        if num_register_tokens:
+            raise ValueError(
+                "Midnight encoder assumes a single CLS prefix token, but the loaded "
+                f"checkpoint reports num_register_tokens={num_register_tokens}. Update "
+                "the pooled/dense/attention paths to strip the register tokens before "
+                "using this checkpoint."
+            )
 
     def get_transform(self) -> Callable:
         return v2.Compose([
