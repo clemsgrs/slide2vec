@@ -133,8 +133,12 @@ Notes:
   concatenates CLS and mean patch tokens, ``d`` can be smaller than the pooled
   output dimension ``D``.
 - ``get_dense_transform`` preserves geometry by applying normalization only.
-  Resize, crop, padding, and sliding-window policy are the caller's
-  responsibility.
+  At the **encoder level** (``get_dense_transform`` / ``encode_tiles_dense``),
+  resize, crop, padding, and sliding-window policy are therefore the caller's
+  responsibility. slide2vec also ships a **region-level** streaming primitive,
+  ``iter_regions_dense``, that layers spacing-aware region reads, padding to the
+  patch multiple, and optional sliding-window blending on top of this encoder
+  API — see the "Dense Tile Feature Extraction" section of :doc:`api`.
 - ``musk`` dense extraction currently requires its native 384 x 384 input size.
 - H-Optimus dense extraction at non-native input sizes requires
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
