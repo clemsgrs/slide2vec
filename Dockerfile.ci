@@ -76,3 +76,20 @@ RUN python -m pip install --upgrade pip setuptools pip-tools \
 
 USER user
 WORKDIR /opt/app
+
+# Bake the heavy third-party dependencies (torch, xformers, transformers, hs2p,
+# ...) into the image at build time so the GHA layer cache absorbs them once,
+# instead of re-installing them on every PR run (the old runtime `pip install
+# '.[prism,asap]'` step dominated CI wall-clock). We resolve them from a stub
+# package built off the *real* pyproject.toml, so the dependency set is identical
+# to what the source would pull; the stub package itself is then uninstalled,
+# leaving only its resolved dependencies. This layer's cache key is the
+# pyproject.toml hash, so it only re-runs when the dependency set changes.
+# (`asap` is not a slide2vec extra — ASAP is the apt package installed above — so
+# only the `prism` extra is needed here.)
+COPY --chown=user:user pyproject.toml README.md /opt/deps/
+RUN mkdir -p /opt/deps/slide2vec \
+    && touch /opt/deps/slide2vec/__init__.py \
+    && python -m pip install --user --no-cache-dir '/opt/deps[prism]' pytest pytest-cov \
+    && python -m pip uninstall -y slide2vec \
+    && rm -rf /home/user/.cache/pip
