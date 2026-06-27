@@ -145,6 +145,9 @@ addopts = "--cov=slide2vec"
 testpaths = [
     "tests",
 ]
+markers = [
+    "heavy: real-weight foundation-model inference on CPU; minutes per test. Excluded from the PR suite via `-m 'not heavy'`; run on the scheduled/manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
+]
 
 [tool.mypy]
 mypy_path = "."
