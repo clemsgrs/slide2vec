@@ -155,6 +155,69 @@ variable-size model setting:
        allow_non_recommended_settings=True,
    ).to("cuda")
 
+Region-level streaming
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The encoder-level API above operates on tiles you have already read and
+normalized. To extract dense grids over many slide regions at once, slide2vec
+provides a higher-level streaming primitive,
+``iter_regions_dense`` (from ``slide2vec.runtime.dense_regions``), that wraps
+spacing-aware region reads, padding, and encoding into a single generator:
+
+.. code-block:: python
+
+   from slide2vec.runtime.dense_regions import iter_regions_dense
+
+   for grid in iter_regions_dense(
+       model=model,
+       device=model.device,
+       wsi=wsi,
+       coordinates=[(0, 0), (4096, 0)],
+       requested_spacing_um=0.5,
+       target_size=2048,
+   ):
+       print(grid.shape)  # (d, grid_h, grid_w), float32
+
+For each ``(x, y)`` coordinate (a level-0 top-left location), the region is read
+**spacing-aware** at ``requested_spacing_um`` to ``target_size``, run through the
+encoder's normalization-only ``get_dense_transform``, padded on the bottom/right
+up to the encoder's patch multiple, and encoded into a ``(d, grid_h, grid_w)``
+token grid. The ``wsi`` argument is any object exposing
+``read_region_at_spacing(location, requested_spacing_um, size, *, tolerance,
+interpolation)``, so the loop runs offline in tests with a fake reader.
+
+Streaming contract:
+
+- Grids are yielded **one per coordinate, in coordinate order**; an empty
+  ``coordinates`` sequence yields nothing.
+- Regions are read and encoded one ``batch_size`` chunk at a time, so resident
+  host memory is bounded by ``batch_size`` rather than by the slide's coordinate
+  count — there is no per-slide accumulation.
+- Each yielded grid is a standalone C-contiguous ``float32`` copy, so consuming
+  one grid does not pin the rest of its batch's memory alive.
+- Arguments and geometry are validated **eagerly** at the call site (an invalid
+  ``pad_mode`` or ``feature_kind`` raises before any region is read); iteration
+  itself is lazy and advances one batch at a time.
+
+The ``window_size`` / ``overlap`` parameters select the encode strategy:
+
+- ``window_size=None`` (the default) runs a single whole-region forward —
+  byte-identical to encoding the full padded tile in one pass.
+- A ``window_size`` smaller than the encoded region slides the encoder's native
+  field over patch-aligned windows and blends the per-window token grids with a
+  separable raised-cosine map; ``overlap`` (in ``[0, 1)``) sets the fractional
+  window overlap and the stride is ``window * (1 - overlap)``. This lets a
+  native-field encoder serve a larger region without interpolating its position
+  embeddings. The output grid is always the whole region's ``(grid_h, grid_w)``
+  either way — sliding is internal to extraction.
+
+``feature_kind`` selects which dense map is streamed. ``"patch_features"`` (the
+default) uses ``encode_tiles_dense`` to produce the ``(d, grid_h, grid_w)``
+patch-token grid; ``"cls_attention"`` uses ``encode_tiles_attention`` to produce
+a ``(K, grid_h, grid_w)`` CLS-attention grid, with ``attention_blocks`` and
+``attention_include_registers`` forwarded to that call. Both feature kinds share
+the same read / pad / window path.
+
 Dense Attention Map Extraction
 ------------------------------
 
