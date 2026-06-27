@@ -22,6 +22,7 @@ from slide2vec.runtime.dense_regions import (  # noqa: E402
     iter_regions_dense,
     pad_image_to_encoded,
 )
+from slide2vec.runtime.dense_sliding import encode_dense_sliding  # noqa: E402
 
 
 def _encoder(**kwargs) -> TimmTileEncoder:
@@ -45,7 +46,9 @@ class _FakeWSI:
         return rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
 
 
-def test_iter_regions_dense_yields_grid_per_coordinate_in_order():
+@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
+def test_iter_regions_dense_yields_grid_per_coordinate_in_order(window_size, feature_kind):
     enc = _encoder()
     target_size = 64  # patch 16 -> grid 4x4, no padding
     wsi = _FakeWSI(target_h=target_size, target_w=target_size)
@@ -59,14 +62,18 @@ def test_iter_regions_dense_yields_grid_per_coordinate_in_order():
             coordinates=coords,
             requested_spacing_um=0.5,
             target_size=target_size,
+            window_size=window_size,
+            feature_kind=feature_kind,
             batch_size=2,
         )
     )
 
-    # One standalone (d, gh, gw) grid per coordinate, in coordinate order.
+    # One standalone (d, gh, gw) grid per coordinate, in coordinate order — for both the
+    # whole-tile and sliding-window paths and both feature kinds (sliding is internal to
+    # extraction, so the output grid is always the whole geometry's 4x4 token grid).
     assert len(grids) == 3
     for grid in grids:
-        assert grid.shape == (enc.encode_dim, 4, 4)
+        assert grid.shape[1:] == (4, 4)
         assert grid.dtype == np.float32
         assert grid.flags["C_CONTIGUOUS"]
         assert grid.base is None  # standalone copy, not a view pinning a batch
@@ -87,8 +94,13 @@ def test_iter_regions_dense_pads_non_multiple_target():
     assert grids[0].shape == (enc.encode_dim, 4, 4)
 
 
-def _reference_grid(enc, loc, *, target_size, feature_kind):
-    """Hand-rolled transform → pad → encode of one region, for parity checks."""
+def _reference_grid(enc, loc, *, target_size, feature_kind, window_size=None, overlap=0.0):
+    """Hand-rolled transform → pad → encode of one region, for parity checks.
+
+    ``window_size=None`` is the direct whole-tile forward (the byte-identity anchor for
+    the whole-region path); a ``window_size`` routes the padded tile through the same
+    windowed primitive ``iter_regions_dense`` uses, so the seam stays exactly identical.
+    """
     from PIL import Image
 
     geometry = compute_dense_geometry(target_size=target_size, patch_size=enc.patch_size)
@@ -99,17 +111,30 @@ def _reference_grid(enc, loc, *, target_size, feature_kind):
     )
     tensor = torch.as_tensor(transform(Image.fromarray(region))).as_subclass(torch.Tensor)
     padded = pad_image_to_encoded(tensor, geometry, pad_mode="reflect", image_pad_value=None)
+    batch = padded.unsqueeze(0)
+    if feature_kind == "patch_features":
+        encode_fn = enc.encode_tiles_dense
+    else:
+        encode_fn = enc.encode_tiles_attention
     with torch.inference_mode():
-        if feature_kind == "patch_features":
-            out = enc.encode_tiles_dense(padded.unsqueeze(0))
+        if window_size is None:
+            out = encode_fn(batch)
         else:
-            out = enc.encode_tiles_attention(padded.unsqueeze(0))
+            out = encode_dense_sliding(
+                enc, batch, geometry=geometry, window_size=window_size,
+                overlap=overlap, encode_fn=encode_fn,
+            )
     return out.detach().float().cpu().numpy()[0]
 
 
 @pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
-def test_iter_regions_dense_matches_direct_encode(feature_kind):
-    """Each yielded grid is byte-identical to a hand-rolled transform+pad+encode."""
+@pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
+def test_iter_regions_dense_matches_direct_encode(window_size, feature_kind):
+    """Each yielded grid is byte-identical to a hand-rolled transform+pad+encode.
+
+    ``window_size=None`` pins the whole-region path against a direct encode; a smaller
+    ``window_size`` pins the streamed blended grid against the same windowed primitive.
+    """
     enc = _encoder()
     target_size = 64
     wsi = _FakeWSI(target_h=target_size, target_w=target_size)
@@ -118,12 +143,15 @@ def test_iter_regions_dense_matches_direct_encode(feature_kind):
     grids = list(iter_regions_dense(
         model=enc, device="cpu", wsi=wsi, coordinates=coords,
         requested_spacing_um=0.5, target_size=target_size,
-        feature_kind=feature_kind,
+        window_size=window_size, feature_kind=feature_kind,
     ))
 
     assert len(grids) == len(coords)
     for grid, loc in zip(grids, coords):
-        ref = _reference_grid(enc, loc, target_size=target_size, feature_kind=feature_kind)
+        ref = _reference_grid(
+            enc, loc, target_size=target_size, feature_kind=feature_kind,
+            window_size=window_size,
+        )
         assert grid.shape == ref.shape
         np.testing.assert_array_equal(grid, ref)
 
@@ -139,8 +167,14 @@ def test_iter_regions_dense_empty_coordinates_yields_nothing():
     assert wsi.calls == []
 
 
-def test_iter_regions_dense_streams_one_batch_at_a_time():
-    """Reads advance one batch at a time; first grids land before all coords are read."""
+@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
+def test_iter_regions_dense_streams_one_batch_at_a_time(window_size, feature_kind):
+    """Reads advance one batch at a time; first grids land before all coords are read.
+
+    The streaming/laziness contract is independent of the dense mode, so it holds for
+    both the whole-tile and sliding-window paths and both feature kinds.
+    """
     enc = _encoder()
     target_size = 64
     wsi = _FakeWSI(target_h=target_size, target_w=target_size)
@@ -148,13 +182,14 @@ def test_iter_regions_dense_streams_one_batch_at_a_time():
 
     gen = iter_regions_dense(
         model=enc, device="cpu", wsi=wsi, coordinates=coords,
-        requested_spacing_um=0.5, target_size=target_size, batch_size=2,
+        requested_spacing_um=0.5, target_size=target_size,
+        window_size=window_size, feature_kind=feature_kind, batch_size=2,
     )
 
     assert wsi.calls == []  # iteration is lazy: building the generator reads nothing
 
     first = next(gen)
-    assert first.shape == (enc.encode_dim, 4, 4)
+    assert first.shape[1:] == (4, 4)
     # First grid is yielded after only the first batch (2 of 5) has been read.
     assert len(wsi.calls) == 2
     next(gen)

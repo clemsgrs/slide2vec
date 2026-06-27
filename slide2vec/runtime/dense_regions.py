@@ -21,9 +21,12 @@ the finest pyramid level ``<=`` the requested µm/px is read and downscaled to t
 the same spacing. The ``wsi`` is injected (any object exposing ``read_region_at_spacing``),
 so the loop is unit-testable offline with a fake reader + a random-weight encoder.
 
-Whole-tile only (one padded forward per region). Sliding-window dense extraction over
-coordinates (``window_size`` < input) is a deferred follow-up — large ROIs that exceed the
-encoder's comfortable field are out of scope for the first increment.
+Both dense modes run through one primitive (:func:`~slide2vec.runtime.dense_sliding.encode_dense_sliding`):
+``window_size=None`` is a single whole-tile forward (byte-identical to the legacy
+whole-region encode), and a ``window_size`` smaller than the encoded tile slides the
+encoder's native field over the padded tile and blends the per-window token grids with a
+separable raised-cosine map — letting a native-field encoder (e.g. 224-px Virchow2/phikon)
+serve a larger ROI without interpolating its position embeddings.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
+from slide2vec.runtime.dense_sliding import encode_dense_sliding
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
 
 _PAD_MODES = {"reflect", "constant", "zero", "replicate"}
@@ -150,6 +154,8 @@ def iter_regions_dense(
     tolerance: float = 0.05,
     pad_mode: str = "reflect",
     image_pad_value: float | None = None,
+    window_size: int | None = None,
+    overlap: float = 0.0,
     feature_kind: str = "patch_features",
     attention_blocks: tuple[int, ...] = (-1,),
     attention_include_registers: bool = False,
@@ -180,6 +186,14 @@ def iter_regions_dense(
         requested_spacing_um: µm/px to read each region at.
         target_size: supervision tile size (int or ``(h, w)``); the region is read at this
             size at ``requested_spacing_um`` and the token grid registers to it.
+        window_size: encoder field-of-view chunk fed through the backbone per forward.
+            ``None`` (default) is one whole-tile forward, byte-identical to the
+            whole-region encode; a value smaller than the encoded tile slides the encoder
+            over patch-aligned windows and blends the token grids (raised-cosine map). The
+            output grid is always the whole geometry's ``(grid_h, grid_w)`` either way —
+            sliding is internal to extraction.
+        overlap: fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
+            ``window_size is None``); the stride is ``window * (1 - overlap)``.
 
     Yields ``float32`` grids in coordinate order; empty ``coordinates`` yields nothing.
     ``feature_kind`` selects ``encode_tiles_dense`` (patch grid) vs
@@ -233,14 +247,26 @@ def iter_regions_dense(
                 batch = torch.stack([_read_padded(loc) for loc in chunk]).to(
                     device, non_blocking=True
                 )
-                out = encode_fn(batch)
+                # Every batch goes through the one windowed primitive: window_size=None
+                # short-circuits to a single whole-tile forward (byte-identical to the
+                # whole-region encode), so there is no separate whole-region branch.
+                out = encode_dense_sliding(
+                    model,
+                    batch,
+                    geometry=geometry,
+                    window_size=window_size,
+                    overlap=overlap,
+                    encode_fn=encode_fn,
+                )
                 if out.ndim != 4:
                     raise ValueError(
                         f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
                     )
                 batch_np = out.detach().float().cpu().numpy()
                 for i in range(batch_np.shape[0]):
-                    # Standalone contiguous copy: a per-row view would pin the whole batch.
-                    yield np.ascontiguousarray(batch_np[i])
+                    # Standalone C-contiguous copy: a per-row view would pin the whole
+                    # batch alive (the blended sliding output is contiguous, so a view of
+                    # it would not copy). ``.copy()`` always copies, in C order.
+                    yield batch_np[i].copy()
 
     return _stream()
