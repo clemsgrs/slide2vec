@@ -96,7 +96,7 @@ By default, ``slide2vec`` uses all available GPUs, a batch size of 32, and infer
 model's registered ``precision`` field.
 
 Pass :class:`~slide2vec.ExecutionOptions` to control GPU count, batch size,
-and precision:
+compute precision, and the on-disk feature dtype:
 
 .. code-block:: python
 
@@ -106,9 +106,16 @@ and precision:
    execution = ExecutionOptions(
        num_gpus=2,
        batch_size=32,
-       precision="fp16",   # "fp16", "bf16", "fp32", or None (auto)
+       precision="fp16",      # forward-pass dtype: "fp16", "bf16", "fp32", or None (auto)
+       output_dtype=None,     # saved feature dtype: "fp16", "fp32", or None (follow precision)
    )
    embedded = model.embed_slide("/path/to/slide.svs", execution=execution)
+
+``output_dtype`` controls the dtype the tile, slide, hierarchical, and patient features are
+written in. Left as ``None`` (the default), it follows ``precision`` — an ``fp16`` run stores
+``fp16`` features, while ``bf16``/``fp32`` store ``fp32`` — so you can force a compact ``fp16``
+cache or a lossless ``fp32`` one independently of the compute precision. The equivalent config
+key is ``speed.output_dtype``.
 
 See :doc:`api` for the full field reference.
 

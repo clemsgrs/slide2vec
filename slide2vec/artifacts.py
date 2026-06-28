@@ -74,6 +74,28 @@ def _validate_output_format(output_format: str) -> str:
     return normalized
 
 
+_OUTPUT_TORCH_DTYPE = {"fp16": torch.float16, "fp32": torch.float32}
+_OUTPUT_NUMPY_DTYPE = {"fp16": np.float16, "fp32": np.float32}
+
+
+def cast_feature_dtype(data: Any, precision: str) -> Any:
+    """Cast features to the on-disk ``precision`` (``"fp16"`` / ``"fp32"``), keeping their kind.
+
+    Torch tensors are cast via ``.to`` and arrays via ``astype``; ``None`` (no features)
+    passes through. This is what makes the pooled tile/slide/hierarchical/patient artifacts
+    land in a deterministic dtype, mirroring the dense path's ``output_dtype``. The precision
+    is resolved upstream by :func:`slide2vec.runtime.model_settings.resolve_output_precision`,
+    so only ``"fp16"`` / ``"fp32"`` reach here.
+    """
+    if data is None:
+        return data
+    if precision not in _OUTPUT_TORCH_DTYPE:
+        raise ValueError(f"Unsupported output precision {precision!r}; expected 'fp16' or 'fp32'.")
+    if torch.is_tensor(data):
+        return data.to(_OUTPUT_TORCH_DTYPE[precision])
+    return np.asarray(data).astype(_OUTPUT_NUMPY_DTYPE[precision], copy=False)
+
+
 def _ensure_array(data: Any) -> np.ndarray:
     if isinstance(data, np.ndarray):
         return data
