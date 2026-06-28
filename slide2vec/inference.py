@@ -59,6 +59,7 @@ from slide2vec.artifacts import (
 from slide2vec.encoders.registry import (
     encoder_registry,
     resolve_encoder_output,
+    resolve_patch_size,
     resolve_preprocessing_defaults,
 )
 from slide2vec.runtime.model_settings import canonicalize_model_name
@@ -120,6 +121,21 @@ def load_model(
     if "allow_non_recommended_settings" in ctor_params:
         extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
     encoder = encoder_cls(output_variant=output_variant, **extra_kwargs)
+
+    # Drift guard: the static patch_size declared on @register_encoder is read
+    # (without loading the model) to resolve the dense cache key. Assert it still
+    # equals the loaded model's runtime patch_size so the static metadata can never
+    # silently diverge from the architecture and corrupt that key.
+    if info.get("patch_size") is not None:
+        static_patch_size = resolve_patch_size(name, metadata=info)
+        runtime_patch_size = encoder.patch_size
+        if tuple(runtime_patch_size) != static_patch_size:
+            raise ValueError(
+                f"Encoder '{name}' declares a static patch_size {static_patch_size} "
+                f"(registry metadata) but the loaded model reports "
+                f"{tuple(runtime_patch_size)}. The static value seeds the dense cache "
+                "key; fix the @register_encoder patch_size to match the architecture."
+            )
 
     tile_encoder = None
     if resolved_level == "tile":

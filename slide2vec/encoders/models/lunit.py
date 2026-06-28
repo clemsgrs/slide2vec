@@ -9,6 +9,7 @@ from slide2vec.encoders.registry import register_encoder
     output_variants={"default": {"encode_dim": 384}},
     default_output_variant="default",
     input_size=224,
+    patch_size=8,
     supported_spacing_um=0.5,
     precision="fp32",
     source="1aurent/vit_small_patch8_224.lunit_dino",

@@ -27,6 +27,7 @@ _GIGAPATH_STD = (0.229, 0.224, 0.225)
     output_variants={"default": {"encode_dim": 1536}},
     default_output_variant="default",
     input_size=256,
+    patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
     source="prov-gigapath/prov-gigapath",

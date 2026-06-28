@@ -37,6 +37,7 @@ def register_encoder(
     output_variants: dict[str, dict[str, Any]],
     default_output_variant: str,
     input_size: int | None = None,
+    patch_size: int | tuple[int, int] | None = None,
     level: str = "tile",
     tile_encoder: str | None = None,
     tile_encoder_output_variant: str | None = None,
@@ -51,6 +52,12 @@ def register_encoder(
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
         input_size: Recommended encoder input image size in pixels.
+        patch_size: Backbone patch size, as ``int`` (square) or ``(patch_h,
+            patch_w)``. Optional: only dense-capable ViT tile encoders have a
+            meaningful patch grid. Declared statically so the dense token grid /
+            cache key can be resolved via :func:`resolve_patch_size` WITHOUT
+            instantiating the (multi-GB) encoder; the model-load path asserts this
+            static value still equals the loaded model's runtime ``patch_size``.
         level: Encoder output level ("tile" or "slide").
         tile_encoder: Registered tile encoder dependency for slide-level models.
         tile_encoder_output_variant: Fixed tile-encoder output variant for slide models.
@@ -67,6 +74,7 @@ def register_encoder(
         "default_output_variant": default_output_variant,
         "level": level,
         "input_size": input_size,
+        "patch_size": patch_size,
         "tile_encoder": tile_encoder,
         "tile_encoder_output_variant": tile_encoder_output_variant,
         "supported_spacing_um": supported_spacing_um,
@@ -74,6 +82,41 @@ def register_encoder(
         "source": source,
     }
     return encoder_registry.register_decorator(name, metadata=metadata)
+
+
+def normalize_patch_size(value: int | tuple[int, int]) -> tuple[int, int]:
+    """Normalize a patch size to a ``(patch_h, patch_w)`` int tuple.
+
+    This is the SAME representation the runtime ``encoder.patch_size`` instance
+    property returns, so static and runtime values compare/serialize identically
+    (a downstream dense cache key depends on this byte-for-byte equality).
+    """
+    if isinstance(value, int):
+        return (value, value)
+    patch_h, patch_w = value
+    return (int(patch_h), int(patch_w))
+
+
+def resolve_patch_size(
+    encoder_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[int, int]:
+    """Resolve an encoder's static patch size WITHOUT constructing the model.
+
+    Reads the ``patch_size`` declared on the encoder's ``@register_encoder`` and
+    normalizes it to a ``(patch_h, patch_w)`` int tuple (matching the runtime
+    ``encoder.patch_size``). Raises a clear error for encoders that do not declare
+    one (non-dense encoders) rather than returning a wrong value.
+    """
+    info = metadata if metadata is not None else encoder_registry.info(encoder_name)
+    patch = info.get("patch_size")
+    if patch is None:
+        raise ValueError(
+            f"Encoder '{encoder_name}' does not declare a patch_size in its registry "
+            "metadata. patch_size is only defined for dense-capable ViT tile encoders; "
+            "non-dense encoders have no recoverable patch grid."
+        )
+    return normalize_patch_size(patch)
 
 
 def resolve_preprocessing_requirements(

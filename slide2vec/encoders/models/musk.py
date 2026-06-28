@@ -35,6 +35,7 @@ def _as_hw(value: int | tuple[int, int] | list[int]) -> tuple[int, int]:
     },
     default_output_variant="ms_aug",
     input_size=384,
+    patch_size=16,
     supported_spacing_um=[0.25, 0.5, 1.0],
     precision="fp16",
     source="xiangjx/musk",

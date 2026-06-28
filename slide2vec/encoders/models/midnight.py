@@ -27,6 +27,7 @@ from slide2vec.encoders.registry import register_encoder
     output_variants={"default": {"encode_dim": 3072}},
     default_output_variant="default",
     input_size=224,
+    patch_size=14,
     supported_spacing_um=[0.25, 0.5, 1.0, 2.0],
     precision="fp16",
     source="kaiko-ai/midnight",

@@ -4957,6 +4957,11 @@ def test_load_model_auto_prefers_cuda_when_available(monkeypatch):
     import slide2vec.encoders.base as base
 
     class FakeModel:
+        # h0-mini is a dense ViT/14; the load-time patch_size drift guard reads
+        # patch_embed.patch_size, so the stand-in must expose it.
+        patch_embed = SimpleNamespace(patch_size=(14, 14))
+        num_prefix_tokens = 5
+
         def eval(self):
             return self
 
