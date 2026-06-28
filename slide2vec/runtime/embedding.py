@@ -10,11 +10,13 @@ from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    cast_feature_dtype,
     write_hierarchical_embeddings,
     write_slide_embeddings,
     write_tile_embeddings,
 )
 from slide2vec.runtime.hierarchical import resolve_hierarchical_geometry
+from slide2vec.runtime.model_settings import resolve_output_precision
 
 
 def tiling_result_annotation(tiling_result) -> str | None:
@@ -114,12 +116,14 @@ def write_tile_embedding_artifact(
 ) -> TileEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
+    precision = resolve_output_precision(execution.output_dtype, execution.precision)
+    features = cast_feature_dtype(features, precision)
     return write_tile_embeddings(
         sample_id,
         features,
         output_dir=execution.output_dir,
         output_format=execution.output_format,
-        metadata=metadata,
+        metadata={**metadata, "feature_dtype": precision},
         tile_index=np.arange(_num_rows(features), dtype=np.int64),
         annotation=annotation,
     )
@@ -142,13 +146,14 @@ def write_slide_embedding_artifact(
 ) -> SlideEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
+    precision = resolve_output_precision(execution.output_dtype, execution.precision)
     return write_slide_embeddings(
         sample_id,
-        embedding,
+        cast_feature_dtype(embedding, precision),
         output_dir=execution.output_dir,
         output_format=execution.output_format,
-        metadata=metadata,
-        latents=latents,
+        metadata={**metadata, "feature_dtype": precision},
+        latents=cast_feature_dtype(latents, precision),
         annotation=annotation,
     )
 
@@ -163,11 +168,12 @@ def write_hierarchical_embedding_artifact(
 ) -> HierarchicalEmbeddingArtifact:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist hierarchical embeddings")
+    precision = resolve_output_precision(execution.output_dtype, execution.precision)
     return write_hierarchical_embeddings(
         sample_id,
-        features,
+        cast_feature_dtype(features, precision),
         output_dir=execution.output_dir,
         output_format=execution.output_format,
-        metadata=metadata,
+        metadata={**metadata, "feature_dtype": precision},
         annotation=annotation,
     )

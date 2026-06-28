@@ -11,6 +11,7 @@ from slide2vec.artifacts import (
     PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
+    cast_feature_dtype,
     write_patient_embeddings,
 )
 from slide2vec.progress import emit_progress
@@ -22,6 +23,7 @@ from slide2vec.runtime.embedding import (
 )
 from slide2vec.runtime.embedding_pipeline import compute_tile_embeddings_for_slide
 from slide2vec.runtime.hierarchical import num_embedding_items
+from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.slide_encode import encode_slide_from_tiles
 from slide2vec.runtime.tiling import resolve_slide_backend
 
@@ -117,12 +119,17 @@ def run_patient_pipeline(
         stacked = torch.stack(slide_embs, dim=0).to(loaded.device)
         with torch.inference_mode():
             patient_emb = loaded.model.encode_patient(stacked).detach().cpu()
+        precision = resolve_output_precision(execution.output_dtype, execution.precision)
         artifact = write_patient_embeddings(
             patient_id,
-            patient_emb,
+            cast_feature_dtype(patient_emb, precision),
             output_dir=output_dir,
             output_format=execution.output_format,
-            metadata={"encoder_name": model.name, "encoder_level": model.level},
+            metadata={
+                "encoder_name": model.name,
+                "encoder_level": model.level,
+                "feature_dtype": precision,
+            },
             num_slides=patient_slide_counts[patient_id],
         )
         patient_artifacts.append(artifact)

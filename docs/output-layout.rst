@@ -110,6 +110,9 @@ Embedding Meta Files
 
 Each ``.pt`` embedding file has a companion ``.meta.json`` with provenance
 and shape information. The exact fields depend on the artifact type.
+``feature_dtype`` records the dtype the features were written in (``"fp16"`` or
+``"fp32"``), as resolved from ``ExecutionOptions.output_dtype`` / ``speed.output_dtype``
+(see :ref:`execution-options`).
 
 **tile_embeddings**
 
@@ -124,6 +127,7 @@ and shape information. The exact fields depend on the artifact type.
       "encoder_level": "tile",
       "encoder_name": "prost40m",
       "feature_dim": 384,
+      "feature_dtype": "fp16",
       "format": "pt",
       "image_path": "/data/slide-1.tif",
       "mask_path": "/data/mask-1.tif",

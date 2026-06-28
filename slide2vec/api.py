@@ -21,7 +21,11 @@ from slide2vec.encoders.registry import (
     resolve_preprocessing_defaults,
 )
 from slide2vec.encoders.validation import validate_encoder_config
-from slide2vec.runtime.model_settings import canonicalize_model_name, normalize_precision_name
+from slide2vec.runtime.model_settings import (
+    canonicalize_model_name,
+    normalize_output_dtype,
+    normalize_precision_name,
+)
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
@@ -226,6 +230,10 @@ class ExecutionOptions:
     #: Forward-pass dtype — ``"fp16"``, ``"bf16"``, ``"fp32"``,
     #: or ``None`` (auto-determined from the model preset).
     precision: str | None = None
+    #: On-disk feature dtype — ``"fp16"``, ``"fp32"``, or ``None`` to follow
+    #: :attr:`precision` (fp16 → fp16, else fp32). Applies to tile, slide, hierarchical,
+    #: and patient artifacts; ``"bf16"`` is rejected (numpy has no bfloat16).
+    output_dtype: str | None = None
     #: DataLoader prefetch queue depth per worker (default ``4``).
     prefetch_factor: int = 4
     #: Persist tile embeddings to disk when running a slide-level model.
@@ -253,6 +261,7 @@ class ExecutionOptions:
             ),
             num_gpus=1 if run_on_cpu else (int(configured_num_gpus) if configured_num_gpus is not None else None),
             precision="fp32" if run_on_cpu else requested_precision,
+            output_dtype=getattr(cfg.speed, "output_dtype", None),
             prefetch_factor=prefetch_factor,
             save_tile_embeddings=bool(cfg.model.save_tile_embeddings),
             save_slide_embeddings=bool(cfg.model.save_slide_embeddings),
@@ -263,6 +272,7 @@ class ExecutionOptions:
         resolved_num_gpus = _default_num_gpus() if self.num_gpus is None else self.num_gpus
         object.__setattr__(self, "num_gpus", resolved_num_gpus)
         object.__setattr__(self, "precision", normalize_precision_name(self.precision))
+        object.__setattr__(self, "output_dtype", normalize_output_dtype(self.output_dtype))
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:

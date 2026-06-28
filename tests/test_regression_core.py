@@ -290,6 +290,170 @@ def test_hierarchical_npz_artifacts_round_trip(tmp_path: Path):
     assert metadata["requested_region_size_px"] == 672
 
 
+# --- output dtype control (pooled feature path) -------------------------------------
+
+
+def test_resolve_output_precision_follows_compute_precision_by_default():
+    from slide2vec.runtime.model_settings import resolve_output_precision
+
+    # output_dtype=None tracks compute precision; bf16/fp32/unknown widen to fp32.
+    assert resolve_output_precision(None, "fp16") == "fp16"
+    assert resolve_output_precision(None, "bf16") == "fp32"
+    assert resolve_output_precision(None, "fp32") == "fp32"
+    assert resolve_output_precision(None, None) == "fp32"
+    # An explicit request overrides the compute precision either way.
+    assert resolve_output_precision("fp32", "fp16") == "fp32"
+    assert resolve_output_precision("float16", "fp32") == "fp16"
+
+
+def test_normalize_output_dtype_rejects_bf16_and_normalizes_aliases():
+    from slide2vec.runtime.model_settings import normalize_output_dtype
+
+    assert normalize_output_dtype(None) is None
+    assert normalize_output_dtype("float16") == "fp16"
+    assert normalize_output_dtype("fp32") == "fp32"
+    with pytest.raises(ValueError, match="bf16"):
+        normalize_output_dtype("bf16")
+
+
+def test_execution_options_normalizes_output_dtype():
+    assert ExecutionOptions().output_dtype is None
+    assert ExecutionOptions(output_dtype="float16").output_dtype == "fp16"
+    with pytest.raises(ValueError, match="bf16"):
+        ExecutionOptions(output_dtype="bf16")
+
+
+def test_execution_options_from_config_maps_output_dtype(tmp_path: Path):
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(
+            batch_size=4,
+            save_tile_embeddings=False,
+            save_slide_embeddings=False,
+            save_latents=False,
+        ),
+        speed=SimpleNamespace(
+            precision="fp16",
+            output_dtype="fp32",
+            num_dataloader_workers=2,
+            num_preprocessing_workers=8,
+            num_gpus=1,
+            prefetch_factor_embedding=4,
+        ),
+    )
+
+    execution = ExecutionOptions.from_config(cfg)
+
+    assert execution.precision == "fp16"
+    assert execution.output_dtype == "fp32"
+
+
+def test_execution_options_from_config_defaults_output_dtype_to_none_when_absent(tmp_path: Path):
+    # Configs predating speed.output_dtype must still parse (attribute absent entirely).
+    cfg = SimpleNamespace(
+        output_dir=str(tmp_path),
+        model=SimpleNamespace(
+            batch_size=4,
+            save_tile_embeddings=False,
+            save_slide_embeddings=False,
+            save_latents=False,
+        ),
+        speed=SimpleNamespace(
+            precision="fp16",
+            num_dataloader_workers=2,
+            num_preprocessing_workers=8,
+            num_gpus=1,
+            prefetch_factor_embedding=4,
+        ),
+    )
+
+    assert ExecutionOptions.from_config(cfg).output_dtype is None
+
+
+@pytest.mark.parametrize(
+    "precision, output_dtype, expected",
+    [
+        ("fp16", None, "float16"),  # default follows compute precision
+        ("bf16", None, "float32"),  # bf16 compute widens to fp32 on disk
+        ("fp32", None, "float32"),
+        (None, None, "float32"),
+        ("fp16", "fp32", "float32"),  # explicit override wins over precision
+        ("fp32", "fp16", "float16"),
+    ],
+)
+def test_tile_artifact_output_dtype(tmp_path: Path, precision, output_dtype, expected):
+    torch = pytest.importorskip("torch")
+    from slide2vec.runtime.embedding import write_tile_embedding_artifact
+
+    execution = ExecutionOptions(
+        output_dir=tmp_path, output_format="pt", precision=precision, output_dtype=output_dtype
+    )
+    features = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+    artifact = write_tile_embedding_artifact(
+        "sample-d", features, execution=execution, metadata={"k": "v"}
+    )
+
+    loaded = load_array(artifact.path)
+    metadata = load_metadata(artifact.metadata_path)
+    assert str(loaded.dtype) == f"torch.{expected}"
+    assert metadata["feature_dtype"] == ("fp16" if expected == "float16" else "fp32")
+
+
+def test_slide_and_hierarchical_artifact_output_dtype(tmp_path: Path):
+    torch = pytest.importorskip("torch")
+    from slide2vec.runtime.embedding import (
+        write_hierarchical_embedding_artifact,
+        write_slide_embedding_artifact,
+    )
+
+    execution = ExecutionOptions(
+        output_dir=tmp_path, output_format="pt", precision="fp32", output_dtype="fp16"
+    )
+    embedding = torch.ones(8, dtype=torch.float32)
+    latents = torch.ones(2, 8, dtype=torch.float32)
+    slide_artifact = write_slide_embedding_artifact(
+        "sample-e", embedding, execution=execution, metadata={"image_path": "x"}, latents=latents
+    )
+    assert str(load_array(slide_artifact.path).dtype) == "torch.float16"
+    assert slide_artifact.latent_path is not None
+    assert str(load_array(slide_artifact.latent_path).dtype) == "torch.float16"
+
+    hierarchical_artifact = write_hierarchical_embedding_artifact(
+        "sample-f",
+        torch.ones(2, 3, 4, dtype=torch.float32),
+        execution=execution,
+        metadata={"tiles_per_region": 3},
+    )
+    assert str(load_array(hierarchical_artifact.path).dtype) == "torch.float16"
+    assert load_metadata(hierarchical_artifact.metadata_path)["feature_dtype"] == "fp16"
+
+
+def test_npz_tile_artifact_honours_output_dtype(tmp_path: Path):
+    torch = pytest.importorskip("torch")
+    from slide2vec.runtime.embedding import write_tile_embedding_artifact
+
+    execution = ExecutionOptions(
+        output_dir=tmp_path, output_format="npz", precision="fp32", output_dtype="fp16"
+    )
+    features = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+    artifact = write_tile_embedding_artifact("sample-g", features, execution=execution, metadata={})
+
+    assert load_array(artifact.path).dtype == np.float16
+
+
+def test_execution_options_output_dtype_round_trips_through_serialization():
+    from slide2vec.runtime.serialization import deserialize_execution, serialize_execution
+
+    execution = ExecutionOptions(precision="fp16", output_dtype="fp32")
+    payload = serialize_execution(execution)
+    assert payload["output_dtype"] == "fp32"
+    assert deserialize_execution(payload).output_dtype == "fp32"
+
+    # Legacy payloads without the key deserialize to None (follow precision).
+    legacy = {k: v for k, v in payload.items() if k != "output_dtype"}
+    assert deserialize_execution(legacy).output_dtype is None
+
+
 def test_resolve_direct_api_preprocessing_derives_requested_region_size_from_multiple():
     import slide2vec.api as api
 

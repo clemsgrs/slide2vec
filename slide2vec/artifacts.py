@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from hs2p.fileops import is_flattened_annotation
 
+from slide2vec.runtime.model_settings import output_torch_dtype
+
 
 @dataclass(frozen=True, kw_only=True)
 class TileEmbeddingArtifact:
@@ -72,6 +74,26 @@ def _validate_output_format(output_format: str) -> str:
     if normalized not in {"pt", "npz"}:
         raise ValueError(f"Unsupported output format: {output_format}")
     return normalized
+
+
+_OUTPUT_NUMPY_DTYPE = {"fp16": np.float16, "fp32": np.float32}
+
+
+def cast_feature_dtype(data: Any, precision: str) -> Any:
+    """Cast features to the on-disk ``precision`` (``"fp16"`` / ``"fp32"``), keeping their kind.
+
+    Torch tensors are cast via ``.to`` and arrays via ``astype``; ``None`` (no features)
+    passes through. This is what makes the pooled tile/slide/hierarchical/patient artifacts
+    land in a deterministic dtype, mirroring the dense path's ``output_dtype``. The precision
+    is resolved upstream by :func:`slide2vec.runtime.model_settings.resolve_output_precision`,
+    so only ``"fp16"`` / ``"fp32"`` reach here.
+    """
+    if data is None:
+        return data
+    torch_dtype = output_torch_dtype(precision)  # validates precision (shared string→dtype map)
+    if torch.is_tensor(data):
+        return data.to(torch_dtype)
+    return np.asarray(data).astype(_OUTPUT_NUMPY_DTYPE[precision], copy=False)
 
 
 def _ensure_array(data: Any) -> np.ndarray:

@@ -52,6 +52,7 @@ def serialize_execution(
         "num_preprocessing_workers": execution.num_preprocessing_workers,
         "num_gpus": execution.num_gpus,
         "precision": execution.precision,
+        "output_dtype": execution.output_dtype,
         "prefetch_factor": execution.prefetch_factor,
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_slide_embeddings": execution.save_slide_embeddings,
@@ -104,6 +105,7 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
     num_preprocessing_workers = payload.get("num_preprocessing_workers")
     num_gpus = payload.get("num_gpus", 1)
     precision = payload.get("precision", "fp32")
+    output_dtype = payload.get("output_dtype")
     prefetch_factor = payload.get("prefetch_factor", 4)
     save_tile_embeddings = bool(payload.get("save_tile_embeddings", False))
     save_slide_embeddings = bool(payload.get("save_slide_embeddings", False))
@@ -118,6 +120,7 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         ),
         num_gpus=int(num_gpus),
         precision=precision,
+        output_dtype=output_dtype,
         prefetch_factor=int(prefetch_factor),
         save_tile_embeddings=save_tile_embeddings,
         save_slide_embeddings=save_slide_embeddings,
