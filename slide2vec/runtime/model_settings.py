@@ -74,6 +74,23 @@ def resolve_output_precision(output_dtype: Any, compute_precision: Any) -> str:
     return "fp16" if normalize_precision_name(compute_precision) == "fp16" else "fp32"
 
 
+def output_torch_dtype(precision: str):
+    """The torch dtype an on-disk feature artifact materializes in for ``precision``.
+
+    ``precision`` is a value returned by :func:`resolve_output_precision` (``"fp16"`` or
+    ``"fp32"``); anything else is a programming error. This is the single string→dtype
+    mapping shared by the pooled write path (:func:`slide2vec.artifacts.cast_feature_dtype`)
+    and the dense ``iter_regions_dense`` path, so both agree on the materialized dtype.
+    torch is imported lazily to keep this module importable without it.
+    """
+    import torch
+
+    mapping = {"fp16": torch.float16, "fp32": torch.float32}
+    if precision not in mapping:
+        raise ValueError(f"Unsupported output precision {precision!r}; expected 'fp16' or 'fp32'.")
+    return mapping[precision]
+
+
 def canonicalize_model_name(name: str) -> str:
     normalized = name.strip().lower()
     return MODEL_NAME_ALIASES.get(normalized, normalized)

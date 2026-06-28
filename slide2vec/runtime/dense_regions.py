@@ -40,10 +40,8 @@ import torch.nn.functional as F
 from PIL import Image
 
 from slide2vec.runtime.dense_sliding import encode_dense_sliding
-from slide2vec.runtime.model_settings import resolve_output_precision
+from slide2vec.runtime.model_settings import output_torch_dtype, resolve_output_precision
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
-
-_OUTPUT_TORCH_DTYPE = {"fp16": torch.float16, "fp32": torch.float32}
 
 
 def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) -> "torch.dtype":
@@ -57,7 +55,7 @@ def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) ->
     """
     if output_dtype is None:
         # Shared rule with the pooled write path: fp16 compute -> fp16, else fp32.
-        return _OUTPUT_TORCH_DTYPE[resolve_output_precision(None, precision)]
+        return output_torch_dtype(resolve_output_precision(None, precision))
     if output_dtype == torch.bfloat16:
         raise ValueError(
             "output_dtype=torch.bfloat16 cannot be materialized as a numpy grid; "

@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from hs2p.fileops import is_flattened_annotation
 
+from slide2vec.runtime.model_settings import output_torch_dtype
+
 
 @dataclass(frozen=True, kw_only=True)
 class TileEmbeddingArtifact:
@@ -74,7 +76,6 @@ def _validate_output_format(output_format: str) -> str:
     return normalized
 
 
-_OUTPUT_TORCH_DTYPE = {"fp16": torch.float16, "fp32": torch.float32}
 _OUTPUT_NUMPY_DTYPE = {"fp16": np.float16, "fp32": np.float32}
 
 
@@ -89,10 +90,9 @@ def cast_feature_dtype(data: Any, precision: str) -> Any:
     """
     if data is None:
         return data
-    if precision not in _OUTPUT_TORCH_DTYPE:
-        raise ValueError(f"Unsupported output precision {precision!r}; expected 'fp16' or 'fp32'.")
+    torch_dtype = output_torch_dtype(precision)  # validates precision (shared string→dtype map)
     if torch.is_tensor(data):
-        return data.to(_OUTPUT_TORCH_DTYPE[precision])
+        return data.to(torch_dtype)
     return np.asarray(data).astype(_OUTPUT_NUMPY_DTYPE[precision], copy=False)
 
 
