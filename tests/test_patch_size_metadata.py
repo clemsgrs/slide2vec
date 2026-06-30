@@ -27,7 +27,9 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "uni2": (14, 14),
     "virchow": (14, 14),
     "virchow2": (14, 14),
+    "genbio-pathfm": (16, 16),
     "gigapath": (14, 14),
+    "gpfm": (14, 14),
     "h-optimus-0": (14, 14),
     "h-optimus-1": (14, 14),
     "h0-mini": (14, 14),
@@ -44,8 +46,15 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "hibou-l": (14, 14),
 }
 
+# Non-dense tile encoders: real tile encoders with no recoverable patch grid
+# (e.g. a custom AutoModel backbone whose forward exposes no spatial patch-token
+# sequence), so they declare no ``patch_size`` and opt out of the dense interface.
+# Currently empty — every built-in tile encoder is dense-capable — but the bucket
+# is kept so a future non-dense tile encoder has a tracked home.
+NON_DENSE_TILE_ENCODERS: list[str] = []
+
 # Non-dense encoders: no recoverable patch grid, so no declared patch_size.
-NON_DENSE_ENCODERS = ["gigapath-slide", "titan", "prism"]
+NON_DENSE_ENCODERS = ["gigapath-slide", "titan", "prism"] + NON_DENSE_TILE_ENCODERS
 
 
 def test_normalize_patch_size_int_and_tuple():
@@ -95,11 +104,22 @@ def test_resolve_patch_size_raises_for_non_dense_encoder(name):
 
 
 def test_every_tile_encoder_declares_patch_size():
-    """All registered tile-level encoders are dense-capable and declare patch_size."""
+    """Dense-capable tile encoders declare patch_size; non-dense ones opt out.
+
+    Most tile encoders are dense-capable ViTs and must declare a ``patch_size``.
+    A few (``NON_DENSE_TILE_ENCODERS``, e.g. custom AutoModel backbones) expose no
+    recoverable patch grid and deliberately declare none. Every tile encoder must
+    fall into exactly one of those two tracked buckets.
+    """
     for info in encoder_registry.list_with_metadata():
         if info["level"] != "tile":
             continue
         name = info["name"]
+        if name in NON_DENSE_TILE_ENCODERS:
+            assert info.get("patch_size") is None, (
+                f"non-dense tile encoder '{name}' must not declare a patch_size"
+            )
+            continue
         assert info.get("patch_size") is not None, (
             f"tile encoder '{name}' is dense-capable but declares no patch_size"
         )

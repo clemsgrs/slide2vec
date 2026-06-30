@@ -72,7 +72,12 @@ Tile-level encoders
      - `mSTAR <https://huggingface.co/Wangyh/mSTAR>`_
      - 1024
      - ``0.5``
-     - Xu et al. (2024); gated weights, requires ``HF_TOKEN``
+     - Xu et al. (2024)
+   * - ``gpfm``
+     - `GPFM <https://huggingface.co/majiabo/GPFM>`_
+     - 1024
+     - ``0.5``
+     - Ma et al. (2024)
    * - ``uni``
      - `UNI <https://huggingface.co/MahmoodLab/UNI>`_
      - 1024
@@ -118,6 +123,11 @@ Tile-level encoders
      - 3072
      - ``0.25``, ``0.5``, ``1.0``, ``2.0``
      - Karasikov et al. (2025)
+   * - ``genbio-pathfm``
+     - `GenBio-PathFM <https://huggingface.co/genbio-ai/genbio-pathfm>`_
+     - 4608
+     - ``0.5``
+     - GenBio AI (2024)
 
 Dense tile grids
 ~~~~~~~~~~~~~~~~
@@ -127,10 +137,10 @@ Dense tile feature extraction is available on tile encoders that implement
 instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 
 The following built-in tile presets are covered by the dense encoder interface:
-``conch``, ``conchv15``, ``gigapath``, ``h0-mini``, ``h-optimus-0``,
-``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``,
-``musk``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``,
-``virchow``, and ``virchow2``.
+``conch``, ``conchv15``, ``genbio-pathfm``, ``gigapath``, ``gpfm``, ``h0-mini``,
+``h-optimus-0``, ``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``,
+``midnight``, ``mstar``, ``musk``, ``phikon``, ``phikonv2``, ``prost40m``,
+``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
@@ -148,6 +158,9 @@ Notes:
 - H-Optimus dense extraction at non-native input sizes requires
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
   constructing the encoder.
+- ``genbio-pathfm`` is a single-channel ViT: its dense grid (via
+  ``forward_with_patches``) concatenates the three per-colour-channel patch grids
+  along the feature dim, so ``d`` = 4608 matches the pooled output dimension.
 
 Dense attention maps
 ~~~~~~~~~~~~~~~~~~~~~
@@ -158,15 +171,20 @@ prefix-token self-attention as a spatial grid ``(B, K, h, w)`` — see the
 contract and knobs.
 
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
-``gigapath``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
-``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``, ``phikonv2``,
-``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``,
+``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``,
+``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
 - ``musk`` is **not** covered: its BEiT3 backbone uses a non-timm attention
   module, so attention extraction raises ``NotImplementedError`` (dense
   patch-token extraction is still available).
+- ``genbio-pathfm`` is **not** covered: it computes attention with a fused
+  ``scaled_dot_product_attention`` (no materialized weights) and encodes the three
+  colour channels as independent single-channel images, so there is no single
+  coherent CLS-over-patches attention to extract; ``encode_tiles_attention`` raises
+  ``NotImplementedError`` (dense patch-token extraction is still available).
 - ``hibou-b`` / ``hibou-l`` carry register tokens; pass ``include_registers=True``
   to add their query rows as extra channels.
 - ``conch`` / ``conchv15`` recover attention from their inner timm ViT trunk, the
