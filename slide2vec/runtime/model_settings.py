@@ -29,6 +29,7 @@ MODEL_NAME_ALIASES = {
     "prov-gigapath-tile": "gigapath",
     "prov-gigapath-slide": "gigapath-slide",
     "kaiko-midnight": "midnight",
+    "mstar-slide": "mstar",
 }
 
 

@@ -119,7 +119,7 @@ The package writes explicit artifact directories:
 
 ### Supported Models
 
-`slide2vec` currently ships preset configs for 17 tile-level models and 3 slide-level models.  
+`slide2vec` currently ships preset configs for 18 tile-level models and 3 slide-level models.  
 For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
 
 ## CLI

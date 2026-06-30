@@ -19,6 +19,7 @@ EXPECTED_TILE_ENCODERS = {
     "hibou-b",
     "hibou-l",
     "midnight",
+    "mstar",
     "musk",
     "phikon",
     "phikonv2",
@@ -110,6 +111,24 @@ def test_prost40m_input_size_is_224_and_encode_dim_is_384():
     info = encoder_registry.info("prost40m")
     assert info["input_size"] == 224
     assert info["output_variants"]["default"]["encode_dim"] == 384
+
+
+def test_mstar_metadata_contract():
+    info = encoder_registry.info("mstar")
+    assert info["level"] == "tile"
+    assert info["input_size"] == 224
+    assert info["patch_size"] == 16
+    assert info["supported_spacing_um"] == pytest.approx(0.5)
+    assert info["precision"] == "fp32"
+    assert info["source"] == "Wangyh/mSTAR"
+    assert info["output_variants"]["default"]["encode_dim"] == 1024
+    assert info["default_output_variant"] == "default"
+
+
+def test_mstar_slide_alias_resolves_to_mstar():
+    from slide2vec.runtime.model_settings import canonicalize_model_name
+
+    assert canonicalize_model_name("mstar-slide") == "mstar"
 
 
 def test_resolve_preprocessing_requirements_for_tile_encoder():

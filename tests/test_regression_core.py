@@ -197,6 +197,7 @@ def test_list_models_can_filter_by_level():
         "hibou-l",
         "lunit",
         "midnight",
+        "mstar",
         "musk",
         "phikon",
         "phikonv2",
