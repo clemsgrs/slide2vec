@@ -9,9 +9,12 @@ They pin the two registration choices that can only be confirmed against the rea
 checkpoints:
 
 * GPFM: ``GPFM.pth`` loads into the timm DINOv2 ViT-L/14 (``strict=True``) and the
-  pooled forward returns the registered 1024-d embedding.
+  pooled forward returns the registered 1024-d embedding; its dense path folds a
+  224 tile into a ``(1, 1024, 16, 16)`` patch-token grid (patch size 14).
 * GenBio-PathFM: the single-channel backbone's canonical forward returns the
-  registered 4608-d (= embed_dim*3) per-channel-CLS concatenation.
+  registered 4608-d (= embed_dim*3) per-channel-CLS concatenation; its dense path
+  (``forward_with_patches``) folds a 224 tile into a ``(1, 4608, 14, 14)`` grid
+  (patch size 16).
 """
 
 from __future__ import annotations
@@ -34,7 +37,10 @@ def test_gpfm_loads_strict_and_forward_is_1024_d():
     batch = torch.randn(1, 3, 224, 224)
     with torch.inference_mode():
         out = encoder.encode_tiles(batch)
+        dense = encoder.encode_tiles_dense(batch)
     assert out.shape == (1, 1024)
+    # patch 14: 224 / 14 = 16 -> a 16x16 grid of 1024-d patch tokens.
+    assert dense.shape == (1, 1024, 16, 16)
 
 
 @pytest.mark.heavy
@@ -45,9 +51,14 @@ def test_genbio_pathfm_forward_is_4608_d():
         pytest.skip(f"genbio-pathfm weights unavailable: {type(exc).__name__}: {exc}")
     encoder = encoder.to("cpu")
     assert encoder.encode_dim == 4608
+    assert encoder.patch_size == (16, 16)
     batch = torch.randn(1, 3, 224, 224)
     with torch.inference_mode():
         out = encoder.encode_tiles(batch)
+        dense = encoder.encode_tiles_dense(batch)
     # Single-channel ViT (in_chans=1): forward concatenates the 3 per-channel CLS
     # tokens (embed_dim 1536) -> 4608.
     assert out.shape == (1, 4608)
+    # Dense via forward_with_patches: the 3 per-channel patch grids concatenated
+    # along the feature dim; patch 16: 224 / 16 = 14 -> a 14x14 grid of 4608-d tokens.
+    assert dense.shape == (1, 4608, 14, 14)

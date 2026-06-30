@@ -149,9 +149,9 @@ def test_genbio_pathfm_metadata_contract():
     info = encoder_registry.info("genbio-pathfm")
     assert info["level"] == "tile"
     assert info["input_size"] == 224
-    # GenBio is a custom AutoModel without a recoverable dense patch grid, so it
-    # declares no patch_size (not in the dense coverage lists).
-    assert info["patch_size"] is None
+    # GenBio exposes a dense patch grid via forward_with_patches (single-channel
+    # ViT, patch size 16: a 224 tile -> a 14x14 grid).
+    assert info["patch_size"] == 16
     assert info["supported_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp32"
     assert info["source"] == "genbio-ai/genbio-pathfm"

@@ -27,6 +27,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "uni2": (14, 14),
     "virchow": (14, 14),
     "virchow2": (14, 14),
+    "genbio-pathfm": (16, 16),
     "gigapath": (14, 14),
     "gpfm": (14, 14),
     "h-optimus-0": (14, 14),
@@ -46,10 +47,11 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
 }
 
 # Non-dense tile encoders: real tile encoders with no recoverable patch grid
-# (e.g. custom AutoModel backbones whose forward does not expose a spatial
-# patch-token sequence), so they declare no ``patch_size`` and opt out of the
-# dense interface.
-NON_DENSE_TILE_ENCODERS = ["genbio-pathfm"]
+# (e.g. a custom AutoModel backbone whose forward exposes no spatial patch-token
+# sequence), so they declare no ``patch_size`` and opt out of the dense interface.
+# Currently empty — every built-in tile encoder is dense-capable — but the bucket
+# is kept so a future non-dense tile encoder has a tracked home.
+NON_DENSE_TILE_ENCODERS: list[str] = []
 
 # Non-dense encoders: no recoverable patch grid, so no declared patch_size.
 NON_DENSE_ENCODERS = ["gigapath-slide", "titan", "prism"] + NON_DENSE_TILE_ENCODERS
