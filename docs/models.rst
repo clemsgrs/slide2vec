@@ -68,6 +68,11 @@ Tile-level encoders
      - 1024
      - ``0.5``
      - Nechaev et al. (2024)
+   * - ``mstar``
+     - `mSTAR <https://huggingface.co/Wangyh/mSTAR>`_
+     - 1024
+     - ``0.5``
+     - Xu et al. (2024); gated weights, requires ``HF_TOKEN``
    * - ``uni``
      - `UNI <https://huggingface.co/MahmoodLab/UNI>`_
      - 1024
@@ -123,9 +128,9 @@ instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 
 The following built-in tile presets are covered by the dense encoder interface:
 ``conch``, ``conchv15``, ``gigapath``, ``h0-mini``, ``h-optimus-0``,
-``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``musk``,
-``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
-``virchow2``.
+``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``,
+``musk``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``,
+``virchow``, and ``virchow2``.
 
 Notes:
 
@@ -154,8 +159,8 @@ contract and knobs.
 
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
 ``gigapath``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
-``hibou-l``, ``lunit``, ``midnight``, ``phikon``, ``phikonv2``, ``prost40m``,
-``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``, ``phikonv2``,
+``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
