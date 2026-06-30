@@ -64,7 +64,7 @@ def _unwrap_gpfm_state_dict(payload: Mapping[str, object]) -> dict[str, torch.Te
     default_output_variant="default",
     input_size=224,
     patch_size=14,
-    supported_spacing_um=0.25,  # 40x; ~512px tiles resized to 224 (per card)
+    supported_spacing_um=0.5,  # 512px@0.25um (128um FOV) resized to 224 => ~0.5um/px effective (20x), as for UNI
     precision="fp32",  # upstream runs plain fp32, no autocast
     source="majiabo/GPFM",
 )

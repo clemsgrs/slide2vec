@@ -76,7 +76,7 @@ Tile-level encoders
    * - ``gpfm``
      - `GPFM <https://huggingface.co/majiabo/GPFM>`_
      - 1024
-     - ``0.25``
+     - ``0.5``
      - Ma et al. (2024); MIT license
    * - ``uni``
      - `UNI <https://huggingface.co/MahmoodLab/UNI>`_

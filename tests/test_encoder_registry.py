@@ -138,7 +138,7 @@ def test_gpfm_metadata_contract():
     assert info["level"] == "tile"
     assert info["input_size"] == 224
     assert info["patch_size"] == 14
-    assert info["supported_spacing_um"] == pytest.approx(0.25)
+    assert info["supported_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp32"
     assert info["source"] == "majiabo/GPFM"
     assert info["output_variants"]["default"]["encode_dim"] == 1024
