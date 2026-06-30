@@ -72,7 +72,12 @@ Tile-level encoders
      - `mSTAR <https://huggingface.co/Wangyh/mSTAR>`_
      - 1024
      - ``0.5``
-     - Xu et al. (2024); gated weights, requires ``HF_TOKEN``
+     - Xu et al. (2024)
+   * - ``gpfm``
+     - `GPFM <https://huggingface.co/majiabo/GPFM>`_
+     - 1024
+     - ``0.25``
+     - Ma et al. (2024); MIT license
    * - ``uni``
      - `UNI <https://huggingface.co/MahmoodLab/UNI>`_
      - 1024
@@ -118,6 +123,11 @@ Tile-level encoders
      - 3072
      - ``0.25``, ``0.5``, ``1.0``, ``2.0``
      - Karasikov et al. (2025)
+   * - ``genbio-pathfm``
+     - `GenBio-PathFM <https://huggingface.co/genbio-ai/genbio-pathfm>`_
+     - 4608
+     - ``0.5``
+     - GenBio AI (2024); custom Community License; non-ImageNet normalization
 
 Dense tile grids
 ~~~~~~~~~~~~~~~~
@@ -127,7 +137,7 @@ Dense tile feature extraction is available on tile encoders that implement
 instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 
 The following built-in tile presets are covered by the dense encoder interface:
-``conch``, ``conchv15``, ``gigapath``, ``h0-mini``, ``h-optimus-0``,
+``conch``, ``conchv15``, ``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``,
 ``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``,
 ``musk``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``,
 ``virchow``, and ``virchow2``.
@@ -158,9 +168,9 @@ prefix-token self-attention as a spatial grid ``(B, K, h, w)`` — see the
 contract and knobs.
 
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
-``gigapath``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
-``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``, ``phikonv2``,
-``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``,
+``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``,
+``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 

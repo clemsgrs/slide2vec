@@ -12,7 +12,9 @@ EXPECTED_TILE_ENCODERS = {
     "virchow2",
     "conch",
     "conchv15",
+    "genbio-pathfm",
     "gigapath",
+    "gpfm",
     "h-optimus-0",
     "h-optimus-1",
     "h0-mini",
@@ -129,6 +131,35 @@ def test_mstar_slide_alias_resolves_to_mstar():
     from slide2vec.runtime.model_settings import canonicalize_model_name
 
     assert canonicalize_model_name("mstar-slide") == "mstar"
+
+
+def test_gpfm_metadata_contract():
+    info = encoder_registry.info("gpfm")
+    assert info["level"] == "tile"
+    assert info["input_size"] == 224
+    assert info["patch_size"] == 14
+    assert info["supported_spacing_um"] == pytest.approx(0.25)
+    assert info["precision"] == "fp32"
+    assert info["source"] == "majiabo/GPFM"
+    assert info["output_variants"]["default"]["encode_dim"] == 1024
+    assert info["default_output_variant"] == "default"
+
+
+def test_genbio_pathfm_metadata_contract():
+    info = encoder_registry.info("genbio-pathfm")
+    assert info["level"] == "tile"
+    assert info["input_size"] == 224
+    # GenBio is a custom AutoModel without a recoverable dense patch grid, so it
+    # declares no patch_size (not in the dense coverage lists).
+    assert info["patch_size"] is None
+    assert info["supported_spacing_um"] == pytest.approx(0.5)
+    assert info["precision"] == "fp32"
+    assert info["source"] == "genbio-ai/genbio-pathfm"
+    # GenBio is a single-channel ViT (in_chans=1): forward() splits RGB into 3
+    # single-channel images and concatenates their per-channel CLS tokens, so the
+    # canonical pooled output is embed_dim*3 = 1536*3 = 4608 (verified on real weights).
+    assert info["output_variants"]["default"]["encode_dim"] == 4608
+    assert info["default_output_variant"] == "default"
 
 
 def test_resolve_preprocessing_requirements_for_tile_encoder():
