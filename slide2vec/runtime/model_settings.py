@@ -30,6 +30,9 @@ MODEL_NAME_ALIASES = {
     "prov-gigapath-slide": "gigapath-slide",
     "kaiko-midnight": "midnight",
     "mstar-slide": "mstar",
+    "dinov2": "dinov2-vitb14",
+    "dinov2-base": "dinov2-vitb14",
+    "dinov2-vitb": "dinov2-vitb14",
 }
 
 

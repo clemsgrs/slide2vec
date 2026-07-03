@@ -37,6 +37,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "prost40m": (16, 16),
     "conch": (16, 16),
     "conchv15": (16, 16),
+    "dinov2-vitb14": (14, 14),
     "phikon": (16, 16),
     "phikonv2": (16, 16),
     "midnight": (14, 14),

@@ -12,6 +12,7 @@ EXPECTED_TILE_ENCODERS = {
     "virchow2",
     "conch",
     "conchv15",
+    "dinov2-vitb14",
     "genbio-pathfm",
     "gigapath",
     "gpfm",
