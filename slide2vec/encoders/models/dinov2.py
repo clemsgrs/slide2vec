@@ -21,11 +21,15 @@ run at the 224px detection tile geometry via positional-embedding interpolation,
 a no-op at the native size (verified in the shared dense-extraction suite).
 
 Spacing note: a natural-image model has **no** intrinsic micron-per-pixel
-spacing. ``supported_spacing_um=0.5`` is a *convention*, not a physical property:
-0.5 µm/px is the default task-spacing the pathology tile encoders declare, so
-selecting this encoder by name lands on identical tile geometry and it drops in
-as a matched control. To sweep other task-spacings, pass
-``allow_non_recommended_settings=True`` (the encoder is spacing-agnostic).
+spacing, so it declares ``supported_spacing_um=None`` — it is *spacing-agnostic*
+and :func:`validate_encoder_config` never rejects a requested spacing for it
+(unlike the pathology encoders, which are validated at a specific spacing). It
+still needs *a* spacing to tile a slide, so ``default_spacing_um=0.5`` sets the
+tiling default: 0.5 µm/px is the task-spacing the pathology tile encoders
+declare, so selecting this encoder by name lands on identical tile geometry and
+it drops in as a matched control. Because it is agnostic, sweeping other
+task-spacings (e.g. 0.25) needs no ``allow_non_recommended_settings`` escape
+hatch — any requested spacing is accepted as-is.
 """
 
 from slide2vec.encoders.base import TimmTileEncoder
@@ -38,7 +42,8 @@ from slide2vec.encoders.registry import register_encoder
     default_output_variant="default",
     input_size=224,
     patch_size=14,
-    supported_spacing_um=0.5,  # convention: match the pathology encoders' default task-spacing
+    supported_spacing_um=None,  # spacing-agnostic: no intrinsic µm/px, so no validation constraint
+    default_spacing_um=0.5,  # tiling default: match the pathology encoders' task-spacing
     precision="fp16",
     source="timm/vit_base_patch14_dinov2.lvd142m",
 )

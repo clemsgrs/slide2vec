@@ -51,8 +51,8 @@ Tile-level encoders
    * - ``dinov2-vitb14``
      - `DINOv2 ViT-B/14 <https://huggingface.co/timm/vit_base_patch14_dinov2.lvd142m>`_
      - 768
-     - ``0.5``
-     - Oquab et al. (2024); natural-image (non-pathology) control, public weights
+     - any (``0.5`` default)
+     - Oquab et al. (2024); natural-image (non-pathology) control, public weights; spacing-agnostic
    * - ``hibou-b``
      - `Hibou-B <https://huggingface.co/histai/hibou-b>`_
      - 768

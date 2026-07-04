@@ -23,14 +23,39 @@ def test_dinov2_natimage_metadata_contract():
     assert info["level"] == "tile"
     assert info["input_size"] == 224
     assert info["patch_size"] == 14
-    # Natural-image encoders have no intrinsic micron spacing; 0.5 is the
-    # convention that matches the pathology tile encoders' default task-spacing,
-    # so the control runs at identical tile geometry when selected by name.
-    assert info["supported_spacing_um"] == pytest.approx(0.5)
+    # Natural-image encoders have no intrinsic micron spacing, so they declare
+    # supported_spacing_um=None (spacing-agnostic: no validation constraint) and
+    # a separate default_spacing_um that matches the pathology encoders' task
+    # spacing, so the control runs at identical tile geometry when selected by name.
+    assert info["supported_spacing_um"] is None
+    assert info["default_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp16"
     assert info["source"] == "timm/vit_base_patch14_dinov2.lvd142m"
     assert info["output_variants"]["default"]["encode_dim"] == 768
     assert info["default_output_variant"] == "default"
+
+
+def test_dinov2_natimage_resolves_tiling_default_from_default_spacing():
+    """Spacing-agnostic encoder still resolves a zero-config tiling spacing.
+
+    ``supported_spacing_um=None`` alone has no derivable default; the explicit
+    ``default_spacing_um`` is what lets name-only selection tile at 0.5 µm/px.
+    """
+    from slide2vec.encoders.registry import resolve_preprocessing_defaults
+
+    defaults = resolve_preprocessing_defaults("dinov2-vitb14")
+    assert defaults["tile_size_px"] == 224
+    assert defaults["spacing_um"] == pytest.approx(0.5)
+
+
+def test_dinov2_natimage_is_spacing_agnostic_in_validation():
+    """No requested spacing is ever "non-recommended" for the agnostic control."""
+    from slide2vec.encoders.validation import validate_encoder_config
+
+    # A spacing far from the 0.5 tiling default must NOT raise, even without the
+    # allow_non_recommended escape hatch: the model has no spacing to violate.
+    validate_encoder_config("dinov2-vitb14", requested_spacing_um=0.25)
+    validate_encoder_config("dinov2-vitb14", requested_spacing_um=2.0)
 
 
 def test_dinov2_alias_resolves_to_canonical():
