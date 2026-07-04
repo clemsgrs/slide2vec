@@ -48,11 +48,6 @@ Tile-level encoders
      - 768
      - ``0.5``
      - Lu et al. (2024)
-   * - ``dinov2-vitb14``
-     - `DINOv2 ViT-B/14 <https://huggingface.co/timm/vit_base_patch14_dinov2.lvd142m>`_
-     - 768
-     - any (``0.5`` default)
-     - Oquab et al. (2024); natural-image (non-pathology) control, public weights; spacing-agnostic
    * - ``hibou-b``
      - `Hibou-B <https://huggingface.co/histai/hibou-b>`_
      - 768
@@ -133,6 +128,30 @@ Tile-level encoders
      - 4608
      - ``0.5``
      - GenBio AI (2024)
+
+Natural-image control
+~~~~~~~~~~~~~~~~~~~~~~~
+
+A non-pathology tile encoder, kept separate from the pathology-focused table
+above. It holds the ViT architecture and self-supervised objective fixed while
+varying only the pretraining domain, so it acts as a control for measuring the
+effect of pathology pretraining. Being spacing-agnostic, it has no intrinsic
+micron spacing and accepts any requested spacing, tiling at ``0.5`` µm/px by
+default so it lands on the same tile geometry as the pathology encoders.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Preset
+     - Model
+     - Output dim
+     - Spacing (um)
+     - Notes
+   * - ``dinov2-vitb14``
+     - `DINOv2 ViT-B/14 <https://huggingface.co/timm/vit_base_patch14_dinov2.lvd142m>`_
+     - 768
+     - any (``0.5`` default)
+     - Oquab et al. (2024)
 
 Dense tile grids
 ~~~~~~~~~~~~~~~~
