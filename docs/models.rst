@@ -48,6 +48,11 @@ Tile-level encoders
      - 768
      - ``0.5``
      - Lu et al. (2024)
+   * - ``dinov2-vitb14``
+     - `DINOv2 ViT-B/14 <https://huggingface.co/timm/vit_base_patch14_dinov2.lvd142m>`_
+     - 768
+     - any (``0.5`` default)
+     - Oquab et al. (2024); natural-image (non-pathology) control, public weights; spacing-agnostic
    * - ``hibou-b``
      - `Hibou-B <https://huggingface.co/histai/hibou-b>`_
      - 768
@@ -137,10 +142,10 @@ Dense tile feature extraction is available on tile encoders that implement
 instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 
 The following built-in tile presets are covered by the dense encoder interface:
-``conch``, ``conchv15``, ``genbio-pathfm``, ``gigapath``, ``gpfm``, ``h0-mini``,
-``h-optimus-0``, ``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``,
-``midnight``, ``mstar``, ``musk``, ``phikon``, ``phikonv2``, ``prost40m``,
-``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``conch``, ``conchv15``, ``dinov2-vitb14``, ``genbio-pathfm``, ``gigapath``,
+``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
+``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``musk``, ``phikon``,
+``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
@@ -171,9 +176,10 @@ prefix-token self-attention as a spatial grid ``(B, K, h, w)`` — see the
 contract and knobs.
 
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
-``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``,
-``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``phikon``,
-``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``dinov2-vitb14``, ``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``,
+``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``,
+``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
+``virchow2``.
 
 Notes:
 

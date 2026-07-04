@@ -41,7 +41,8 @@ def register_encoder(
     level: str = "tile",
     tile_encoder: str | None = None,
     tile_encoder_output_variant: str | None = None,
-    supported_spacing_um: float | list[float],
+    supported_spacing_um: float | list[float] | None,
+    default_spacing_um: float | None = None,
     precision: str = "fp16",
     source: str = "",
 ):
@@ -61,7 +62,22 @@ def register_encoder(
         level: Encoder output level ("tile" or "slide").
         tile_encoder: Registered tile encoder dependency for slide-level models.
         tile_encoder_output_variant: Fixed tile-encoder output variant for slide models.
-        supported_spacing_um: Supported spacing(s) in µm/px.
+        supported_spacing_um: The spacing(s) in µm/px the model was trained/validated
+            for; :func:`validate_encoder_config` rejects requests outside this set
+            unless ``allow_non_recommended_settings=True``. ``None`` marks a
+            *spacing-agnostic* encoder (e.g. a natural-image control): the spacing
+            check is skipped entirely because no spacing is more "correct" than
+            another. Agnostic encoders MUST pair this with an explicit
+            ``default_spacing_um`` so name-only selection still resolves a tiling
+            spacing.
+        default_spacing_um: The single spacing in µm/px used to tile a slide when the
+            caller selects this encoder by name without passing an explicit
+            ``requested_spacing_um``. Optional: when omitted it is derived from
+            ``supported_spacing_um`` if that is a single value. Encoders that
+            support a *list* of spacings, or are spacing-agnostic
+            (``supported_spacing_um=None``), have no derivable default and must
+            declare one here to be selectable with zero config (otherwise
+            :func:`resolve_preprocessing_defaults` requires an explicit spacing).
         precision: Recommended inference precision ("fp16" or "fp32").
         source: Model source identifier (e.g. HuggingFace hub path).
     """
@@ -78,6 +94,7 @@ def register_encoder(
         "tile_encoder": tile_encoder,
         "tile_encoder_output_variant": tile_encoder_output_variant,
         "supported_spacing_um": supported_spacing_um,
+        "default_spacing_um": default_spacing_um,
         "precision": precision,
         "source": source,
     }
@@ -133,14 +150,13 @@ def resolve_preprocessing_requirements(
 
     if level == "tile":
         input_size = require_encoder_metadata_field(encoder_name, info, "input_size")
-        spacing_um = require_encoder_metadata_field(
-            encoder_name,
-            info,
-            "supported_spacing_um",
-        )
+        # supported_spacing_um is the *validated* constraint set and may be None
+        # (spacing-agnostic). Kept lazy: do NOT resolve a default here — callers
+        # that only need the constraint (e.g. tile-size validation) must not trip
+        # over a list/agnostic encoder having no single default.
         return {
             "tile_size_px": input_size,
-            "spacing_um": spacing_um,
+            "spacing_um": info.get("supported_spacing_um"),
             "source_encoder": encoder_name,
         }
 
@@ -153,35 +169,67 @@ def resolve_preprocessing_requirements(
     raise AssertionError("unreachable")
 
 
+def _resolve_default_spacing(encoder_name: str, info: dict[str, Any]) -> float:
+    """Resolve the single spacing (µm/px) an encoder is tiled at by default.
+
+    Prefers an explicit ``default_spacing_um``. Otherwise derives it from
+    ``supported_spacing_um`` when that is a single value. Encoders that support a
+    *list* of spacings, or are spacing-agnostic (``supported_spacing_um=None``),
+    with no explicit default have no unambiguous tiling spacing and raise — the
+    caller must pass ``preprocessing.requested_spacing_um`` (or the encoder must
+    declare ``default_spacing_um``).
+    """
+    explicit = info.get("default_spacing_um")
+    if explicit is not None:
+        return float(explicit)
+
+    supported = info.get("supported_spacing_um")
+    if isinstance(supported, list):
+        unique_spacings: list[float] = []
+        for spacing in supported:
+            spacing_value = float(spacing)
+            if not any(abs(spacing_value - existing) <= 1e-8 for existing in unique_spacings):
+                unique_spacings.append(spacing_value)
+        if len(unique_spacings) == 1:
+            return unique_spacings[0]
+        supported_text = ", ".join(f"{s:g}" for s in unique_spacings)
+        raise ValueError(
+            f"Encoder '{encoder_name}' supports multiple spacings [{supported_text}]; "
+            "cannot infer a default requested_spacing_um. Declare default_spacing_um "
+            "in its registration or pass preprocessing.requested_spacing_um explicitly."
+        )
+    if isinstance(supported, (int, float)) and not isinstance(supported, bool):
+        return float(supported)
+
+    raise ValueError(
+        f"Encoder '{encoder_name}' is spacing-agnostic (supported_spacing_um=None) but "
+        "declares no default_spacing_um; declare default_spacing_um in its registration "
+        "or pass preprocessing.requested_spacing_um explicitly."
+    )
+
+
 def resolve_preprocessing_defaults(
     encoder_name: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve a single unambiguous preprocessing default for an encoder.
 
-    This is stricter than :func:`resolve_preprocessing_requirements`: it only
-    succeeds when the encoder advertises exactly one supported spacing.
+    This is stricter than :func:`resolve_preprocessing_requirements`: it resolves
+    exactly one tiling spacing (see :func:`_resolve_default_spacing`) and raises
+    when the encoder advertises several supported spacings without an explicit
+    ``default_spacing_um``.
     """
     reqs = resolve_preprocessing_requirements(encoder_name, metadata)
-    spacing_um = reqs["spacing_um"]
-    if isinstance(spacing_um, list):
-        unique_spacings = []
-        for spacing in spacing_um:
-            spacing_value = float(spacing)
-            if not any(abs(spacing_value - existing) <= 1e-8 for existing in unique_spacings):
-                unique_spacings.append(spacing_value)
-        if len(unique_spacings) != 1:
-            supported_text = ", ".join(f"{s:g}" for s in unique_spacings)
-            raise ValueError(
-                f"Encoder '{encoder_name}' supports multiple spacings [{supported_text}]; "
-                "cannot infer a default requested_spacing_um. "
-                "Pass preprocessing.requested_spacing_um explicitly."
-            )
-        spacing_um = unique_spacings[0]
+    source_encoder = reqs["source_encoder"]
+    # Resolve the default off the *tile* encoder's metadata: slide/patient
+    # encoders inherit both tile size and spacing from their tile encoder, so
+    # source_encoder already points at the model that carries the spacing fields.
+    source_info = encoder_registry.info(source_encoder)
+    spacing_um = _resolve_default_spacing(source_encoder, source_info)
     return {
         "tile_size_px": int(reqs["tile_size_px"]),
         "spacing_um": float(spacing_um),
-        "source_encoder": reqs["source_encoder"],
+        "source_encoder": source_encoder,
     }
 
 

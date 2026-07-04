@@ -189,6 +189,7 @@ def test_list_models_can_filter_by_level():
     assert list_models("tile") == [
         "conch",
         "conchv15",
+        "dinov2-vitb14",
         "genbio-pathfm",
         "gigapath",
         "gpfm",
