@@ -95,7 +95,7 @@ def compute_tile_embeddings_for_slide(
             return torch.empty((0, int(feature_dim)), dtype=torch.float32)
     supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        resolved_backend = resolve_slide_backend(preprocessing, tiling_result)
+        resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
         collate_fn = OnTheFlyBatchTileCollator(
             image_path=slide.image_path,
             tiling_result=tiling_result,
@@ -139,7 +139,7 @@ def compute_tile_embeddings_for_slide(
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = build_batch_preprocessor(loaded, tiling_result)
     loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
@@ -211,7 +211,7 @@ def compute_hierarchical_embeddings_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
-        backend=resolve_slide_backend(preprocessing, tiling_result),
+        backend=resolve_slide_backend(preprocessing.backend, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
     )
@@ -221,7 +221,7 @@ def compute_hierarchical_embeddings_for_slide(
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
     if resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
@@ -292,7 +292,7 @@ def compute_hierarchical_embedding_shard_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
-        backend=resolve_slide_backend(preprocessing, tiling_result),
+        backend=resolve_slide_backend(preprocessing.backend, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
     )
@@ -302,7 +302,7 @@ def compute_hierarchical_embedding_shard_for_slide(
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing, tiling_result)
+    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
     if resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,

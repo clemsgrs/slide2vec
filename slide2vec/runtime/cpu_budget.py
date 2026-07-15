@@ -50,7 +50,7 @@ def log_on_the_fly_worker_override_once(
     if not preprocessing.on_the_fly or preprocessing.read_tiles_from is not None:
         return
     if not any(
-        resolve_slide_backend(preprocessing, tiling_result) == "cucim"
+        resolve_slide_backend(preprocessing.backend, tiling_result) == "cucim"
         for tiling_result in tiling_results
     ):
         return

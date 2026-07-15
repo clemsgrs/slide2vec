@@ -77,7 +77,7 @@ def run_patient_pipeline(
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
-                    backend=resolve_slide_backend(preprocessing, tiling_result),
+                    backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                 ),
             )
             tile_artifacts.append(tile_artifact)

@@ -35,7 +35,6 @@ serve a larger ROI without interpolating its position embeddings.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Callable, Iterator
 
 import numpy as np
@@ -272,9 +271,8 @@ def iter_regions_dense(
 
     # Resolve the backend the way the pooled path does: an explicit ``backend`` wins,
     # otherwise fall back to the TilingResult's own backend ("auto" resolution).
-    resolved_backend = resolve_slide_backend(
-        SimpleNamespace(backend=backend or "auto"), tiling_result
-    )
+    requested_backend = "auto" if backend is None else backend
+    resolved_backend = resolve_slide_backend(requested_backend, tiling_result)
     reader = WSIRegionReader(
         tiling_result.image_path,
         read_level=read_level,

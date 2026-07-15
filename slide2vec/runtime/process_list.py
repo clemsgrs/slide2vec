@@ -71,7 +71,7 @@ def write_zero_tile_embedding_sidecars(
                     tiling_result=tiling_result,
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
-                    backend=resolve_slide_backend(preprocessing, tiling_result),
+                    backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                     preprocessing=preprocessing,
                 ),
                 annotation=tiling_result_annotation(tiling_result),
@@ -90,7 +90,7 @@ def write_zero_tile_embedding_sidecars(
                 image_path=slide.image_path,
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
-                backend=resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing.backend, tiling_result),
             ),
         )
 
