@@ -159,37 +159,42 @@ Region-level streaming
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The encoder-level API above operates on tiles you have already read and
-normalized. To extract dense grids over many slide regions at once, slide2vec
-provides a higher-level streaming primitive,
-``iter_regions_dense`` (from ``slide2vec.runtime.dense_regions``), that wraps
-spacing-aware region reads, padding, and encoding into a single generator:
+normalized. To extract dense grids over the regions of an hs2p ``TilingResult``,
+slide2vec provides a higher-level streaming primitive,
+``iter_regions_dense`` (from ``slide2vec.runtime.dense_regions``), that wraps the
+region reads, padding, and encoding into a single generator:
 
 .. code-block:: python
 
    from slide2vec.runtime.dense_regions import iter_regions_dense
 
+   # ``tiling_result`` is an hs2p TilingResult (from annotation/tissue sampling);
+   # it already resolved spacing -> level (read_level / read_tile_size_px /
+   # requested_tile_size_px) and carries the region coordinates and slide path.
    for grid in iter_regions_dense(
        model=model,
        device=model.device,
-       wsi=wsi,
-       coordinates=[(0, 0), (4096, 0)],
-       requested_spacing_um=0.5,
-       target_size=2048,
+       tiling_result=tiling_result,
+       num_workers=4,
    ):
        print(grid.shape)  # (d, grid_h, grid_w), float32
 
-For each ``(x, y)`` coordinate (a level-0 top-left location), the region is read
-**spacing-aware** at ``requested_spacing_um`` to ``target_size``, run through the
-encoder's normalization-only ``get_dense_transform``, padded on the bottom/right
-up to the encoder's patch multiple, and encoded into a ``(d, grid_h, grid_w)``
-token grid. The ``wsi`` argument is any object exposing
-``read_region_at_spacing(location, requested_spacing_um, size, *, tolerance,
-interpolation)``, so the loop runs offline in tests with a fake reader.
+Reads go through the **same shared batched reader the pooled path uses**
+(``WSIRegionReader``, cuCIM ``read_regions(num_workers=…)``). For each region the
+reader reads ``read_tile_size_px`` at ``read_level`` and, when that differs from
+``requested_tile_size_px``, **area-resizes** to the supervision size reusing
+hs2p's own ``resize_array(..., "area")`` — the identical operation the tiling
+planner assumed — so the read pixels are unchanged. Each region is then run
+through the encoder's normalization-only ``get_dense_transform``, padded on the
+bottom/right up to the encoder's patch multiple, and encoded into a
+``(d, grid_h, grid_w)`` token grid. The low-level backend is opened lazily via
+``slide2vec.data.tile_reader._open_wsi_backend``, so the loop runs offline in
+tests by monkeypatching that seam with a fake backend.
 
 Streaming contract:
 
 - Grids are yielded **one per coordinate, in coordinate order**; an empty
-  ``coordinates`` sequence yields nothing.
+  ``tiling_result`` yields nothing.
 - Regions are read and encoded one ``batch_size`` chunk at a time, so resident
   host memory is bounded by ``batch_size`` rather than by the slide's coordinate
   count — there is no per-slide accumulation.
