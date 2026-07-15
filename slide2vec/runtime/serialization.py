@@ -2,7 +2,7 @@ import copy
 from pathlib import Path
 from typing import Any
 
-from slide2vec.api import ExecutionOptions, PreprocessingConfig
+from slide2vec.api import DenseOptions, ExecutionOptions, PreprocessingConfig
 
 
 def serialize_model(model) -> dict[str, Any]:
@@ -58,6 +58,41 @@ def serialize_execution(
         "save_slide_embeddings": execution.save_slide_embeddings,
         "save_latents": execution.save_latents,
     }
+
+
+def serialize_dense_options(dense: DenseOptions) -> dict[str, Any]:
+    """JSON-round-trippable dense settings crossing to the torchrun ranks (D10)."""
+    return {
+        "spacing_um": dense.spacing_um,
+        "target_size": dense.target_size,
+        "tolerance": dense.tolerance,
+        "backend": dense.backend,
+        "pad_mode": dense.pad_mode,
+        "image_pad_value": dense.image_pad_value,
+        "window_size": dense.window_size,
+        "overlap": dense.overlap,
+        "feature_kind": dense.feature_kind,
+        "attention_blocks": list(dense.attention_blocks),
+        "attention_include_registers": dense.attention_include_registers,
+    }
+
+
+def deserialize_dense_options(payload: dict[str, Any]) -> DenseOptions:
+    return DenseOptions(
+        spacing_um=float(payload["spacing_um"]),
+        target_size=int(payload["target_size"]),
+        tolerance=float(payload.get("tolerance", 0.05)),
+        backend=str(payload.get("backend", "auto")),
+        pad_mode=str(payload.get("pad_mode", "reflect")),
+        image_pad_value=(
+            float(payload["image_pad_value"]) if payload.get("image_pad_value") is not None else None
+        ),
+        window_size=int(payload["window_size"]) if payload.get("window_size") is not None else None,
+        overlap=float(payload.get("overlap", 0.0)),
+        feature_kind=str(payload.get("feature_kind", "patch_features")),
+        attention_blocks=tuple(int(b) for b in payload.get("attention_blocks", (-1,))),
+        attention_include_registers=bool(payload.get("attention_include_registers", False)),
+    )
 
 
 def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
