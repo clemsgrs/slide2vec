@@ -89,7 +89,7 @@ def persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing.backend, tiling_result),
             ),
         )
         return None, None
@@ -103,7 +103,7 @@ def persist_embedded_slide(
                 tiling_result=tiling_result,
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
-                backend=resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                 preprocessing=preprocessing,
             ),
             annotation=annotation,
@@ -122,7 +122,7 @@ def persist_embedded_slide(
                 image_path=embedded_slide.image_path,
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
-                backend=resolve_slide_backend(preprocessing, tiling_result),
+                backend=resolve_slide_backend(preprocessing.backend, tiling_result),
             ),
         )
     slide_artifact = None

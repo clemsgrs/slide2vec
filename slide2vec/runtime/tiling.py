@@ -18,10 +18,9 @@ def resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
     return preprocessing.backend
 
 
-def resolve_slide_backend(preprocessing: PreprocessingConfig | None, tiling_result) -> str:
-    backend = resolve_tiling_backend(preprocessing)
-    if backend != "auto":
-        return backend
+def resolve_slide_backend(requested_backend: str, tiling_result) -> str:
+    if requested_backend != "auto":
+        return requested_backend
     resolved_backend = tiling_result.backend if hasattr(tiling_result, "backend") else None
     if isinstance(resolved_backend, str) and resolved_backend and resolved_backend != "auto":
         return resolved_backend

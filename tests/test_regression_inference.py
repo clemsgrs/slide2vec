@@ -2719,13 +2719,19 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
     assert recorded.loc[0, "backend"] == "asap"
 
 
-def test_resolve_slide_backend_uses_tiling_result_backend_for_auto():
+@pytest.mark.parametrize(
+    ("requested_backend", "tiling_result", "expected"),
+    [
+        pytest.param("auto", SimpleNamespace(backend="cucim"), "cucim", id="auto-uses-result"),
+        pytest.param("auto", SimpleNamespace(backend="asap"), "asap", id="auto-keeps-asap"),
+        pytest.param("auto", SimpleNamespace(), "asap", id="auto-falls-back-to-asap"),
+        pytest.param("cucim", SimpleNamespace(backend="asap"), "cucim", id="explicit-wins"),
+    ],
+)
+def test_resolve_slide_backend(requested_backend, tiling_result, expected):
     import slide2vec.runtime.tiling as runtime_tiling
 
-    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="cucim")) == "cucim"
-    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace(backend="asap")) == "asap"
-    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="auto"), SimpleNamespace()) == "asap"
-    assert runtime_tiling.resolve_slide_backend(replace(DEFAULT_PREPROCESSING, backend="cucim"), SimpleNamespace(backend="asap")) == "cucim"
+    assert runtime_tiling.resolve_slide_backend(requested_backend, tiling_result) == expected
 
 
 def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd):

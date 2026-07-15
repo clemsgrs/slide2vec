@@ -1,25 +1,28 @@
-"""Dense ``(d, h, w)`` grid extraction over **slide regions at coordinates**.
+"""Dense ``(d, h, w)`` grid extraction over the **regions of an hs2p ``TilingResult``**.
 
 The dense counterpart of the pooled coordinate path (``compute_tile_embeddings_for_slide``
 → ``run_forward_pass`` → ``encode_tiles``): instead of pooling each region to one vector,
-each sampled ROI is read **spacing-aware** from the slide, run through the encoder's
-normalization-only dense transform (``get_dense_transform`` — NOT the pooled transform,
-which crops), padded up to the encoder's patch multiple, and encoded via
-``encode_tiles_dense`` into a ``(d, grid_h, grid_w)`` token grid. ``iter_regions_dense``
-**streams** these grids — yielding one per coordinate, in coordinate order, holding at most
-one ``batch_size`` chunk resident — so host memory is bounded by ``batch_size`` rather than
-by a slide's ROI count.
+each sampled ROI is read from the slide, run through the encoder's normalization-only dense
+transform (``get_dense_transform`` — NOT the pooled transform, which crops), padded up to the
+encoder's patch multiple, and encoded via ``encode_tiles_dense`` into a ``(d, grid_h, grid_w)``
+token grid. ``iter_regions_dense`` **streams** these grids — yielding one per coordinate, in
+coordinate order, holding at most one ``batch_size`` chunk resident — so host memory is bounded
+by ``batch_size`` rather than by a slide's ROI count.
 
 This is the extraction half of soma's slide-manifest segmentation path: slide2vec reads
-regions + encodes (it already owns the region reader and the dense encode); soma sources
-the ROI coordinates (hs2p annotation sampling) and persists/caches the grids. It mirrors
+regions + encodes (it already owns the region reader and the dense encode); soma sources the
+ROIs (hs2p annotation sampling → a ``TilingResult``) and persists/caches the grids. It mirrors
 the pooled split exactly — extraction here, caching in soma.
 
-Region reads are spacing-aware via hs2p (:meth:`hs2p.wsi.wsi.WSI.read_region_at_spacing`):
-the finest pyramid level ``<=`` the requested µm/px is read and downscaled to the exact
-``target_size`` (``area`` for images), so the token grid registers against a mask read at
-the same spacing. The ``wsi`` is injected (any object exposing ``read_region_at_spacing``),
-so the loop is unit-testable offline with a fake reader + a random-weight encoder.
+Reads go through the **same shared batched reader the pooled path uses**
+(:class:`slide2vec.data.tile_reader.WSIRegionReader`, cuCIM ``read_regions(num_workers=…)``),
+driven by the ``TilingResult`` that already resolved the spacing→level plan. The reader reads
+``read_tile_size_px`` at ``read_level`` and, when ``read_tile_size_px != requested_tile_size_px``,
+area-resizes to ``requested_tile_size_px`` reusing hs2p's own ``resize_array(..., "area")`` —
+the identical operation the legacy ``read_region_at_spacing`` performed, so the read pixels are
+unchanged. The token grid registers against a mask read at the same spacing. The offline seam
+is :func:`slide2vec.data.tile_reader._open_wsi_backend` (monkeypatch it with a fake backend to
+run the loop with a random-weight encoder and canned regions).
 
 Both dense modes run through one primitive (:func:`~slide2vec.runtime.dense_sliding.encode_dense_sliding`):
 ``window_size=None`` is a single whole-tile forward (byte-identical to the legacy
@@ -32,16 +35,18 @@ serve a larger ROI without interpolating its position embeddings.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterator, Sequence
+from typing import Callable, Iterator
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
 
+from slide2vec.data.tile_reader import WSIRegionReader
 from slide2vec.runtime.dense_sliding import encode_dense_sliding
 from slide2vec.runtime.model_settings import output_torch_dtype, resolve_output_precision
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
+from slide2vec.runtime.tiling import resolve_slide_backend
 
 
 def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) -> "torch.dtype":
@@ -169,11 +174,9 @@ def iter_regions_dense(
     *,
     model,
     device: torch.device | str,
-    wsi,
-    coordinates: Sequence[tuple[int, int]],
-    requested_spacing_um: float,
-    target_size: int | tuple[int, int],
-    tolerance: float = 0.05,
+    tiling_result,
+    backend: str | None = None,
+    num_workers: int = 4,
     pad_mode: str = "reflect",
     image_pad_value: float | None = None,
     window_size: int | None = None,
@@ -186,7 +189,18 @@ def iter_regions_dense(
     output_dtype: "torch.dtype | None" = None,
     dense_transform: Callable | None = None,
 ) -> Iterator[np.ndarray]:
-    """Stream slide regions at ``coordinates`` into dense grids, one per coordinate.
+    """Stream the regions of ``tiling_result`` into dense grids, one per coordinate.
+
+    Driven by an hs2p ``TilingResult`` — which already resolved the spacing→level plan
+    (``read_level`` / ``read_tile_size_px`` / ``requested_tile_size_px`` via
+    ``plan_spacing_read`` at tiling time) — so this loop does **not** re-plan per read. It
+    reads through the shared batched :class:`~slide2vec.data.tile_reader.WSIRegionReader`
+    (cuCIM ``read_regions(num_workers=…)``), which reads ``read_tile_size_px`` at
+    ``read_level`` and area-resizes to ``requested_tile_size_px`` when they differ (hs2p
+    ``resize_array(..., "area")`` — the identical op the legacy ``read_region_at_spacing``
+    performed, so the read pixels are unchanged). Each region is then run through the
+    normalization-only dense transform, padded up to the encoder's patch multiple, and
+    encoded.
 
     Yields one ``(d, grid_h, grid_w)`` grid per coordinate, in coordinate order, in the
     model's compute ``precision`` by default (fp16 runs yield fp16 grids; see
@@ -194,22 +208,25 @@ def iter_regions_dense(
     resident host memory is bounded by ``batch_size`` rather than by a slide's ROI count
     (the loop holds at most one batch of grids resident — no per-slide accumulation).
 
-    Injectable core: takes a constructed dense-capable ``model`` (with
-    ``encode_tiles_dense`` / ``encode_tiles_attention`` / ``patch_size`` /
-    ``get_dense_transform``) and a ``wsi`` exposing
-    ``read_region_at_spacing(location, requested_spacing_um, size, *, tolerance,
-    interpolation)``, so it runs offline in tests with random weights + a fake reader.
+    Offline seam: the low-level backend is opened lazily via
+    :func:`slide2vec.data.tile_reader._open_wsi_backend`; monkeypatch it with a fake backend
+    (serving canned region arrays through ``read_regions`` / ``read_region``) to run this loop
+    with a random-weight ``model`` and no real slide.
 
     Arguments are validated and geometry is resolved **eagerly** (before any region is
     read): an invalid ``pad_mode`` or ``feature_kind`` raises at the call site, not on the
     first ``next()``. Iteration itself is lazy — reads advance one batch at a time.
 
     Args:
-        coordinates: ``(x, y)`` top-left locations in **level-0** pixel space (the hs2p
-            tiling convention; passed straight to ``read_region_at_spacing``).
-        requested_spacing_um: µm/px to read each region at.
-        target_size: supervision tile size (int or ``(h, w)``); the region is read at this
-            size at ``requested_spacing_um`` and the token grid registers to it.
+        tiling_result: hs2p ``TilingResult`` carrying ``tiles.x`` / ``tiles.y`` (level-0
+            top-left coordinates), ``read_level``, ``read_tile_size_px``,
+            ``requested_tile_size_px``, ``image_path`` and ``backend``. The supervision tile
+            size is ``requested_tile_size_px``; the token grid registers to it.
+        backend: reader backend override (``"cucim"`` / ``"openslide"`` / ``"vips"`` /
+            ``"asap"``). ``None`` (default) resolves from ``tiling_result.backend`` the same
+            way the pooled path does.
+        num_workers: cuCIM read parallelism (``read_regions(num_workers=…)``); size it via
+            :func:`slide2vec.runtime.cpu_budget.resolve_on_the_fly_num_workers`.
         window_size: encoder field-of-view chunk fed through the backbone per forward.
             ``None`` (default) is one whole-tile forward, byte-identical to the
             whole-region encode; a value smaller than the encoded tile slides the encoder
@@ -223,8 +240,8 @@ def iter_regions_dense(
             bfloat16). Pass e.g. ``torch.float32`` to force a lossless cache regardless of
             precision; an explicit ``torch.bfloat16`` is rejected (cannot cross ``.numpy()``).
 
-    Yields grids in coordinate order in ``output_dtype``; empty ``coordinates`` yields nothing.
-    ``feature_kind`` selects ``encode_tiles_dense`` (patch grid) vs
+    Yields grids in coordinate order in ``output_dtype``; an empty ``tiling_result`` yields
+    nothing. ``feature_kind`` selects ``encode_tiles_dense`` (patch grid) vs
     ``encode_tiles_attention`` (CLS-attention grid); both produce a ``(C, gh, gw)`` grid and
     share this path. Each yielded grid is a standalone contiguous copy, so it does not pin
     the rest of its batch's memory alive.
@@ -232,7 +249,12 @@ def iter_regions_dense(
     if pad_mode not in _PAD_MODES:
         raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
     resolved_output_dtype = _resolve_output_dtype(output_dtype, precision)
-    geometry = compute_dense_geometry(target_size=target_size, patch_size=model.patch_size)
+    read_level = int(tiling_result.read_level)
+    read_tile_size_px = int(tiling_result.read_tile_size_px)
+    requested_tile_size_px = int(tiling_result.requested_tile_size_px)
+    geometry = compute_dense_geometry(
+        target_size=requested_tile_size_px, patch_size=model.patch_size
+    )
     if dense_transform is None:
         dense_transform = model.get_dense_transform()
     encode_fn = _resolve_encode_fn(
@@ -242,18 +264,27 @@ def iter_regions_dense(
         attention_include_registers=attention_include_registers,
     )
     target_h, target_w = geometry.target_size
-    coords = [(int(x), int(y)) for x, y in coordinates]
+    x = np.asarray(tiling_result.x)
+    y = np.asarray(tiling_result.y)
+    coords = [(int(x[i]), int(y[i])) for i in range(x.shape[0])]
     step = max(1, int(batch_size))
 
-    def _read_padded(location: tuple[int, int]) -> torch.Tensor:
-        region = wsi.read_region_at_spacing(
-            location,
-            float(requested_spacing_um),
-            (target_w, target_h),  # hs2p size is (width, height)
-            tolerance=float(tolerance),
-            interpolation="area",
-        )
-        region = np.ascontiguousarray(np.asarray(region)[..., :3])
+    # Resolve the backend the way the pooled path does: an explicit ``backend`` wins,
+    # otherwise fall back to the TilingResult's own backend ("auto" resolution).
+    requested_backend = "auto" if backend is None else backend
+    resolved_backend = resolve_slide_backend(requested_backend, tiling_result)
+    reader = WSIRegionReader(
+        tiling_result.image_path,
+        read_level=read_level,
+        region_size_px=read_tile_size_px,
+        backend=resolved_backend,
+        num_cucim_workers=int(num_workers),
+        resize_to_px=requested_tile_size_px,  # area-resizes iff read != requested
+        interpolation="area",
+    )
+
+    def _transform_and_pad(region_hwc: np.ndarray, location: tuple[int, int]) -> torch.Tensor:
+        region = np.ascontiguousarray(np.asarray(region_hwc)[..., :3])
         tensor = torch.as_tensor(dense_transform(Image.fromarray(region))).as_subclass(torch.Tensor)
         if tensor.ndim != 3:
             raise ValueError(
@@ -262,8 +293,8 @@ def iter_regions_dense(
         if tuple(int(s) for s in tensor.shape[-2:]) != (target_h, target_w):
             raise ValueError(
                 f"region at {location} is {tuple(int(s) for s in tensor.shape[-2:])} after the dense "
-                f"transform, but target_size is {(target_h, target_w)}. The dense transform must be "
-                "normalization-only (no resize/crop)."
+                f"transform, but requested_tile_size_px is {(target_h, target_w)}. The dense transform "
+                "must be normalization-only (no resize/crop)."
             )
         return pad_image_to_encoded(
             tensor, geometry, pad_mode=pad_mode, image_pad_value=image_pad_value
@@ -273,9 +304,14 @@ def iter_regions_dense(
         with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
             for start in range(0, len(coords), step):
                 chunk = coords[start : start + step]
-                batch = torch.stack([_read_padded(loc) for loc in chunk]).to(
-                    device, non_blocking=True
-                )
+                # One batched read per chunk (cuCIM read_regions when cucim; serial read
+                # otherwise) through the shared reader, already RGB-sliced and area-resized
+                # to requested_tile_size_px. (B, 3, target_h, target_w) uint8.
+                region_batch, _timing = reader.read_batch_with_timing(chunk)
+                region_np = region_batch.permute(0, 2, 3, 1).numpy()  # (B, H, W, 3) uint8
+                batch = torch.stack(
+                    [_transform_and_pad(region_np[i], chunk[i]) for i in range(region_np.shape[0])]
+                ).to(device, non_blocking=True)
                 # Every batch goes through the one windowed primitive: window_size=None
                 # short-circuits to a single whole-tile forward (byte-identical to the
                 # whole-region encode), so there is no separate whole-region branch.

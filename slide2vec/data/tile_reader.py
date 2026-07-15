@@ -9,6 +9,7 @@ import torch
 from hs2p import TilingResult
 from hs2p.utils.stderr import run_with_filtered_stderr
 from hs2p.wsi.streaming.plans import build_supertile_index
+from hs2p.wsi.wsi import resize_array
 from slide2vec.utils.log_utils import suppress_c_stderr
 
 
@@ -278,7 +279,17 @@ class OnTheFlyBatchTileCollator:
 
 
 class WSIRegionReader:
-    """Random-access region reader for hierarchical extraction."""
+    """Random-access region reader for hierarchical and dense extraction.
+
+    Reads ``region_size_px`` at ``read_level`` (batched via cucim ``read_regions`` when the
+    backend is ``"cucim"``, else serial ``read_region``). When ``resize_to_px`` is set and
+    differs from ``region_size_px``, each region is resized to ``(resize_to_px, resize_to_px)``
+    with ``interpolation`` — reusing hs2p's own :func:`resize_array`. This is the geometry
+    resize the dense path needs (``"area"`` downscale of a coarser-level read to the
+    supervision tile size), applied identically to what ``read_region_at_spacing`` does, and
+    left off (``resize_to_px=None``) for the hierarchical unfold path, which needs the full
+    region.
+    """
 
     def __init__(
         self,
@@ -289,6 +300,8 @@ class WSIRegionReader:
         backend: str = "cucim",
         num_cucim_workers: int = 4,
         gpu_decode: bool = False,
+        resize_to_px: int | None = None,
+        interpolation: str = "area",
     ):
         self._image_path = str(image_path)
         self._backend = backend
@@ -296,6 +309,11 @@ class WSIRegionReader:
         self._gpu_decode = gpu_decode
         self._read_level = int(read_level)
         self._region_size_px = int(region_size_px)
+        self._resize_to_px = int(resize_to_px) if resize_to_px is not None else None
+        self._interpolation = interpolation
+        self._out_size_px = (
+            self._resize_to_px if self._resize_to_px is not None else self._region_size_px
+        )
         self._reader = None
 
     def _ensure_open(self) -> None:
@@ -321,13 +339,24 @@ class WSIRegionReader:
             for loc in locations
         ]
 
+    def _prepare_region(self, region: np.ndarray) -> np.ndarray:
+        """RGB-slice a read region and area-resize it to the target size when configured."""
+        arr = np.asarray(region)[:, :, :3]
+        if self._resize_to_px is not None and self._resize_to_px != self._region_size_px:
+            arr = resize_array(
+                arr,
+                (self._resize_to_px, self._resize_to_px),
+                interpolation=self._interpolation,
+            )
+        return arr
+
     def read_batch_with_timing(
         self,
         locations: list[tuple[int, int]],
     ) -> tuple[torch.Tensor, dict[str, float]]:
         if not locations:
             return (
-                torch.empty((0, 3, self._region_size_px, self._region_size_px), dtype=torch.uint8),
+                torch.empty((0, 3, self._out_size_px, self._out_size_px), dtype=torch.uint8),
                 {"reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
         stderr_context = suppress_c_stderr() if self._backend == "cucim" else nullcontext()
@@ -339,7 +368,7 @@ class WSIRegionReader:
             read_start = time.perf_counter()
             regions = self._read_regions_batch(locations)
         reader_read_ms = (time.perf_counter() - read_start) * 1000.0
-        batch = np.stack([np.asarray(region)[:, :, :3] for region in regions], axis=0)
+        batch = np.stack([self._prepare_region(region) for region in regions], axis=0)
         tensor = torch.from_numpy(batch).permute(0, 3, 1, 2).contiguous()
         return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
 
