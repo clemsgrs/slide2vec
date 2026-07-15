@@ -262,3 +262,287 @@ def test_iter_regions_dense_rejects_bfloat16_output_eagerly():
             requested_spacing_um=0.5, target_size=target_size, output_dtype=torch.bfloat16,
         )
     assert wsi.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Prefetch path (num_workers): overlap reads with the forward.
+#
+# ``num_workers=None`` is the legacy serial path (byte-identical, exercised by the
+# tests above). ``num_workers=K`` reads regions through a ``ThreadPoolExecutor`` of
+# width ``K`` (threads, not processes — the reader releases the GIL), double-buffered
+# so the next batch's reads overlap the current forward, with torch/cv2 intra-op
+# threads pinned to 1 for the read path. These tests prove the *mechanism* on CPU with
+# a fake reader (there is no GPU here to measure the ~2x throughput acceptance target).
+# ---------------------------------------------------------------------------
+
+import threading  # noqa: E402
+import time  # noqa: E402
+from concurrent.futures import ThreadPoolExecutor  # noqa: E402
+
+from slide2vec.runtime import dense_regions as _dense_regions  # noqa: E402
+from slide2vec.runtime.cpu_budget import resolve_on_the_fly_num_workers  # noqa: E402
+
+
+class _ConcurrentFakeWSI:
+    """Thread-safe fake reader that records read concurrency and (optionally) gates.
+
+    ``gate`` reads are held on a ``threading.Barrier(gate)`` so they can only proceed
+    once ``gate`` reads are in flight simultaneously — if the executor is narrower than
+    ``gate`` the barrier times out and the read raises, so a clean run *proves* at least
+    ``gate`` reads ran concurrently. ``max_active`` records the peak concurrency reached.
+    """
+
+    def __init__(self, *, target_h: int, target_w: int, gate: int = 0, sleep_s: float = 0.0):
+        self._target_h = target_h
+        self._target_w = target_w
+        self._sleep_s = sleep_s
+        self._lock = threading.Lock()
+        self.calls: list[tuple] = []
+        self.active = 0
+        self.max_active = 0
+        self._gated_remaining = gate
+        self._barrier = threading.Barrier(gate) if gate else None
+
+    def read_region_at_spacing(self, location, requested_spacing_um, size, *, tolerance, interpolation):
+        with self._lock:
+            self.calls.append((tuple(location), requested_spacing_um, tuple(size), tolerance, interpolation))
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            gate_this = self._gated_remaining > 0
+            if gate_this:
+                self._gated_remaining -= 1
+        if gate_this and self._barrier is not None:
+            self._barrier.wait(timeout=10.0)  # releases only once `gate` reads coexist
+        if self._sleep_s:
+            time.sleep(self._sleep_s)
+        with self._lock:
+            self.active -= 1
+        width, height = size
+        x, y = location
+        rng = np.random.default_rng(abs(hash((int(x), int(y)))) % (2**32))
+        return rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
+
+
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    a = a.astype(np.float64).ravel()
+    b = b.astype(np.float64).ravel()
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+def test_prefetch_pool_width_matches_num_workers(monkeypatch):
+    """Acceptance (b): num_workers sets the ThreadPoolExecutor width."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    captured: list[int] = []
+
+    def _spy_executor(*args, **kwargs):
+        captured.append(int(kwargs.get("max_workers")))
+        return ThreadPoolExecutor(*args, **kwargs)
+
+    monkeypatch.setattr(_dense_regions, "ThreadPoolExecutor", _spy_executor)
+    list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0), (64, 0), (0, 64)],
+        requested_spacing_um=0.5, target_size=target_size, batch_size=2, num_workers=3,
+    ))
+    assert captured == [3]
+
+
+def test_prefetch_width_driven_by_resolve_on_the_fly_num_workers(monkeypatch):
+    """Acceptance (b): the width comes from the num_workers_per_gpu resolver path."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    resolved, _ = resolve_on_the_fly_num_workers(num_cucim_workers=4, num_gpus=1)
+    assert resolved >= 1
+    captured: list[int] = []
+
+    def _spy_executor(*args, **kwargs):
+        captured.append(int(kwargs.get("max_workers")))
+        return ThreadPoolExecutor(*args, **kwargs)
+
+    monkeypatch.setattr(_dense_regions, "ThreadPoolExecutor", _spy_executor)
+    list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
+        requested_spacing_um=0.5, target_size=target_size, num_workers=resolved,
+    ))
+    assert captured == [resolved]
+
+
+@pytest.mark.parametrize("num_workers", [2, 3])
+def test_prefetch_reads_run_concurrently(num_workers):
+    """Acceptance (a)/(b): reads are issued concurrently, not strictly serially.
+
+    A barrier of width ``num_workers`` only releases if that many reads are in flight
+    at once — a serial reader would time out on it and raise.
+    """
+    enc = _encoder()
+    target_size = 64
+    wsi = _ConcurrentFakeWSI(target_h=target_size, target_w=target_size, gate=num_workers)
+    coords = [(i * 64, 0) for i in range(num_workers + 2)]
+    grids = list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=coords,
+        requested_spacing_um=0.5, target_size=target_size,
+        batch_size=1, num_workers=num_workers,
+    ))
+    assert len(grids) == len(coords)
+    assert wsi.max_active == num_workers  # exactly the configured width ran at once
+
+
+def test_prefetch_reads_overlap_the_forward():
+    """Acceptance (a): the next batch's reads are in flight while the forward runs.
+
+    batch_size=1 with a gate of 2 means: for the first forward (of coord 0) to obtain
+    its input, coord 0's read must complete — which the barrier only permits once a
+    *second* read (coord 1, a later batch) is also in flight. A serial path would read
+    coord 0 alone, time out on the barrier, and raise. Completing proves overlap.
+    """
+    enc = _encoder()
+    target_size = 64
+    wsi = _ConcurrentFakeWSI(target_h=target_size, target_w=target_size, gate=2)
+    coords = [(0, 0), (64, 0), (128, 0)]
+    gen = iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=coords,
+        requested_spacing_um=0.5, target_size=target_size,
+        batch_size=1, num_workers=2,
+    )
+    first = next(gen)  # would raise BrokenBarrierError if reads did not overlap
+    assert first.shape[1:] == (4, 4)
+    assert len(list(gen)) == 2
+
+
+def test_prefetch_pins_and_restores_intraop_threads(monkeypatch):
+    """Thread-pinning: the read path sets torch intra-op threads to 1 and restores them."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    before = torch.get_num_threads()
+    seen: list[int] = []
+    real_set = torch.set_num_threads
+
+    def _spy_set(n):
+        seen.append(int(n))
+        return real_set(n)
+
+    monkeypatch.setattr(torch, "set_num_threads", _spy_set)
+    list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0), (64, 0)],
+        requested_spacing_um=0.5, target_size=target_size, batch_size=1, num_workers=2,
+    ))
+    assert 1 in seen  # pinned to a single intra-op thread in the read path
+    assert torch.get_num_threads() == before  # restored afterwards
+
+
+def test_prefetch_does_not_pin_threads_on_serial_path(monkeypatch):
+    """The legacy serial path (num_workers=None) leaves intra-op threads untouched."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    seen: list[int] = []
+    real_set = torch.set_num_threads
+    monkeypatch.setattr(torch, "set_num_threads", lambda n: (seen.append(int(n)), real_set(n))[1])
+    list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
+        requested_spacing_um=0.5, target_size=target_size,
+    ))
+    assert seen == []
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_prefetch_preserves_forward_batch_sizes(monkeypatch, batch_size):
+    """Acceptance (c): prefetch reordering does not change the forward batch sizes B."""
+    enc = _encoder()
+    target_size = 64
+    coords = [(i * 64, 0) for i in range(5)]  # 5 coords => last batch is a remainder
+
+    def _run(num_workers):
+        seen: list[int] = []
+        real = encode_dense_sliding
+
+        def _spy(model, batch, **kwargs):
+            seen.append(int(batch.shape[0]))
+            return real(model, batch, **kwargs)
+
+        monkeypatch.setattr(_dense_regions, "encode_dense_sliding", _spy)
+        wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+        list(iter_regions_dense(
+            model=enc, device="cpu", wsi=wsi, coordinates=coords,
+            requested_spacing_um=0.5, target_size=target_size,
+            batch_size=batch_size, num_workers=num_workers,
+        ))
+        return seen
+
+    assert _run(None) == _run(4)  # identical B sequence, prefetch vs serial
+
+
+@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+def test_prefetch_grids_match_serial_within_tolerance(feature_kind):
+    """Acceptance (c): prefetched grids match the serial path (cosine >= 1 - 1e-4).
+
+    Byte-identity is not required (nor achievable): pinning intra-op threads to 1
+    perturbs the CPU forward's reduction order by ~1e-6. The ADR tolerance applies.
+    """
+    enc = _encoder()
+    target_size = 64
+    coords = [(0, 0), (64, 0), (0, 64), (64, 64), (128, 0)]
+
+    def _grids(num_workers):
+        wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+        return list(iter_regions_dense(
+            model=enc, device="cpu", wsi=wsi, coordinates=coords,
+            requested_spacing_um=0.5, target_size=target_size,
+            batch_size=2, num_workers=num_workers, feature_kind=feature_kind,
+        ))
+
+    serial = _grids(None)
+    prefetched = _grids(3)
+    assert len(serial) == len(prefetched) == len(coords)
+    for s, p in zip(serial, prefetched):
+        assert s.shape == p.shape
+        assert _cosine(s, p) >= 1.0 - 1e-4
+
+
+def test_prefetch_reads_every_coordinate_once():
+    """Acceptance (c): the same set of reads happens, one per coordinate."""
+    enc = _encoder()
+    target_size = 64
+    coords = [(0, 0), (64, 0), (0, 64), (64, 64), (128, 0)]
+    wsi = _ConcurrentFakeWSI(target_h=target_size, target_w=target_size)
+    list(iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=coords,
+        requested_spacing_um=0.5, target_size=target_size, batch_size=2, num_workers=3,
+    ))
+    read_locs = sorted(c[0] for c in wsi.calls)
+    assert read_locs == sorted(coords)
+
+
+def test_prefetch_validates_num_workers_eagerly():
+    """num_workers < 1 raises at the call site, before any region is read."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    with pytest.raises(ValueError):
+        iter_regions_dense(
+            model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0)],
+            requested_spacing_um=0.5, target_size=target_size, num_workers=0,
+        )
+    assert wsi.calls == []
+
+
+def test_prefetch_is_lazy_and_reads_nothing_on_build():
+    """Building the prefetch generator reads nothing; empty coords yield nothing."""
+    enc = _encoder()
+    target_size = 64
+    wsi = _FakeWSI(target_h=target_size, target_w=target_size)
+    gen = iter_regions_dense(
+        model=enc, device="cpu", wsi=wsi, coordinates=[(0, 0), (64, 0)],
+        requested_spacing_um=0.5, target_size=target_size, num_workers=2,
+    )
+    assert wsi.calls == []  # no read until first next()
+    assert len(list(gen)) == 2
+    empty = _FakeWSI(target_h=target_size, target_w=target_size)
+    assert list(iter_regions_dense(
+        model=enc, device="cpu", wsi=empty, coordinates=[],
+        requested_spacing_um=0.5, target_size=target_size, num_workers=2,
+    )) == []
+    assert empty.calls == []

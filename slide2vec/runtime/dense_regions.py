@@ -31,6 +31,9 @@ serve a larger ROI without interpolating its position embeddings.
 
 from __future__ import annotations
 
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable, Iterator, Sequence
 
@@ -42,6 +45,41 @@ from PIL import Image
 from slide2vec.runtime.dense_sliding import encode_dense_sliding
 from slide2vec.runtime.model_settings import output_torch_dtype, resolve_output_precision
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
+
+
+@contextmanager
+def _pinned_intraop_threads() -> Iterator[None]:
+    """Pin torch (and cv2) intra-op threads to 1 for the duration of a dense read stream.
+
+    The pooled ``DataLoader`` path gets this for free — each worker *process* calls
+    ``torch.set_num_threads(1)`` on start. The threaded dense prefetcher shares one
+    process, so we pin process-wide while the stream runs and restore on exit. Pinning
+    collapses the per-ROI dense transform (``get_dense_transform`` + ``pad``) from ~71 ms
+    at torch's default 32 intra-op threads (which thrash on a loaded box) to ~5 ms at a
+    single thread. The GPU forward is unaffected — intra-op threads are CPU-only — so the
+    only visible effect on the encode is a ~1e-6 reduction-order perturbation on a CPU
+    forward, well within the reproducibility tolerance (see ADR 0002).
+    """
+    prev_torch = torch.get_num_threads()
+    try:
+        import cv2  # local import: cv2 is heavy and only needed on the read path
+    except Exception:  # pragma: no cover - cv2 always present in the runtime image
+        cv2 = None
+    prev_cv2 = None
+    if cv2 is not None:
+        try:
+            prev_cv2 = cv2.getNumThreads()
+        except Exception:  # pragma: no cover - defensive
+            prev_cv2 = None
+    torch.set_num_threads(1)
+    if cv2 is not None and prev_cv2 is not None:
+        cv2.setNumThreads(1)
+    try:
+        yield
+    finally:
+        torch.set_num_threads(prev_torch)
+        if cv2 is not None and prev_cv2 is not None:
+            cv2.setNumThreads(prev_cv2)
 
 
 def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) -> "torch.dtype":
@@ -182,6 +220,7 @@ def iter_regions_dense(
     attention_blocks: tuple[int, ...] = (-1,),
     attention_include_registers: bool = False,
     batch_size: int = 1,
+    num_workers: int | None = None,
     precision: str = "fp32",
     output_dtype: "torch.dtype | None" = None,
     dense_transform: Callable | None = None,
@@ -191,8 +230,20 @@ def iter_regions_dense(
     Yields one ``(d, grid_h, grid_w)`` grid per coordinate, in coordinate order, in the
     model's compute ``precision`` by default (fp16 runs yield fp16 grids; see
     ``output_dtype``). Regions are read and encoded one ``batch_size`` chunk at a time, so
-    resident host memory is bounded by ``batch_size`` rather than by a slide's ROI count
-    (the loop holds at most one batch of grids resident — no per-slide accumulation).
+    resident host memory is bounded by ``batch_size`` (serial) / the prefetch window
+    (``num_workers + batch_size`` in-flight reads, see ``num_workers``) rather than by a
+    slide's ROI count — no per-slide accumulation.
+
+    Reads and the encoder forward run serially on the main thread by default
+    (``num_workers is None``): read a chunk → forward → yield, one chunk at a time. This
+    leaves the GPU idle on CPU JPEG decode. Pass ``num_workers=K`` to read regions through
+    a ``ThreadPoolExecutor`` of width ``K`` (threads, not processes — cuCIM/hs2p release
+    the GIL during a region read), double-buffered so the next batch's reads overlap the
+    current forward, with torch/cv2 intra-op threads pinned to 1 for the read path. Batches
+    are the *same* fixed ``batch_size`` chunks of ``coordinates`` and are gathered in
+    coordinate order, so the prefetcher only changes read *timing*, never the forward batch
+    size ``B`` or its membership (ADR 0002: grids are reproducible to a tolerance; thread
+    pinning perturbs a CPU forward by ~1e-6, a GPU forward not at all).
 
     Injectable core: takes a constructed dense-capable ``model`` (with
     ``encode_tiles_dense`` / ``encode_tiles_attention`` / ``patch_size`` /
@@ -218,6 +269,13 @@ def iter_regions_dense(
             sliding is internal to extraction.
         overlap: fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
             ``window_size is None``); the stride is ``window * (1 - overlap)``.
+        num_workers: prefetch width. ``None`` (default) reads serially on the main thread
+            (the legacy path). A positive ``K`` reads regions through a ``K``-thread
+            ``ThreadPoolExecutor`` that overlaps reads with the forward. Callers size this
+            from ``ExecutionOptions.num_workers_per_gpu`` (resolved by
+            ``slide2vec.runtime.cpu_budget.resolve_on_the_fly_num_workers``); it is taken as
+            a plain int here so the primitive stays injectable/offline-testable. ``< 1``
+            is rejected eagerly.
         output_dtype: torch dtype the grids are materialized in. ``None`` (default) follows
             the compute ``precision`` — fp16 → fp16, fp32 → fp32, bf16 → fp32 (numpy has no
             bfloat16). Pass e.g. ``torch.float32`` to force a lossless cache regardless of
@@ -231,6 +289,8 @@ def iter_regions_dense(
     """
     if pad_mode not in _PAD_MODES:
         raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
+    if num_workers is not None and int(num_workers) < 1:
+        raise ValueError(f"num_workers must be a positive int or None, got {num_workers!r}")
     resolved_output_dtype = _resolve_output_dtype(output_dtype, precision)
     geometry = compute_dense_geometry(target_size=target_size, patch_size=model.patch_size)
     if dense_transform is None:
@@ -269,33 +329,69 @@ def iter_regions_dense(
             tensor, geometry, pad_mode=pad_mode, image_pad_value=image_pad_value
         )
 
-    def _stream() -> Iterator[np.ndarray]:
+    def _encode_batch(tiles: list[torch.Tensor]) -> Iterator[np.ndarray]:
+        """Stack one fixed chunk of read tiles, run the forward, yield its grids.
+
+        The batch is exactly the chunk's tiles in coordinate order — identical batch size
+        ``B`` and membership whether the tiles were read serially or via the prefetcher, so
+        reordering reads never changes the forward's grouping (acceptance c).
+        """
+        batch = torch.stack(tiles).to(device, non_blocking=True)
+        # Every batch goes through the one windowed primitive: window_size=None
+        # short-circuits to a single whole-tile forward (byte-identical to the
+        # whole-region encode), so there is no separate whole-region branch.
+        out = encode_dense_sliding(
+            model,
+            batch,
+            geometry=geometry,
+            window_size=window_size,
+            overlap=overlap,
+            encode_fn=encode_fn,
+        )
+        if out.ndim != 4:
+            raise ValueError(
+                f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
+            )
+        batch_np = out.detach().to(resolved_output_dtype).cpu().numpy()
+        for i in range(batch_np.shape[0]):
+            # Standalone C-contiguous copy: a per-row view would pin the whole
+            # batch alive (the blended sliding output is contiguous, so a view of
+            # it would not copy). ``.copy()`` always copies, in C order.
+            yield batch_np[i].copy()
+
+    def _stream_serial() -> Iterator[np.ndarray]:
         with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
             for start in range(0, len(coords), step):
                 chunk = coords[start : start + step]
-                batch = torch.stack([_read_padded(loc) for loc in chunk]).to(
-                    device, non_blocking=True
-                )
-                # Every batch goes through the one windowed primitive: window_size=None
-                # short-circuits to a single whole-tile forward (byte-identical to the
-                # whole-region encode), so there is no separate whole-region branch.
-                out = encode_dense_sliding(
-                    model,
-                    batch,
-                    geometry=geometry,
-                    window_size=window_size,
-                    overlap=overlap,
-                    encode_fn=encode_fn,
-                )
-                if out.ndim != 4:
-                    raise ValueError(
-                        f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
-                    )
-                batch_np = out.detach().to(resolved_output_dtype).cpu().numpy()
-                for i in range(batch_np.shape[0]):
-                    # Standalone C-contiguous copy: a per-row view would pin the whole
-                    # batch alive (the blended sliding output is contiguous, so a view of
-                    # it would not copy). ``.copy()`` always copies, in C order.
-                    yield batch_np[i].copy()
+                yield from _encode_batch([_read_padded(loc) for loc in chunk])
 
-    return _stream()
+    def _stream_prefetch(workers: int) -> Iterator[np.ndarray]:
+        # Double-buffered read/forward overlap. ``capacity`` is the max in-flight reads:
+        # ``workers + step`` keeps the whole pool busy AND guarantees the next batch's
+        # reads are already submitted while the current batch forwards. Reads are gathered
+        # in submission order (== coordinate order), so batches match the serial chunks.
+        n = len(coords)
+        capacity = workers + step
+        with _pinned_intraop_threads(), torch.inference_mode(), slide_encode_autocast_ctx(
+            device, precision
+        ):
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures: deque[Future[torch.Tensor]] = deque()
+                submitted = 0
+
+                def _fill() -> None:
+                    nonlocal submitted
+                    while submitted < n and len(futures) < capacity:
+                        futures.append(pool.submit(_read_padded, coords[submitted]))
+                        submitted += 1
+
+                _fill()
+                for start in range(0, n, step):
+                    count = min(step, n - start)
+                    tiles = [futures.popleft().result() for _ in range(count)]
+                    _fill()  # top up so the next batch's reads overlap this forward
+                    yield from _encode_batch(tiles)
+
+    if num_workers is None:
+        return _stream_serial()
+    return _stream_prefetch(int(num_workers))
