@@ -78,7 +78,7 @@ def flatten_slide_regions(regions: Sequence) -> list[_FlatRegion]:
             )
         annotation = slide_regions.annotation
         sample_id = str(slide_regions.sample_id)
-        image_path = str(slide_regions.image_path)
+        image_path = str(Path(slide_regions.image_path).expanduser().resolve())
         for x, y in coordinates:
             flat.append(_FlatRegion(sample_id, image_path, int(x), int(y), annotation))
     return flat
@@ -162,7 +162,8 @@ def embed_regions_dense(
     execution,
 ) -> list[DenseRegionArtifact]:
     """Extract + persist a dense grid per ROI across all visible GPUs (the D8 entry point)."""
-    out_dir = Path(execution.output_dir)
+    out_dir = Path(execution.output_dir).expanduser().resolve()
+    execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
     flat = flatten_slide_regions(regions)
     remaining, skipped = partition_regions_by_resume(flat, out_dir)
@@ -199,6 +200,7 @@ def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
         device=loaded.device,
         precision=execution.precision,
         output_dtype=resolve_output_torch_dtype(execution),
+        num_workers=execution.resolved_num_workers_per_gpu(),
     )
 
 

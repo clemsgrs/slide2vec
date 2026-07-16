@@ -16,6 +16,7 @@ set, grids within a per-grid cosine tolerance (docs/adr/0002).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +25,7 @@ torch = pytest.importorskip("torch")
 timm = pytest.importorskip("timm")
 
 from slide2vec.api import DenseOptions  # noqa: E402
+from slide2vec.artifacts import region_dense_paths, write_dense_region  # noqa: E402
 from slide2vec.data import tile_reader  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime.dense_shard import (  # noqa: E402
@@ -173,6 +175,88 @@ def test_plan_dense_shards_rejects_non_positive_world_size():
 # --------------------------------------------------------------------------------------
 # Layer 2: run_dense_shard (device-agnostic encode+write loop, CPU-tested)
 # --------------------------------------------------------------------------------------
+
+
+def test_region_dense_paths_rejects_sample_id_paths(tmp_path):
+    with pytest.raises(ValueError, match="sample_id"):
+        region_dense_paths(
+            tmp_path,
+            sample_id="/tmp/outside",
+            annotation=None,
+            x=0,
+            y=0,
+        )
+
+
+def test_region_dense_paths_rejects_drive_relative_sample_id(tmp_path):
+    with pytest.raises(ValueError, match="sample_id"):
+        region_dense_paths(
+            tmp_path,
+            sample_id="C:outside",
+            annotation=None,
+            x=0,
+            y=0,
+        )
+
+
+def test_region_dense_paths_rejects_symlink_escape(tmp_path):
+    output_dir = tmp_path / "output"
+    slide_dir = output_dir / "dense_embeddings" / "slide-1"
+    outside_dir = tmp_path / "outside"
+    slide_dir.parent.mkdir(parents=True)
+    outside_dir.mkdir()
+    slide_dir.symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="output_dir"):
+        region_dense_paths(
+            output_dir,
+            sample_id="slide-1",
+            annotation=None,
+            x=0,
+            y=0,
+        )
+
+
+def test_region_dense_paths_rejects_annotation_paths(tmp_path):
+    with pytest.raises(ValueError, match="annotation"):
+        region_dense_paths(
+            tmp_path,
+            sample_id="slide-1",
+            annotation="../../outside",
+            x=0,
+            y=0,
+        )
+
+
+def test_write_dense_region_does_not_publish_interrupted_sidecar(tmp_path, monkeypatch):
+    original_write_text = Path.write_text
+
+    def _interrupted_write(path, text, *, encoding):
+        original_write_text(path, text[:1], encoding=encoding)
+        raise OSError("simulated interrupted metadata write")
+
+    monkeypatch.setattr(Path, "write_text", _interrupted_write)
+
+    with pytest.raises(OSError, match="interrupted metadata write"):
+        write_dense_region(
+            torch.zeros((2, 2, 2)),
+            output_dir=tmp_path,
+            sample_id="slide-1",
+            annotation=None,
+            x=0,
+            y=0,
+            metadata={"feature_dim": 2, "grid_shape": [2, 2]},
+        )
+
+    payload_path, sidecar_path = region_dense_paths(
+        tmp_path,
+        sample_id="slide-1",
+        annotation=None,
+        x=0,
+        y=0,
+    )
+    assert payload_path.exists()
+    assert not sidecar_path.exists()
 
 
 def _dense(**kwargs) -> DenseOptions:

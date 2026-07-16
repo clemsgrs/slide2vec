@@ -41,10 +41,12 @@ def _canned_region(location, size) -> np.ndarray:
 class _FakeBackend:
     def __init__(self) -> None:
         self.locations: list[tuple[int, int]] = []
+        self.num_workers: list[int] = []
 
     def read_regions(self, locations, level, size, num_workers):
         locs = [(int(x), int(y)) for x, y in locations]
         self.locations.extend(locs)
+        self.num_workers.append(int(num_workers))
         return [_canned_region(loc, size) for loc in locs]
 
     def read_region(self, location, level, size):
@@ -112,7 +114,12 @@ def test_embed_regions_dense_num_gpus_one_runs_in_process(fake_backend, stub_rea
         lambda **kwargs: pytest.fail("num_gpus=1 must not launch torchrun"),
     )
     model = _FakeModel(_encoder())
-    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32")
+    execution = ExecutionOptions(
+        output_dir=tmp_path,
+        num_gpus=1,
+        num_workers_per_gpu=7,
+        precision="fp32",
+    )
 
     artifacts = dense_stage.embed_regions_dense(
         model, [_regions()], dense=_dense(), execution=execution,
@@ -124,6 +131,7 @@ def test_embed_regions_dense_num_gpus_one_runs_in_process(fake_backend, stub_rea
     for art in artifacts:
         assert art.metadata_path.exists()
         assert art.grid_shape == (4, 4)
+    assert {num_workers for backend in fake_backend.values() for num_workers in backend.num_workers} == {7}
 
 
 def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend, stub_read_plan, tmp_path, monkeypatch):
@@ -133,6 +141,9 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
     from slide2vec.runtime.dense_shard import plan_dense_shards, run_dense_shard
     from slide2vec.runtime.serialization import deserialize_dense_options
 
+    caller_dir = tmp_path / "caller"
+    caller_dir.mkdir()
+    monkeypatch.chdir(caller_dir)
     captured = {}
     rank_encoder = _encoder()  # every rank loads the same checkpoint
 
@@ -140,7 +151,14 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
         request = json.loads(Path(request_path).read_text())
         with np.load(request["coordinates_npz_path"], allow_pickle=False) as payload:
             coords = np.asarray(payload["coordinates"])
-        captured.update(module=module, num_gpus=num_gpus, request=request, coords=coords)
+        captured.update(
+            module=module,
+            num_gpus=num_gpus,
+            output_dir=output_dir,
+            request_path=request_path,
+            request=request,
+            coords=coords,
+        )
         # Simulate the ranks: rebuild the flat specs, shard, encode each shard on CPU.
         specs = dense_stage.region_specs_from_request(request)
         dense = deserialize_dense_options(request["dense"])
@@ -156,7 +174,7 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
         lambda *a, **k: pytest.fail("num_gpus>1 must not encode in-process"),
     )
     model = _FakeModel(_encoder())
-    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=3, precision="fp32")
+    execution = ExecutionOptions(output_dir=Path("output"), num_gpus=3, precision="fp32")
 
     artifacts = dense_stage.embed_regions_dense(
         model,
@@ -166,14 +184,19 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
 
     assert captured["module"] == "slide2vec.distributed.dense_worker"
     assert captured["num_gpus"] == 3
+    expected_output_dir = (caller_dir / "output").resolve()
+    assert Path(captured["output_dir"]) == expected_output_dir
+    assert Path(captured["request_path"]).is_absolute()
+    assert captured["request"]["execution"]["output_dir"] == str(expected_output_dir)
+    assert all(Path(slide["image_path"]).is_absolute() for slide in captured["request"]["slides"])
     # All three ROIs travelled to the npz, slide-ordered.
     assert captured["coords"].tolist() == [[0, 0], [64, 0], [0, 0]]
     assert [s["sample_id"] for s in captured["request"]["slides"]] == ["s0", "s1"]
     assert captured["request"]["dense"]["target_size"] == 64
     # Collection returns one artifact per input ROI, read back off disk (nobody gathered grids).
     assert len(artifacts) == 3
-    assert (tmp_path / "dense_embeddings" / "s0" / "0_0.pt").exists()
-    assert (tmp_path / "dense_embeddings" / "s1" / "0_0.pt").exists()
+    assert (expected_output_dir / "dense_embeddings" / "s0" / "0_0.pt").exists()
+    assert (expected_output_dir / "dense_embeddings" / "s1" / "0_0.pt").exists()
 
 
 def test_embed_regions_dense_resume_skips_existing_and_logs(fake_backend, stub_read_plan, tmp_path, caplog):

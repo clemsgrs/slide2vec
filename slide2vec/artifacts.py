@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -137,7 +138,15 @@ def _ensure_tensor(data: Any):
 
 def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid4().hex}")
+    try:
+        tmp_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def tile_embeddings_subdir(annotation: str | None) -> str:
@@ -187,6 +196,20 @@ def hierarchical_embeddings_subdir(annotation: str | None) -> str:
     return f"hierarchical_embeddings/{annotation}"
 
 
+def _validate_path_component(value: str, *, field: str) -> str:
+    component = str(value)
+    if (
+        not component
+        or component in {".", ".."}
+        or "/" in component
+        or "\\" in component
+        or "\x00" in component
+        or PureWindowsPath(component).drive
+    ):
+        raise ValueError(f"{field} must be a non-empty filesystem path component")
+    return component
+
+
 def dense_embeddings_subdir(annotation: str | None) -> str:
     """Namespace the ``dense_embeddings`` output dir per annotation class.
 
@@ -197,7 +220,8 @@ def dense_embeddings_subdir(annotation: str | None) -> str:
     """
     if is_flattened_annotation(annotation):
         return "dense_embeddings"
-    return f"dense_embeddings/{annotation}"
+    annotation_component = _validate_path_component(annotation, field="annotation")
+    return f"dense_embeddings/{annotation_component}"
 
 
 def region_dense_paths(
@@ -208,7 +232,11 @@ def region_dense_paths(
     Geometry-independent (named only from slide + level-0 ``(x, y)`` + class), so the resume
     check can test sidecar existence before any slide is opened.
     """
-    slide_dir = (Path(output_dir) / dense_embeddings_subdir(annotation) / str(sample_id)).resolve()
+    output_root = Path(output_dir).expanduser().resolve()
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    slide_dir = (output_root / dense_embeddings_subdir(annotation) / sample_component).resolve()
+    if not slide_dir.is_relative_to(output_root):
+        raise ValueError("Dense artifact path must stay within output_dir")
     stem = f"{int(x)}_{int(y)}"
     return slide_dir / f"{stem}.pt", slide_dir / f"{stem}.meta.json"
 

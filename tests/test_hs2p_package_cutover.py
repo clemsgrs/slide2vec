@@ -17,6 +17,9 @@ def test_package_root_exports_api():
     assert hasattr(package, "EmbeddedSlide")
     assert hasattr(package, "TileEmbeddingArtifact")
     assert hasattr(package, "SlideEmbeddingArtifact")
+    assert hasattr(package, "DenseOptions")
+    assert hasattr(package, "SlideRegions")
+    assert hasattr(package, "DenseRegionArtifact")
 
 
 def test_load_slide_manifest_requires_hs2p_schema(tmp_path: Path):
