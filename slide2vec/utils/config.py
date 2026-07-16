@@ -6,10 +6,7 @@ import getpass
 from pathlib import Path
 from omegaconf import OmegaConf
 
-from slide2vec.distributed import (
-    is_enabled_and_multiple_gpus,
-    is_main_process,
-)
+from slide2vec.distributed import is_main_process
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.utils import initialize_wandb, fix_random_seeds, get_sha, setup_logging
 from slide2vec.configs import default_config
@@ -170,9 +167,5 @@ def hf_login():
         prompted = True
     if token is None:
         return
-    if is_enabled_and_multiple_gpus():
-        import torch.distributed as dist
-
-        dist.barrier()
     if is_main_process() and prompted:
         login(token)

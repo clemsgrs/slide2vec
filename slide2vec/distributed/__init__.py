@@ -1,11 +1,10 @@
-import datetime
 import os
-import random
 import socket
 
 import torch
-import torch.distributed as dist
 
+_RANK = -1
+_WORLD_SIZE = -1
 _LOCAL_RANK = -1
 _LOCAL_WORLD_SIZE = -1
 
@@ -13,27 +12,17 @@ _LOCAL_WORLD_SIZE = -1
 def is_enabled() -> bool:
     """
     Returns:
-        True if distributed training is enabled
+        True if distributed mode has been enabled (the process topology is known).
     """
-    return dist.is_available() and dist.is_initialized()
-
-
-def is_enabled_and_multiple_gpus() -> bool:
-    """
-    Returns:
-        True if distributed training is enabled and there are multiple GPUs available.
-    """
-    return (
-        dist.is_available() and dist.is_initialized() and torch.cuda.device_count() > 1
-    )
+    return _RANK >= 0
 
 
 def get_global_size() -> int:
     """
     Returns:
-        The number of processes in the process group
+        The number of processes in the job.
     """
-    return dist.get_world_size() if is_enabled() else 1
+    return _WORLD_SIZE if is_enabled() else 1
 
 
 def get_global_rank() -> int:
@@ -41,7 +30,7 @@ def get_global_rank() -> int:
     Returns:
         The rank of the current process within the global process group.
     """
-    return dist.get_rank() if is_enabled() else 0
+    return _RANK if is_enabled() else 0
 
 
 def get_local_rank() -> int:
@@ -198,9 +187,15 @@ def enable(
     *,
     set_cuda_current_device: bool = True,
     overwrite: bool = False,
-    allow_nccl_timeout: bool = False,
 ):
-    """Enable distributed mode
+    """Enable distributed mode.
+
+    Reads the process topology (RANK / WORLD_SIZE / LOCAL_RANK / LOCAL_WORLD_SIZE) that
+    torchrun exports — or single-process defaults when launched bare — and records it for
+    the ``get_*`` helpers. No ``torch.distributed`` process group is created: the workers
+    run no collectives (each rank writes its own artifacts and nobody gathers), so an NCCL
+    group would only add init cost and a 14-day-timeout hang surface for no benefit. See
+    issue #219.
 
     Args:
         set_cuda_current_device: If True, call torch.cuda.set_device() to set the
@@ -208,8 +203,8 @@ def enable(
         overwrite: If True, overwrites already set variables. Else fails.
     """
 
-    global _LOCAL_RANK, _LOCAL_WORLD_SIZE
-    if _LOCAL_RANK >= 0 or _LOCAL_WORLD_SIZE >= 0:
+    global _RANK, _WORLD_SIZE, _LOCAL_RANK, _LOCAL_WORLD_SIZE
+    if is_enabled():
         raise RuntimeError("Distributed mode has already been enabled")
     torch_env = _TorchDistributedEnvironment()
     torch_env.export(overwrite=overwrite)
@@ -217,20 +212,9 @@ def enable(
     if set_cuda_current_device:
         torch.cuda.set_device(torch_env.local_rank)
 
-    if allow_nccl_timeout:
-        # This allows to use torch distributed timeout in a NCCL backend
-        key, value = "NCCL_ASYNC_ERROR_HANDLING", "1"
-        if not overwrite:
-            _check_env_variable(key, value)
-        os.environ[key] = value
-
-    dist.init_process_group(
-        backend="nccl",
-        timeout=datetime.timedelta(days=14),
-        device_id=torch.device(f"cuda:{torch_env.local_rank}")
-    )
-
     # Finalize setup
+    _RANK = torch_env.rank
+    _WORLD_SIZE = torch_env.world_size
     _LOCAL_RANK = torch_env.local_rank
     _LOCAL_WORLD_SIZE = torch_env.local_world_size
     _restrict_print_to_main_process()
