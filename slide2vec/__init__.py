@@ -1,4 +1,5 @@
 from slide2vec.api import (
+    DenseOptions,
     EmbeddedPatient,
     EmbeddedSlide,
     ExecutionOptions,
@@ -6,9 +7,15 @@ from slide2vec.api import (
     Pipeline,
     PreprocessingConfig,
     RunResult,
+    SlideRegions,
     list_models,
 )
-from slide2vec.artifacts import HierarchicalEmbeddingArtifact, SlideEmbeddingArtifact, TileEmbeddingArtifact
+from slide2vec.artifacts import (
+    DenseRegionArtifact,
+    HierarchicalEmbeddingArtifact,
+    SlideEmbeddingArtifact,
+    TileEmbeddingArtifact,
+)
 
 
 __version__ = "5.3.0"
@@ -18,6 +25,8 @@ __all__ = [
     "list_models",
     "Pipeline",
     "PreprocessingConfig",
+    "DenseOptions",
+    "SlideRegions",
     "ExecutionOptions",
     "RunResult",
     "EmbeddedPatient",
@@ -25,5 +34,6 @@ __all__ = [
     "SlideEmbeddingArtifact",
     "HierarchicalEmbeddingArtifact",
     "TileEmbeddingArtifact",
+    "DenseRegionArtifact",
     "__version__",
 ]

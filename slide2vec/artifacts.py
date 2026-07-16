@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PureWindowsPath
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -69,6 +71,30 @@ class HierarchicalEmbeddingArtifact:
         return load_metadata(self.metadata_path)
 
 
+@dataclass(frozen=True, kw_only=True)
+class DenseRegionArtifact:
+    """One persisted dense ROI grid: the ``(d, gh, gw)`` payload + its geometry sidecar.
+
+    Dense emits one *directory* per slide (``dense_embeddings/[<class>/]<sample_id>/``) and
+    one ``<x>_<y>.pt`` / ``<x>_<y>.meta.json`` pair per ROI — the counterpart of the pooled
+    one-file-per-slide artifacts. Named from what slide2vec knows (slide + level-0 top-left
+    coordinate); soma maps its ROI ``sample_id`` back onto ``(x, y)``.
+    """
+
+    sample_id: str
+    x: int
+    y: int
+    path: Path
+    metadata_path: Path
+    feature_dim: int
+    grid_shape: tuple[int, int]
+    annotation: str | None = None
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return load_metadata(self.metadata_path)
+
+
 def _validate_output_format(output_format: str) -> str:
     normalized = output_format.lower()
     if normalized not in {"pt", "npz"}:
@@ -112,7 +138,15 @@ def _ensure_tensor(data: Any):
 
 def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid4().hex}")
+    try:
+        tmp_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def tile_embeddings_subdir(annotation: str | None) -> str:
@@ -160,6 +194,89 @@ def hierarchical_embeddings_subdir(annotation: str | None) -> str:
     if is_flattened_annotation(annotation):
         return "hierarchical_embeddings"
     return f"hierarchical_embeddings/{annotation}"
+
+
+def _validate_path_component(value: str, *, field: str) -> str:
+    component = str(value)
+    if (
+        not component
+        or component in {".", ".."}
+        or "/" in component
+        or "\\" in component
+        or "\x00" in component
+        or PureWindowsPath(component).drive
+    ):
+        raise ValueError(f"{field} must be a non-empty filesystem path component")
+    return component
+
+
+def dense_embeddings_subdir(annotation: str | None) -> str:
+    """Namespace the ``dense_embeddings`` output dir per annotation class.
+
+    Reuses hs2p's flatten rule (the single source of truth, shared with
+    :func:`tile_embeddings_subdir` and the other pooled subdir helpers): ``None`` and the
+    sentinel ``"tissue"`` collapse to the flat ``dense_embeddings`` root; any real class
+    label gets its own ``dense_embeddings/<class>`` subdirectory.
+    """
+    if is_flattened_annotation(annotation):
+        return "dense_embeddings"
+    annotation_component = _validate_path_component(annotation, field="annotation")
+    return f"dense_embeddings/{annotation_component}"
+
+
+def region_dense_paths(
+    output_dir: str | Path, *, sample_id: str, annotation: str | None, x: int, y: int
+) -> tuple[Path, Path]:
+    """``(payload_path, sidecar_path)`` for one ROI: ``.../<sample_id>/<x>_<y>.{pt,meta.json}``.
+
+    Geometry-independent (named only from slide + level-0 ``(x, y)`` + class), so the resume
+    check can test sidecar existence before any slide is opened.
+    """
+    output_root = Path(output_dir).expanduser().resolve()
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    slide_dir = (output_root / dense_embeddings_subdir(annotation) / sample_component).resolve()
+    if not slide_dir.is_relative_to(output_root):
+        raise ValueError("Dense artifact path must stay within output_dir")
+    stem = f"{int(x)}_{int(y)}"
+    return slide_dir / f"{stem}.pt", slide_dir / f"{stem}.meta.json"
+
+
+def write_dense_region(
+    grid,
+    *,
+    output_dir: str | Path,
+    sample_id: str,
+    annotation: str | None,
+    x: int,
+    y: int,
+    metadata: dict[str, Any],
+) -> DenseRegionArtifact:
+    """Persist one ``(d, gh, gw)`` grid + its geometry sidecar, atomically and sidecar-last.
+
+    Write order (D6): payload to a temp file in the destination directory → ``os.replace``
+    into ``<x>_<y>.pt`` (atomic on the same filesystem) → then the ``<x>_<y>.meta.json``
+    sidecar. A payload present without its sidecar therefore unambiguously means an
+    incomplete ROI, and resume treats the sidecar as the done-marker.
+    """
+    payload_path, metadata_path = region_dense_paths(
+        output_dir, sample_id=sample_id, annotation=annotation, x=x, y=y
+    )
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    grid_array = _ensure_array(grid)
+    tmp_path = payload_path.with_name(f"{payload_path.name}.tmp-{os.getpid()}")
+    torch.save(_ensure_tensor(grid), tmp_path)
+    os.replace(tmp_path, payload_path)
+    _write_metadata(metadata_path, metadata)
+    return DenseRegionArtifact(
+        sample_id=sample_id,
+        x=int(x),
+        y=int(y),
+        path=payload_path,
+        metadata_path=metadata_path,
+        feature_dim=int(grid_array.shape[0]),
+        grid_shape=(int(grid_array.shape[1]), int(grid_array.shape[2])),
+        annotation=annotation,
+    )
 
 
 def _setup_artifact_paths(

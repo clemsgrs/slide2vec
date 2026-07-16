@@ -11,6 +11,7 @@ import torch
 from hs2p import SlideSpec
 
 from slide2vec.artifacts import (
+    DenseRegionArtifact,
     HierarchicalEmbeddingArtifact,
     PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
@@ -313,6 +314,63 @@ class ExecutionOptions:
 
 
 @dataclass(frozen=True, kw_only=True)
+class DenseOptions:
+    """Dense ``(d, gh, gw)`` grid extraction settings (issue #217).
+
+    The dense counterpart of the pooled :class:`PreprocessingConfig`: it names the
+    extraction geometry (spacing → level, supervision ``target_size``, padding) and the
+    dense encode knobs (whole-tile vs sliding-window, patch grid vs CLS-attention). Unlike
+    the pooled path there is no tiling — the caller supplies ROI coordinates directly (see
+    :class:`SlideRegions`) — so a ``DenseOptions`` carries only what slide2vec needs to read
+    and encode each ROI. ``ExecutionOptions`` is reused unchanged for output/precision/GPUs.
+    """
+
+    #: Target spacing in µm/px the ROI is read at (resolved to a pyramid level per slide).
+    spacing_um: float
+    #: Supervision tile side length in pixels at *spacing_um* (the dense grid registers to it).
+    target_size: int
+    #: Relative spacing tolerance for pyramid level selection.
+    tolerance: float = 0.05
+    #: Slide reading backend. ``"auto"`` resolves per slide (cucim → openslide → vips).
+    backend: str = "auto"
+    #: Padding mode used to pad the tile up to the encoder's patch multiple.
+    #: One of ``"reflect"`` / ``"replicate"`` / ``"constant"`` / ``"zero"``.
+    pad_mode: str = "reflect"
+    #: Constant fill value for ``pad_mode in {"constant", "zero"}`` (ignored otherwise).
+    image_pad_value: float | None = None
+    #: Encoder field-of-view chunk fed through the backbone per forward. ``None`` (default)
+    #: is one whole-tile forward; a smaller value slides the encoder and blends token grids.
+    window_size: int | None = None
+    #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
+    #: ``window_size is None``).
+    overlap: float = 0.0
+    #: ``"patch_features"`` (the patch-token grid) or ``"cls_attention"`` (CLS/register
+    #: self-attention grid).
+    feature_kind: str = "patch_features"
+    #: Transformer blocks whose CLS attention is read (``cls_attention`` only).
+    attention_blocks: tuple[int, ...] = (-1,)
+    #: Include register-token query rows as extra attention channels (``cls_attention`` only).
+    attention_include_registers: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class SlideRegions:
+    """One slide's ROIs for dense extraction: ``(sample_id, image_path, coordinates, annotation)``.
+
+    The dense input unit soma's slide-manifest path hands to
+    :meth:`Model.embed_regions_dense`. ``coordinates`` is an ``(N, 2)`` array of level-0
+    top-left ``(x, y)`` pixel coordinates; each ROI is read + encoded into one persisted
+    ``(d, gh, gw)`` grid named ``<x>_<y>.pt``. ``annotation`` namespaces the output under a
+    per-class subdirectory (reusing the pooled convention); ``None`` is the flat layout.
+    """
+
+    sample_id: str
+    image_path: PathLike
+    coordinates: Any
+    annotation: str | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
 class RunResult:
     """Return value of :meth:`Pipeline.run`."""
 
@@ -587,6 +645,30 @@ class Model:
                 preprocessing=resolved_preprocessing,
                 execution=resolved,
             )
+
+    def embed_regions_dense(
+        self,
+        regions: "Sequence[SlideRegions]",
+        *,
+        dense: "DenseOptions",
+        execution: ExecutionOptions | None = None,
+    ) -> list[DenseRegionArtifact]:
+        """Extract + persist a dense ``(d, gh, gw)`` grid per caller-supplied ROI.
+
+        The dense counterpart of the pooled coordinate path: each ``SlideRegions`` names a
+        slide + a set of level-0 ROI coordinates, and every ROI is read, encoded through the
+        dense transform, and written to ``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``
+        plus a geometry sidecar. The run splits its ROIs across all visible GPUs
+        (``execution.num_gpus``); ``num_gpus=1`` encodes fully in-process. Resume is
+        automatic — ROIs whose sidecar already exists are skipped. Returns one
+        :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI.
+        """
+        from slide2vec.runtime.dense_stage import embed_regions_dense
+
+        resolved = _coerce_execution_options(execution, model=self)
+        _require_output_dir_for_persistence(resolved, method_name="Model.embed_regions_dense(...)")
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
     def _load_backend(self) -> LoadedModel:
         if self._backend is None:
