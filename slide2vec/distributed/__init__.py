@@ -1,5 +1,4 @@
 import os
-import socket
 
 import torch
 
@@ -28,7 +27,7 @@ def get_global_size() -> int:
 def get_global_rank() -> int:
     """
     Returns:
-        The rank of the current process within the global process group.
+        The rank of the current process in the job.
     """
     return _RANK if is_enabled() else 0
 
@@ -36,7 +35,7 @@ def get_global_rank() -> int:
 def get_local_rank() -> int:
     """
     Returns:
-        The rank of the current process within the local (per-machine) process group.
+        The rank of the current process on its machine.
     """
     if not is_enabled():
         return 0
@@ -47,8 +46,7 @@ def get_local_rank() -> int:
 def get_local_size() -> int:
     """
     Returns:
-        The size of the per-machine process group,
-        i.e. the number of processes per machine.
+        The number of processes on the current machine.
     """
     if not is_enabled():
         return 1
@@ -80,18 +78,10 @@ def _restrict_print_to_main_process() -> None:
     __builtin__.print = print
 
 
-def _get_available_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # A "" host address means INADDR_ANY i.e. binding to all interfaces.
-        # Note this is not compatible with IPv6.
-        s.bind(("", 0))
-        port = s.getsockname()[1]
-        return port
-
-
-_TORCH_DISTRIBUTED_ENV_VARS = (
-    "MASTER_ADDR",
-    "MASTER_PORT",
+# The process-topology variables torchrun exports. MASTER_ADDR / MASTER_PORT are
+# deliberately ignored: they only locate a process-group rendezvous, and no process
+# group is ever created (issue #219).
+_TORCHRUN_ENV_VARS = (
     "RANK",
     "WORLD_SIZE",
     "LOCAL_RANK",
@@ -102,7 +92,7 @@ _TORCH_DISTRIBUTED_ENV_VARS = (
 def _collect_env_vars() -> dict[str, str]:
     return {
         env_var: os.environ[env_var]
-        for env_var in _TORCH_DISTRIBUTED_ENV_VARS
+        for env_var in _TORCHRUN_ENV_VARS
         if env_var in os.environ
     }
 
@@ -117,8 +107,6 @@ def _check_env_variable(key: str, new_value: str):
 
 class _TorchDistributedEnvironment:
     def __init__(self):
-        self.master_addr = "127.0.0.1"
-        self.master_port = 0
         self.rank = -1
         self.world_size = -1
         self.local_rank = -1
@@ -128,7 +116,7 @@ class _TorchDistributedEnvironment:
         if not env_vars:
             # Environment is not set
             pass
-        elif len(env_vars) == len(_TORCH_DISTRIBUTED_ENV_VARS):
+        elif len(env_vars) == len(_TORCHRUN_ENV_VARS):
             # Environment is fully set
             return self._set_from_preset_env()
         else:
@@ -139,13 +127,13 @@ class _TorchDistributedEnvironment:
         if torch.cuda.device_count() > 0:
             return self._set_from_local()
 
-        raise RuntimeError("Can't initialize PyTorch distributed environment")
+        raise RuntimeError(
+            "Can't determine the process topology: no torchrun environment and no CUDA device"
+        )
 
     # Single node job with preset environment (i.e. torchrun)
     def _set_from_preset_env(self):
         # logger.info("Initialization from preset environment")
-        self.master_addr = os.environ["MASTER_ADDR"]
-        self.master_port = os.environ["MASTER_PORT"]
         self.rank = int(os.environ["RANK"])
         self.world_size = int(os.environ["WORLD_SIZE"])
         assert self.rank < self.world_size
@@ -156,20 +144,16 @@ class _TorchDistributedEnvironment:
     # Single node and GPU job (i.e. local script run)
     def _set_from_local(self):
         # logger.info("Initialization from local")
-        self.master_addr = "127.0.0.1"
-        self.master_port = _get_available_port()
         self.rank = 0
         self.world_size = 1
         self.local_rank = 0
         self.local_world_size = 1
 
     def export(self, *, overwrite: bool) -> "_TorchDistributedEnvironment":
-        # See the "Environment variable initialization" section from
-        # https://pytorch.org/docs/stable/distributed.html for the complete list of
-        # environment variables required for the env:// initialization method.
+        # Export the topology so child processes and later lookups see one consistent
+        # view. There is no env:// rendezvous to feed (no process group is created), so
+        # MASTER_ADDR / MASTER_PORT are not exported.
         env_vars = {
-            "MASTER_ADDR": self.master_addr,
-            "MASTER_PORT": str(self.master_port),
             "RANK": str(self.rank),
             "WORLD_SIZE": str(self.world_size),
             "LOCAL_RANK": str(self.local_rank),
