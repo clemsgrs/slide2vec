@@ -670,7 +670,6 @@ def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
 
     monkeypatch.setenv("HF_TOKEN", "token-from-env")
     monkeypatch.setattr(config, "is_main_process", lambda: True)
-    monkeypatch.setattr(config, "is_enabled_and_multiple_gpus", lambda: False)
     monkeypatch.setattr("huggingface_hub.login", _fake_login)
 
     config.hf_login()

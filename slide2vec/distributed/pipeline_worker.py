@@ -15,8 +15,6 @@ def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    import torch.distributed as dist
-
     import slide2vec.distributed as distributed
     import slide2vec.inference as inference
     from slide2vec.api import Model
@@ -29,84 +27,81 @@ def main(argv=None) -> int:
     request = json.loads(Path(args.request_path).read_text(encoding="utf-8"))
     output_dir = Path(args.output_dir)
 
+    # Reads the torchrun-exported rank/world-size; no NCCL process group (issue #219).
     distributed.enable(overwrite=True)
-    try:
-        local_rank = distributed.get_local_rank()
-        global_rank = distributed.get_global_rank()
-        world_size = distributed.get_global_size()
+    local_rank = distributed.get_local_rank()
+    global_rank = distributed.get_global_rank()
+    world_size = distributed.get_global_size()
 
-        model_spec = dict(request["model"])
-        model = Model.from_preset(
-            model_spec["name"],
-            device=f"cuda:{local_rank}",
-            output_variant=model_spec.get("output_variant"),
-            allow_non_recommended_settings=bool(model_spec["allow_non_recommended_settings"]),
-        )
-        preprocessing = deserialize_preprocessing(request["preprocessing"])
-        execution = deserialize_execution(request["execution"])
-        tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
-        load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
-        if not callable(load_successful_tiled_slides_fn):
-            from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
-        slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
-        # Each (sample_id, annotation) row is an independent work unit; key by the composite so a
-        # multi-class slide's sibling classes never overwrite each other. Flat units (None / tissue /
-        # merged) encode to the bare sample_id, byte-identical to pre-#168 single-class runs.
+    model_spec = dict(request["model"])
+    model = Model.from_preset(
+        model_spec["name"],
+        device=f"cuda:{local_rank}",
+        output_variant=model_spec.get("output_variant"),
+        allow_non_recommended_settings=bool(model_spec["allow_non_recommended_settings"]),
+    )
+    preprocessing = deserialize_preprocessing(request["preprocessing"])
+    execution = deserialize_execution(request["execution"])
+    tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
+    load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
+    if not callable(load_successful_tiled_slides_fn):
+        from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
+    slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
+    # Each (sample_id, annotation) row is an independent work unit; key by the composite so a
+    # multi-class slide's sibling classes never overwrite each other. Flat units (None / tissue /
+    # merged) encode to the bare sample_id, byte-identical to pre-#168 single-class runs.
+    paired_by_unit = {
+        encode_work_unit(slide.sample_id, tiling_result_annotation(tiling_result)): (slide, tiling_result)
+        for slide, tiling_result in zip(slide_records, tiling_results)
+    }
+    requested_work_units = request.get("work_units")
+    if requested_work_units is not None:
+        requested_unit_set = {str(unit) for unit in requested_work_units}
         paired_by_unit = {
-            encode_work_unit(slide.sample_id, tiling_result_annotation(tiling_result)): (slide, tiling_result)
-            for slide, tiling_result in zip(slide_records, tiling_results)
+            unit_key: pair
+            for unit_key, pair in paired_by_unit.items()
+            if unit_key in requested_unit_set
         }
-        requested_work_units = request.get("work_units")
-        if requested_work_units is not None:
-            requested_unit_set = {str(unit) for unit in requested_work_units}
-            paired_by_unit = {
-                unit_key: pair
-                for unit_key, pair in paired_by_unit.items()
-                if unit_key in requested_unit_set
-            }
-        slide_records = [slide for slide, _ in paired_by_unit.values()]
-        tiling_results = [tiling_result for _, tiling_result in paired_by_unit.values()]
-        assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
-        assigned_ids = assignments.get(global_rank, [])
-        if not assigned_ids:
-            return 0
-        assigned_slides = [paired_by_unit[unit_key][0] for unit_key in assigned_ids]
-        assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in assigned_ids]
-        progress_events_path = request.get("progress_events_path")
-        reporter = (
-            JsonlProgressReporter(
-                progress_events_path,
-                rank=global_rank,
-                progress_label=f"cuda:{local_rank}",
-            )
-            if progress_events_path
-            else None
-        )
-        context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
-        with context:
-            build_incremental_persist_callback_fn = getattr(inference, "_build_incremental_persist_callback", build_incremental_persist_callback)
-            persist_callback, _, _ = build_incremental_persist_callback_fn(
-                model=model,
-                preprocessing=preprocessing,
-                execution=execution,
-                process_list_path=None,
-            )
-            compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
-            if not callable(compute_embedded_slides_fn):
-                from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
-            compute_embedded_slides_fn(
-                model,
-                assigned_slides,
-                assigned_tiling_results,
-                preprocessing=preprocessing,
-                execution=execution,
-                on_embedded_slide=persist_callback,
-                collect_results=False,
-            )
+    slide_records = [slide for slide, _ in paired_by_unit.values()]
+    tiling_results = [tiling_result for _, tiling_result in paired_by_unit.values()]
+    assignments = assign_slides_to_ranks(slide_records, tiling_results, num_gpus=world_size)
+    assigned_ids = assignments.get(global_rank, [])
+    if not assigned_ids:
         return 0
-    finally:
-        if dist.is_available() and dist.is_initialized():
-            dist.destroy_process_group()
+    assigned_slides = [paired_by_unit[unit_key][0] for unit_key in assigned_ids]
+    assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in assigned_ids]
+    progress_events_path = request.get("progress_events_path")
+    reporter = (
+        JsonlProgressReporter(
+            progress_events_path,
+            rank=global_rank,
+            progress_label=f"cuda:{local_rank}",
+        )
+        if progress_events_path
+        else None
+    )
+    context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
+    with context:
+        build_incremental_persist_callback_fn = getattr(inference, "_build_incremental_persist_callback", build_incremental_persist_callback)
+        persist_callback, _, _ = build_incremental_persist_callback_fn(
+            model=model,
+            preprocessing=preprocessing,
+            execution=execution,
+            process_list_path=None,
+        )
+        compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
+        if not callable(compute_embedded_slides_fn):
+            from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
+        compute_embedded_slides_fn(
+            model,
+            assigned_slides,
+            assigned_tiling_results,
+            preprocessing=preprocessing,
+            execution=execution,
+            on_embedded_slide=persist_callback,
+            collect_results=False,
+        )
+    return 0
 
 
 if __name__ == "__main__":

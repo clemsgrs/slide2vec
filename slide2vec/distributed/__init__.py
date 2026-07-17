@@ -1,11 +1,9 @@
-import datetime
 import os
-import random
-import socket
 
 import torch
-import torch.distributed as dist
 
+_RANK = -1
+_WORLD_SIZE = -1
 _LOCAL_RANK = -1
 _LOCAL_WORLD_SIZE = -1
 
@@ -13,41 +11,31 @@ _LOCAL_WORLD_SIZE = -1
 def is_enabled() -> bool:
     """
     Returns:
-        True if distributed training is enabled
+        True if distributed mode has been enabled (the process topology is known).
     """
-    return dist.is_available() and dist.is_initialized()
-
-
-def is_enabled_and_multiple_gpus() -> bool:
-    """
-    Returns:
-        True if distributed training is enabled and there are multiple GPUs available.
-    """
-    return (
-        dist.is_available() and dist.is_initialized() and torch.cuda.device_count() > 1
-    )
+    return _RANK >= 0
 
 
 def get_global_size() -> int:
     """
     Returns:
-        The number of processes in the process group
+        The number of processes in the job.
     """
-    return dist.get_world_size() if is_enabled() else 1
+    return _WORLD_SIZE if is_enabled() else 1
 
 
 def get_global_rank() -> int:
     """
     Returns:
-        The rank of the current process within the global process group.
+        The rank of the current process in the job.
     """
-    return dist.get_rank() if is_enabled() else 0
+    return _RANK if is_enabled() else 0
 
 
 def get_local_rank() -> int:
     """
     Returns:
-        The rank of the current process within the local (per-machine) process group.
+        The rank of the current process on its machine.
     """
     if not is_enabled():
         return 0
@@ -58,8 +46,7 @@ def get_local_rank() -> int:
 def get_local_size() -> int:
     """
     Returns:
-        The size of the per-machine process group,
-        i.e. the number of processes per machine.
+        The number of processes on the current machine.
     """
     if not is_enabled():
         return 1
@@ -91,18 +78,10 @@ def _restrict_print_to_main_process() -> None:
     __builtin__.print = print
 
 
-def _get_available_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # A "" host address means INADDR_ANY i.e. binding to all interfaces.
-        # Note this is not compatible with IPv6.
-        s.bind(("", 0))
-        port = s.getsockname()[1]
-        return port
-
-
-_TORCH_DISTRIBUTED_ENV_VARS = (
-    "MASTER_ADDR",
-    "MASTER_PORT",
+# The process-topology variables torchrun exports. MASTER_ADDR / MASTER_PORT are
+# deliberately ignored: they only locate a process-group rendezvous, and no process
+# group is ever created (issue #219).
+_TORCHRUN_ENV_VARS = (
     "RANK",
     "WORLD_SIZE",
     "LOCAL_RANK",
@@ -113,7 +92,7 @@ _TORCH_DISTRIBUTED_ENV_VARS = (
 def _collect_env_vars() -> dict[str, str]:
     return {
         env_var: os.environ[env_var]
-        for env_var in _TORCH_DISTRIBUTED_ENV_VARS
+        for env_var in _TORCHRUN_ENV_VARS
         if env_var in os.environ
     }
 
@@ -128,8 +107,6 @@ def _check_env_variable(key: str, new_value: str):
 
 class _TorchDistributedEnvironment:
     def __init__(self):
-        self.master_addr = "127.0.0.1"
-        self.master_port = 0
         self.rank = -1
         self.world_size = -1
         self.local_rank = -1
@@ -139,7 +116,7 @@ class _TorchDistributedEnvironment:
         if not env_vars:
             # Environment is not set
             pass
-        elif len(env_vars) == len(_TORCH_DISTRIBUTED_ENV_VARS):
+        elif len(env_vars) == len(_TORCHRUN_ENV_VARS):
             # Environment is fully set
             return self._set_from_preset_env()
         else:
@@ -150,13 +127,13 @@ class _TorchDistributedEnvironment:
         if torch.cuda.device_count() > 0:
             return self._set_from_local()
 
-        raise RuntimeError("Can't initialize PyTorch distributed environment")
+        raise RuntimeError(
+            "Can't determine the process topology: no torchrun environment and no CUDA device"
+        )
 
     # Single node job with preset environment (i.e. torchrun)
     def _set_from_preset_env(self):
         # logger.info("Initialization from preset environment")
-        self.master_addr = os.environ["MASTER_ADDR"]
-        self.master_port = os.environ["MASTER_PORT"]
         self.rank = int(os.environ["RANK"])
         self.world_size = int(os.environ["WORLD_SIZE"])
         assert self.rank < self.world_size
@@ -167,20 +144,16 @@ class _TorchDistributedEnvironment:
     # Single node and GPU job (i.e. local script run)
     def _set_from_local(self):
         # logger.info("Initialization from local")
-        self.master_addr = "127.0.0.1"
-        self.master_port = _get_available_port()
         self.rank = 0
         self.world_size = 1
         self.local_rank = 0
         self.local_world_size = 1
 
     def export(self, *, overwrite: bool) -> "_TorchDistributedEnvironment":
-        # See the "Environment variable initialization" section from
-        # https://pytorch.org/docs/stable/distributed.html for the complete list of
-        # environment variables required for the env:// initialization method.
+        # Export the topology so child processes and later lookups see one consistent
+        # view. There is no env:// rendezvous to feed (no process group is created), so
+        # MASTER_ADDR / MASTER_PORT are not exported.
         env_vars = {
-            "MASTER_ADDR": self.master_addr,
-            "MASTER_PORT": str(self.master_port),
             "RANK": str(self.rank),
             "WORLD_SIZE": str(self.world_size),
             "LOCAL_RANK": str(self.local_rank),
@@ -198,9 +171,15 @@ def enable(
     *,
     set_cuda_current_device: bool = True,
     overwrite: bool = False,
-    allow_nccl_timeout: bool = False,
 ):
-    """Enable distributed mode
+    """Enable distributed mode.
+
+    Reads the process topology (RANK / WORLD_SIZE / LOCAL_RANK / LOCAL_WORLD_SIZE) that
+    torchrun exports — or single-process defaults when launched bare — and records it for
+    the ``get_*`` helpers. No ``torch.distributed`` process group is created: the workers
+    run no collectives (each rank writes its own artifacts and nobody gathers), so an NCCL
+    group would only add init cost and a 14-day-timeout hang surface for no benefit. See
+    issue #219.
 
     Args:
         set_cuda_current_device: If True, call torch.cuda.set_device() to set the
@@ -208,8 +187,8 @@ def enable(
         overwrite: If True, overwrites already set variables. Else fails.
     """
 
-    global _LOCAL_RANK, _LOCAL_WORLD_SIZE
-    if _LOCAL_RANK >= 0 or _LOCAL_WORLD_SIZE >= 0:
+    global _RANK, _WORLD_SIZE, _LOCAL_RANK, _LOCAL_WORLD_SIZE
+    if is_enabled():
         raise RuntimeError("Distributed mode has already been enabled")
     torch_env = _TorchDistributedEnvironment()
     torch_env.export(overwrite=overwrite)
@@ -217,20 +196,9 @@ def enable(
     if set_cuda_current_device:
         torch.cuda.set_device(torch_env.local_rank)
 
-    if allow_nccl_timeout:
-        # This allows to use torch distributed timeout in a NCCL backend
-        key, value = "NCCL_ASYNC_ERROR_HANDLING", "1"
-        if not overwrite:
-            _check_env_variable(key, value)
-        os.environ[key] = value
-
-    dist.init_process_group(
-        backend="nccl",
-        timeout=datetime.timedelta(days=14),
-        device_id=torch.device(f"cuda:{torch_env.local_rank}")
-    )
-
     # Finalize setup
+    _RANK = torch_env.rank
+    _WORLD_SIZE = torch_env.world_size
     _LOCAL_RANK = torch_env.local_rank
     _LOCAL_WORLD_SIZE = torch_env.local_world_size
     _restrict_print_to_main_process()

@@ -1680,8 +1680,6 @@ def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is
 
 
 def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, tmp_path: Path):
-    import torch.distributed as dist
-
     import slide2vec.distributed as distributed
     import slide2vec.inference as inference
     import slide2vec.runtime.serialization as serialization
@@ -1713,8 +1711,6 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(dist, "is_available", lambda: False)
-    monkeypatch.setattr(dist, "is_initialized", lambda: False)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
@@ -1747,8 +1743,6 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
 
 
 def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: Path):
-    import torch.distributed as dist
-
     import slide2vec.distributed as distributed
     import slide2vec.runtime.serialization as serialization
     from slide2vec.api import Model
@@ -1781,8 +1775,6 @@ def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(dist, "is_available", lambda: False)
-    monkeypatch.setattr(dist, "is_initialized", lambda: False)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
@@ -1811,7 +1803,6 @@ def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: 
 
 def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypatch, tmp_path: Path):
     import torch
-    import torch.distributed as dist
 
     import slide2vec.distributed as distributed
     import slide2vec.runtime.serialization as serialization
@@ -1846,8 +1837,6 @@ def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypa
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(dist, "is_available", lambda: False)
-    monkeypatch.setattr(dist, "is_initialized", lambda: False)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
@@ -3106,46 +3095,89 @@ def test_make_embedded_slide_validates_coordinates_and_supports_tile_and_slide_o
             tile_embeddings=np.zeros((1, 4), dtype=np.float32),
         )
 
-def test_distributed_enable_keeps_explicit_device_binding_without_unconditional_barrier():
+def test_distributed_enable_drops_nccl_process_group_but_keeps_device_binding():
+    # Issue #219: the dense/pooled workers run no collectives, so enable() must NOT
+    # build an NCCL process group. It reads rank/world-size from the torchrun-exported
+    # env and only binds the CUDA device.
     source = (ROOT / "slide2vec" / "distributed" / "__init__.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
-    init_process_group_calls = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "dist"
-        and node.func.attr == "init_process_group"
-    ]
-    assert init_process_group_calls
+    def _attr_calls(attr: str) -> list[ast.Call]:
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == attr
+        ]
 
-    device_keyword = next(
-        (
-            keyword
-            for keyword in init_process_group_calls[0].keywords
-            if keyword.arg == "device_id"
-        ),
-        None,
-    )
-    assert device_keyword is not None
-    assert isinstance(device_keyword.value, ast.Call)
-    assert isinstance(device_keyword.value.func, ast.Attribute)
-    assert isinstance(device_keyword.value.func.value, ast.Name)
-    assert device_keyword.value.func.value.id == "torch"
-    assert device_keyword.value.func.attr == "device"
+    # No process group is created or torn down, and no collective is issued.
+    assert not _attr_calls("init_process_group")
+    assert not _attr_calls("destroy_process_group")
+    assert not _attr_calls("barrier")
+    assert not _attr_calls("all_gather")
+    assert not _attr_calls("all_reduce")
 
-    barrier_calls = [
+    # The explicit device binding survives.
+    set_device_calls = [
         node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "dist"
-        and node.func.attr == "barrier"
+        for node in _attr_calls("set_device")
+        if isinstance(node.func.value, ast.Attribute)
+        and node.func.value.attr == "cuda"
     ]
-    assert not barrier_calls
+    assert set_device_calls
+
+
+def test_global_rank_and_size_read_module_state_not_a_process_group(monkeypatch):
+    # Issue #219: get_global_rank/get_global_size derive from the module state that
+    # enable() records from the env, not from a live torch.distributed process group.
+    import slide2vec.distributed as distributed
+
+    monkeypatch.setattr(distributed, "_RANK", 3, raising=False)
+    monkeypatch.setattr(distributed, "_WORLD_SIZE", 4, raising=False)
+    monkeypatch.setattr(distributed, "_LOCAL_RANK", 1, raising=False)
+    monkeypatch.setattr(distributed, "_LOCAL_WORLD_SIZE", 2, raising=False)
+
+    assert distributed.is_enabled() is True
+    assert distributed.get_global_rank() == 3
+    assert distributed.get_global_size() == 4
+    assert distributed.get_local_rank() == 1
+    assert distributed.get_local_size() == 2
+    assert distributed.is_main_process() is False
+
+
+def test_global_helpers_return_single_process_defaults_when_not_enabled(monkeypatch):
+    import slide2vec.distributed as distributed
+
+    monkeypatch.setattr(distributed, "_RANK", -1, raising=False)
+    monkeypatch.setattr(distributed, "_WORLD_SIZE", -1, raising=False)
+    monkeypatch.setattr(distributed, "_LOCAL_RANK", -1, raising=False)
+    monkeypatch.setattr(distributed, "_LOCAL_WORLD_SIZE", -1, raising=False)
+
+    assert distributed.is_enabled() is False
+    assert distributed.get_global_rank() == 0
+    assert distributed.get_global_size() == 1
+    assert distributed.get_local_rank() == 0
+    assert distributed.get_local_size() == 1
+    assert distributed.is_main_process() is True
+
+
+def test_distributed_module_has_no_torch_distributed_dependency():
+    # The whole point of #219: slide2vec.distributed no longer imports or calls into
+    # torch.distributed — nor datetime (the NCCL timeout) or socket (the MASTER_PORT
+    # pick), which only the process-group setup needed.
+    source = (ROOT / "slide2vec" / "distributed" / "__init__.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+    assert "torch.distributed" not in imported
+    assert "datetime" not in imported
+    assert "socket" not in imported
+
 
 def test_setup_distributed_helper_has_been_removed():
     source = (ROOT / "slide2vec" / "utils" / "config.py").read_text(encoding="utf-8")
@@ -6028,8 +6060,6 @@ def test_work_unit_shard_stem_real_class_is_unique_and_filesystem_safe():
 def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_collision(monkeypatch, tmp_path: Path):
     """Two classes of one slide assigned to the same rank must persist to distinct .embedded.pt
     files (per (sample_id, annotation) stem), so a sibling class is never overwritten."""
-    import torch.distributed as dist
-
     import slide2vec.distributed as distributed
     import slide2vec.runtime.serialization as serialization
     from slide2vec.api import Model
@@ -6063,8 +6093,6 @@ def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_colli
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(dist, "is_available", lambda: False)
-    monkeypatch.setattr(dist, "is_initialized", lambda: False)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
@@ -6146,8 +6174,6 @@ def test_compute_embedded_slides_finished_event_carries_annotation(monkeypatch):
 def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, tmp_path: Path):
     """Pipeline-worker path: a multi-label slide's classes must NOT collapse by sample_id — every
     (sample_id, annotation) unit is computed (the bug #168 fixes)."""
-    import torch.distributed as dist
-
     import slide2vec.distributed as distributed
     import slide2vec.runtime.serialization as serialization
     from slide2vec.api import Model
@@ -6179,8 +6205,6 @@ def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(dist, "is_available", lambda: False)
-    monkeypatch.setattr(dist, "is_initialized", lambda: False)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
