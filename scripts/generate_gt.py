@@ -24,62 +24,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_DIR = REPO_ROOT / "tests"
 INPUT_DIR = TEST_DIR / "fixtures" / "input"
 DEFAULT_GT_DIR = TEST_DIR / "fixtures" / "gt"
+sys.path.insert(0, str(REPO_ROOT))
 
-# Must stay in sync with test_output_consistency.py
-TILING_PARAMS = dict(
-    requested_spacing_um=0.5,
-    tolerance=0.07,
-    requested_tile_size_px=224,
-    overlap=0.0,
-    drop_holes=False,
-    use_padding=True,
+from tests.output_consistency_config import (  # noqa: E402
+    MODEL_PARAMS,
+    SPEED_PARAMS,
+    TILING_FILTER_PARAMS,
+    TILING_MASKS,
+    TILING_PARAMS,
+    TILING_PREVIEW,
+    TILING_SEG_PARAMS,
 )
-# min_coverage.tissue is the sole tissue threshold (was tissue_threshold=0.1)
-TILING_MASKS = dict(
-    output_mode="per_annotation",
-    pixel_mapping={"background": 0, "tissue": 1},
-    colors={"background": None, "tissue": [157, 219, 129]},
-    min_coverage={"background": None, "tissue": 0.1},
-)
-TILING_SEG_PARAMS = dict(
-    downsample=64,
-    sthresh=8,
-    sthresh_up=255,
-    mthresh=7,
-    close=4,
-    use_otsu=False,
-    use_hsv=True,
-)
-TILING_FILTER_PARAMS = dict(
-    ref_tile_size=224,
-    a_t=4,
-    a_h=2,
-    max_n_holes=8,
-    filter_white=False,
-    filter_black=False,
-    white_threshold=220,
-    black_threshold=25,
-    fraction_threshold=0.9,
-)
-MODEL_PARAMS = dict(
-    level="slide",
-    name="prism",
-    mode="cls",
-    arch=None,
-    pretrained_weights=None,
-    batch_size=8,
-    input_size=224,
-    patch_size=256,
-    token_size=16,
-    save_tile_embeddings=True,
-    save_latents=False,
-)
-SPEED_PARAMS = dict(
-    precision="fp16",
-    num_workers=4,
-    num_workers_embedding=4,
-)
-
 
 def main():
     parser = argparse.ArgumentParser(description="Regenerate slide2vec GT fixtures")
@@ -122,7 +77,7 @@ def main():
                 "params": TILING_PARAMS,
                 "seg_params": TILING_SEG_PARAMS,
                 "filter_params": TILING_FILTER_PARAMS,
-                "preview": {"save": False, "downsample": 32},
+                "preview": TILING_PREVIEW,
             },
             "model": MODEL_PARAMS,
             "speed": SPEED_PARAMS,

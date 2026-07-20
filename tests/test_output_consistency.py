@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,70 +11,14 @@ import pytest
 torch = pytest.importorskip("torch")
 OmegaConf = pytest.importorskip("omegaconf").OmegaConf
 
-# ---------------------------------------------------------------------------
-# Hardcoded pipeline parameters
-# ---------------------------------------------------------------------------
-
-# -- tiling.params --
-TILING_PARAMS = dict(
-    requested_spacing_um=0.5,
-    tolerance=0.07,           # override (default: 0.05)
-    requested_tile_size_px=224,  # override (default: 256)
-    overlap=0.0,
-)
-
-# -- tiling.masks -- (min_coverage.tissue is the sole tissue threshold; was tissue_threshold=0.1)
-TILING_MASKS = dict(
-    output_mode="per_annotation",
-    pixel_mapping={"background": 0, "tissue": 1},
-    colors={"background": None, "tissue": [157, 219, 129]},
-    min_coverage={"background": None, "tissue": 0.1},
-)
-
-# -- tiling.seg_params --
-TILING_SEG_PARAMS = dict(
-    downsample=64,          # override (default: 16)
-    sthresh=8,
-    sthresh_up=255,
-    mthresh=7,
-    close=4,
-    method="hsv",
-)
-
-# -- tiling.filter_params --
-TILING_FILTER_PARAMS = dict(
-    ref_tile_size=224,  # override (default: 16)
-    a_t=4,
-    a_h=2,
-    filter_white=False,
-    filter_black=False,
-    white_threshold=220,
-    black_threshold=25,
-    fraction_threshold=0.9,
-)
-
-# -- tiling.preview --
-TILING_PREVIEW = dict(
-    save_mask_preview=False,
-    save_tiling_preview=False,
-    downsample=32,
-    tissue_contour_color=(157, 219, 129),
-    mask_overlay_alpha=0.5,
-)
-
-# -- model --
-MODEL_PARAMS = dict(
-    name="prism",            # override (default: null)
-    batch_size=8,            # override (default: 256)
-    save_tile_embeddings=True,
-    save_slide_embeddings=False,
-    save_latents=False,
-)
-
-# -- speed --
-SPEED_PARAMS = dict(
-    precision="fp16",       # override (default: fp32)
-    num_dataloader_workers=0,  # keep the Prism subprocess path single-process to avoid worker SHM pressure
+from tests.output_consistency_config import (  # noqa: E402
+    MODEL_PARAMS,
+    SPEED_PARAMS,
+    TILING_FILTER_PARAMS,
+    TILING_MASKS,
+    TILING_PARAMS,
+    TILING_PREVIEW,
+    TILING_SEG_PARAMS,
 )
 
 # ---------------------------------------------------------------------------
@@ -156,6 +101,21 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         cwd=REPO_ROOT,
         check=True,
     )
+
+    capture_root = os.environ.get("SLIDE2VEC_CAPTURE_OUTPUT")
+    if capture_root:
+        capture_dir = Path(capture_root)
+        for relative_path in (
+            Path("slide_embeddings/test-wsi.pt"),
+            Path("slide_embeddings/test-wsi.meta.json"),
+            Path("tile_embeddings/test-wsi.pt"),
+            Path("tile_embeddings/test-wsi.meta.json"),
+            Path("tiles/test-wsi.coordinates.npz"),
+            Path("tiles/test-wsi.coordinates.meta.json"),
+        ):
+            destination = capture_dir / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(tmp_path / relative_path, destination)
 
     # 4. Assert coordinates match exactly (tiling is deterministic)
     gt_coords = np.load(GT_DIR / "test-wsi.coordinates.npz", allow_pickle=False)

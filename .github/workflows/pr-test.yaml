@@ -107,6 +107,7 @@ jobs:
           # so we can see where this step's time actually goes.
           docker run --rm \
             -e HF_TOKEN="$HF_TOKEN" \
+            -e SLIDE2VEC_CAPTURE_OUTPUT=/opt/app/.ci-output-consistency \
             -v "$GITHUB_WORKSPACE:/opt/app" \
             slide2vec-ci:${{ github.sha }} \
             bash -lc '
@@ -118,3 +119,12 @@ jobs:
               python -m pytest -q --durations=15 tests
               echo "::notice::pytest took $((SECONDS - t1))s"
             '
+
+      - name: Upload canonical output-consistency artifacts
+        if: ${{ always() && github.event_name == 'pull_request' && steps.changes.outputs.code == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-output-consistency-${{ github.sha }}
+          path: .ci-output-consistency
+          if-no-files-found: ignore
+          retention-days: 1
