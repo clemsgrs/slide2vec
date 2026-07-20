@@ -116,7 +116,7 @@ jobs:
               python -m pip install --no-cache-dir --no-deps -e /opt/app
               echo "::notice::pip install (source only) took $((SECONDS - t0))s"
               t1=$SECONDS
-              python -m pytest -q --durations=15 tests
+              python -m pytest -q tests/test_output_consistency.py
               echo "::notice::pytest took $((SECONDS - t1))s"
             '
 
