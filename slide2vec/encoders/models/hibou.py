@@ -47,7 +47,7 @@ class _HibouBase(TileEncoder):
     def get_transform(self) -> Callable:
         return _hibou_transform()
 
-    def get_dense_transform(self) -> Callable:
+    def get_normalization_transform(self) -> Callable:
         return v2.Compose([
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
@@ -151,6 +151,7 @@ class _HibouBase(TileEncoder):
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -168,6 +169,7 @@ class HibouB(_HibouBase):
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",

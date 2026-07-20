@@ -78,6 +78,7 @@ def _encode_trunk_dense(*, trunk, batch: Tensor, encoder_name: str) -> Tensor:
     output_variants={"default": {"encode_dim": 512}},
     default_output_variant="default",
     input_size=448,
+    supports_variable_input_size=False,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",
@@ -97,7 +98,7 @@ class CONCH(TileEncoder):
     def get_transform(self) -> Callable:
         return self._transform
 
-    def get_dense_transform(self) -> Callable:
+    def get_normalization_transform(self) -> Callable:
         try:
             from conch.open_clip_custom.constants import (
                 OPENAI_DATASET_MEAN,
@@ -164,6 +165,7 @@ class CONCH(TileEncoder):
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=448,
+    supports_variable_input_size=False,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -180,7 +182,7 @@ class CONCHv15(TileEncoder):
     def get_transform(self) -> Callable:
         return self._transform
 
-    def get_dense_transform(self) -> Callable:
+    def get_normalization_transform(self) -> Callable:
         return _normalize_only_transform(mean=_IMAGENET_MEAN, std=_IMAGENET_STD)
 
     def encode_tiles(self, batch: Tensor) -> Tensor:

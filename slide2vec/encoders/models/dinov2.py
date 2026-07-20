@@ -41,6 +41,7 @@ from slide2vec.encoders.registry import register_encoder
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
     patch_size=14,
     supported_spacing_um=None,  # spacing-agnostic: no intrinsic µm/px, so no validation constraint
     default_spacing_um=0.5,  # tiling default: match the pathology encoders' task-spacing

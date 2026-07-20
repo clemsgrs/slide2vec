@@ -37,6 +37,8 @@ def register_encoder(
     output_variants: dict[str, dict[str, Any]],
     default_output_variant: str,
     input_size: int | None = None,
+    supports_variable_input_size: bool | None = None,
+    variable_input_model_kwargs: dict[str, Any] | None = None,
     patch_size: int | tuple[int, int] | None = None,
     level: str = "tile",
     tile_encoder: str | None = None,
@@ -53,6 +55,11 @@ def register_encoder(
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
         input_size: Recommended encoder input image size in pixels.
+        supports_variable_input_size: Explicit end-to-end capability for accepting
+            exact non-preset square inputs in pooled extraction. Required for tile
+            encoders; slide and patient encoders inherit their tile dependency.
+        variable_input_model_kwargs: Constructor settings required to activate
+            that capability. Pooled planning owns their use; callers do not.
         patch_size: Backbone patch size, as ``int`` (square) or ``(patch_h,
             patch_w)``. Optional: only dense-capable ViT tile encoders have a
             meaningful patch grid. Declared statically so the dense token grid /
@@ -85,11 +92,17 @@ def register_encoder(
         raise ValueError(
             f"default_output_variant '{default_output_variant}' must be present in output_variants"
         )
+    if level == "tile" and type(supports_variable_input_size) is not bool:
+        raise ValueError(
+            f"Tile encoder '{name}' must declare supports_variable_input_size=True|False"
+        )
     metadata: dict[str, Any] = {
         "output_variants": output_variants,
         "default_output_variant": default_output_variant,
         "level": level,
         "input_size": input_size,
+        "supports_variable_input_size": supports_variable_input_size,
+        "variable_input_model_kwargs": dict(variable_input_model_kwargs or {}),
         "patch_size": patch_size,
         "tile_encoder": tile_encoder,
         "tile_encoder_output_variant": tile_encoder_output_variant,
@@ -99,6 +112,27 @@ def register_encoder(
         "source": source,
     }
     return encoder_registry.register_decorator(name, metadata=metadata)
+
+
+def resolve_variable_input_capability(
+    encoder_name: str,
+    metadata: dict[str, Any] | None = None,
+) -> bool:
+    """Resolve the tile dependency's explicit end-to-end geometry capability."""
+    info = metadata if metadata is not None else encoder_registry.info(encoder_name)
+    level = resolve_encoder_level(encoder_name, info)
+    if level == "tile":
+        capability = require_encoder_metadata_field(
+            encoder_name, info, "supports_variable_input_size"
+        )
+        if type(capability) is not bool:
+            raise ValueError(
+                f"Encoder '{encoder_name}' must declare "
+                "supports_variable_input_size=True|False"
+            )
+        return capability
+    dependency = str(require_encoder_metadata_field(encoder_name, info, "tile_encoder"))
+    return resolve_variable_input_capability(dependency)
 
 
 def normalize_patch_size(value: int | tuple[int, int]) -> tuple[int, int]:

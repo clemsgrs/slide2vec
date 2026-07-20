@@ -67,6 +67,7 @@ _GENBIO_STD = (0.188, 0.240, 0.187)
     output_variants={"default": {"encode_dim": 4608}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,  # 20x; card states no magnification, house default
     precision="fp32",  # upstream runs plain fp32, no autocast
@@ -91,8 +92,8 @@ class GenBioPathFM(TileEncoder):
             v2.Normalize(mean=_GENBIO_MEAN, std=_GENBIO_STD),
         ])
 
-    def get_dense_transform(self) -> Callable:
-        # Normalization only — no Resize/CenterCrop (see TileEncoder.get_dense_transform),
+    def get_normalization_transform(self) -> Callable:
+        # Normalization only — no Resize/CenterCrop,
         # so the dense grid stays registered to the full source tile.
         return v2.Compose([
             v2.ToImage(),

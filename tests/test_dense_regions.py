@@ -223,7 +223,7 @@ def _reference_grid(
     if read_tile_size_px is None:
         read_tile_size_px = requested_tile_size_px
     geometry = compute_dense_geometry(target_size=requested_tile_size_px, patch_size=enc.patch_size)
-    transform = enc.get_dense_transform()
+    transform = enc.get_normalization_transform()
     region = _canned_region(loc, (read_tile_size_px, read_tile_size_px))[:, :, :3]
     if read_tile_size_px != requested_tile_size_px:
         region = resize_array(

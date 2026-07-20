@@ -111,6 +111,7 @@ def build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
         "ToTensor",
         "MaybeToTensor",
         "ToImage",
+        "ToDtype",
         "ConvertImageDtype",
     }
     for step in transform_steps:
@@ -122,6 +123,12 @@ def build_batch_transform_spec(transforms) -> BatchTransformSpec | None:
             resize_interpolation = interp_mode_to_str(step.interpolation if hasattr(step, "interpolation") else None)
         elif step_name == "CenterCrop":
             center_crop_size = normalize_hw(step.size if hasattr(step, "size") else None)
+        elif step_name == "ToDtype":
+            if (
+                getattr(step, "dtype", None) != torch.float32
+                or getattr(step, "scale", None) is not True
+            ):
+                return None
         elif step_name == "Normalize":
             mean = tuple(float(value) for value in step.mean)
             std = tuple(float(value) for value in step.std)

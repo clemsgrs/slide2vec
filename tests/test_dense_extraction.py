@@ -391,8 +391,8 @@ def test_gigapath_dense_transform_is_pooled_only_and_crops():
     assert GigaPath.encode_tiles_dense is TimmTileEncoder.encode_tiles_dense
 
 
-def test_dense_transform_is_normalization_only_no_resize_or_crop():
-    """get_dense_transform must normalize WITHOUT resizing/cropping.
+def test_normalization_transform_has_no_resize_or_crop():
+    """get_normalization_transform must normalize WITHOUT resizing/cropping.
 
     A resize or center-crop here would shrink/clip the source tile and misregister
     the dense grid against the target mask (the GigaPath/Lunit pooled-transform
@@ -402,7 +402,7 @@ def test_dense_transform_is_normalization_only_no_resize_or_crop():
     from timm.data import resolve_data_config
 
     enc = _make_timm_encoder("vit_tiny_patch16_224")
-    tf = enc.get_dense_transform()
+    tf = enc.get_normalization_transform()
     names = {type(t).__name__ for t in tf.transforms}
     assert "Resize" not in names and "CenterCrop" not in names
 
@@ -418,7 +418,7 @@ def test_dense_transform_is_normalization_only_no_resize_or_crop():
     torch.testing.assert_close(out.as_subclass(torch.Tensor), expected, rtol=0, atol=1e-6)
 
 
-def test_get_dense_transform_unsupported_encoder_raises():
+def test_get_normalization_transform_unsupported_encoder_raises():
     class _NonDense(TileEncoder):
         def get_transform(self):  # pragma: no cover - trivial stub
             return lambda x: x
@@ -437,8 +437,8 @@ def test_get_dense_transform_unsupported_encoder_raises():
         def to(self, device):  # pragma: no cover - trivial stub
             return self
 
-    with pytest.raises(NotImplementedError, match="does not provide a dense transform"):
-        _NonDense().get_dense_transform()
+    with pytest.raises(NotImplementedError, match="does not provide a normalization transform"):
+        _NonDense().get_normalization_transform()
 
 
 def test_resolve_recommended_dynamic_img_size():

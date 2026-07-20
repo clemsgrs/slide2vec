@@ -64,6 +64,7 @@ from slide2vec.encoders.registry import (
 )
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.runtime.types import LoadedModel
+from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 from slide2vec.progress import (
     emit_progress,
     read_tiling_progress_snapshot,
@@ -93,6 +94,7 @@ def load_model(
     allow_non_recommended_settings: bool = False,
     dynamic_img_size: bool | None = None,
     token: str | None = None,
+    pooled_input_plan: PooledEncoderInputPlan | None = None,
 ) -> LoadedModel:
     name = canonicalize_model_name(name)
     info = encoder_registry.info(name)
@@ -120,6 +122,16 @@ def load_model(
         extra_kwargs["dynamic_img_size"] = dynamic_img_size
     if "allow_non_recommended_settings" in ctor_params:
         extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
+    if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == name:
+        missing_params = set(pooled_input_plan.model_construction_kwargs) - set(ctor_params)
+        if missing_params:
+            missing_text = ", ".join(sorted(missing_params))
+            raise ValueError(
+                f"Encoder '{name}' requires pooled variable-input constructor "
+                f"setting(s) not accepted by its implementation: {missing_text}"
+            )
+        for key, value in pooled_input_plan.model_construction_kwargs.items():
+            extra_kwargs[key] = value
     encoder = encoder_cls(output_variant=output_variant, **extra_kwargs)
 
     # Drift guard: the static patch_size declared on @register_encoder is read
@@ -139,14 +151,39 @@ def load_model(
 
     tile_encoder = None
     if resolved_level == "tile":
-        transforms = encoder.get_transform()
+        transforms = (
+            pooled_input_plan.get_transform(encoder)
+            if pooled_input_plan is not None
+            else encoder.get_transform()
+        )
     else:
         # Both "slide" and "patient" declare tile_encoder for transform resolution.
         tile_enc_name = info["tile_encoder"]
         tile_enc_ov = info["tile_encoder_output_variant"]
         tile_enc_cls = encoder_registry.require(tile_enc_name)
-        tile_encoder = tile_enc_cls(output_variant=tile_enc_ov)
-        transforms = tile_encoder.get_transform()
+        tile_ctor_params = inspect.signature(tile_enc_cls.__init__).parameters
+        tile_kwargs: dict[str, Any] = {"output_variant": tile_enc_ov}
+        if "allow_non_recommended_settings" in tile_ctor_params:
+            tile_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
+        if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == tile_enc_name:
+            missing_params = set(pooled_input_plan.model_construction_kwargs) - set(
+                tile_ctor_params
+            )
+            if missing_params:
+                missing_text = ", ".join(sorted(missing_params))
+                raise ValueError(
+                    f"Encoder '{tile_enc_name}' requires pooled variable-input "
+                    "constructor setting(s) not accepted by its implementation: "
+                    f"{missing_text}"
+                )
+            for key, value in pooled_input_plan.model_construction_kwargs.items():
+                tile_kwargs[key] = value
+        tile_encoder = tile_enc_cls(**tile_kwargs)
+        transforms = (
+            pooled_input_plan.get_transform(tile_encoder)
+            if pooled_input_plan is not None
+            else tile_encoder.get_transform()
+        )
 
     target_device = batching.resolve_device(device, encoder.device)
     encoder.to(target_device)
@@ -571,10 +608,10 @@ def embed_tiles(
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
 
-    loaded = model._load_backend()
     slide_records = [manifest.coerce_slide_spec(slide) for slide in slides]
     resolved_tiling_results = manifest.normalize_tiling_results(tiling_results, slide_records)
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
+    loaded = model._load_backend()
     hierarchical_mode = hierarchical.is_hierarchical_preprocessing(resolved_preprocessing)
     cpu_budget.log_on_the_fly_worker_override_once(
         resolved_preprocessing,

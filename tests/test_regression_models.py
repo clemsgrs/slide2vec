@@ -445,11 +445,11 @@ def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
     with pytest.raises(ValueError, match="allow_non_recommended_settings"):
         model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=256),
+            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=252),
         )
 
 
-def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
+def test_model_embed_slides_logs_exact_input_when_non_recommended_settings_are_allowed(
     monkeypatch,
     caplog: pytest.LogCaptureFixture,
 ):
@@ -459,15 +459,15 @@ def test_model_embed_slides_warns_when_non_recommended_settings_are_allowed(
 
     monkeypatch.setattr("slide2vec.inference.embed_slides", lambda *args, **kwargs: [slide_a])
 
-    with caplog.at_level("WARNING", logger="slide2vec"):
+    with caplog.at_level("INFO", logger="slide2vec"):
         result = model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=256),
+            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=252),
         )
 
     assert result == expected
     assert "virchow2" in caplog.text
-    assert "recommended" in caplog.text
+    assert "preset 224px, requested 252px, exact encoder input 252px" in caplog.text
 
 
 def test_model_embed_slides_rejects_non_recommended_precision_by_default():

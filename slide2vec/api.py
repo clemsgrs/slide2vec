@@ -29,6 +29,7 @@ from slide2vec.runtime.model_settings import (
 )
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
+from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path
@@ -451,6 +452,8 @@ class Model:
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._output_variant = output_variant
         self._backend: LoadedModel | None = None
+        self._pooled_input_plan: PooledEncoderInputPlan | None = None
+        self._backend_pooled_input_plan: PooledEncoderInputPlan | None = None
 
     @classmethod
     def from_preset(
@@ -672,8 +675,34 @@ class Model:
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
+    def _prepare_pooled_input(
+        self,
+        preprocessing: PreprocessingConfig,
+        *,
+        emit_run_info: bool,
+    ) -> PooledEncoderInputPlan:
+        plan = PooledEncoderInputPlan.resolve(
+            self.name,
+            requested_tile_size_px=int(preprocessing.requested_tile_size_px),
+            allow_non_recommended_settings=self.allow_non_recommended_settings,
+        )
+        self._pooled_input_plan = plan
+        if emit_run_info and plan.requires_variable_model_input:
+            logging.getLogger("slide2vec").info(
+                "Pooled encoder input for '%s': preset %dpx, requested %dpx, "
+                "exact encoder input %dpx; using normalization-only preprocessing.",
+                self.name,
+                plan.preset_input_size_px,
+                plan.requested_tile_size_px,
+                plan.expected_encoder_input_size_px,
+            )
+        return plan
+
     def _load_backend(self) -> LoadedModel:
-        if self._backend is None:
+        if (
+            self._backend is None
+            or self._backend_pooled_input_plan != self._pooled_input_plan
+        ):
             from slide2vec.inference import load_model
 
             emit_progress("model.loading", model_name=self.name)
@@ -681,7 +710,10 @@ class Model:
                 name=self.name,
                 device=self._requested_device,
                 output_variant=self._output_variant,
+                allow_non_recommended_settings=self.allow_non_recommended_settings,
+                pooled_input_plan=self._pooled_input_plan,
             )
+            self._backend_pooled_input_plan = self._pooled_input_plan
             emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 
@@ -922,12 +954,12 @@ def _validate_model_config(
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
+    model._prepare_pooled_input(preprocessing, emit_run_info=True)
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
     on_cpu = model._requested_device == "cpu"
     precision = None if on_cpu or execution is None else execution.precision
     validate_encoder_config(
         name,
-        requested_tile_size_px=preprocessing.requested_tile_size_px,
         requested_spacing_um=preprocessing.requested_spacing_um,
         precision=precision,
         output_variant=model._output_variant,

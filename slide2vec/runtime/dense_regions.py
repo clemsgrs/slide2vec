@@ -3,8 +3,9 @@
 The dense counterpart of the pooled coordinate path (``compute_tile_embeddings_for_slide``
 → ``run_forward_pass`` → ``encode_tiles``): instead of pooling each region to one vector,
 each sampled ROI is read from the slide, run through the encoder's normalization-only dense
-transform (``get_dense_transform`` — NOT the pooled transform, which crops), padded up to the
-encoder's patch multiple, and encoded via ``encode_tiles_dense`` into a ``(d, grid_h, grid_w)``
+transform (``get_normalization_transform`` — NOT the pooled transform, which crops), padded
+up to the encoder's patch multiple, and encoded via ``encode_tiles_dense`` into a
+``(d, grid_h, grid_w)``
 token grid. ``iter_regions_dense`` **streams** these grids — yielding one per coordinate, in
 coordinate order, holding at most one ``batch_size`` chunk resident — so host memory is bounded
 by ``batch_size`` rather than by a slide's ROI count.
@@ -256,7 +257,7 @@ def iter_regions_dense(
         target_size=requested_tile_size_px, patch_size=model.patch_size
     )
     if dense_transform is None:
-        dense_transform = model.get_dense_transform()
+        dense_transform = model.get_normalization_transform()
     encode_fn = _resolve_encode_fn(
         model,
         feature_kind=feature_kind,
