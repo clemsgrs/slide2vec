@@ -107,7 +107,7 @@ jobs:
           # so we can see where this step's time actually goes.
           docker run --rm \
             -e HF_TOKEN="$HF_TOKEN" \
-            -e SLIDE2VEC_CAPTURE_OUTPUT=/opt/app/.ci-output-consistency \
+            -e SLIDE2VEC_CAPTURE_OUTPUT=/opt/app/ci-output-consistency \
             -v "$GITHUB_WORKSPACE:/opt/app" \
             slide2vec-ci:${{ github.sha }} \
             bash -lc '
@@ -125,6 +125,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: canonical-output-consistency-${{ github.sha }}
-          path: .ci-output-consistency
+          path: ci-output-consistency
           if-no-files-found: ignore
           retention-days: 1
