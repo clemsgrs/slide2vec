@@ -72,7 +72,8 @@ class WSITileReader:
     ``gpu_decode`` are cucim-specific and silently unused for other backends.
 
     WSI handles are opened lazily on first read via ``_ensure_open()``, making
-    this safe to construct before forking DataLoader workers.
+    this safe to construct before forking DataLoader workers. Raw pyramid reads
+    are area-resized to ``requested_tile_size_px`` before they are returned.
     """
 
     def __init__(
@@ -91,6 +92,7 @@ class WSITileReader:
         self._gpu_decode = gpu_decode
         self._read_level = int(tiling_result.read_level)
         self._tile_size_px = int(tiling_result.read_tile_size_px)
+        self._requested_tile_size_px = int(tiling_result.requested_tile_size_px)
         self._x = tiling_result.x
         self._y = tiling_result.y
         self._reader = None
@@ -137,7 +139,7 @@ class WSITileReader:
     def read_batch_with_timing(
         self, tile_indices: np.ndarray
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        ts = self._tile_size_px
+        ts = self._requested_tile_size_px
         if len(tile_indices) == 0:
             return (
                 torch.empty((0, 3, ts, ts), dtype=torch.uint8),
@@ -154,6 +156,11 @@ class WSITileReader:
                 tensor = self._read_batch_supertiles(tile_indices)
             else:
                 tensor = self._read_batch_simple(tile_indices)
+            tensor = _area_resize_tile_batch(
+                tensor,
+                read_size_px=self._tile_size_px,
+                requested_size_px=self._requested_tile_size_px,
+            )
         reader_read_ms = (time.perf_counter() - read_start) * 1000.0
         return tensor, {"reader_open_ms": reader_open_ms, "reader_read_ms": reader_read_ms}
 
@@ -197,7 +204,8 @@ class OnTheFlyBatchTileCollator:
     """Collator that reads tiles directly from a WSI via the configured backend.
 
     Returns ``(indices_tensor, image_tensor, timing_dict)`` where
-    ``image_tensor`` is ``(B, 3, read_tile_size_px, read_tile_size_px)`` uint8.
+    ``image_tensor`` is ``(B, 3, requested_tile_size_px,
+    requested_tile_size_px)`` uint8.
 
     When super tiles are enabled (default), tiles are grouped into larger read
     regions to reduce the number of WSI reads.  Use ``ordered_indices`` to
@@ -216,7 +224,7 @@ class OnTheFlyBatchTileCollator:
         gpu_decode: bool = False,
         use_supertiles: bool = True,
     ):
-        self.tile_size = int(tiling_result.read_tile_size_px)
+        self.tile_size = int(tiling_result.requested_tile_size_px)
         self._reader = WSITileReader(
             image_path,
             tiling_result,
@@ -374,7 +382,7 @@ class WSIRegionReader:
 
 
 class OnTheFlyHierarchicalBatchCollator:
-    """Collator that reads region crops once and unfolds selected subtiles."""
+    """Read regions once, unfold raw subtiles, then area-resize them to requested size."""
 
     def __init__(
         self,
@@ -385,6 +393,7 @@ class OnTheFlyHierarchicalBatchCollator:
         subtile_index_within_region: np.ndarray,
         read_region_size_px: int,
         read_tile_size_px: int,
+        requested_tile_size_px: int,
         backend: str = "cucim",
         num_cucim_workers: int = 4,
         gpu_decode: bool = False,
@@ -392,7 +401,8 @@ class OnTheFlyHierarchicalBatchCollator:
         self._region_index = np.asarray(region_index, dtype=np.int32)
         self._subtile_index_within_region = np.asarray(subtile_index_within_region, dtype=np.int32)
         self._tiles_per_region = int(self._subtile_index_within_region.max()) + 1 if len(self._subtile_index_within_region) else 0
-        self._tile_size = int(read_tile_size_px)
+        self._read_tile_size_px = int(read_tile_size_px)
+        self._requested_tile_size_px = int(requested_tile_size_px)
         self._reader = WSIRegionReader(
             image_path,
             read_level=int(tiling_result.read_level),
@@ -423,7 +433,10 @@ class OnTheFlyHierarchicalBatchCollator:
         if not batch_indices:
             return (
                 torch.empty((0,), dtype=torch.long),
-                torch.empty((0, 3, self._tile_size, self._tile_size), dtype=torch.uint8),
+                torch.empty(
+                    (0, 3, self._requested_tile_size_px, self._requested_tile_size_px),
+                    dtype=torch.uint8,
+                ),
                 {"worker_batch_ms": 0.0, "reader_open_ms": 0.0, "reader_read_ms": 0.0},
             )
         def _run_batch():
@@ -433,9 +446,17 @@ class OnTheFlyHierarchicalBatchCollator:
             unique_regions, inverse = np.unique(requested_regions, return_inverse=True)
             locations = [self._region_locations[int(region)] for region in unique_regions]
             region_tensor, timing = self._reader.read_batch_with_timing(locations)
-            unfolded = _unfold_region_tensor_uint8(region_tensor, self._tile_size)
+            unfolded = _unfold_region_tensor_uint8(region_tensor, self._read_tile_size_px)
             subtile_indices = self._subtile_index_within_region[flat_indices]
-            out = unfolded[torch.as_tensor(inverse, dtype=torch.long), torch.as_tensor(subtile_indices, dtype=torch.long)]
+            out = unfolded[
+                torch.as_tensor(inverse, dtype=torch.long),
+                torch.as_tensor(subtile_indices, dtype=torch.long),
+            ]
+            out = _area_resize_tile_batch(
+                out,
+                read_size_px=self._read_tile_size_px,
+                requested_size_px=self._requested_tile_size_px,
+            )
             timing["worker_batch_ms"] = (time.perf_counter() - worker_start) * 1000.0
             return torch.as_tensor(flat_indices, dtype=torch.long), out, timing
 
@@ -457,3 +478,29 @@ def _unfold_region_tensor_uint8(region_tensor: torch.Tensor, tile_size: int) -> 
     unfolded = unfolded.transpose(1, 2)
     reshaped = unfolded.reshape(region_tensor.shape[0], -1, region_tensor.shape[1], tile_size, tile_size)
     return reshaped.round().clamp(0, 255).to(torch.uint8)
+
+
+def _area_resize_tile_batch(
+    batch: torch.Tensor,
+    *,
+    read_size_px: int,
+    requested_size_px: int,
+) -> torch.Tensor:
+    """Canonicalize raw RGB tiles with hs2p's tiling resize operation."""
+    if int(read_size_px) == int(requested_size_px):
+        return batch
+    resized = [
+        resize_array(
+            tile.permute(1, 2, 0).numpy(),
+            (int(requested_size_px), int(requested_size_px)),
+            interpolation="area",
+        )
+        for tile in batch
+    ]
+    if not resized:
+        return torch.empty(
+            (0, 3, int(requested_size_px), int(requested_size_px)),
+            dtype=torch.uint8,
+        )
+    array = np.stack(resized, axis=0)
+    return torch.from_numpy(array).permute(0, 3, 1, 2).contiguous()

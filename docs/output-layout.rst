@@ -132,8 +132,17 @@ and shape information. The exact fields depend on the artifact type.
       "image_path": "/data/slide-1.tif",
       "mask_path": "/data/mask-1.tif",
       "num_tiles": 166,
+      "read_tile_size_px": 224,
+      "requested_tile_size_px": 224,
+      "encoder_input_size_px": 224,
+      "requested_spacing_um": 0.5,
       "tile_size_lv0": 224,
    }
+
+``encoder_input_size_px`` is always present and may be ``null`` for a zero-tile
+artifact because no tensor reached the encoder. The metadata does not infer an
+encoder spacing: ``requested_spacing_um`` describes the canonical tile request,
+while the encoder input size reports only the observed post-transform pixels.
 
 **hierarchical_embeddings**
 
@@ -144,7 +153,11 @@ Same fields as ``tile_embeddings`` (except  ``"artifact_type": "hierarchical_emb
    {
      ...
      "num_regions": 512,
-     "tiles_per_region": 36
+     "tiles_per_region": 36,
+     "read_tile_size_px": 224,
+     "requested_tile_size_px": 224,
+     "encoder_input_size_px": 224,
+     "requested_spacing_um": 0.5
    }
 
 **slide_embeddings**

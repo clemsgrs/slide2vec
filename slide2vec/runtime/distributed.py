@@ -326,6 +326,21 @@ def load_embedded_slide_payload(coordination_dir: Path, stem: str):
     return torch.load(payload_path, map_location="cpu", weights_only=True)
 
 
+def resolve_shard_encoder_input_size(shard_payloads) -> int | None:
+    """Resolve one factual encoder input size from distributed tile shards."""
+    sizes = {
+        int(payload["encoder_input_size_px"])
+        for payload in shard_payloads
+        if payload.get("encoder_input_size_px") is not None
+    }
+    if len(sizes) > 1:
+        raise ValueError(
+            "Distributed embedding shards recorded inconsistent encoder input sizes: "
+            f"{sorted(sizes)}"
+        )
+    return next(iter(sizes), None)
+
+
 def glob_escape(text: str) -> str:
     """Escape glob metacharacters in a shard stem so a literal stem matches itself."""
     from glob import escape

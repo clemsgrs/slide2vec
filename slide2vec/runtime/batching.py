@@ -385,6 +385,7 @@ def run_forward_pass(
     with torch.inference_mode(), autocast_context:
         for prepared_batch in prefetcher:
             image = prepared_batch.image
+            _record_encoder_input_size(loaded, image)
             forward_start = time.perf_counter()
             embedding = loaded.model.encode_tiles(image).detach().cpu()
             forward_ms = (time.perf_counter() - forward_start) * 1000.0
@@ -456,6 +457,24 @@ def run_forward_pass(
         empty = torch.empty((0, int(feature_dim)), dtype=torch.float32)
         return torch.empty((0,), dtype=torch.long), empty
     return batch_indices[:processed], embeddings[:processed]
+
+
+def _record_encoder_input_size(loaded: LoadedModel, image) -> None:
+    """Record the factual square tensor geometry immediately before encoding."""
+    if not torch.is_tensor(image) or image.ndim != 4:
+        raise ValueError("Model preprocessing must produce a (B, C, H, W) tensor")
+    height, width = (int(image.shape[-2]), int(image.shape[-1]))
+    if height != width:
+        raise ValueError(
+            f"Model preprocessing must produce square encoder inputs; got {height}x{width}"
+        )
+    previous = getattr(loaded, "encoder_input_size_px", None)
+    if previous is not None and previous != height:
+        raise ValueError(
+            "Model preprocessing produced inconsistent encoder input sizes across batches: "
+            f"{previous}px and {height}px"
+        )
+    loaded.encoder_input_size_px = height
 
 
 def resolve_device(device: str, default_device):

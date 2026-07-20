@@ -432,6 +432,8 @@ class EmbeddedSlide:
     tiling_preview_path: Path | None = None
     #: Encoder latent representations when available; ``None`` otherwise.
     latents: Any | None = None
+    #: Factual square tensor side length immediately before tile encoding.
+    encoder_input_size_px: int | None = None
 
 
 class Model:

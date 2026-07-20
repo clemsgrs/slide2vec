@@ -22,6 +22,34 @@ The ``backend`` field controls which slide-reading library is used:
 - ``"asap"`` — ASAP reader (requires separate installation)
 
 
+Pooled Tile Geometry
+--------------------
+
+Pooled extraction uses three distinct pixel sizes:
+
+- ``read_tile_size_px`` is the raw square read from the selected WSI pyramid
+  level.
+- ``requested_tile_size_px`` is the canonical square tile after geometry
+  correction and before model preprocessing.
+- ``encoder_input_size_px`` is the factual square tensor side length immediately
+  before ``encode_tiles``.
+
+Every pooled reader path — direct WSI reads, saved tar tiles, hierarchical
+subtiles, and the tile-encoder dependencies of slide- and patient-level models —
+presents ``requested_tile_size_px`` to the shipped model transform. When a WSI
+read size differs, slide2vec uses hs2p's
+``resize_array(..., interpolation="area")`` operation before model
+preprocessing. Preset transforms are unchanged; for example, GigaPath keeps a
+requested tile size of 256 pixels and its shipped center-crop produces an
+encoder input size of 224 pixels.
+
+This reader convergence intentionally changes pooled embeddings for runs where
+``read_tile_size_px != requested_tile_size_px``: older runs could pass the raw
+pyramid read directly to the model transform. There is no legacy compatibility
+mode; use artifact geometry metadata to distinguish outputs produced under the
+canonical contract.
+
+
 Tissue Segmentation
 -------------------
 

@@ -22,6 +22,7 @@ from slide2vec.runtime.distributed import (
     load_tile_embedding_shards,
     merge_hierarchical_embedding_shards,
     merge_tile_embedding_shards,
+    resolve_shard_encoder_input_size,
     reset_progress_event_logs,
     run_torchrun_worker,
     work_unit_shard_stem,
@@ -227,11 +228,13 @@ def embed_single_slide_distributed(
         else:
             shard_payloads = load_tile_embedding_shards(coordination_dir, shard_stem)
             tile_embeddings = merge_tile_embedding_shards(shard_payloads)
+        encoder_input_size_px = resolve_shard_encoder_input_size(shard_payloads)
         if model.level != "slide":
             return make_embedded_slide(
                 slide=slide,
                 tiling_result=tiling_result,
                 tile_embeddings=tile_embeddings,
+                encoder_input_size_px=encoder_input_size_px,
             )
         loaded = model._load_backend()
         slide_embedding, latents = aggregate_tile_embeddings_for_slide(
@@ -249,6 +252,7 @@ def embed_single_slide_distributed(
             tile_embeddings=tile_embeddings,
             slide_embedding=slide_embedding,
             latents=latents,
+            encoder_input_size_px=encoder_input_size_px,
         )
 
 
@@ -291,6 +295,7 @@ def embed_multi_slides_distributed(
                     tile_embeddings=payload["tile_embeddings"],
                     slide_embedding=slide_embedding,
                     latents=latents,
+                    encoder_input_size_px=payload.get("encoder_input_size_px"),
                 )
             )
         return results

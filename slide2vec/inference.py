@@ -602,6 +602,7 @@ def embed_tiles(
                     mask_path=slide.mask_path,
                     backend=tiling.resolve_slide_backend(resolved_preprocessing.backend, tiling_result),
                     preprocessing=resolved_preprocessing,
+                    encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
                 ),
                 annotation=embedding.tiling_result_annotation(tiling_result),
             )
@@ -621,6 +622,7 @@ def embed_tiles(
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
                 backend=tiling.resolve_slide_backend(resolved_preprocessing.backend, tiling_result),
+                encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
             )
             artifact = embedding.write_tile_embedding_artifact(
                 slide.sample_id,

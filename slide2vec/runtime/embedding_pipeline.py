@@ -81,6 +81,7 @@ def compute_tile_embeddings_for_slide(
     execution: ExecutionOptions,
     tile_indices=None,
 ):
+    loaded.encoder_input_size_px = None
     cast_dtype = autocast_dtype(torch, execution.precision)
     autocast_context = (
         torch.autocast(device_type="cuda", dtype=cast_dtype)
@@ -190,6 +191,7 @@ def compute_hierarchical_embeddings_for_slide(
     execution: ExecutionOptions,
     flat_indices=None,
 ):
+    loaded.encoder_input_size_px = None
     geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
     index = build_hierarchical_index(
         tiling_result,
@@ -211,6 +213,7 @@ def compute_hierarchical_embeddings_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
+        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
         backend=resolve_slide_backend(preprocessing.backend, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
@@ -278,6 +281,7 @@ def compute_hierarchical_embedding_shard_for_slide(
     execution: ExecutionOptions,
     flat_indices,
 ):
+    loaded.encoder_input_size_px = None
     geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
     index = build_hierarchical_index(
         tiling_result,
@@ -292,6 +296,7 @@ def compute_hierarchical_embedding_shard_for_slide(
         subtile_index_within_region=index.subtile_index_within_region,
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
+        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
         backend=resolve_slide_backend(preprocessing.backend, tiling_result),
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
@@ -403,6 +408,7 @@ def compute_embedded_slides(
             tile_embeddings=tile_embeddings,
             slide_embedding=slide_embedding,
             latents=latents,
+            encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
         )
         if collect_results:
             embedded_slides.append(embedded_slide)
