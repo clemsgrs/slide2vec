@@ -34,6 +34,7 @@ def make_embedded_slide(
     tile_embeddings,
     slide_embedding=None,
     latents=None,
+    encoder_input_size_px: int | None = None,
 ) -> EmbeddedSlide:
     x_values, y_values = coordinate_arrays(tiling_result)
     if num_rows(tile_embeddings) != len(x_values):
@@ -61,6 +62,7 @@ def make_embedded_slide(
         mask_preview_path=Path(mask_preview_path) if mask_preview_path is not None else None,
         tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
         latents=latents,
+        encoder_input_size_px=encoder_input_size_px,
     )
 
 
@@ -90,6 +92,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
         )
         return None, None
@@ -105,6 +108,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                 preprocessing=preprocessing,
+                encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
             annotation=annotation,
         )
@@ -123,6 +127,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
         )
     slide_artifact = None

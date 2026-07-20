@@ -111,6 +111,7 @@ def main(argv=None) -> int:
                 payload = {
                     "flat_index": torch.as_tensor(shard_indices, dtype=torch.long),
                     "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
+                    "encoder_input_size_px": getattr(loaded, "encoder_input_size_px", None),
                 }
                 torch.save(payload, coordination_dir / f"{shard_stem}.hier.rank{global_rank}.pt")
             else:
@@ -137,6 +138,7 @@ def main(argv=None) -> int:
                 payload = {
                     "tile_index": torch.as_tensor(tile_indices, dtype=torch.long),
                     "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
+                    "encoder_input_size_px": getattr(loaded, "encoder_input_size_px", None),
                 }
                 torch.save(payload, coordination_dir / f"{shard_stem}.tiles.rank{global_rank}.pt")
             return 0
@@ -152,6 +154,7 @@ def main(argv=None) -> int:
                 "tile_embeddings": _to_cpu_payload(embedded_slide.tile_embeddings),
                 "slide_embedding": _to_cpu_payload(embedded_slide.slide_embedding),
                 "latents": _to_cpu_payload(embedded_slide.latents),
+                "encoder_input_size_px": embedded_slide.encoder_input_size_px,
             }
             # Stem by (sample_id, annotation) so two classes of one slide never overwrite each
             # other; flat units keep the bare-sample_id filename for backward compatibility.

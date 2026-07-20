@@ -43,6 +43,7 @@ def build_tile_embedding_metadata(
     mask_path: Path | str | None,
     tile_size_lv0: int,
     backend: str,
+    encoder_input_size_px: int | None = None,
 ) -> dict[str, Any]:
     coordinates_npz_path = (
         tiling_result.coordinates_npz_path if hasattr(tiling_result, "coordinates_npz_path") else None
@@ -61,6 +62,12 @@ def build_tile_embedding_metadata(
         "mask_path": str(mask_path) if mask_path is not None else None,
         "tile_size_lv0": int(tile_size_lv0),
         "backend": backend,
+        "read_tile_size_px": _optional_int(tiling_result, "read_tile_size_px"),
+        "requested_tile_size_px": _optional_int(tiling_result, "requested_tile_size_px"),
+        "encoder_input_size_px": (
+            int(encoder_input_size_px) if encoder_input_size_px is not None else None
+        ),
+        "requested_spacing_um": _optional_float(tiling_result, "requested_spacing_um"),
     }
 
 
@@ -80,6 +87,7 @@ def build_hierarchical_embedding_metadata(
     mask_path: Path | str | None,
     backend: str,
     preprocessing: PreprocessingConfig,
+    encoder_input_size_px: int | None = None,
 ) -> dict[str, Any]:
     coordinates_npz_path = (
         tiling_result.coordinates_npz_path if hasattr(tiling_result, "coordinates_npz_path") else None
@@ -102,8 +110,21 @@ def build_hierarchical_embedding_metadata(
         "requested_region_size_px": int(geometry["requested_region_size_px"]),
         "read_region_size_px": int(geometry["read_region_size_px"]),
         "requested_spacing_um": float(preprocessing.requested_spacing_um),
+        "encoder_input_size_px": (
+            int(encoder_input_size_px) if encoder_input_size_px is not None else None
+        ),
         "subtile_order": "row_major",
     }
+
+
+def _optional_int(value: Any, field: str) -> int | None:
+    resolved = getattr(value, field, None)
+    return int(resolved) if resolved is not None else None
+
+
+def _optional_float(value: Any, field: str) -> float | None:
+    resolved = getattr(value, field, None)
+    return float(resolved) if resolved is not None else None
 
 
 def write_tile_embedding_artifact(
