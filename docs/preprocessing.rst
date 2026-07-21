@@ -36,12 +36,20 @@ Pooled extraction uses three distinct pixel sizes:
 
 Every pooled reader path — direct WSI reads, saved tar tiles, hierarchical
 subtiles, and the tile-encoder dependencies of slide- and patient-level models —
-presents ``requested_tile_size_px`` to the shipped model transform. When a WSI
-read size differs, slide2vec uses hs2p's
+first produces ``requested_tile_size_px``. When a WSI read size differs,
+slide2vec uses hs2p's
 ``resize_array(..., interpolation="area")`` operation before model
-preprocessing. Preset transforms are unchanged; for example, GigaPath keeps a
+preprocessing.
+
+When the requested size equals the tile encoder's registered preset, slide2vec
+uses the shipped pooled transform unchanged. For example, GigaPath keeps a
 requested tile size of 256 pixels and its shipped center-crop produces an
-encoder input size of 224 pixels.
+encoder input size of 224 pixels. A different requested size is instead an exact
+encoder-input request: it requires ``allow_non_recommended_settings=True``, an
+encoder registered as variable-input capable, and a positive size divisible by
+the model's patch geometry. The permitted path applies normalization only, so
+the exact requested square reaches ``encode_tiles``. Fixed-size or
+patch-incompatible requests fail before slide reading begins.
 
 This reader convergence intentionally changes pooled embeddings for runs where
 ``read_tile_size_px != requested_tile_size_px``: older runs could pass the raw

@@ -452,24 +452,26 @@ class TileEncoder(Encoder):
             "ViT tile encoders do)."
         )
 
-    def get_dense_transform(self) -> Callable:
-        """Photometric (normalization-only) transform for dense extraction.
+    def get_normalization_transform(self) -> Callable:
+        """Geometry-preserving photometric transform.
 
         Returns a transform that applies ONLY this encoder's normalization
-        (per-channel mean/std) — **no Resize, no CenterCrop** — so the dense
-        feature grid covers the *full* source tile and stays spatially registered
-        to it. This deliberately differs from ``get_transform`` (the pooled recipe):
+        (per-channel mean/std) — **no Resize, no CenterCrop** — so callers can
+        preserve the full input geometry. This deliberately differs from
+        ``get_transform`` (the shipped pooled recipe):
         some encoders resize-then-center-crop there (GigaPath ``Resize(256) ->
         CenterCrop(224)``; Lunit ``crop_pct=0.9 -> Resize(248) -> CenterCrop(224)``),
-        which drops the tile margins and would misregister the grid against a dense
-        target mask. Geometry (padding to a patch multiple, optional resize,
-        cropping logits back) is the dense pipeline's responsibility, not the
-        encoder's. Default: unsupported, mirroring ``encode_tiles_dense``.
+        which drops the tile margins. Geometry policy remains the caller's
+        responsibility. Default: unsupported, mirroring ``encode_tiles_dense``.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} does not provide a dense transform. Only "
-            "encoders that support dense (spatial-grid) extraction define one."
+            f"{type(self).__name__} does not provide a normalization transform. "
+            "The encoder cannot preserve caller-requested image geometry."
         )
+
+    def get_dense_transform(self) -> Callable:
+        """Backward-compatible alias for the shared normalization primitive."""
+        return self.get_normalization_transform()
 
 
 class SlideEncoder(Encoder):
@@ -552,8 +554,8 @@ class TimmTileEncoder(TileEncoder):
         data_config = resolve_data_config(self._model.pretrained_cfg, model=self._model)
         return create_transform(**data_config)
 
-    def get_dense_transform(self) -> Callable:
-        # Normalization only — no Resize/CenterCrop (see TileEncoder.get_dense_transform).
+    def get_normalization_transform(self) -> Callable:
+        # Normalization only — no Resize/CenterCrop.
         # mean/std come from the same resolved data config get_transform uses, so the
         # photometric pipeline matches pooled extraction even for encoders with custom
         # normalization (e.g. H-optimus 0.7072.../0.2119...); verified per-encoder.

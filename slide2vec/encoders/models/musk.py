@@ -35,6 +35,7 @@ def _as_hw(value: int | tuple[int, int] | list[int]) -> tuple[int, int]:
     },
     default_output_variant="ms_aug",
     input_size=384,
+    supports_variable_input_size=False,
     patch_size=16,
     supported_spacing_um=[0.25, 0.5, 1.0],
     precision="fp16",
@@ -60,7 +61,7 @@ class MUSK(TileEncoder):
             v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
         ])
 
-    def get_dense_transform(self) -> Callable:
+    def get_normalization_transform(self) -> Callable:
         return v2.Compose([
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),

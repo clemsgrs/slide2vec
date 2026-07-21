@@ -171,8 +171,9 @@ Notes:
 - Dense grids use patch-token dimensions. For encoders whose pooled output
   concatenates CLS and mean patch tokens, ``d`` can be smaller than the pooled
   output dimension ``D``.
-- ``get_dense_transform`` preserves geometry by applying normalization only.
-  At the **encoder level** (``get_dense_transform`` / ``encode_tiles_dense``),
+- ``get_normalization_transform`` preserves geometry by applying normalization
+  only. At the **encoder level**
+  (``get_normalization_transform`` / ``encode_tiles_dense``),
   resize, crop, padding, and sliding-window policy are therefore the caller's
   responsibility. slide2vec also ships a **region-level** streaming primitive,
   ``iter_regions_dense``, that layers spacing-aware region reads, padding to the

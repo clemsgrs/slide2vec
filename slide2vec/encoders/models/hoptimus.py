@@ -72,6 +72,8 @@ class _HOptimusBase(TimmTileEncoder):
     output_variants={"default": {"encode_dim": 1536}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
+    variable_input_model_kwargs={"dynamic_img_size": True},
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -109,6 +111,8 @@ class HOptimus0(TimmTileEncoder):
     output_variants={"default": {"encode_dim": 1536}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
+    variable_input_model_kwargs={"dynamic_img_size": True},
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -147,18 +151,32 @@ class HOptimus1(TimmTileEncoder):
     },
     default_output_variant="cls_patch_mean",
     input_size=224,
+    supports_variable_input_size=True,
+    variable_input_model_kwargs={"dynamic_img_size": True},
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
     source="bioptimus/H0-mini",
 )
 class H0Mini(_HOptimusBase):
-    def __init__(self, *, output_variant: str | None = None):
+    def __init__(
+        self,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool | None = None,
+        allow_non_recommended_settings: bool = False,
+    ):
         super().__init__(
             "hf-hub:bioptimus/H0-mini",
             output_variant=output_variant,
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
+            dynamic_img_size=resolve_recommended_dynamic_img_size(
+                requested=dynamic_img_size,
+                recommended=False,
+                allow_non_recommended=allow_non_recommended_settings,
+                encoder_name="h0-mini",
+            ),
         )
 
 

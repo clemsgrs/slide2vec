@@ -1325,7 +1325,7 @@ def test_get_cfg_from_args_rejects_non_recommended_model_settings_by_default(tmp
                 "tiling:",
                 "  params:",
                 "    requested_spacing_um: 1.0",
-                "    requested_tile_size_px: 256",
+                "    requested_tile_size_px: 252",
                 "model:",
                 "  name: virchow",
             ]
@@ -1355,7 +1355,7 @@ def test_get_cfg_from_args_warns_when_non_recommended_model_settings_are_allowed
                 "tiling:",
                 "  params:",
                 "    requested_spacing_um: 1.0",
-                "    requested_tile_size_px: 256",
+                "    requested_tile_size_px: 252",
                 "model:",
                 "  name: virchow",
                 "  allow_non_recommended_settings: true",

@@ -56,6 +56,7 @@ def _fill_null_encoder_defaults(cfg, encoder_defaults: dict) -> None:
 def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> None:
     from slide2vec.encoders.registry import encoder_registry
     from slide2vec.encoders.validation import validate_encoder_config
+    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 
     model_cfg = cfg.model
     model_name = model_cfg.name
@@ -72,9 +73,15 @@ def validate_model_recommended_settings(cfg, *, run_on_cpu: bool = False) -> Non
     precision = None if run_on_cpu else cfg.speed.precision
     allow_non_recommended = bool(model_cfg.allow_non_recommended_settings)
 
+    if requested_tile_size_px is not None:
+        PooledEncoderInputPlan.resolve(
+            canonical,
+            requested_tile_size_px=int(requested_tile_size_px),
+            allow_non_recommended_settings=allow_non_recommended,
+        )
+
     validate_encoder_config(
         canonical,
-        requested_tile_size_px=requested_tile_size_px,
         requested_spacing_um=requested_spacing_um,
         precision=precision,
         allow_non_recommended=allow_non_recommended,

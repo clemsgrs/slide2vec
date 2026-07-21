@@ -16,7 +16,13 @@ _VIRCHOW_OUTPUT_DIMS = {
 class _VirchowBase(TimmTileEncoder):
     """Base for Virchow models that concat CLS + mean-pooled patch tokens."""
 
-    def __init__(self, model_name: str, *, output_variant: str | None = None):
+    def __init__(
+        self,
+        model_name: str,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool = False,
+    ):
         self._output_variant = resolve_requested_output_variant(
             output_variant,
             default="cls_patch_mean",
@@ -27,6 +33,7 @@ class _VirchowBase(TimmTileEncoder):
             output_variant="default",
             mlp_layer=timm.layers.SwiGLUPacked,
             act_layer=torch.nn.SiLU,
+            dynamic_img_size=dynamic_img_size,
         )
 
     def encode_tiles(self, batch: Tensor) -> Tensor:
@@ -50,14 +57,25 @@ class _VirchowBase(TimmTileEncoder):
     },
     default_output_variant="cls_patch_mean",
     input_size=224,
+    supports_variable_input_size=True,
+    variable_input_model_kwargs={"dynamic_img_size": True},
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
     source="paige-ai/Virchow",
 )
 class Virchow(_VirchowBase):
-    def __init__(self, *, output_variant: str | None = None):
-        super().__init__("hf-hub:paige-ai/Virchow", output_variant=output_variant)
+    def __init__(
+        self,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool = False,
+    ):
+        super().__init__(
+            "hf-hub:paige-ai/Virchow",
+            output_variant=output_variant,
+            dynamic_img_size=dynamic_img_size,
+        )
 
 
 @register_encoder(
@@ -68,11 +86,22 @@ class Virchow(_VirchowBase):
     },
     default_output_variant="cls_patch_mean",
     input_size=224,
+    supports_variable_input_size=True,
+    variable_input_model_kwargs={"dynamic_img_size": True},
     patch_size=14,
     supported_spacing_um=[0.25, 0.5, 1.0, 2.0],
     precision="fp16",
     source="paige-ai/Virchow2",
 )
 class Virchow2(_VirchowBase):
-    def __init__(self, *, output_variant: str | None = None):
-        super().__init__("hf-hub:paige-ai/Virchow2", output_variant=output_variant)
+    def __init__(
+        self,
+        *,
+        output_variant: str | None = None,
+        dynamic_img_size: bool = False,
+    ):
+        super().__init__(
+            "hf-hub:paige-ai/Virchow2",
+            output_variant=output_variant,
+            dynamic_img_size=dynamic_img_size,
+        )

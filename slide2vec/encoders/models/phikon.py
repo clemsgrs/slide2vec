@@ -40,8 +40,8 @@ class _PhikonBase(TileEncoder):
 
         return _transform
 
-    def get_dense_transform(self) -> Callable:
-        # Normalization only — no resize/crop (see TileEncoder.get_dense_transform).
+    def get_normalization_transform(self) -> Callable:
+        # Normalization only — no resize/crop.
         # Reuses the HF processor's normalization so it matches pooled extraction;
         # Phikon is pinned to its native 224, so the dense pipeline must feed 224.
         from torchvision.transforms import v2
@@ -148,6 +148,7 @@ class _PhikonBase(TileEncoder):
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=False,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",
@@ -166,6 +167,7 @@ class Phikon(_PhikonBase):
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=False,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",

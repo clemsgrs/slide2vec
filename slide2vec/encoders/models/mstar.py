@@ -19,6 +19,7 @@ from slide2vec.encoders.registry import register_encoder
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
     input_size=224,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,  # 256px @ 20x, resized to 224 (per paper)
     precision="fp32",  # upstream runs plain fp32, no autocast
