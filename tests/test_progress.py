@@ -986,6 +986,33 @@ def test_rich_reporter_defers_tiling_bar_until_progress(monkeypatch):
     assert 2 not in reporter.progress.tasks
 
 
+def test_rich_reporter_surfaces_empty_masks_in_tiling_finished(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="tiling.started", payload={"slide_count": 3}))
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.finished",
+            payload={
+                "total": 3,
+                "completed": 3,
+                "failed": 0,
+                "discovered_tiles": 12,
+                "empty_masks": 1,
+            },
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "Tiling slides (3 total)...",
+        "Tiling finished: 3/3 complete, 0 failed, 12 tiles, empty_masks=1",
+    ]
+
+
 def test_rich_reporter_updates_embedding_total_for_resume_skips(monkeypatch):
     import slide2vec.progress as progress
 

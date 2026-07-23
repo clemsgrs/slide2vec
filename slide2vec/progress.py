@@ -316,6 +316,13 @@ class RichCliProgressReporter:
             if task_id is not None:
                 self.progress.remove_task(task_id)
                 self._task_ids.pop("tiling", None)
+            empty_masks_suffix = _empty_masks_suffix(payload)
+            if empty_masks_suffix:
+                self.progress.print(
+                    f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
+                    f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+                    f"{empty_masks_suffix}"
+                )
             return
         if kind == "tiling.summary":
             self._print_summary(
