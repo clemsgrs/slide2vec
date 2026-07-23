@@ -407,6 +407,79 @@ def test_plain_text_reporter_formats_tissue_progress():
     )
 
 
+def test_plain_text_reporter_formats_mask_backend_selected():
+    import slide2vec.progress as progress
+
+    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
+
+    assert (
+        reporter._format_line(
+            "mask_backend.selected",
+            {
+                "sample_id": "slide-a",
+                "mask_path": "/data/slide-a-mask.tif",
+                "backend": "openslide",
+                "reason": "selected openslide for auto mask backend",
+            },
+        )
+        == "[mask backend] slide-a (/data/slide-a-mask.tif): selected openslide for auto mask backend"
+    )
+    assert (
+        reporter._format_line(
+            "mask_backend.selected",
+            {
+                "sample_id": "slide-a",
+                "mask_path": "/data/slide-a-mask.tif",
+                "backend": "openslide",
+            },
+        )
+        == "[mask backend] slide-a (/data/slide-a-mask.tif): using openslide"
+    )
+
+
+def test_plain_text_reporter_surfaces_empty_masks_only_when_present():
+    import slide2vec.progress as progress
+
+    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
+
+    # Zero (or missing) empty_masks leaves the existing lines untouched.
+    assert (
+        reporter._format_line(
+            "tissue.finished",
+            {"total": 3, "completed": 3, "failed": 0, "empty_masks": 0},
+        )
+        == "Tissue resolution finished: 3/3 complete, 0 failed"
+    )
+    # A non-zero count is surfaced across tissue + tiling lines.
+    assert (
+        reporter._format_line(
+            "tissue.progress",
+            {"total": 3, "completed": 2, "failed": 0, "empty_masks": 1},
+        )
+        == "Tissue resolution: 2/3 complete, 0 failed, empty_masks=1"
+    )
+    assert (
+        reporter._format_line(
+            "tissue.finished",
+            {"total": 3, "completed": 3, "failed": 0, "empty_masks": 2},
+        )
+        == "Tissue resolution finished: 3/3 complete, 0 failed, empty_masks=2"
+    )
+    assert (
+        reporter._format_line(
+            "tiling.finished",
+            {
+                "total": 3,
+                "completed": 3,
+                "failed": 0,
+                "discovered_tiles": 12,
+                "empty_masks": 2,
+            },
+        )
+        == "Tiling finished: 3/3 complete, 0 failed, 12 tiles, empty_masks=2"
+    )
+
+
 def test_run_forward_pass_reports_processed_tile_counts():
     torch = pytest.importorskip("torch")
     import slide2vec.inference as inference
@@ -913,6 +986,33 @@ def test_rich_reporter_defers_tiling_bar_until_progress(monkeypatch):
     assert 2 not in reporter.progress.tasks
 
 
+def test_rich_reporter_surfaces_empty_masks_in_tiling_finished(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="tiling.started", payload={"slide_count": 3}))
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tiling.finished",
+            payload={
+                "total": 3,
+                "completed": 3,
+                "failed": 0,
+                "discovered_tiles": 12,
+                "empty_masks": 1,
+            },
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "Tiling slides (3 total)...",
+        "Tiling finished: 3/3 complete, 0 failed, 12 tiles, empty_masks=1",
+    ]
+
+
 def test_rich_reporter_updates_embedding_total_for_resume_skips(monkeypatch):
     import slide2vec.progress as progress
 
@@ -991,6 +1091,74 @@ def test_rich_reporter_emits_backend_selected_via_console_print(monkeypatch):
     ]
 
 
+def test_rich_reporter_emits_mask_backend_selected_via_console_print(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    def _fail_if_used(*args, **kwargs):
+        raise AssertionError("mask_backend.selected should not go through Progress.print")
+
+    reporter.progress.print = _fail_if_used
+
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="mask_backend.selected",
+            payload={
+                "sample_id": "slide-a",
+                "mask_path": "/data/slide-a-mask.tif",
+                "backend": "openslide",
+                "reason": "selected openslide for auto mask backend",
+            },
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "[mask backend] slide-a (/data/slide-a-mask.tif): selected openslide for auto mask backend"
+    ]
+
+
+def test_rich_reporter_surfaces_empty_masks_in_tissue_finished(monkeypatch):
+    import slide2vec.progress as progress
+
+    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
+    console = FakeConsole()
+    reporter = progress.RichCliProgressReporter(console=console)
+
+    reporter.emit(progress.ProgressEvent(kind="tissue.started", payload={"total": 3}))
+    reporter.emit(
+        progress.ProgressEvent(
+            kind="tissue.finished",
+            payload={"total": 3, "completed": 3, "failed": 0, "empty_masks": 1},
+        )
+    )
+
+    assert [line[0] for line in console.lines] == [
+        "Resolving tissue masks (3 total)...",
+        "Tissue resolution finished: 3/3 complete, 0 failed, empty_masks=1",
+    ]
+
+
+def test_progress_bridge_forwards_mask_backend_selected_and_drops_unbridged_kinds():
+    import slide2vec.progress as progress
+    from slide2vec.runtime.progress_bridge import _Hs2pProgressBridge
+
+    captured = []
+
+    class _Capture:
+        def emit(self, event):
+            captured.append((event.kind, dict(event.payload)))
+
+    bridge = _Hs2pProgressBridge(_Capture())
+
+    mask_payload = {"sample_id": "slide-a", "mask_path": "/m.tif", "backend": "openslide"}
+    bridge.emit(progress.ProgressEvent(kind="mask_backend.selected", payload=mask_payload))
+    # A kind slide2vec does not bridge (e.g. an hs2p run-level event) is dropped.
+    bridge.emit(progress.ProgressEvent(kind="run.started", payload={"x": 1}))
+
+    assert captured == [("mask_backend.selected", mask_payload)]
 
 
 def test_jsonl_progress_reporter_tags_worker_events_with_gpu_label(tmp_path: Path):

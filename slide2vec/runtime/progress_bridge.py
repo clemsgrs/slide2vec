@@ -10,6 +10,7 @@ from slide2vec.progress import (
 
 _BRIDGED_HS2P_PROGRESS_KINDS = {
     "backend.selected",
+    "mask_backend.selected",
     "tissue.started",
     "tissue.progress",
     "tissue.finished",
