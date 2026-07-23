@@ -7,7 +7,7 @@ and how to configure them.
 .. autoclass:: slide2vec.PreprocessingConfig
    :members:
    :undoc-members:
-   :exclude-members: from_config, with_backend
+   :exclude-members: from_config, with_backend, with_mask_backend
 
 
 Backends
@@ -20,6 +20,14 @@ The ``backend`` field controls which slide-reading library is used:
 - ``"openslide"`` — broad format support, CPU-only
 - ``"vips"`` — libvips, good for large TIFF files
 - ``"asap"`` — ASAP reader (requires separate installation)
+
+The ``mask_backend`` field (hs2p ≥ 4.3.0) controls the reader used for **source masks**
+— precomputed tissue masks and annotation masks — and accepts the same values. It is
+resolved independently from the *mask* path, so a mask can use a different decoder than its
+slide. Since hs2p no longer silently falls back to another reader, set ``mask_backend``
+explicitly (e.g. ``"openslide"``) when a mask cannot be decoded by the slide backend — for
+example a deflate-compressed label TIFF that cuCIM can open but not decode. It defaults to
+``"auto"`` and is ignored for slides with no source mask.
 
 
 Pooled Tile Geometry

@@ -60,6 +60,10 @@ def build_hs2p_configs(
             ),
             independent_sampling=preprocessing.independent_sampling,
             backend=resolve_tiling_backend(preprocessing),
+            # Mask backend is resolved independently from the mask path by hs2p; pass the
+            # requested value straight through (default "auto"). Unlike the slide backend it
+            # has no "asap" fallback — a maskless slide simply never resolves it.
+            mask_backend=preprocessing.mask_backend,
         )
     )
     tiling_cfg = resolve_tiling_config(tiling_adapter)

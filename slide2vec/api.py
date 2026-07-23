@@ -103,6 +103,13 @@ class PreprocessingConfig:
     #: Slide reading backend. ``"auto"`` tries cucim → openslide → vips in order.
     #: Explicit choices: ``"cucim"``, ``"openslide"``, ``"vips"``, ``"asap"``.
     backend: str = "auto"
+    #: Source-mask reading backend, resolved independently from the *mask* path
+    #: (hs2p ≥ 4.3.0). ``"auto"`` probes openability just like :attr:`backend`. Set this
+    #: explicitly (e.g. ``"openslide"``) when a precomputed tissue or annotation mask needs
+    #: a different decoder than its slide — hs2p no longer silently falls back to another
+    #: reader, so a mask the slide backend cannot decode fails unless overridden here.
+    #: Accepts the same values as :attr:`backend`; ignored for slides with no source mask.
+    mask_backend: str = "auto"
     #: Target spacing in µm/px. Resolved from the model preset when ``None``.
     requested_spacing_um: float | None = None
     #: Tile side length in pixels at *requested_spacing_um*.
@@ -183,6 +190,7 @@ class PreprocessingConfig:
         region_tile_multiple = getattr(tiling.params, "region_tile_multiple", None)
         return cls(
             backend=tiling.backend,
+            mask_backend=getattr(tiling, "mask_backend", "auto"),
             requested_spacing_um=float(tiling.params.requested_spacing_um),
             requested_tile_size_px=int(tiling.params.requested_tile_size_px),
             requested_region_size_px=int(region_size_px) if region_size_px is not None else None,
@@ -209,6 +217,9 @@ class PreprocessingConfig:
 
     def with_backend(self, backend: str) -> "PreprocessingConfig":
         return replace(self, backend=backend)
+
+    def with_mask_backend(self, mask_backend: str) -> "PreprocessingConfig":
+        return replace(self, mask_backend=mask_backend)
 
 
 

@@ -40,6 +40,8 @@ def test_packaged_preprocessing_config_matches_hs2p_4_tiling_schema():
     cfg = load_config("default")
 
     assert hasattr(cfg, "save_tiles")
+    assert cfg.tiling.backend == "auto"
+    assert cfg.tiling.mask_backend == "auto"
     assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
     assert hasattr(cfg.tiling.filter_params, "filter_blur")
     assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
@@ -840,6 +842,63 @@ def test_preprocessing_with_backend_preserves_other_fields():
     assert updated.read_coordinates_from == base.read_coordinates_from
     assert updated.read_tiles_from == base.read_tiles_from
     assert updated is not base
+
+
+def test_preprocessing_mask_backend_defaults_to_auto_and_is_overridable():
+    base = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
+    assert base.mask_backend == "auto"
+
+    updated = base.with_mask_backend("openslide")
+
+    assert updated.mask_backend == "openslide"
+    assert updated.backend == base.backend
+    assert updated.requested_spacing_um == base.requested_spacing_um
+    assert updated is not base
+
+
+def test_serialize_preprocessing_round_trips_mask_backend():
+    from slide2vec.runtime.serialization import (
+        deserialize_preprocessing,
+        serialize_preprocessing,
+    )
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        mask_backend="openslide",
+    )
+    payload = serialize_preprocessing(preprocessing)
+    assert payload["mask_backend"] == "openslide"
+    assert deserialize_preprocessing(payload).mask_backend == "openslide"
+
+    # Legacy worker payloads without the key deserialize to the "auto" default.
+    legacy = {k: v for k, v in payload.items() if k != "mask_backend"}
+    assert deserialize_preprocessing(legacy).mask_backend == "auto"
+
+
+def test_build_hs2p_configs_threads_mask_backend_into_tiling_config():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = (
+        _masks_preprocessing({"min_coverage": {"tissue": 0.1}})
+        .with_backend("cucim")
+        .with_mask_backend("openslide")
+    )
+
+    tiling_cfg = build_hs2p_configs(preprocessing)[0]
+
+    assert tiling_cfg.backend == "cucim"
+    assert tiling_cfg.mask_backend == "openslide"
+
+
+def test_build_hs2p_configs_defaults_mask_backend_to_auto():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing({"min_coverage": {"tissue": 0.1}})
+
+    tiling_cfg = build_hs2p_configs(preprocessing)[0]
+
+    assert tiling_cfg.mask_backend == "auto"
 
 
 def test_masks_min_coverage_tissue_drives_derived_tiling_threshold():

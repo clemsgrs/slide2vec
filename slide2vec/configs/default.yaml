@@ -26,6 +26,7 @@ tiling:
   read_coordinates_from: # path to an existing directory containing pre-extracted `.coordinates.npz` / `.coordinates.meta.json` artifacts to reuse instead of starting tiling from scratch
   read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
   backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
+  mask_backend: "auto" # backend for reading source masks (precomputed tissue / annotation), resolved independently from the mask path; "auto" probes openability like `backend`. Set explicitly (e.g. "openslide") when a mask needs a different decoder than its slide — hs2p (>=4.3.0) no longer silently falls back
   independent_sampling: true # selection strategy when annotation sampling is active. true: sample each class independently against its own binary mask (independent selection); false: sample once over the union of active classes, then post-filter per class by coverage (joint selection). Ignored when the masks vocabulary is left at the tissue-only default.
   masks:
     # Annotation-mask vocabulary forwarded to hs2p's sampling resolver. The shipped default

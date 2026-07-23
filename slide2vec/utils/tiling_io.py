@@ -62,6 +62,8 @@ BASE_TILING_ORDERED_COLUMNS = (
     "mask_path",
     "requested_backend",
     "backend",
+    "requested_mask_backend",
+    "mask_backend",
     "spacing_at_level_0",
     "tiling_status",
     "num_tiles",
@@ -80,6 +82,8 @@ BASE_EMBEDDING_ORDERED_COLUMNS = (
     "mask_path",
     "requested_backend",
     "backend",
+    "requested_mask_backend",
+    "mask_backend",
     "spacing_at_level_0",
     "tiling_status",
     "num_tiles",
@@ -187,6 +191,13 @@ def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
         )
     if "spacing_at_level_0" not in df.columns:
         df["spacing_at_level_0"] = [None] * len(df)
+    # Mask-role backend provenance (hs2p >= 4.3.0). Not in BASE_PROCESS_COLUMNS so process
+    # lists produced by older hs2p still load; backfilled to None here so the ordered views
+    # can select them unconditionally, and preserved verbatim when hs2p wrote them.
+    if "requested_mask_backend" not in df.columns:
+        df["requested_mask_backend"] = [None] * len(df)
+    if "mask_backend" not in df.columns:
+        df["mask_backend"] = [None] * len(df)
     if "annotation" not in df.columns:
         df["annotation"] = ["tissue"] * len(df)
     if "tiles_tar_path" not in df.columns:

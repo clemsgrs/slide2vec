@@ -18,6 +18,7 @@ def serialize_model(model) -> dict[str, Any]:
 def serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any]:
     return {
         "backend": preprocessing.backend,
+        "mask_backend": preprocessing.mask_backend,
         "requested_spacing_um": preprocessing.requested_spacing_um,
         "requested_tile_size_px": preprocessing.requested_tile_size_px,
         "requested_region_size_px": preprocessing.requested_region_size_px,
@@ -114,6 +115,7 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
     )
     return PreprocessingConfig(
         backend=payload["backend"],
+        mask_backend=payload.get("mask_backend", "auto"),
         requested_spacing_um=float(payload["requested_spacing_um"]),
         requested_tile_size_px=int(payload["requested_tile_size_px"]),
         requested_region_size_px=(

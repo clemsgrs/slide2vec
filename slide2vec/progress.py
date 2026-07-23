@@ -75,6 +75,29 @@ def _format_backend_selected_message(payload: dict[str, Any]) -> str:
     return f"[backend] {payload['sample_id']}: using {payload['backend']}"
 
 
+def _format_mask_backend_selected_message(payload: dict[str, Any]) -> str:
+    sample_id = payload["sample_id"]
+    mask_path = payload.get("mask_path")
+    reason = payload.get("reason")
+    if reason:
+        return f"[mask backend] {sample_id} ({mask_path}): {reason}"
+    return f"[mask backend] {sample_id} ({mask_path}): using {payload['backend']}"
+
+
+def _empty_masks_suffix(payload: dict[str, Any]) -> str:
+    """Render ``, empty_masks=N`` only when a precomputed mask resolved empty (N > 0).
+
+    hs2p (>=4.3.0) folds the running ``empty_masks`` count into its tissue/tiling progress
+    payloads and forwards them verbatim through the bridge. Zero is the common path, so we
+    stay silent then and surface the count only when there is something to flag.
+    """
+    try:
+        count = int(payload.get("empty_masks", 0))
+    except (TypeError, ValueError):
+        return ""
+    return f", empty_masks={count}" if count > 0 else ""
+
+
 class PlainTextCliProgressReporter:
     def __init__(self, *, stream=None) -> None:
         self.stream = stream or sys.stdout
@@ -111,12 +134,12 @@ class PlainTextCliProgressReporter:
         if kind == "tissue.progress":
             return (
                 f"Tissue resolution: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed"
+                f"{payload['failed']} failed{_empty_masks_suffix(payload)}"
             )
         if kind == "tissue.finished":
             return (
                 f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed"
+                f"{payload['failed']} failed{_empty_masks_suffix(payload)}"
             )
         if kind == "tiling.started":
             return f"Tiling slides ({payload['slide_count']} total)..."
@@ -129,6 +152,7 @@ class PlainTextCliProgressReporter:
             return (
                 f"Tiling finished: {payload['completed']}/{payload['total']} complete, "
                 f"{payload['failed']} failed, {payload['discovered_tiles']} tiles"
+                f"{_empty_masks_suffix(payload)}"
             )
         if kind == "tiling.summary":
             return (
@@ -189,6 +213,8 @@ class PlainTextCliProgressReporter:
             )
         if kind == "backend.selected":
             return _format_backend_selected_message(payload)
+        if kind == "mask_backend.selected":
+            return _format_mask_backend_selected_message(payload)
         if kind == "run.finished":
             return f"Run finished successfully. Logs: {payload['logs_dir']}"
         if kind == "run.failed":
@@ -254,7 +280,8 @@ class RichCliProgressReporter:
                     task_id,
                     completed=payload["completed"] + payload["failed"],
                     description=(
-                        f"Resolving tissue masks ({payload['completed']}/{payload['total']} resolved)"
+                        f"Resolving tissue masks ({payload['completed']}/{payload['total']} resolved"
+                        f"{_empty_masks_suffix(payload)})"
                     ),
                 )
             return
@@ -264,7 +291,7 @@ class RichCliProgressReporter:
                 self.progress.remove_task(task_id)
             self.progress.print(
                 f"Tissue resolution finished: {payload['completed']}/{payload['total']} complete, "
-                f"{payload['failed']} failed"
+                f"{payload['failed']} failed{_empty_masks_suffix(payload)}"
             )
             return
         if kind == "tiling.started":
@@ -469,6 +496,9 @@ class RichCliProgressReporter:
             return
         if kind == "backend.selected":
             self.console.print(_format_backend_selected_message(payload))
+            return
+        if kind == "mask_backend.selected":
+            self.console.print(_format_mask_backend_selected_message(payload))
             return
         if kind == "run.finished":
             self._print_summary(

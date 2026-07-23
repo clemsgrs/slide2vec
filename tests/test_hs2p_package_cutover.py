@@ -83,8 +83,8 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,requested_mask_backend,mask_backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,auto,cucim,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_tiling_process_df(process_list)
@@ -95,6 +95,8 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
         "mask_path",
         "requested_backend",
         "backend",
+        "requested_mask_backend",
+        "mask_backend",
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
@@ -109,6 +111,26 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
     assert df.loc[0, "mask_path"] == "/data/slide-1-mask.png"
     assert df.loc[0, "requested_backend"] == "auto"
     assert df.loc[0, "backend"] == "openslide"
+    assert df.loc[0, "requested_mask_backend"] == "auto"
+    assert df.loc[0, "mask_backend"] == "cucim"
+
+
+def test_load_tiling_process_df_backfills_missing_mask_backend_columns(tmp_path: Path):
+    """A process_list.csv from hs2p < 4.3.0 (no mask-backend columns) still loads: the
+    columns are backfilled to NaN rather than raising."""
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+
+    process_list = tmp_path / "process_list.csv"
+    process_list.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        encoding="utf-8",
+    )
+    df = helper.load_tiling_process_df(process_list)
+    assert "requested_mask_backend" in df.columns
+    assert "mask_backend" in df.columns
+    assert pd.isna(df.loc[0, "requested_mask_backend"])
+    assert pd.isna(df.loc[0, "mask_backend"])
 
 
 def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
@@ -116,8 +138,8 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
 
     process_list = tmp_path / "process_list.csv"
     process_list.write_text(
-        "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
-        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,requested_mask_backend,mask_backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
+        "slide-1,tissue,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,auto,cucim,success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,\n",
         encoding="utf-8",
     )
     df = helper.load_embedding_process_df(process_list, include_aggregation_status=True)
@@ -128,6 +150,8 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
         "mask_path",
         "requested_backend",
         "backend",
+        "requested_mask_backend",
+        "mask_backend",
         "spacing_at_level_0",
         "tiling_status",
         "num_tiles",
@@ -145,6 +169,8 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
         "error",
         "traceback",
     ]
+    assert df.loc[0, "requested_mask_backend"] == "auto"
+    assert df.loc[0, "mask_backend"] == "cucim"
     assert df.loc[0, "feature_status"] == "tbp"
     assert pd.isna(df.loc[0, "feature_path"])
     assert pd.isna(df.loc[0, "encoder_name"])

@@ -27,7 +27,7 @@ PreprocessingConfig
    :members:
    :undoc-members:
    :no-index:
-   :exclude-members: from_config, with_backend
+   :exclude-members: from_config, with_backend, with_mask_backend
 
 For a full breakdown of backends, segmentation methods, and preview options,
 see :doc:`preprocessing`.
