@@ -82,7 +82,7 @@ class EncoderInputContract:
         cls,
         encoder_name: str,
         *,
-        target_size_px: int,
+        target_size_px: int | tuple[int, int],
         window_size: int | None,
     ) -> "EncoderInputContract":
         """Resolve the dense ROI geometry the caller asked for, or raise.

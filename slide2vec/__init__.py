@@ -1,4 +1,5 @@
 from slide2vec.api import (
+    DenseImageOptions,
     DenseOptions,
     EmbeddedPatient,
     EmbeddedSlide,
@@ -12,6 +13,7 @@ from slide2vec.api import (
     list_models,
 )
 from slide2vec.artifacts import (
+    DenseImageArtifact,
     DenseRegionArtifact,
     HierarchicalEmbeddingArtifact,
     ImageEmbeddingArtifact,
@@ -28,6 +30,7 @@ __all__ = [
     "Pipeline",
     "PreprocessingConfig",
     "DenseOptions",
+    "DenseImageOptions",
     "SlideRegions",
     "ImageSpec",
     "ExecutionOptions",
@@ -38,6 +41,7 @@ __all__ = [
     "HierarchicalEmbeddingArtifact",
     "TileEmbeddingArtifact",
     "DenseRegionArtifact",
+    "DenseImageArtifact",
     "ImageEmbeddingArtifact",
     "__version__",
 ]

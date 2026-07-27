@@ -100,9 +100,10 @@ Shapes by artifact type:
    * - ``patient_embeddings``
      - ``(D,)``
 
-Dense tile grids are not currently written by :class:`~slide2vec.Pipeline` or
-the CLI. They are exposed through the low-level tile encoder API as
-``encode_tiles_dense(...)``; see :doc:`api` for usage.
+Dense grids are not written by :class:`~slide2vec.Pipeline` or the CLI. They are
+produced by :meth:`~slide2vec.Model.embed_regions_dense` (slide ROIs) and
+:meth:`~slide2vec.Model.embed_images_dense` (pre-cropped images), and exposed at
+the encoder level as ``encode_tiles_dense(...)``; see :doc:`api` for usage.
 
 
 Embedding Meta Files
@@ -230,6 +231,60 @@ resumable at image granularity across GPUs.
 saw, after its shipped transform ran on that image. In the Given regime it is
 recorded, never validated: the caller supplied pixels it never requested, so
 there is no request to check it against.
+
+
+Dense Image Grids
+-----------------
+
+:meth:`~slide2vec.Model.embed_images_dense` (see :doc:`api`) writes the dense
+counterpart of that layout — one flat directory, one grid payload plus one
+geometry sidecar per input image:
+
+.. code-block:: text
+
+   <output_dir>/
+   └── dense_image_embeddings/
+       ├── <sample_id>.pt          ← Tensor of shape (d, grid_h, grid_w)
+       └── <sample_id>.meta.json
+
+As with every dense artifact the sidecar is written **last**, after the payload
+has been published atomically, so a payload without its sidecar unambiguously
+means an interrupted image and resume treats the sidecar as the done-marker.
+
+**dense_image_embeddings**
+
+.. code-block:: text
+
+   {
+     "sample_id": "ocelot-001",
+     "artifact_type": "dense_image_embeddings",
+     "encoder_name": "virchow2",
+     "encoder_level": "tile",
+     "encoder_input_regime": "declared",
+     "image_path": "/data/ocelot/001.jpg",
+     "format": "pt",
+     "dtype": "float32",
+     "feature_dim": 1280,
+     "grid_shape": [74, 74],
+     "target_size": [1024, 1024],
+     "patch_size": [14, 14],
+     "encoded_size": [1036, 1036],
+     "pad": [12, 12],
+     "pad_mode": "reflect",
+     "image_pad_value": null,
+     "window_size": 224,
+     "overlap": 0.0,
+     "feature_kind": "patch_features",
+     "attention_blocks": [-1],
+     "attention_include_registers": false,
+   }
+
+The geometry fields are the whole extraction contract: ``target_size`` is what
+the caller declared, ``encoded_size`` is that padded up to the encoder's patch
+multiple, ``pad`` is the bottom/right padding applied, and ``grid_shape`` is the
+token grid the payload holds. ``encoder_input_regime`` is ``"declared"`` — unlike
+a pooled image embedding, this run *stated* its geometry and it was validated
+before any image was read.
 
 
 Coordinate Files

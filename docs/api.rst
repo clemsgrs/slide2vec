@@ -275,24 +275,80 @@ the same read / pad / window path.
 Variable encoder input for dense runs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A dense run states a *supervision* geometry — the ROI ``target_size`` the token
-grid registers to, plus an optional ``window_size`` — not an encoder input.
-``Model.embed_regions_dense`` derives the **effective encoder input** from it,
-i.e. the geometry of the tensor handed to ``encode_tiles_dense``:
+A dense run states a *supervision* geometry — the ``target_size`` the token grid
+registers to, plus an optional ``window_size`` — not an encoder input.
+``Model.embed_regions_dense`` and ``Model.embed_images_dense`` derive the
+**effective encoder input** from it, i.e. the geometry of the tensor handed to
+``encode_tiles_dense``:
 
-- whole-tile (``window_size=None``): the ROI padded up to the patch multiple;
+- whole-tile (``window_size=None``): the ROI or image padded up to the patch
+  multiple;
 - sliding: the ``window_size`` rounded to the patch multiple and clamped to that
   padded extent.
 
 That size then goes through the same check as a pooled
 ``requested_tile_size_px``: when it differs from the encoder's registered input
-size, the encoder must declare ``supports_variable_input_size=True``, and its
+size (in either dimension — a non-square image geometry is checked per axis, not
+rejected for not being square), the encoder must declare ``supports_variable_input_size=True``, and its
 ``variable_input_model_kwargs`` (e.g. ``dynamic_img_size=True``) are applied at
 construction. Whole-tile dense at a non-native size on a fixed-input encoder
 (e.g. ``phikon``) therefore fails before any region is read, instead of feeding
 the backbone a size it cannot accept; sliding at the native window passes the
 check trivially. Callers never pass ``dynamic_img_size`` — it is derived from the
 declared geometry plus the registry metadata.
+
+Dense Grids from Images
+-----------------------
+
+When the supervision arrives as image/mask pairs rather than as slides —
+segmentation and detection datasets, exported ROI sets —
+:meth:`Model.embed_images_dense` is the image-sourced counterpart of
+``embed_regions_dense``: the image *is* the region, so there is no slide, no
+coordinate and no spacing→level plan.
+
+.. code-block:: python
+
+   from slide2vec import DenseImageOptions, ExecutionOptions, ImageSpec, Model
+
+   model = Model.from_preset("virchow2")
+   artifacts = model.embed_images_dense(
+       [
+           ImageSpec(sample_id="ocelot-001", image_path="/data/ocelot/001.jpg"),
+           ImageSpec(sample_id="ocelot-002", image_path="/data/ocelot/002.jpg"),
+       ],
+       dense=DenseImageOptions(target_size=1024, window_size=224),
+       execution=ExecutionOptions(output_dir="outputs/ocelot", num_gpus=2),
+   )
+
+   print(artifacts[0].path)        # outputs/ocelot/dense_image_embeddings/ocelot-001.pt
+   print(artifacts[0].grid_shape)  # (74, 74) for a 1024px image on a 14px patch encoder
+
+Everything after the pixels arrive is shared with the ROI path: the same
+geometry resolution, the same bottom/right padding up to the patch multiple, the
+same whole-image-vs-sliding encode and raised-cosine blending, and the same
+``feature_kind`` choice between the patch-token grid and the CLS-attention grid.
+The run splits its images across all visible GPUs (``num_gpus=1`` encodes
+in-process) and is resume-aware — an image whose ``.meta.json`` sidecar already
+exists is skipped — so an interrupted run is restarted by re-issuing the call.
+
+**target_size is a declaration, not a resize.** Dense extraction encodes through
+the encoder's normalization-only transform, so it never rescales: every image
+must already be exactly ``target_size`` (a non-square ``(height, width)`` pair is
+accepted), and one that is not raises naming the images. Declaring the geometry
+up front is what lets the *effective* encoder input — the padded image, or one
+patch-aligned window of it — be validated, and the encoder's variable-input
+constructor settings resolved, before a single image is decoded (see
+`Variable encoder input for dense runs`_). A dataset whose images differ in size
+is therefore several runs, one per geometry — which is also the only way their
+grids could be batched downstream.
+
+.. autoclass:: slide2vec.DenseImageOptions
+   :members:
+   :undoc-members:
+
+.. autoclass:: slide2vec.DenseImageArtifact
+   :members:
+   :undoc-members:
 
 Dense Attention Map Extraction
 ------------------------------

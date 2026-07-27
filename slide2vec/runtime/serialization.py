@@ -2,7 +2,12 @@ import copy
 from pathlib import Path
 from typing import Any
 
-from slide2vec.api import DenseOptions, ExecutionOptions, PreprocessingConfig
+from slide2vec.api import (
+    DenseImageOptions,
+    DenseOptions,
+    ExecutionOptions,
+    PreprocessingConfig,
+)
 
 
 def serialize_model(model) -> dict[str, Any]:
@@ -90,6 +95,48 @@ def deserialize_dense_options(payload: dict[str, Any]) -> DenseOptions:
         target_size=int(payload["target_size"]),
         tolerance=float(payload.get("tolerance", 0.05)),
         backend=str(payload.get("backend", "auto")),
+        pad_mode=str(payload.get("pad_mode", "reflect")),
+        image_pad_value=(
+            float(payload["image_pad_value"]) if payload.get("image_pad_value") is not None else None
+        ),
+        window_size=int(payload["window_size"]) if payload.get("window_size") is not None else None,
+        overlap=float(payload.get("overlap", 0.0)),
+        feature_kind=str(payload.get("feature_kind", "patch_features")),
+        attention_blocks=tuple(int(b) for b in payload.get("attention_blocks", (-1,))),
+        attention_include_registers=bool(payload.get("attention_include_registers", False)),
+    )
+
+
+def serialize_dense_image_options(dense: DenseImageOptions) -> dict[str, Any]:
+    """JSON-round-trippable dense-over-images settings crossing to the torchrun ranks.
+
+    ``target_size`` keeps its shape: an int stays an int, an ``(h, w)`` pair travels as a
+    two-element list, so a non-square declaration survives the trip to the ranks intact.
+    """
+    return {
+        "target_size": (
+            int(dense.target_size)
+            if isinstance(dense.target_size, int)
+            else [int(size) for size in dense.target_size]
+        ),
+        "pad_mode": dense.pad_mode,
+        "image_pad_value": dense.image_pad_value,
+        "window_size": dense.window_size,
+        "overlap": dense.overlap,
+        "feature_kind": dense.feature_kind,
+        "attention_blocks": list(dense.attention_blocks),
+        "attention_include_registers": dense.attention_include_registers,
+    }
+
+
+def deserialize_dense_image_options(payload: dict[str, Any]) -> DenseImageOptions:
+    target_size = payload["target_size"]
+    return DenseImageOptions(
+        target_size=(
+            int(target_size)
+            if isinstance(target_size, int)
+            else (int(target_size[0]), int(target_size[1]))
+        ),
         pad_mode=str(payload.get("pad_mode", "reflect")),
         image_pad_value=(
             float(payload["image_pad_value"]) if payload.get("image_pad_value") is not None else None

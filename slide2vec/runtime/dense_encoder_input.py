@@ -25,7 +25,10 @@ from slide2vec.encoders.registry import (
     resolve_patch_size,
     resolve_preprocessing_requirements,
 )
-from slide2vec.runtime.effective_encoder_input import EffectiveEncoderInput
+from slide2vec.runtime.effective_encoder_input import (
+    EffectiveEncoderInput,
+    format_input_size,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -35,8 +38,10 @@ class DenseEncoderInputPlan:
     encoder_name: str
     tile_encoder_name: str
     preset_input_size_px: int
-    #: Supervision tile side length the dense grid registers to (``DenseOptions.target_size``).
-    target_size_px: int
+    #: Supervision geometry ``(h, w)`` the dense grid registers to (the run's
+    #: ``target_size``). Always a pair: a slide ROI is square by construction, a pre-cropped
+    #: image need not be, and both are checked per dimension against the patch geometry.
+    target_size_px: tuple[int, int]
     #: Requested encoder field-of-view chunk; ``None`` is one whole-tile forward.
     window_size_px: int | None
     #: ``target_size_px`` padded up to the patch multiple — the padded tensor's geometry.
@@ -51,7 +56,7 @@ class DenseEncoderInputPlan:
         cls,
         encoder_name: str,
         *,
-        target_size_px: int,
+        target_size_px: int | tuple[int, int],
         window_size: int | None,
     ) -> "DenseEncoderInputPlan":
         # Imported here, not at module scope: the dense geometry kernels live next to the
@@ -67,14 +72,14 @@ class DenseEncoderInputPlan:
         # resolved *before* the encoder is constructed. ``load_model`` asserts the two
         # agree, so the geometry resolved here is the geometry that gets encoded.
         patch_size = resolve_patch_size(tile_encoder_name)
-        geometry = compute_dense_geometry(
-            target_size=int(target_size_px), patch_size=patch_size
-        )
+        # The geometry kernel normalizes an int side length into an (h, w) pair, so the plan
+        # states one shape whether the caller asked for a square or a rectangle.
+        geometry = compute_dense_geometry(target_size=target_size_px, patch_size=patch_size)
         if window_size is None:
             effective_size = geometry.encoded_size
             origin = (
-                f"dense whole-tile target_size={int(target_size_px)} padded to the "
-                "patch multiple"
+                f"dense whole-tile target_size={format_input_size(geometry.target_size)} "
+                "padded to the patch multiple"
             )
         else:
             # Ask the sliding kernel itself, so the declaration cannot drift from the
@@ -95,7 +100,7 @@ class DenseEncoderInputPlan:
             encoder_name=encoder_name,
             tile_encoder_name=tile_encoder_name,
             preset_input_size_px=effective.preset_input_size_px,
-            target_size_px=int(target_size_px),
+            target_size_px=geometry.target_size,
             window_size_px=None if window_size is None else int(window_size),
             encoded_size_px=geometry.encoded_size,
             effective_encoder_input_size_px=effective.size_px,
