@@ -64,7 +64,7 @@ from slide2vec.encoders.registry import (
 )
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.runtime.types import LoadedModel
-from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.progress import (
     emit_progress,
     read_tiling_progress_snapshot,
@@ -89,13 +89,24 @@ from slide2vec.runtime.hierarchical import num_embedding_items
 def load_model(
     *,
     name: str,
+    encoder_input: EncoderInputContract,
     device: str = "auto",
     output_variant: str | None = None,
     allow_non_recommended_settings: bool = False,
     dynamic_img_size: bool | None = None,
     token: str | None = None,
-    pooled_input_plan: PooledEncoderInputPlan | None = None,
 ) -> LoadedModel:
+    # ``encoder_input`` is required and deliberately has no default: the transform a
+    # run encodes through is a contract the caller states, never something load_model
+    # infers from an absent argument. See EncoderInputContract for the two regimes.
+    if not isinstance(encoder_input, EncoderInputContract):
+        raise TypeError(
+            "load_model requires an explicit encoder-input contract: pass "
+            "encoder_input=EncoderInputContract.declared(...) when the caller states "
+            "the encoder input geometry it wants, or EncoderInputContract.given() "
+            "when the caller supplies pixels it never requested and the encoder's "
+            f"shipped transform is the contract; got {encoder_input!r}"
+        )
     name = canonicalize_model_name(name)
     info = encoder_registry.info(name)
     resolved_level = info["level"]
@@ -122,16 +133,16 @@ def load_model(
         extra_kwargs["dynamic_img_size"] = dynamic_img_size
     if "allow_non_recommended_settings" in ctor_params:
         extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
-    if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == name:
-        missing_params = set(pooled_input_plan.model_construction_kwargs) - set(ctor_params)
+    contract_kwargs = encoder_input.construction_kwargs_for(name)
+    if contract_kwargs:
+        missing_params = set(contract_kwargs) - set(ctor_params)
         if missing_params:
             missing_text = ", ".join(sorted(missing_params))
             raise ValueError(
                 f"Encoder '{name}' requires pooled variable-input constructor "
                 f"setting(s) not accepted by its implementation: {missing_text}"
             )
-        for key, value in pooled_input_plan.model_construction_kwargs.items():
-            extra_kwargs[key] = value
+        extra_kwargs.update(contract_kwargs)
     encoder = encoder_cls(output_variant=output_variant, **extra_kwargs)
 
     # Drift guard: the static patch_size declared on @register_encoder is read
@@ -151,11 +162,7 @@ def load_model(
 
     tile_encoder = None
     if resolved_level == "tile":
-        transforms = (
-            pooled_input_plan.get_transform(encoder)
-            if pooled_input_plan is not None
-            else encoder.get_transform()
-        )
+        transforms = encoder_input.get_transform(encoder)
     else:
         # Both "slide" and "patient" declare tile_encoder for transform resolution.
         tile_enc_name = info["tile_encoder"]
@@ -165,10 +172,9 @@ def load_model(
         tile_kwargs: dict[str, Any] = {"output_variant": tile_enc_ov}
         if "allow_non_recommended_settings" in tile_ctor_params:
             tile_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
-        if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == tile_enc_name:
-            missing_params = set(pooled_input_plan.model_construction_kwargs) - set(
-                tile_ctor_params
-            )
+        tile_contract_kwargs = encoder_input.construction_kwargs_for(tile_enc_name)
+        if tile_contract_kwargs:
+            missing_params = set(tile_contract_kwargs) - set(tile_ctor_params)
             if missing_params:
                 missing_text = ", ".join(sorted(missing_params))
                 raise ValueError(
@@ -176,14 +182,9 @@ def load_model(
                     "constructor setting(s) not accepted by its implementation: "
                     f"{missing_text}"
                 )
-            for key, value in pooled_input_plan.model_construction_kwargs.items():
-                tile_kwargs[key] = value
+            tile_kwargs.update(tile_contract_kwargs)
         tile_encoder = tile_enc_cls(**tile_kwargs)
-        transforms = (
-            pooled_input_plan.get_transform(tile_encoder)
-            if pooled_input_plan is not None
-            else tile_encoder.get_transform()
-        )
+        transforms = encoder_input.get_transform(tile_encoder)
 
     target_device = batching.resolve_device(device, encoder.device)
     encoder.to(target_device)

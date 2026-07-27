@@ -42,9 +42,7 @@ def main(argv=None) -> int:
     )
     preprocessing = deserialize_preprocessing(request["preprocessing"])
     execution = deserialize_execution(request["execution"])
-    prepare_pooled_input = getattr(model, "_prepare_pooled_input", None)
-    if callable(prepare_pooled_input):
-        prepare_pooled_input(preprocessing, emit_run_info=False)
+    model._declare_encoder_input(preprocessing, emit_run_info=False)
     tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
     load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
     if not callable(load_successful_tiled_slides_fn):

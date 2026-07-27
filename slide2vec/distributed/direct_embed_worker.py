@@ -48,9 +48,7 @@ def main(argv=None) -> int:
     )
     preprocessing = deserialize_preprocessing(request["preprocessing"])
     execution = deserialize_execution(request["execution"])
-    prepare_pooled_input = getattr(model, "_prepare_pooled_input", None)
-    if callable(prepare_pooled_input):
-        prepare_pooled_input(preprocessing, emit_run_info=False)
+    model._declare_encoder_input(preprocessing, emit_run_info=False)
     from slide2vec.runtime.distributed import (
         decode_work_unit,
         encode_work_unit,

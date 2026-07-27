@@ -172,7 +172,7 @@ def test_permitted_non_preset_plan_rejects_patch_incompatible_geometry():
 
 def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatch):
     import slide2vec.inference as inference
-    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
     captured = {}
 
@@ -207,7 +207,7 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
             self.device = torch.device(device)
             return self
 
-    plan = PooledEncoderInputPlan.resolve(
+    contract = EncoderInputContract.declared(
         "h-optimus-0",
         requested_tile_size_px=280,  # 14x20 — h-optimus-0 is a genuine patch-14 model
         allow_non_recommended_settings=True,
@@ -218,7 +218,7 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
     loaded = inference.load_model(
         name="h-optimus-0",
         allow_non_recommended_settings=True,
-        pooled_input_plan=plan,
+        encoder_input=contract,
     )
 
     assert captured == {
@@ -241,7 +241,7 @@ def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_
     captured = {}
 
     def embed_slides(model, slides, *, preprocessing, execution):
-        captured["plan"] = model._pooled_input_plan
+        captured["plan"] = model._encoder_input.plan
         captured["batch_size"] = execution.batch_size
         return []
 
@@ -417,14 +417,14 @@ def test_distributed_request_round_trip_resolves_same_exact_hierarchical_tar_pla
     )
     worker_preprocessing = deserialize_preprocessing(request["preprocessing"])
 
-    parent_plan = model._prepare_pooled_input(preprocessing, emit_run_info=False)
-    worker_plan = worker_model._prepare_pooled_input(
+    parent_contract = model._declare_encoder_input(preprocessing, emit_run_info=False)
+    worker_contract = worker_model._declare_encoder_input(
         worker_preprocessing,
         emit_run_info=False,
     )
 
-    assert worker_plan == parent_plan
-    assert worker_plan.expected_encoder_input_size_px == 288
+    assert worker_contract == parent_contract
+    assert worker_contract.plan.expected_encoder_input_size_px == 288
     assert worker_preprocessing.region_tile_multiple == 2
     assert worker_preprocessing.on_the_fly is False
     assert worker_preprocessing.read_tiles_from == tmp_path
@@ -460,7 +460,7 @@ def test_slide_and_patient_plans_use_tile_dependency_exact_geometry():
 
 def test_slide_model_loading_applies_plan_to_resolved_tile_dependency(monkeypatch):
     import slide2vec.inference as inference
-    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
     captured = {}
 
@@ -490,7 +490,7 @@ def test_slide_model_loading_applies_plan_to_resolved_tile_dependency(monkeypatc
             self.device = torch.device(device)
             return self
 
-    plan = PooledEncoderInputPlan.resolve(
+    contract = EncoderInputContract.declared(
         "prism",
         requested_tile_size_px=252,
         allow_non_recommended_settings=True,
@@ -505,7 +505,7 @@ def test_slide_model_loading_applies_plan_to_resolved_tile_dependency(monkeypatc
     loaded = inference.load_model(
         name="prism",
         allow_non_recommended_settings=True,
-        pooled_input_plan=plan,
+        encoder_input=contract,
     )
 
     assert captured == {"dynamic_img_size": True, "normalization": True}

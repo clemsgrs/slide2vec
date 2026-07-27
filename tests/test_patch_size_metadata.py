@@ -18,6 +18,7 @@ from slide2vec.encoders.registry import (
     normalize_patch_size,
     resolve_patch_size,
 )
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
 
 # Every dense-capable encoder (those whose model class exposes a runtime
@@ -165,7 +166,11 @@ def test_load_model_drift_guard_rejects_patch_size_mismatch(monkeypatch):
     monkeypatch.delenv("HF_TOKEN", raising=False)
 
     with pytest.raises(ValueError, match="patch_size"):
-        inference.load_model(name="drifted-model", device="cpu")
+        inference.load_model(
+            name="drifted-model",
+            device="cpu",
+            encoder_input=EncoderInputContract.given(),
+        )
 
 
 def test_load_model_drift_guard_passes_when_consistent(monkeypatch):
@@ -195,7 +200,11 @@ def test_load_model_drift_guard_passes_when_consistent(monkeypatch):
     monkeypatch.setattr(inference.encoder_registry, "require", lambda name: _ConsistentEncoder)
     monkeypatch.delenv("HF_TOKEN", raising=False)
 
-    loaded = inference.load_model(name="consistent-model", device="cpu")
+    loaded = inference.load_model(
+        name="consistent-model",
+        device="cpu",
+        encoder_input=EncoderInputContract.given(),
+    )
     assert loaded.name == "consistent-model"
 
 
@@ -205,7 +214,11 @@ def test_static_patch_size_matches_runtime(name, expected):
     from slide2vec.inference import load_model
 
     try:
-        loaded = load_model(name=name, device="cpu")
+        loaded = load_model(
+            name=name,
+            device="cpu",
+            encoder_input=EncoderInputContract.given(),
+        )
     except (ImportError, OSError) as exc:
         # Skip ONLY on genuine unavailability, never on a contract violation:
         #   ImportError -> optional per-encoder dependency not installed

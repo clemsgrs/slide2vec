@@ -29,7 +29,7 @@ from slide2vec.runtime.model_settings import (
 )
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
-from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path
@@ -463,8 +463,12 @@ class Model:
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._output_variant = output_variant
         self._backend: LoadedModel | None = None
-        self._pooled_input_plan: PooledEncoderInputPlan | None = None
-        self._backend_pooled_input_plan: PooledEncoderInputPlan | None = None
+        # A freshly constructed Model has been handed no geometry, which is exactly the
+        # Given regime: anything encoded through it right now goes through the shipped
+        # transform. Every route that reads tiles at a requested size declares its
+        # geometry (``_declare_encoder_input``) before the backend is loaded.
+        self._encoder_input: EncoderInputContract = EncoderInputContract.given()
+        self._backend_encoder_input: EncoderInputContract | None = None
 
     @classmethod
     def from_preset(
@@ -686,18 +690,30 @@ class Model:
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
-    def _prepare_pooled_input(
+    def _declare_encoder_input(
         self,
         preprocessing: PreprocessingConfig,
         *,
         emit_run_info: bool,
-    ) -> PooledEncoderInputPlan:
-        plan = PooledEncoderInputPlan.resolve(
+    ) -> EncoderInputContract:
+        """Declare the encoder input geometry this run requested, or raise.
+
+        Idempotent: resolving the same preprocessing twice yields an equal contract, so
+        every layer that reaches the encoder may declare for itself rather than trust
+        the layer above to have done it.
+        """
+        if preprocessing.requested_tile_size_px is None:
+            raise ValueError(
+                "requested_tile_size_px must be resolved before declaring the encoder "
+                "input geometry; a pooled run reads tiles at a size it requested."
+            )
+        contract = EncoderInputContract.declared(
             self.name,
             requested_tile_size_px=int(preprocessing.requested_tile_size_px),
             allow_non_recommended_settings=self.allow_non_recommended_settings,
         )
-        self._pooled_input_plan = plan
+        self._encoder_input = contract
+        plan = contract.plan
         if emit_run_info and plan.requires_variable_model_input:
             logging.getLogger("slide2vec").info(
                 "Pooled encoder input for '%s': preset %dpx, requested %dpx, "
@@ -707,24 +723,24 @@ class Model:
                 plan.requested_tile_size_px,
                 plan.expected_encoder_input_size_px,
             )
-        return plan
+        return contract
 
     def _load_backend(self) -> LoadedModel:
         if (
             self._backend is None
-            or self._backend_pooled_input_plan != self._pooled_input_plan
+            or self._backend_encoder_input != self._encoder_input
         ):
             from slide2vec.inference import load_model
 
             emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
+                encoder_input=self._encoder_input,
                 device=self._requested_device,
                 output_variant=self._output_variant,
                 allow_non_recommended_settings=self.allow_non_recommended_settings,
-                pooled_input_plan=self._pooled_input_plan,
             )
-            self._backend_pooled_input_plan = self._pooled_input_plan
+            self._backend_encoder_input = self._encoder_input
             emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 
@@ -965,7 +981,7 @@ def _validate_model_config(
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
-    model._prepare_pooled_input(preprocessing, emit_run_info=True)
+    model._declare_encoder_input(preprocessing, emit_run_info=True)
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
     on_cpu = model._requested_device == "cpu"
     precision = None if on_cpu or execution is None else execution.precision
