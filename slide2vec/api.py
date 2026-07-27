@@ -11,6 +11,7 @@ import torch
 from hs2p import SlideSpec
 
 from slide2vec.artifacts import (
+    DenseImageArtifact,
     DenseRegionArtifact,
     HierarchicalEmbeddingArtifact,
     ImageEmbeddingArtifact,
@@ -357,6 +358,48 @@ class DenseOptions:
     #: Together with ``target_size`` this fixes the *effective encoder input* — the geometry
     #: handed to ``encode_tiles_dense`` — from which the encoder's variable-input constructor
     #: settings are derived; hence no ``dynamic_img_size`` knob here.
+    window_size: int | None = None
+    #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
+    #: ``window_size is None``).
+    overlap: float = 0.0
+    #: ``"patch_features"`` (the patch-token grid) or ``"cls_attention"`` (CLS/register
+    #: self-attention grid).
+    feature_kind: str = "patch_features"
+    #: Transformer blocks whose CLS attention is read (``cls_attention`` only).
+    attention_blocks: tuple[int, ...] = (-1,)
+    #: Include register-token query rows as extra attention channels (``cls_attention`` only).
+    attention_include_registers: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class DenseImageOptions:
+    """Dense ``(d, gh, gw)`` grid extraction over pre-cropped images (issue #235).
+
+    :class:`DenseOptions` minus everything that only a slide has: there is no spacing, no
+    tolerance and no reading backend here, because the image *is* the region — it is read
+    from disk at the size it was written. What remains is the same supervision geometry and
+    the same dense encode knobs, so a run migrating from ROIs to image/mask pairs keeps its
+    recipe.
+
+    ``target_size`` is a **declaration**, not a resize: the dense transform is
+    normalization-only, so every image must already be exactly this size and one that is not
+    is an error rather than a silent rescale. Declaring it up front is what lets the
+    effective encoder input be validated (and the encoder's variable-input constructor
+    settings resolved) before a single image is decoded. A run whose images are not all the
+    same size is therefore several runs, one per geometry — which is also the only way their
+    grids could be batched downstream.
+    """
+
+    #: Supervision geometry in pixels the dense grid registers to: a square side length, or
+    #: an explicit ``(height, width)`` for non-square images.
+    target_size: int | tuple[int, int]
+    #: Padding mode used to pad the image up to the encoder's patch multiple.
+    #: One of ``"reflect"`` / ``"replicate"`` / ``"constant"`` / ``"zero"``.
+    pad_mode: str = "reflect"
+    #: Constant fill value for ``pad_mode in {"constant", "zero"}`` (ignored otherwise).
+    image_pad_value: float | None = None
+    #: Encoder field-of-view chunk fed through the backbone per forward. ``None`` (default)
+    #: is one whole-image forward; a smaller value slides the encoder and blends token grids.
     window_size: int | None = None
     #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
     #: ``window_size is None``).
@@ -720,6 +763,43 @@ class Model:
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
+    def embed_images_dense(
+        self,
+        images: "Sequence[ImageSpec]",
+        *,
+        dense: "DenseImageOptions",
+        execution: ExecutionOptions | None = None,
+    ) -> list[DenseImageArtifact]:
+        """Extract + persist a dense ``(d, gh, gw)`` grid per caller-supplied image.
+
+        The image-sourced counterpart of :meth:`embed_regions_dense`, for consumers whose
+        supervision arrives as image/mask pairs rather than as slides (segmentation,
+        detection): each :class:`ImageSpec` is decoded, run through the encoder's
+        **normalization-only** transform, padded up to the encoder's patch multiple, encoded
+        — whole-image, or by sliding the encoder's native field and blending the token grids
+        — and written to ``dense_image_embeddings/<sample_id>.pt`` plus a geometry sidecar.
+        The run splits its images across all visible GPUs (``execution.num_gpus``);
+        ``num_gpus=1`` encodes fully in-process. Resume is automatic — images whose sidecar
+        already exists are skipped. Returns one
+        :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
+
+        It differs from :meth:`embed_regions_dense` in exactly one respect: there is no
+        slide, no coordinate and no spacing→level plan, because the image *is* the region.
+        Everything else is shared, including the effective encoder input — the padded image
+        for a whole-image run, one patch-aligned window for a sliding one — which is declared
+        before any image is decoded, so a geometry the encoder cannot accept raises here
+        rather than on a torchrun rank's first forward pass.
+
+        ``dense.target_size`` is a declaration, not a resize request: dense extraction never
+        rescales, so every image must already be that size (a non-square ``(h, w)`` is fine).
+        """
+        from slide2vec.runtime.dense_image_stage import embed_images_dense
+
+        resolved = _coerce_execution_options(execution, model=self)
+        _require_output_dir_for_persistence(resolved, method_name="Model.embed_images_dense(...)")
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            return embed_images_dense(self, images, dense=dense, execution=resolved)
+
     def embed_images(
         self,
         images: "Sequence[ImageSpec]",
@@ -795,15 +875,19 @@ class Model:
     ) -> EncoderInputContract:
         """Declare the dense encoder input geometry this run requested, or raise.
 
-        Dense states a supervision geometry (ROI ``target_size``, optional ``window_size``)
+        Dense states a supervision geometry (``target_size``, optional ``window_size``)
         rather than an encoder input; the contract derives the tensor the backbone will
         actually see and validates it exactly as the pooled path's is validated. Like the
         pooled declaration this is idempotent, so each layer that reaches the encoder — the
         parent stage and every torchrun rank — declares for itself.
+
+        *dense* is a :class:`DenseOptions` (ROIs on a slide) or a :class:`DenseImageOptions`
+        (pre-cropped images); only the supervision geometry is read here, and the two state
+        it the same way.
         """
         contract = EncoderInputContract.declared_dense(
             self.name,
-            target_size_px=int(dense.target_size),
+            target_size_px=dense.target_size,
             window_size=None if dense.window_size is None else int(dense.window_size),
         )
         self._encoder_input = contract
@@ -811,11 +895,11 @@ class Model:
         if emit_run_info and plan.requires_variable_model_input:
             logging.getLogger("slide2vec").info(
                 "Dense encoder input for '%s': native %dpx, effective encoder input %s "
-                "(target_size=%dpx, window_size=%s); enabling variable input size via %s.",
+                "(target_size=%s, window_size=%s); enabling variable input size via %s.",
                 self.name,
                 plan.preset_input_size_px,
                 format_input_size(plan.effective_encoder_input_size_px),
-                plan.target_size_px,
+                format_input_size(plan.target_size_px),
                 plan.window_size_px,
                 plan.model_construction_kwargs or "no constructor setting",
             )

@@ -96,6 +96,27 @@ class DenseRegionArtifact:
 
 
 @dataclass(frozen=True, kw_only=True)
+class DenseImageArtifact:
+    """One persisted dense grid over a pre-cropped image: payload + geometry sidecar.
+
+    The unit of :meth:`slide2vec.api.Model.embed_images_dense`. Same payload as a
+    :class:`DenseRegionArtifact` — a ``(d, gh, gw)`` grid plus the geometry that produced it
+    — but named the way a given-geometry input can be named: by the caller's ``sample_id``
+    alone, since there is no slide, no level-0 coordinate and no sampled class.
+    """
+
+    sample_id: str
+    path: Path
+    metadata_path: Path
+    feature_dim: int
+    grid_shape: tuple[int, int]
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return load_metadata(self.metadata_path)
+
+
+@dataclass(frozen=True, kw_only=True)
 class ImageEmbeddingArtifact:
     """One persisted given-geometry image embedding: the ``(D,)`` payload + its sidecar.
 
@@ -279,6 +300,23 @@ def region_dense_paths(
     return slide_dir / f"{stem}.pt", slide_dir / f"{stem}.meta.json"
 
 
+def _write_dense_grid(
+    grid, *, payload_path: Path, metadata_path: Path, metadata: dict[str, Any]
+) -> np.ndarray:
+    """Publish one dense grid: payload atomically, then the sidecar. Returns the array.
+
+    The single write order every dense artifact follows (D6), whatever named it: payload to
+    a temp file in the destination directory → ``os.replace`` into place (atomic on the same
+    filesystem) → then the ``.meta.json`` sidecar. A payload present without its sidecar
+    therefore unambiguously means an incomplete unit, and resume treats the sidecar as the
+    done-marker.
+    """
+    grid_array = _ensure_array(grid)
+    write_atomically(payload_path, lambda tmp_path: torch.save(_ensure_tensor(grid), tmp_path))
+    _write_metadata(metadata_path, metadata)
+    return grid_array
+
+
 def write_dense_region(
     grid,
     *,
@@ -289,19 +327,14 @@ def write_dense_region(
     y: int,
     metadata: dict[str, Any],
 ) -> DenseRegionArtifact:
-    """Persist one ``(d, gh, gw)`` grid + its geometry sidecar, atomically and sidecar-last.
-
-    Write order (D6): payload to a temp file in the destination directory → ``os.replace``
-    into ``<x>_<y>.pt`` (atomic on the same filesystem) → then the ``<x>_<y>.meta.json``
-    sidecar. A payload present without its sidecar therefore unambiguously means an
-    incomplete ROI, and resume treats the sidecar as the done-marker.
-    """
+    """Persist one ROI's ``(d, gh, gw)`` grid + its geometry sidecar (see
+    :func:`_write_dense_grid` for the write order this shares with every dense artifact)."""
     payload_path, metadata_path = region_dense_paths(
         output_dir, sample_id=sample_id, annotation=annotation, x=x, y=y
     )
-    grid_array = _ensure_array(grid)
-    write_atomically(payload_path, lambda tmp_path: torch.save(_ensure_tensor(grid), tmp_path))
-    _write_metadata(metadata_path, metadata)
+    grid_array = _write_dense_grid(
+        grid, payload_path=payload_path, metadata_path=metadata_path, metadata=metadata
+    )
     return DenseRegionArtifact(
         sample_id=sample_id,
         x=int(x),
@@ -311,6 +344,47 @@ def write_dense_region(
         feature_dim=int(grid_array.shape[0]),
         grid_shape=(int(grid_array.shape[1]), int(grid_array.shape[2])),
         annotation=annotation,
+    )
+
+
+def dense_image_paths(output_dir: str | Path, *, sample_id: str) -> tuple[Path, Path]:
+    """``(payload_path, sidecar_path)`` for one image's dense grid.
+
+    ``dense_image_embeddings/<sample_id>.pt`` plus ``<sample_id>.meta.json``. Flat, like the
+    pooled image layout and unlike the per-slide dense one: a pre-cropped image has no slide
+    directory to live under and no ``(x, y)`` to be named by, so the caller's ``sample_id``
+    is the whole identity and the resume check needs nothing else.
+    """
+    output_root = Path(output_dir).expanduser().resolve()
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    embeddings_dir = (output_root / "dense_image_embeddings").resolve()
+    if not embeddings_dir.is_relative_to(output_root):
+        raise ValueError("Dense image artifact path must stay within output_dir")
+    return (
+        embeddings_dir / f"{sample_component}.pt",
+        embeddings_dir / f"{sample_component}.meta.json",
+    )
+
+
+def write_dense_image(
+    grid,
+    *,
+    output_dir: str | Path,
+    sample_id: str,
+    metadata: dict[str, Any],
+) -> DenseImageArtifact:
+    """Persist one image's ``(d, gh, gw)`` grid + its geometry sidecar (see
+    :func:`_write_dense_grid` for the write order this shares with every dense artifact)."""
+    payload_path, metadata_path = dense_image_paths(output_dir, sample_id=sample_id)
+    grid_array = _write_dense_grid(
+        grid, payload_path=payload_path, metadata_path=metadata_path, metadata=metadata
+    )
+    return DenseImageArtifact(
+        sample_id=sample_id,
+        path=payload_path,
+        metadata_path=metadata_path,
+        feature_dim=int(grid_array.shape[0]),
+        grid_shape=(int(grid_array.shape[1]), int(grid_array.shape[2])),
     )
 
 

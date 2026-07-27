@@ -23,7 +23,7 @@ from PIL import Image  # noqa: E402
 
 from slide2vec.api import ExecutionOptions, ImageSpec  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
-from slide2vec.runtime import image_stage  # noqa: E402
+from slide2vec.runtime import image_specs, image_stage  # noqa: E402
 from slide2vec.runtime.types import LoadedModel  # noqa: E402
 
 
@@ -111,7 +111,7 @@ def test_embed_images_num_gpus_gt_one_launches_image_worker(tmp_path, monkeypatc
     def _fake_run(*, module, num_gpus, output_dir, request_path, **kwargs):
         request = json.loads(Path(request_path).read_text())
         captured.update(module=module, num_gpus=num_gpus, output_dir=output_dir, request=request)
-        specs = image_stage.image_specs_from_request(request)
+        specs = image_specs.image_specs_from_request(request)
         for shard in plan_contiguous_shards(specs, num_gpus):
             run_image_shard(shard, loaded=rank_loaded, out_dir=Path(output_dir), batch_size=2,
                             output_precision="fp32", num_workers=0)
@@ -195,8 +195,8 @@ def test_image_specs_round_trip_through_request(tmp_path):
         ImageSpec(sample_id="a", image_path="/data/a.png"),
         ImageSpec(sample_id="b", image_path="/data/nested/b.tif"),
     ]
-    request = image_stage.build_image_worker_request(specs)
-    assert image_stage.image_specs_from_request(request) == specs
+    request = image_specs.build_image_specs_request(specs)
+    assert image_specs.image_specs_from_request(request) == specs
 
 
 def test_model_embed_images_delegates_and_requires_output_dir(monkeypatch, tmp_path):
@@ -289,7 +289,7 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
         ),
         "output_dir": str(tmp_path / "out"),
         "progress_events_path": None,
-        **image_stage.build_image_worker_request(specs),
+        **image_specs.build_image_specs_request(specs),
     }
     request_path = tmp_path / "image_request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")

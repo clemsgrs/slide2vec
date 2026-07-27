@@ -27,7 +27,7 @@ def get_args_parser(add_help: bool = True):
 def main(argv=None) -> int:
     from slide2vec.progress import emit_progress
     from slide2vec.runtime.image_shard import run_image_shard
-    from slide2vec.runtime.image_stage import image_specs_from_request
+    from slide2vec.runtime.image_specs import image_specs_from_request
     from slide2vec.runtime.model_settings import resolve_output_precision
     from slide2vec.runtime.serialization import deserialize_execution
     from slide2vec.runtime.sharding import plan_contiguous_shards

@@ -134,17 +134,23 @@ def pad_image_to_encoded(
     pad_mode: str,
     image_pad_value: float | None,
 ) -> torch.Tensor:
-    """Pad a ``(C, H, W)`` tile (bottom/right) up to ``geometry.encoded_size``."""
+    """Pad a ``(C, H, W)`` tile — or a whole ``(B, C, H, W)`` batch — up to ``encoded_size``.
+
+    Padding is bottom/right only, so it never shifts the token grid's registration to the
+    tile's top-left origin. Both ranks are accepted because the two dense sources pad at
+    different moments: the slide path pads each region as it is transformed (the error can
+    then name the ROI's coordinate), the image path pads the stacked batch in one call.
+    """
     pad_bottom, pad_right = geometry.pad
     if pad_bottom == 0 and pad_right == 0:
         return tensor
-    x = tensor.unsqueeze(0)  # F.pad's 2-D modes need a batch dim
+    x = tensor.unsqueeze(0) if tensor.ndim == 3 else tensor  # F.pad's 2-D modes need a batch dim
     pad = (0, pad_right, 0, pad_bottom)  # (left, right, top, bottom)
     if pad_mode in ("constant", "zero"):
         x = F.pad(x, pad, mode="constant", value=float(image_pad_value or 0.0))
     else:
         x = F.pad(x, pad, mode=pad_mode)
-    return x.squeeze(0)
+    return x.squeeze(0) if tensor.ndim == 3 else x
 
 
 def _resolve_encode_fn(
@@ -169,6 +175,138 @@ def _resolve_encode_fn(
     raise ValueError(
         f"unsupported feature_kind {feature_kind!r}; expected 'patch_features' or 'cls_attention'"
     )
+
+
+@dataclass(frozen=True, kw_only=True)
+class DenseGridEncoder:
+    """One dense run's resolved encode recipe: geometry, transform, padding, encode fn.
+
+    Everything between "an RGB region" and "a ``(d, gh, gw)`` grid" that does not depend on
+    *where* the region came from. Both dense sources share it, which is what keeps the second
+    source from growing its own padding, batching or blending logic: ROIs streamed off a
+    slide (:func:`iter_regions_dense`) and pre-cropped image files
+    (:mod:`slide2vec.runtime.dense_image_shard`) differ only in who hands over the pixels.
+
+    Resolved **eagerly** — an unsupported ``pad_mode`` or ``feature_kind``, or a geometry the
+    encoder cannot express, raises at resolve time rather than on the first batch.
+    """
+
+    #: The encoder module the grids are produced by (dense-capable tile encoder).
+    model: object
+    geometry: DenseGridGeometry
+    #: Normalization-only transform; a resizing transform would destroy the registration.
+    dense_transform: Callable
+    #: ``(B, C, h, w) -> (B, d, gh, gw)`` for the selected ``feature_kind``.
+    encode_fn: Callable[[torch.Tensor], torch.Tensor]
+    feature_kind: str
+    #: Short phrase naming where ``target_size`` came from (``"requested_tile_size_px"``,
+    #: ``"the declared target_size"``). Shapes the geometry-mismatch error only, so each
+    #: source keeps its own actionable vocabulary — the same convention
+    #: :meth:`~slide2vec.runtime.effective_encoder_input.EffectiveEncoderInput.resolve` uses.
+    target_size_origin: str
+    pad_mode: str
+    image_pad_value: float | None
+    window_size: int | None
+    overlap: float
+    #: torch dtype the emitted grids are materialized in before ``.numpy()``.
+    output_dtype: "torch.dtype"
+
+    @classmethod
+    def resolve(
+        cls,
+        model,
+        *,
+        target_size: int | tuple[int, int],
+        target_size_origin: str,
+        pad_mode: str = "reflect",
+        image_pad_value: float | None = None,
+        window_size: int | None = None,
+        overlap: float = 0.0,
+        feature_kind: str = "patch_features",
+        attention_blocks: tuple[int, ...] = (-1,),
+        attention_include_registers: bool = False,
+        precision: str = "fp32",
+        output_dtype: "torch.dtype | None" = None,
+        dense_transform: Callable | None = None,
+    ) -> "DenseGridEncoder":
+        if pad_mode not in _PAD_MODES:
+            raise ValueError(
+                f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}"
+            )
+        return cls(
+            model=model,
+            geometry=compute_dense_geometry(
+                target_size=target_size, patch_size=model.patch_size
+            ),
+            dense_transform=(
+                model.get_normalization_transform()
+                if dense_transform is None
+                else dense_transform
+            ),
+            encode_fn=_resolve_encode_fn(
+                model,
+                feature_kind=feature_kind,
+                attention_blocks=attention_blocks,
+                attention_include_registers=attention_include_registers,
+            ),
+            feature_kind=str(feature_kind),
+            target_size_origin=str(target_size_origin),
+            pad_mode=str(pad_mode),
+            image_pad_value=image_pad_value,
+            window_size=None if window_size is None else int(window_size),
+            overlap=float(overlap),
+            output_dtype=_resolve_output_dtype(output_dtype, precision),
+        )
+
+    def pad_to_encoded(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Pad a ``(C, H, W)`` item or a ``(B, C, H, W)`` batch up to the patch multiple."""
+        return pad_image_to_encoded(
+            tensor,
+            self.geometry,
+            pad_mode=self.pad_mode,
+            image_pad_value=self.image_pad_value,
+        )
+
+    def transform_and_pad(self, region, *, origin) -> torch.Tensor:
+        """RGB region (PIL image or ``(H, W, C)`` array) → padded ``(C, enc_h, enc_w)``.
+
+        *origin* names the region in the error messages (a ROI coordinate, an image path).
+        """
+        if not isinstance(region, Image.Image):
+            region = Image.fromarray(np.ascontiguousarray(np.asarray(region)[..., :3]))
+        tensor = torch.as_tensor(self.dense_transform(region)).as_subclass(torch.Tensor)
+        if tensor.ndim != 3:
+            raise ValueError(
+                f"dense transform at {origin} produced a {tensor.ndim}-D tensor; expected (C, H, W)."
+            )
+        if tuple(int(s) for s in tensor.shape[-2:]) != self.geometry.target_size:
+            raise ValueError(
+                f"region at {origin} is {tuple(int(s) for s in tensor.shape[-2:])} after the dense "
+                f"transform, but {self.target_size_origin} is {self.geometry.target_size}. The dense transform "
+                "must be normalization-only (no resize/crop)."
+            )
+        return self.pad_to_encoded(tensor)
+
+    def encode_batch(self, batch: torch.Tensor) -> np.ndarray:
+        """Padded ``(B, C, enc_h, enc_w)`` batch → ``(B, d, gh, gw)`` array in ``output_dtype``.
+
+        Every batch goes through the one windowed primitive: ``window_size=None``
+        short-circuits to a single whole-tile forward (byte-identical to the whole-region
+        encode), so there is no separate whole-region branch.
+        """
+        out = encode_dense_sliding(
+            self.model,
+            batch,
+            geometry=self.geometry,
+            window_size=self.window_size,
+            overlap=self.overlap,
+            encode_fn=self.encode_fn,
+        )
+        if out.ndim != 4:
+            raise ValueError(
+                f"{self.feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
+            )
+        return out.detach().to(self.output_dtype).cpu().numpy()
 
 
 def iter_regions_dense(
@@ -247,24 +385,24 @@ def iter_regions_dense(
     share this path. Each yielded grid is a standalone contiguous copy, so it does not pin
     the rest of its batch's memory alive.
     """
-    if pad_mode not in _PAD_MODES:
-        raise ValueError(f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}")
-    resolved_output_dtype = _resolve_output_dtype(output_dtype, precision)
     read_level = int(tiling_result.read_level)
     read_tile_size_px = int(tiling_result.read_tile_size_px)
     requested_tile_size_px = int(tiling_result.requested_tile_size_px)
-    geometry = compute_dense_geometry(
-        target_size=requested_tile_size_px, patch_size=model.patch_size
-    )
-    if dense_transform is None:
-        dense_transform = model.get_normalization_transform()
-    encode_fn = _resolve_encode_fn(
+    encoder = DenseGridEncoder.resolve(
         model,
+        target_size=requested_tile_size_px,
+        target_size_origin="requested_tile_size_px",
+        pad_mode=pad_mode,
+        image_pad_value=image_pad_value,
+        window_size=window_size,
+        overlap=overlap,
         feature_kind=feature_kind,
         attention_blocks=attention_blocks,
         attention_include_registers=attention_include_registers,
+        precision=precision,
+        output_dtype=output_dtype,
+        dense_transform=dense_transform,
     )
-    target_h, target_w = geometry.target_size
     x = np.asarray(tiling_result.x)
     y = np.asarray(tiling_result.y)
     coords = [(int(x[i]), int(y[i])) for i in range(x.shape[0])]
@@ -284,23 +422,6 @@ def iter_regions_dense(
         interpolation="area",
     )
 
-    def _transform_and_pad(region_hwc: np.ndarray, location: tuple[int, int]) -> torch.Tensor:
-        region = np.ascontiguousarray(np.asarray(region_hwc)[..., :3])
-        tensor = torch.as_tensor(dense_transform(Image.fromarray(region))).as_subclass(torch.Tensor)
-        if tensor.ndim != 3:
-            raise ValueError(
-                f"dense transform at {location} produced a {tensor.ndim}-D tensor; expected (C, H, W)."
-            )
-        if tuple(int(s) for s in tensor.shape[-2:]) != (target_h, target_w):
-            raise ValueError(
-                f"region at {location} is {tuple(int(s) for s in tensor.shape[-2:])} after the dense "
-                f"transform, but requested_tile_size_px is {(target_h, target_w)}. The dense transform "
-                "must be normalization-only (no resize/crop)."
-            )
-        return pad_image_to_encoded(
-            tensor, geometry, pad_mode=pad_mode, image_pad_value=image_pad_value
-        )
-
     def _stream() -> Iterator[np.ndarray]:
         with torch.inference_mode(), slide_encode_autocast_ctx(device, precision):
             for start in range(0, len(coords), step):
@@ -311,24 +432,12 @@ def iter_regions_dense(
                 region_batch, _timing = reader.read_batch_with_timing(chunk)
                 region_np = region_batch.permute(0, 2, 3, 1).numpy()  # (B, H, W, 3) uint8
                 batch = torch.stack(
-                    [_transform_and_pad(region_np[i], chunk[i]) for i in range(region_np.shape[0])]
+                    [
+                        encoder.transform_and_pad(region_np[i], origin=chunk[i])
+                        for i in range(region_np.shape[0])
+                    ]
                 ).to(device, non_blocking=True)
-                # Every batch goes through the one windowed primitive: window_size=None
-                # short-circuits to a single whole-tile forward (byte-identical to the
-                # whole-region encode), so there is no separate whole-region branch.
-                out = encode_dense_sliding(
-                    model,
-                    batch,
-                    geometry=geometry,
-                    window_size=window_size,
-                    overlap=overlap,
-                    encode_fn=encode_fn,
-                )
-                if out.ndim != 4:
-                    raise ValueError(
-                        f"{feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
-                    )
-                batch_np = out.detach().to(resolved_output_dtype).cpu().numpy()
+                batch_np = encoder.encode_batch(batch)
                 for i in range(batch_np.shape[0]):
                     # Standalone C-contiguous copy: a per-row view would pin the whole
                     # batch alive (the blended sliding output is contiguous, so a view of

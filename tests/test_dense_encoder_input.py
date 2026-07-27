@@ -59,7 +59,9 @@ def test_dense_whole_tile_effective_input_is_the_padded_encoded_size():
         "virchow2", target_size_px=512, window_size=None
     )
 
-    assert contract.plan.target_size_px == 512
+    # The supervision geometry is always stated as an (h, w) pair, whether the caller asked
+    # for a square side length (a slide ROI) or a rectangle (a pre-cropped image).
+    assert contract.plan.target_size_px == (512, 512)
     assert contract.plan.encoded_size_px == (518, 518)
     assert contract.plan.effective_encoder_input_size_px == (518, 518)
 

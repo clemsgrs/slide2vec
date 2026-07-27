@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
 from pathlib import Path
 from subprocess import Popen
 from typing import Sequence
@@ -41,39 +40,11 @@ from slide2vec.runtime.image_shard import (
     image_needs_encode,
     run_image_shard,
 )
+from slide2vec.runtime.image_specs import build_image_specs_request, normalize_image_specs
 from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.serialization import serialize_execution, serialize_model
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_image_specs(images: Sequence[ImageSpec]) -> list[ImageSpec]:
-    """Resolve each image path and guarantee the sample ids can name distinct artifacts.
-
-    ``sample_id`` is the artifact's whole identity on this path, so a duplicate would make
-    two images silently overwrite one another — and, worse, make the second look already
-    done to resume. That is a hard error, not a warning.
-    """
-    specs = [
-        ImageSpec(
-            sample_id=str(image.sample_id),
-            image_path=str(Path(image.image_path).expanduser().resolve()),
-        )
-        for image in images
-    ]
-    if not specs:
-        raise ValueError("At least one image is required")
-    duplicates = sorted(
-        sample_id
-        for sample_id, count in Counter(spec.sample_id for spec in specs).items()
-        if count > 1
-    )
-    if duplicates:
-        raise ValueError(
-            f"embed_images() received duplicate sample_id values: {duplicates}. Each image "
-            "is persisted as image_embeddings/<sample_id>, so sample ids must be unique."
-        )
-    return specs
 
 
 def partition_images_by_resume(
@@ -86,28 +57,6 @@ def partition_images_by_resume(
     return remaining, len(specs) - len(remaining)
 
 
-def build_image_worker_request(specs: Sequence[ImageSpec]) -> dict:
-    """The flat image list crossing to the torchrun ranks, in the order the parent fixed.
-
-    Order is the payload: every rank rebuilds this exact list and derives its own contiguous
-    shard from it, so the ordering *is* the work assignment. Unlike the dense request there
-    is no side-car npz — the units are two strings each, not numeric coordinate arrays.
-    """
-    return {
-        "images": [
-            {"sample_id": spec.sample_id, "image_path": str(spec.image_path)} for spec in specs
-        ]
-    }
-
-
-def image_specs_from_request(request: dict) -> list[ImageSpec]:
-    """Inverse of :func:`build_image_worker_request`: request → flat spec list."""
-    return [
-        ImageSpec(sample_id=str(image["sample_id"]), image_path=str(image["image_path"]))
-        for image in request["images"]
-    ]
-
-
 def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[ImageEmbeddingArtifact]:
     """Embed + persist one artifact per caller-supplied image across all visible GPUs."""
     # Declare Given before anything is read or launched. This is the affirmative statement
@@ -115,7 +64,11 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     # declaration, which the contract deliberately refuses to interpret. Idempotent, so
     # every torchrun rank re-declares for itself (image_worker).
     model._declare_given_encoder_input(emit_run_info=True)
-    specs = normalize_image_specs(images)
+    specs = normalize_image_specs(
+        images,
+        method_name="embed_images()",
+        artifact_location="image_embeddings/<sample_id>",
+    )
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
@@ -181,7 +134,7 @@ def _run_images_distributed(model, specs, *, execution, out_dir) -> None:
             "execution": serialize_execution(execution),
             "output_dir": str(out_dir),
             "progress_events_path": str(progress_events_path),
-            **build_image_worker_request(specs),
+            **build_image_specs_request(specs),
         }
         request_path.write_text(json.dumps(request, indent=2, sort_keys=True), encoding="utf-8")
         run_torchrun_worker(
