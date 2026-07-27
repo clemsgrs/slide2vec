@@ -20,11 +20,20 @@ Two things distinguish it from the pooled tile loop it otherwise reuses wholesal
 Writes are atomic and sidecar-last (see :func:`~slide2vec.artifacts.write_image_embedding`),
 so a payload without a sidecar unambiguously means an interrupted image and resume trusts
 the sidecar as the done-marker.
+
+One property of the Given regime is worth stating explicitly, because it is what makes
+batching possible at all: the encoder's shipped transform maps *every* input onto one fixed
+square geometry (every registered encoder's recipe ends in a Resize/CenterCrop to its
+registered input size). Heterogeneous inputs therefore leave preprocessing uniform, which is
+why they can be stacked — and why the shared recorder
+(``batching._record_encoder_input_size``) can hold one observed size for the run. A
+transform that did not normalize geometry would fail at the stack, before the recorder.
 """
 
 from __future__ import annotations
 
 from contextlib import nullcontext
+from functools import partial
 from typing import TYPE_CHECKING, Callable, Sequence
 
 import torch
@@ -37,7 +46,13 @@ from slide2vec.artifacts import (
     write_image_embedding,
 )
 from slide2vec.data.dataset import ImageFileDataset, StackedImageCollator
-from slide2vec.runtime.batching import autocast_dtype, iter_forward_batches, uses_cuda_runtime
+from slide2vec.runtime.batching import (
+    autocast_dtype,
+    dataloader_kwargs,
+    iter_forward_batches,
+    uses_cuda_runtime,
+)
+from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 
 if TYPE_CHECKING:
     from slide2vec.api import ImageSpec
@@ -45,15 +60,18 @@ if TYPE_CHECKING:
 
 
 def image_needs_encode(out_dir, spec: "ImageSpec", *, output_format: str) -> bool:
-    """Resume predicate: an image needs encoding iff its sidecar is absent.
+    """Resume predicate: an image is done iff its sidecar *and* this run's payload exist.
 
     The sidecar is written last, so its presence is the done-marker; a payload with no
-    sidecar is an interrupted write and is re-encoded.
+    sidecar is an interrupted write and is re-encoded. The payload is checked too because
+    the sidecar name carries no format: a rerun that switches ``output_format`` would
+    otherwise see the previous run's sidecar, skip every image, and hand back artifacts
+    pointing at payloads that were never written.
     """
-    _, sidecar_path = image_embedding_paths(
+    payload_path, sidecar_path = image_embedding_paths(
         out_dir, sample_id=spec.sample_id, output_format=output_format
     )
-    return not sidecar_path.exists()
+    return not (sidecar_path.exists() and payload_path.exists())
 
 
 def image_artifact_from_disk(
@@ -134,9 +152,9 @@ def run_image_shard(
 ) -> list[ImageEmbeddingArtifact]:
     """Encode + persist one shard's images, one payload + one sidecar per image.
 
-    Skips any image whose sidecar already exists (resume), encodes the rest through the
-    shared forward loop, and writes each batch's embeddings before the next batch is
-    encoded. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
+    Skips any image already complete on disk (see :func:`image_needs_encode`), encodes the
+    rest through the shared forward loop, and writes each batch's embeddings before the
+    next batch is encoded. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
     image in input order — freshly written or (when skipped) read back off disk.
     ``on_batch`` is invoked with each encoded batch's image count for per-batch progress.
     """
@@ -148,18 +166,21 @@ def run_image_shard(
     if pending:
         # The observed encoder input is a fact of this run, not of a previous one.
         loaded.encoder_input_size_px = None
-        dataset = ImageFileDataset([spec.image_path for spec in pending], loaded.transforms)
-        loader_kwargs: dict = {"num_workers": int(num_workers)}
-        if int(num_workers) > 0:
-            loader_kwargs["prefetch_factor"] = int(prefetch_factor)
-        if uses_cuda_runtime(loaded.device):
-            loader_kwargs["pin_memory"] = True
+        dataset = ImageFileDataset(
+            [spec.image_path for spec in pending],
+            # partial, not a closure: the recipe is pickled into the loader workers.
+            partial(apply_transforms_itemwise, transforms=loaded.transforms),
+        )
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=max(1, int(batch_size)),
             shuffle=False,
             collate_fn=StackedImageCollator(),
-            **loader_kwargs,
+            **dataloader_kwargs(
+                device=loaded.device,
+                num_workers=int(num_workers),
+                prefetch_factor=int(prefetch_factor),
+            ),
         )
         cast_dtype = autocast_dtype(torch, precision)
         autocast_context = (

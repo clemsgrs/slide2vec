@@ -265,6 +265,23 @@ def test_multi_rank_matches_single_rank(tmp_path):
         torch.testing.assert_close(one, many)
 
 
+def test_run_image_shard_reencodes_when_the_output_format_changes(tmp_path):
+    """The sidecar name carries no format, so resume must check this run's payload too."""
+    encoder = _encoder()
+    specs = [_spec(tmp_path, "a", width=64, height=64)]
+    out_dir = tmp_path / "out"
+    run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=1,
+                    output_precision="fp32", num_workers=0)
+
+    artifacts = run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=1,
+                               output_precision="fp32", output_format="npz", num_workers=0)
+
+    assert artifacts[0].path.suffix == ".npz"
+    assert artifacts[0].path.exists()
+    payload = np.load(artifacts[0].path)["features"]
+    assert payload.shape == (encoder.encode_dim,)
+
+
 def test_payload_size_is_independent_of_batch_size(tmp_path):
     """Each artifact holds one vector, not a view onto its whole batch's storage."""
     encoder = _encoder()

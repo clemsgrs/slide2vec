@@ -150,9 +150,16 @@ def _run_images_in_process(model, specs, *, execution, out_dir) -> None:
     # Loaded under the Given contract declared by embed_images, so the backend carries the
     # encoder's shipped transform — which the loader workers then apply itemwise.
     loaded = model._load_backend()
+
+    def _on_batch(count: int) -> None:
+        # Same per-batch event the ranks emit, so a single-GPU run reports progress the
+        # same way a distributed one does.
+        emit_progress("images.batch.finished", rank=0, images=int(count))
+
     run_image_shard(
         specs,
         loaded=loaded,
+        on_batch=_on_batch,
         out_dir=out_dir,
         batch_size=int(execution.batch_size),
         output_precision=resolve_output_precision(execution.output_dtype, execution.precision),

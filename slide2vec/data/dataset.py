@@ -7,8 +7,6 @@ from PIL import Image
 
 from hs2p import TilingResult
 
-from slide2vec.runtime.preprocessing import apply_transforms_itemwise
-
 from .tile_store import TarTileReader
 
 
@@ -24,20 +22,23 @@ class TileIndexDataset(torch.utils.data.Dataset):
 
 
 class ImageFileDataset(torch.utils.data.Dataset):
-    """Decode one given-geometry image and apply the encoder's shipped transform, per item.
+    """Decode one given-geometry image and preprocess it, per item, in the loader worker.
 
     The preprocessing seam of :meth:`slide2vec.api.Model.embed_images`. Given-geometry
     inputs are heterogeneously sized (a 2048x1536 BACH image beside a 96x96 PCam patch), so
     they cannot be stacked into one ``(B, 3, H, W)`` uint8 tensor and resized as a batch the
     way the declared paths do — the batched transform spec is structurally inapplicable
-    here. Instead each item is decoded and transformed on its own, inside the dataloader
-    worker, and only the *transformed* items (all at the encoder's own input size) are
-    stacked by :class:`StackedImageCollator`.
+    here. Instead each item is decoded and transformed on its own, and only the
+    *transformed* items (all at the encoder's own input size) are stacked by
+    :class:`StackedImageCollator`.
+
+    ``preprocess`` is the whole per-item recipe, supplied by the caller: this dataset knows
+    how to read an image file and nothing about which transform an encoder ships.
     """
 
-    def __init__(self, image_paths, transforms):
+    def __init__(self, image_paths, preprocess):
         self.image_paths = [str(path) for path in image_paths]
-        self.transforms = transforms
+        self.preprocess = preprocess
 
     def __len__(self) -> int:
         return len(self.image_paths)
@@ -47,7 +48,7 @@ class ImageFileDataset(torch.utils.data.Dataset):
             # RGB up front: the shipped transforms expect three channels, and public patch
             # datasets ship a mix of RGB, RGBA (alpha) and palette PNGs.
             rgb = image.convert("RGB")
-        return int(idx), apply_transforms_itemwise(rgb, self.transforms)
+        return int(idx), self.preprocess(rgb)
 
 
 class StackedImageCollator:

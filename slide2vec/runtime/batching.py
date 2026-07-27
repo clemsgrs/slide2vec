@@ -82,14 +82,26 @@ def build_batch_preprocessor_for_tile_images(
     return preprocess
 
 
-def embedding_dataloader_kwargs(loaded: LoadedModel, execution) -> dict[str, Any]:
-    num_workers = execution.resolved_num_workers_per_gpu()
-    kwargs: dict[str, Any] = {"num_workers": num_workers}
-    if num_workers > 0:
-        kwargs["prefetch_factor"] = execution.prefetch_factor
-    if uses_cuda_runtime(loaded.device):
+def dataloader_kwargs(*, device, num_workers: int, prefetch_factor: int) -> dict[str, Any]:
+    """The DataLoader knobs every embedding route sets, from the values it already holds.
+
+    ``prefetch_factor`` is only legal with worker processes, and pinned host memory only
+    buys anything when the copy is to a CUDA device.
+    """
+    kwargs: dict[str, Any] = {"num_workers": int(num_workers)}
+    if int(num_workers) > 0:
+        kwargs["prefetch_factor"] = int(prefetch_factor)
+    if uses_cuda_runtime(device):
         kwargs["pin_memory"] = True
     return kwargs
+
+
+def embedding_dataloader_kwargs(loaded: LoadedModel, execution) -> dict[str, Any]:
+    return dataloader_kwargs(
+        device=loaded.device,
+        num_workers=execution.resolved_num_workers_per_gpu(),
+        prefetch_factor=execution.prefetch_factor,
+    )
 
 
 class BatchPrefetcher:
