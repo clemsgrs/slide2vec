@@ -74,6 +74,47 @@ class StackedImageCollator:
         )
 
 
+class DeclaredGeometryCollator:
+    """Stack images, refusing any that is not the geometry its run declared.
+
+    The dense counterpart of :class:`StackedImageCollator`. Dense extraction encodes through
+    a normalization-only transform, so it never rescales: the run's ``target_size`` is a
+    contract each image must already satisfy, and an image of another size would otherwise
+    produce a grid registered to the wrong extent.
+
+    Checking here — per item, *before* the stack — is what lets the error name the offending
+    images: a mixed-size batch would otherwise fail inside ``torch.stack`` with a list of
+    shapes and no way back to a sample id. The ids are supplied as plain data (indexed by
+    dataset position), so this stays free of any runtime dependency.
+    """
+
+    def __init__(self, *, sample_ids, target_size: tuple[int, int]) -> None:
+        self.sample_ids = [str(sample_id) for sample_id in sample_ids]
+        self.target_size = (int(target_size[0]), int(target_size[1]))
+
+    def __call__(self, batch):
+        worker_start = time.perf_counter()
+        indices = [int(index) for index, _ in batch]
+        images = [torch.as_tensor(image) for _, image in batch]
+        offenders = {
+            self.sample_ids[index]: tuple(int(size) for size in image.shape[-2:])
+            for index, image in zip(indices, images)
+            if tuple(int(size) for size in image.shape[-2:]) != self.target_size
+        }
+        if offenders:
+            raise ValueError(
+                f"images {offenders} are not the declared target_size {self.target_size} "
+                "after the normalization-only dense transform (sample_id: observed (h, w)). "
+                "Dense extraction never resizes: state the images' own geometry, or split "
+                "the run so each geometry is declared once."
+            )
+        return (
+            torch.as_tensor(indices, dtype=torch.long),
+            torch.stack(images, dim=0),
+            {"worker_batch_ms": (time.perf_counter() - worker_start) * 1000.0},
+        )
+
+
 class BatchTileCollator:
     def __init__(
         self,

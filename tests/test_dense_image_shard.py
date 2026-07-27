@@ -279,11 +279,35 @@ def test_run_dense_image_shard_rejects_images_that_are_not_the_declared_size(tmp
     enc = _encoder()
     specs = [_spec(tmp_path, "small", width=32, height=32)]
 
-    with pytest.raises(ValueError, match="declared target_size"):
+    with pytest.raises(ValueError, match=r"'small': \(32, 32\)"):
         run_dense_image_shard(
             specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=_dense(),
             batch_size=1, num_workers=0,
         )
+
+
+def test_off_size_images_are_named_even_when_a_batch_is_mixed(tmp_path):
+    """The error has to name the images, not report a list of shapes from ``torch.stack``.
+
+    A mixed-size batch is the realistic failure: the stack would blow up first with no way
+    back to a sample id, so the declared geometry is checked per item before stacking.
+    """
+    enc = _encoder()
+    specs = [
+        _spec(tmp_path, "right", width=64, height=64),
+        _spec(tmp_path, "short", width=64, height=48),
+        _spec(tmp_path, "narrow", width=32, height=64),
+    ]
+
+    with pytest.raises(ValueError) as excinfo:
+        run_dense_image_shard(
+            specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=_dense(),
+            batch_size=3, num_workers=0,
+        )
+
+    message = str(excinfo.value)
+    assert "'short': (48, 64)" in message and "'narrow': (64, 32)" in message
+    assert "right" not in message  # the conforming image is not accused
 
 
 def test_run_dense_image_shard_skips_images_with_existing_sidecar(tmp_path):

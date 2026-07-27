@@ -16,7 +16,8 @@ padding, batching or blending logic of its own.
 Decoding and the normalization-only transform run **itemwise in the loader workers** (the
 same seam :mod:`slide2vec.runtime.image_shard` uses), and only the transformed items are
 stacked. Unlike the pooled given-image path that is not because the geometry is
-heterogeneous — here it is declared, uniform, and checked — but because decoding a directory
+heterogeneous — here it is declared, uniform, and checked while stacking (see
+:class:`~slide2vec.data.dataset.DeclaredGeometryCollator`) — but because decoding a directory
 of large images is the bottleneck this path has, and it parallelizes per item.
 
 Writes are atomic and sidecar-last (see :func:`~slide2vec.artifacts.write_dense_image`), so a
@@ -37,7 +38,7 @@ from slide2vec.artifacts import (
     load_metadata,
     write_dense_image,
 )
-from slide2vec.data.dataset import ImageFileDataset, StackedImageCollator
+from slide2vec.data.dataset import DeclaredGeometryCollator, ImageFileDataset
 from slide2vec.runtime.batching import dataloader_kwargs, uses_cuda_runtime
 from slide2vec.runtime.dense_regions import DenseGridEncoder
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
@@ -117,25 +118,6 @@ def dense_image_metadata(
     }
 
 
-def _check_declared_geometry(batch: torch.Tensor, encoder: DenseGridEncoder, specs) -> None:
-    """Fail loudly when the decoded images are not the geometry the run declared.
-
-    ``target_size`` is a declaration, not a resize request: the dense transform is
-    normalization-only, so an image of another size would silently produce a grid registered
-    to the wrong extent. The check names the images in the batch, because the fix is either
-    to correct ``target_size`` or to split the run per geometry.
-    """
-    observed = (int(batch.shape[-2]), int(batch.shape[-1]))
-    if observed == encoder.geometry.target_size:
-        return
-    raise ValueError(
-        f"images {[spec.sample_id for spec in specs]} decode to {observed} after the "
-        f"normalization-only dense transform, but the declared target_size is "
-        f"{encoder.geometry.target_size}. Dense extraction never resizes: state the images' "
-        "own geometry, or split the run so each geometry is declared once."
-    )
-
-
 def run_dense_image_shard(
     images: Sequence["ImageSpec"],
     *,
@@ -166,6 +148,7 @@ def run_dense_image_shard(
         encoder = DenseGridEncoder.resolve(
             loaded.model,
             target_size=dense.target_size,
+            target_size_origin="the declared target_size",
             pad_mode=dense.pad_mode,
             image_pad_value=dense.image_pad_value,
             window_size=dense.window_size,
@@ -186,7 +169,13 @@ def run_dense_image_shard(
             dataset,
             batch_size=max(1, int(batch_size)),
             shuffle=False,
-            collate_fn=StackedImageCollator(),
+            # The collator, not this loop, holds the declared geometry: an off-size image has
+            # to be refused *before* the stack, which would otherwise fail first with a list
+            # of shapes and no way back to the sample id that has to be fixed.
+            collate_fn=DeclaredGeometryCollator(
+                sample_ids=[spec.sample_id for spec in pending],
+                target_size=encoder.geometry.target_size,
+            ),
             **dataloader_kwargs(
                 device=loaded.device,
                 num_workers=int(num_workers),
@@ -196,7 +185,6 @@ def run_dense_image_shard(
         with torch.inference_mode(), slide_encode_autocast_ctx(loaded.device, precision):
             for indices, batch, _timing in dataloader:
                 batch_specs = [pending[int(index)] for index in indices.tolist()]
-                _check_declared_geometry(batch, encoder, batch_specs)
                 batch = encoder.pad_to_encoded(
                     batch.to(loaded.device, non_blocking=uses_cuda_runtime(loaded.device))
                 )

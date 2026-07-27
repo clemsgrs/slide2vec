@@ -30,6 +30,7 @@ from pathlib import Path
 from subprocess import Popen
 from typing import Sequence
 
+from slide2vec.api import DenseImageOptions, ImageSpec
 from slide2vec.artifacts import DenseImageArtifact
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.dense_image_shard import (
@@ -54,13 +55,21 @@ from slide2vec.runtime.serialization import (
 logger = logging.getLogger(__name__)
 
 
-def partition_dense_images_by_resume(specs: Sequence, out_dir) -> tuple[list, int]:
+def partition_dense_images_by_resume(
+    specs: Sequence[ImageSpec], out_dir
+) -> tuple[list[ImageSpec], int]:
     """Split the spec list into (needs-encode, already-on-disk-count) by sidecar existence."""
     remaining = [spec for spec in specs if dense_image_needs_encode(out_dir, spec)]
     return remaining, len(specs) - len(remaining)
 
 
-def embed_images_dense(model, images: Sequence, *, dense, execution) -> list[DenseImageArtifact]:
+def embed_images_dense(
+    model,
+    images: Sequence[ImageSpec],
+    *,
+    dense: DenseImageOptions,
+    execution,
+) -> list[DenseImageArtifact]:
     """Extract + persist a dense grid per caller-supplied image across all visible GPUs."""
     # Declare the effective encoder input before anything is decoded, sharded or launched: an
     # image geometry this encoder cannot accept must fail here, not on the first forward pass
@@ -100,7 +109,9 @@ def embed_images_dense(model, images: Sequence, *, dense, execution) -> list[Den
     return [dense_image_artifact_from_disk(out_dir, spec) for spec in specs]
 
 
-def _run_dense_images_in_process(model, specs, *, dense, execution, out_dir) -> None:
+def _run_dense_images_in_process(
+    model, specs: Sequence[ImageSpec], *, dense: DenseImageOptions, execution, out_dir
+) -> None:
     # Loaded under the dense contract declared by embed_images_dense, which supplies the
     # variable-input constructor settings this geometry needs. The shard builds its own
     # normalization-only transform — the same one this contract selects.
@@ -125,7 +136,9 @@ def _run_dense_images_in_process(model, specs, *, dense, execution, out_dir) -> 
     )
 
 
-def _run_dense_images_distributed(model, specs, *, dense, execution, out_dir) -> None:
+def _run_dense_images_distributed(
+    model, specs: Sequence[ImageSpec], *, dense: DenseImageOptions, execution, out_dir
+) -> None:
     validate_multi_gpu_execution(model, execution)
     progress_events_path = out_dir / "logs" / "dense_image_worker.progress.jsonl"
     reset_progress_event_logs(progress_events_path)

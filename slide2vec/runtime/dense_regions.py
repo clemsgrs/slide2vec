@@ -199,6 +199,11 @@ class DenseGridEncoder:
     #: ``(B, C, h, w) -> (B, d, gh, gw)`` for the selected ``feature_kind``.
     encode_fn: Callable[[torch.Tensor], torch.Tensor]
     feature_kind: str
+    #: Short phrase naming where ``target_size`` came from (``"requested_tile_size_px"``,
+    #: ``"the declared target_size"``). Shapes the geometry-mismatch error only, so each
+    #: source keeps its own actionable vocabulary — the same convention
+    #: :meth:`~slide2vec.runtime.effective_encoder_input.EffectiveEncoderInput.resolve` uses.
+    target_size_origin: str
     pad_mode: str
     image_pad_value: float | None
     window_size: int | None
@@ -212,6 +217,7 @@ class DenseGridEncoder:
         model,
         *,
         target_size: int | tuple[int, int],
+        target_size_origin: str,
         pad_mode: str = "reflect",
         image_pad_value: float | None = None,
         window_size: int | None = None,
@@ -244,6 +250,7 @@ class DenseGridEncoder:
                 attention_include_registers=attention_include_registers,
             ),
             feature_kind=str(feature_kind),
+            target_size_origin=str(target_size_origin),
             pad_mode=str(pad_mode),
             image_pad_value=image_pad_value,
             window_size=None if window_size is None else int(window_size),
@@ -275,7 +282,7 @@ class DenseGridEncoder:
         if tuple(int(s) for s in tensor.shape[-2:]) != self.geometry.target_size:
             raise ValueError(
                 f"region at {origin} is {tuple(int(s) for s in tensor.shape[-2:])} after the dense "
-                f"transform, but the target size is {self.geometry.target_size}. The dense transform "
+                f"transform, but {self.target_size_origin} is {self.geometry.target_size}. The dense transform "
                 "must be normalization-only (no resize/crop)."
             )
         return self.pad_to_encoded(tensor)
@@ -384,6 +391,7 @@ def iter_regions_dense(
     encoder = DenseGridEncoder.resolve(
         model,
         target_size=requested_tile_size_px,
+        target_size_origin="requested_tile_size_px",
         pad_mode=pad_mode,
         image_pad_value=image_pad_value,
         window_size=window_size,
