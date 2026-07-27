@@ -231,7 +231,10 @@ Notes:
 - ``musk`` dense extraction currently requires its native 384 x 384 input size.
 - H-Optimus dense extraction at non-native input sizes requires
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
-  constructing the encoder.
+  constructing the encoder directly. Through ``Model.embed_regions_dense`` the
+  ``dynamic_img_size`` half is derived from the declared geometry, so only
+  ``allow_non_recommended_settings=True`` (the H-Optimus model card advises
+  against variable input) has to be passed to ``Model.from_preset``.
 - ``genbio-pathfm`` is a single-channel ViT: its dense grid (via
   ``forward_with_patches``) concatenates the three per-colour-channel patch grids
   along the feature dim, so ``d`` = 4608 matches the pooled output dimension.

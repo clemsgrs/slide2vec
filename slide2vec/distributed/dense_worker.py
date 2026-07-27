@@ -63,9 +63,12 @@ def main(argv=None) -> int:
     )
     dense = deserialize_dense_options(request["dense"])
     execution = deserialize_execution(request["execution"])
-    # Dense builds its own transform from the encoder module (see dense_regions:
-    # get_normalization_transform) and never reads loaded.transforms.
-    loaded = model._load_backend_without_transform()
+    # Each rank declares its own dense encoder-input contract rather than trusting the
+    # parent to have done it (the declaration is idempotent): that is what supplies the
+    # variable-input constructor settings this ROI geometry implies. emit_run_info=False —
+    # the run-info line is logged once by the parent, not once per rank.
+    model._declare_dense_encoder_input(dense, emit_run_info=False)
+    loaded = model._load_backend()
 
     progress_events_path = request.get("progress_events_path")
     reporter = (

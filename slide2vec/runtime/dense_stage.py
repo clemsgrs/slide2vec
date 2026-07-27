@@ -162,6 +162,10 @@ def embed_regions_dense(
     execution,
 ) -> list[DenseRegionArtifact]:
     """Extract + persist a dense grid per ROI across all visible GPUs (the D8 entry point)."""
+    # Declare the effective encoder input before anything is read, sharded or launched: a
+    # ROI geometry this encoder cannot accept must fail here, not on the first forward pass
+    # of a torchrun rank. Idempotent, so every rank re-declares for itself (dense_worker).
+    model._declare_dense_encoder_input(dense, emit_run_info=True)
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
@@ -190,9 +194,11 @@ def embed_regions_dense(
 
 
 def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
-    # Dense builds its own transform from the encoder module (see dense_regions:
-    # get_normalization_transform) and never reads loaded.transforms.
-    loaded = model._load_backend_without_transform()
+    # Loaded under the dense contract declared by embed_regions_dense, which supplies the
+    # variable-input constructor settings this geometry needs. Dense builds its own
+    # normalization transform (see dense_regions) and never reads loaded.transforms — but
+    # the contract selects that same transform, so the backend is not carrying a different one.
+    loaded = model._load_backend()
     run_dense_shard(
         specs,
         model=loaded.model,

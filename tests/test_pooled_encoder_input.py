@@ -87,8 +87,9 @@ def test_fixed_size_encoder_rejects_permitted_non_preset_request():
         )
 
     assert str(error.value) == (
-        "Encoder 'conch' does not support variable pooled input geometry; its "
-        "registered preset is 448px, so requested_tile_size_px=464 is unsupported."
+        "Encoder 'conch' does not support a variable encoder input; its registered "
+        "input size is 448px, so an effective encoder input of 464px "
+        "(requested_tile_size_px=464) is unsupported."
     )
 
 
@@ -149,7 +150,10 @@ def test_permitted_non_preset_plan_rejects_non_positive_geometry():
             allow_non_recommended_settings=True,
         )
 
-    assert str(error.value) == "requested_tile_size_px must be a positive square size; got 0px"
+    assert str(error.value) == (
+        "The effective encoder input must be positive; got 0px "
+        "(requested_tile_size_px=0)."
+    )
 
 
 def test_permitted_non_preset_plan_rejects_patch_incompatible_geometry():
@@ -165,8 +169,9 @@ def test_permitted_non_preset_plan_rejects_patch_incompatible_geometry():
         )
 
     assert str(error.value) == (
-        "Encoder 'gigapath' requires exact pooled inputs divisible by its 16x16 "
-        "patch geometry; got requested_tile_size_px=278."
+        "Encoder 'gigapath' requires an encoder input divisible by its 16x16 patch "
+        "geometry; got an effective encoder input of 278px "
+        "(requested_tile_size_px=278)."
     )
 
 
@@ -207,7 +212,7 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
             self.device = torch.device(device)
             return self
 
-    contract = EncoderInputContract.declared(
+    contract = EncoderInputContract.declared_pooled(
         "h-optimus-0",
         requested_tile_size_px=280,  # 14x20 — h-optimus-0 is a genuine patch-14 model
         allow_non_recommended_settings=True,
@@ -490,7 +495,7 @@ def test_slide_model_loading_applies_plan_to_resolved_tile_dependency(monkeypatc
             self.device = torch.device(device)
             return self
 
-    contract = EncoderInputContract.declared(
+    contract = EncoderInputContract.declared_pooled(
         "prism",
         requested_tile_size_px=252,
         allow_non_recommended_settings=True,

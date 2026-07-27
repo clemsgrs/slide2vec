@@ -93,17 +93,22 @@ def load_model(
     device: str = "auto",
     output_variant: str | None = None,
     allow_non_recommended_settings: bool = False,
-    dynamic_img_size: bool | None = None,
     token: str | None = None,
 ) -> LoadedModel:
+    # There is deliberately no ``dynamic_img_size`` parameter: variable encoder input is a
+    # *derived* fact of the declared geometry (see EncoderInputContract), not something a
+    # caller hand-passes. Hand-passing it was unverified in both directions — silently
+    # dropped by encoders whose constructor lacks the parameter, and never checked against
+    # the size actually fed to the encoder.
     # ``encoder_input`` is required and deliberately has no default: the transform a
     # run encodes through is a contract the caller states, never something load_model
     # infers from an absent argument. See EncoderInputContract for the two regimes.
     if not isinstance(encoder_input, EncoderInputContract):
         raise TypeError(
             "load_model requires an explicit encoder-input contract: pass "
-            "encoder_input=EncoderInputContract.declared(...) when the caller states "
-            "the encoder input geometry it wants, or EncoderInputContract.given() "
+            "encoder_input=EncoderInputContract.declared_pooled(...) / "
+            ".declared_dense(...) when the caller states the encoder input geometry it "
+            "wants, or EncoderInputContract.given() "
             "when the caller supplies pixels it never requested and the encoder's "
             f"shipped transform is the contract; got {encoder_input!r}"
         )
@@ -132,17 +137,15 @@ def load_model(
         hf_login(token=token, add_to_git_credential=False)
 
     encoder_cls = encoder_registry.require(name)
-    # Pass dynamic_img_size / allow_non_recommended_settings ONLY to encoders whose
-    # constructor accepts them (e.g. H-optimus needs both to opt into variable input
-    # size for dense extraction; most others hardcode dynamic_img_size=True and take
-    # neither). Limited to these two named params on purpose — not a generic kwargs
-    # passthrough — so load_model stays a narrow construction contract.
+    # Pass allow_non_recommended_settings ONLY to encoders whose constructor accepts it
+    # (e.g. H-optimus needs it to opt into the variable input size its model card advises
+    # against; most encoders take no such parameter). Limited to that one named param on
+    # purpose — not a generic kwargs passthrough — so load_model stays a narrow
+    # construction contract; every other setting comes from the encoder-input contract.
     import inspect
 
     ctor_params = inspect.signature(encoder_cls.__init__).parameters
     extra_kwargs: dict = {}
-    if dynamic_img_size is not None and "dynamic_img_size" in ctor_params:
-        extra_kwargs["dynamic_img_size"] = dynamic_img_size
     if "allow_non_recommended_settings" in ctor_params:
         extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
     contract_kwargs = encoder_input.construction_kwargs_for(name)
@@ -151,7 +154,7 @@ def load_model(
         if missing_params:
             missing_text = ", ".join(sorted(missing_params))
             raise ValueError(
-                f"Encoder '{name}' requires pooled variable-input constructor "
+                f"Encoder '{name}' requires variable-input constructor "
                 f"setting(s) not accepted by its implementation: {missing_text}"
             )
         extra_kwargs.update(contract_kwargs)
@@ -190,7 +193,7 @@ def load_model(
             if missing_params:
                 missing_text = ", ".join(sorted(missing_params))
                 raise ValueError(
-                    f"Encoder '{tile_enc_name}' requires pooled variable-input "
+                    f"Encoder '{tile_enc_name}' requires variable-input "
                     "constructor setting(s) not accepted by its implementation: "
                     f"{missing_text}"
                 )

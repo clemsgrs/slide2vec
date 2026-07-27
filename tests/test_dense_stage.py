@@ -76,7 +76,12 @@ def stub_read_plan(monkeypatch):
 
 
 class _FakeModel:
-    """Minimal Model stand-in exposing what the in-process dense path reads."""
+    """Minimal Model stand-in exposing what the in-process dense path reads.
+
+    ``_load_backend`` refuses to hand out a backend until the dense encoder-input contract
+    has been declared, mirroring the real ``Model``: dense declares its effective encoder
+    input like every other route that reaches the encoder.
+    """
 
     def __init__(self, encoder, device="cpu") -> None:
         self._encoder = encoder
@@ -85,8 +90,14 @@ class _FakeModel:
         self._output_variant = None
         self._requested_device = device
         self.allow_non_recommended_settings = False
+        self.declared_dense = None
 
-    def _load_backend_without_transform(self):
+    def _declare_dense_encoder_input(self, dense, *, emit_run_info):
+        self.declared_dense = dense
+        return dense
+
+    def _load_backend(self):
+        assert self.declared_dense is not None, "dense must declare before it loads"
         return SimpleNamespace(model=self._encoder, device=self._device)
 
     @property

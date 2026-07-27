@@ -73,6 +73,14 @@ Omitting the contract is an error, not a silent fallback to the shipped recipe:
 "the caller never requested this geometry" and "the caller forgot" must not look
 alike at the seam where the transform is chosen.
 
+The declared regime covers dense extraction too. Pooled and dense derive the
+**effective encoder input** — the geometry of the tensor immediately before
+``encode_tiles`` / ``encode_tiles_dense`` — differently (``requested_tile_size_px``
+for pooled; the padded ROI or the patch-aligned window for dense, see
+:doc:`api`), but both then ask the same thing of it: whether the encoder is
+registered as variable-input capable, and which constructor settings activate
+that. There is no separate ``dynamic_img_size`` knob for dense; it is derived.
+
 This reader convergence intentionally changes pooled embeddings for runs where
 ``read_tile_size_px != requested_tile_size_px``: older runs could pass the raw
 pyramid read directly to the model transform. There is no legacy compatibility
