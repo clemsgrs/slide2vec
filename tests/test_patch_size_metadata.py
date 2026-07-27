@@ -28,7 +28,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "virchow": (14, 14),
     "virchow2": (14, 14),
     "genbio-pathfm": (16, 16),
-    "gigapath": (14, 14),
+    "gigapath": (16, 16),  # see gigapath.py: the arch name says 14, the weights say 16
     "gpfm": (14, 14),
     "h-optimus-0": (14, 14),
     "h-optimus-1": (14, 14),

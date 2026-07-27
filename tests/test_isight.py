@@ -176,25 +176,44 @@ def test_isight_dense_rejects_indivisible_input():
 def test_isight_attention_forces_eager_via_the_parent_clip_model():
     """The vision tower alone cannot switch attention implementations.
 
-    ``CLIPVisionTransformer`` is a plain ``nn.Module`` with no
-    ``set_attn_implementation``, so handing it to ``hf_eager_attention`` would be
-    a silent no-op and SDPA would return ``attentions=None``. The encoder keeps
-    the parent ``CLIPModel`` for exactly this reason; this test fails if that is
-    ever "simplified" away.
+    ``CLIPVisionTransformer`` is a plain ``nn.Module``, not a
+    ``PreTrainedModel``, so it exposes no way to select an attention
+    implementation; handing it to ``hf_eager_attention`` would be a silent no-op.
+    The encoder keeps the parent ``CLIPModel`` for exactly this reason, and this
+    test fails if that is ever "simplified" away.
+
+    Asserted as *structure plus behaviour*, never as a specific ``transformers``
+    API: ``PreTrainedModel.set_attn_implementation`` only exists from 4.56, and
+    CI pins 4.53 via the ``prism`` extra. Older versions instead fall back to
+    eager inside the SDPA attention class when ``output_attentions=True``. Both
+    routes must end in materialized attention weights, which is what is checked
+    here; the eager flip itself is asserted only where the API exists.
     """
+    from transformers.modeling_utils import PreTrainedModel
+
+    from slide2vec.encoders.base import hf_eager_attention
+
     enc = _tiny_encoder()
+    assert not isinstance(enc._vision, PreTrainedModel)
     assert not hasattr(enc._vision, "set_attn_implementation")
-    assert hasattr(enc._clip, "set_attn_implementation")
-    assert enc._clip.config.vision_config._attn_implementation == "sdpa"
+    # the parent IS a PreTrainedModel -> hf_eager_attention has something to act on
+    assert isinstance(enc._clip, PreTrainedModel)
+
+    before = enc._clip.config.vision_config._attn_implementation
+    if hasattr(enc._clip, "set_attn_implementation"):
+        # transformers >= 4.56: the flip is real and reaches the vision sub-config
+        with hf_eager_attention(enc._clip):
+            assert enc._clip.config.vision_config._attn_implementation == "eager"
 
     with torch.no_grad():
         maps = enc.encode_tiles_attention(torch.randn(1, 3, _IMAGE, _IMAGE))
 
+    # the contract that actually matters: weights materialized, not attentions=None
     assert maps.shape == (1, _HEADS, 2, 2)  # 1 CLS query * heads, 2x2 grid
     assert torch.isfinite(maps).all()
     assert (maps >= 0).all()
     # implementation restored, so a following encode_tiles is unaffected
-    assert enc._clip.config.vision_config._attn_implementation == "sdpa"
+    assert enc._clip.config.vision_config._attn_implementation == before
 
 
 def test_isight_attention_multiblock_is_block_outer():
