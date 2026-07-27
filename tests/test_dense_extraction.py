@@ -164,7 +164,7 @@ def test_encode_tiles_dense_wrong_prefix_count_fails_loud():
 @pytest.mark.parametrize(
     "arch,native",
     [
-        ("vit_small_patch16_224", 224),  # patch-16 (UNI / Prost40M family)
+        ("vit_small_patch16_224", 224),  # patch-16 (UNI family)
         ("vit_small_patch8_224", 224),  # patch-8 (Lunit)
         ("vit_small_patch14_reg4_dinov2", 518),  # patch-14 + reg tokens (H-optimus)
     ],

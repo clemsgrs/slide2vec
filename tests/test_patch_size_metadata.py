@@ -34,7 +34,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "h-optimus-1": (14, 14),
     "h0-mini": (14, 14),
     "lunit": (8, 8),
-    "prost40m": (16, 16),
+    "prost40m": (14, 14),
     "conch": (16, 16),
     "conchv15": (16, 16),
     "dinov2-vitb14": (14, 14),
@@ -45,6 +45,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "musk": (16, 16),
     "hibou-b": (14, 14),
     "hibou-l": (14, 14),
+    "isight": (14, 14),
 }
 
 # Non-dense tile encoders: real tile encoders with no recoverable patch grid
@@ -205,7 +206,20 @@ def test_static_patch_size_matches_runtime(name, expected):
 
     try:
         loaded = load_model(name=name, device="cpu")
-    except Exception as exc:  # network / weights / optional dep unavailable
+    except (ImportError, OSError) as exc:
+        # Skip ONLY on genuine unavailability, never on a contract violation:
+        #   ImportError -> optional per-encoder dependency not installed
+        #   OSError     -> hub/network/filesystem, which covers the huggingface_hub
+        #                  error tree (GatedRepoError -> ... -> HTTPError ->
+        #                  RequestException -> OSError) and so all gated-repo 401s.
+        # Deliberately NOT `except Exception`: ``load_model`` itself raises ValueError
+        # when the declared patch_size has drifted from the loaded model's runtime
+        # value, and a blanket catch reported that contract breach as "weights
+        # unavailable" — which is exactly how prost40m shipped a wrong static
+        # patch_size (16 vs 14) while this test stayed green.
+        # Note LocalEntryNotFoundError subclasses BOTH OSError and ValueError; it is
+        # true unavailability (offline / no cached entry) and the OSError arm keeps
+        # it a skip regardless of the ValueError base.
         pytest.skip(f"{name} weights unavailable: {type(exc).__name__}: {exc}")
     runtime = loaded.model.patch_size
     static = resolve_patch_size(name)
