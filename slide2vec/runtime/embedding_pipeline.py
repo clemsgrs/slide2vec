@@ -356,6 +356,12 @@ def compute_embedded_slides(
     on_embedded_slide: Callable[[SlideSpec, Any, EmbeddedSlide], None] | None = None,
     collect_results: bool = True,
 ) -> list[EmbeddedSlide]:
+    # Declare the encoder input here rather than trusting the caller to have done it:
+    # this is the in-process embed route one layer below Pipeline, and a caller that
+    # reached it directly used to get the encoder's shipped transform while the very
+    # same config routed through Pipeline got the declared geometry. Declaring is
+    # idempotent, so the layers above may (and do) declare as well.
+    model._declare_encoder_input(preprocessing, emit_run_info=False)
     loaded = model._load_backend()
     embedded_slides: list[EmbeddedSlide] = []
     for slide, tiling_result in zip(slide_records, tiling_results):

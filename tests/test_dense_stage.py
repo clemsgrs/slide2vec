@@ -86,7 +86,7 @@ class _FakeModel:
         self._requested_device = device
         self.allow_non_recommended_settings = False
 
-    def _load_backend(self):
+    def _load_backend_without_transform(self):
         return SimpleNamespace(model=self._encoder, device=self._device)
 
     @property

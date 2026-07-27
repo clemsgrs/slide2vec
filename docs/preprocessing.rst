@@ -59,6 +59,20 @@ the model's patch geometry. The permitted path applies normalization only, so
 the exact requested square reaches ``encode_tiles``. Fixed-size or
 patch-incompatible requests fail before slide reading begins.
 
+Which of those two rules applies is stated explicitly at model load rather than
+inferred. Every entry point resolves an ``EncoderInputContract`` in one of two
+regimes and passes it to ``load_model``, which has no default for it:
+
+- **Declared geometry** — the caller states the encoder input it wants, and
+  slide2vec honors it exactly or raises (the rules above).
+- **Given geometry** — the caller supplies pixels it never requested. The
+  encoder's shipped transform is the contract, and slide2vec *records* the
+  resulting ``encoder_input_size_px`` rather than vetoing it.
+
+Omitting the contract is an error, not a silent fallback to the shipped recipe:
+"the caller never requested this geometry" and "the caller forgot" must not look
+alike at the seam where the transform is chosen.
+
 This reader convergence intentionally changes pooled embeddings for runs where
 ``read_tile_size_px != requested_tile_size_px``: older runs could pass the raw
 pyramid read directly to the model transform. There is no legacy compatibility

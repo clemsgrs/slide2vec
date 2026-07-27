@@ -29,7 +29,7 @@ from slide2vec.runtime.model_settings import (
 )
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
-from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path
@@ -463,8 +463,13 @@ class Model:
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._output_variant = output_variant
         self._backend: LoadedModel | None = None
-        self._pooled_input_plan: PooledEncoderInputPlan | None = None
-        self._backend_pooled_input_plan: PooledEncoderInputPlan | None = None
+        # Unset, deliberately: a Model has no encoder-input contract until a route
+        # declares one. There is no initial Given contract, because an initial value is
+        # a default by another name — it would silently hand the shipped transform to
+        # any route that forgot to declare, which is the confusion this contract exists
+        # to delete. ``_load_backend`` refuses to load until this is set.
+        self._encoder_input: EncoderInputContract | None = None
+        self._backend_encoder_input: EncoderInputContract | None = None
 
     @classmethod
     def from_preset(
@@ -484,11 +489,13 @@ class Model:
 
     @property
     def device(self) -> Any:
-        return self._load_backend().device
+        # Construction fact, not an encode: see _load_backend_without_transform.
+        return self._load_backend_without_transform().device
 
     @property
     def feature_dim(self) -> int:
-        return int(self._load_backend().feature_dim)
+        # Construction fact, not an encode: see _load_backend_without_transform.
+        return int(self._load_backend_without_transform().feature_dim)
 
     def embed_tiles(
         self,
@@ -686,18 +693,30 @@ class Model:
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
-    def _prepare_pooled_input(
+    def _declare_encoder_input(
         self,
         preprocessing: PreprocessingConfig,
         *,
         emit_run_info: bool,
-    ) -> PooledEncoderInputPlan:
-        plan = PooledEncoderInputPlan.resolve(
+    ) -> EncoderInputContract:
+        """Declare the encoder input geometry this run requested, or raise.
+
+        Idempotent: resolving the same preprocessing twice yields an equal contract, so
+        every layer that reaches the encoder may declare for itself rather than trust
+        the layer above to have done it.
+        """
+        if preprocessing.requested_tile_size_px is None:
+            raise ValueError(
+                "requested_tile_size_px must be resolved before declaring the encoder "
+                "input geometry; a pooled run reads tiles at a size it requested."
+            )
+        contract = EncoderInputContract.declared(
             self.name,
             requested_tile_size_px=int(preprocessing.requested_tile_size_px),
             allow_non_recommended_settings=self.allow_non_recommended_settings,
         )
-        self._pooled_input_plan = plan
+        self._encoder_input = contract
+        plan = contract.plan
         if emit_run_info and plan.requires_variable_model_input:
             logging.getLogger("slide2vec").info(
                 "Pooled encoder input for '%s': preset %dpx, requested %dpx, "
@@ -707,24 +726,61 @@ class Model:
                 plan.requested_tile_size_px,
                 plan.expected_encoder_input_size_px,
             )
-        return plan
+        return contract
 
     def _load_backend(self) -> LoadedModel:
-        if (
-            self._backend is None
-            or self._backend_pooled_input_plan != self._pooled_input_plan
-        ):
+        """Load the backend under this run's declared encoder-input contract.
+
+        Every caller that reads ``loaded.transforms`` — i.e. everything that turns
+        pixels into features — must come through here, and must therefore have
+        declared its geometry first.
+        """
+        if self._encoder_input is None:
+            raise ValueError(
+                f"No encoder-input contract has been declared for model '{self.name}'. "
+                "A route that encodes pixels must state its geometry before the "
+                "backend is loaded: call _declare_encoder_input(preprocessing, ...) "
+                "for a run that requested a tile size. Callers that never read "
+                "loaded.transforms use _load_backend_without_transform() instead."
+            )
+        return self._load_backend_under(self._encoder_input)
+
+    def _load_backend_without_transform(self) -> LoadedModel:
+        """Load the backend for callers that never read ``loaded.transforms``.
+
+        Three kinds of caller need the constructed encoder module without ever
+        selecting a tile transform: the ``device``/``feature_dim`` properties (pure
+        construction facts), tile→slide/patient aggregation (``encode_slide`` /
+        ``encode_patient`` consume already-computed features), and dense extraction
+        (which builds its own normalization transform from the module — dense gets its
+        own contract separately). They cannot observe, let alone encode through, the
+        transform the backend happens to carry.
+
+        A declared contract is honored when one exists so the cached backend is shared;
+        otherwise an explicit Given contract is used for this load only. This never
+        assigns ``_encoder_input``: an embed route still has to declare, and
+        ``_load_backend`` reloads when the declared contract differs from the one the
+        cached backend was built under.
+        """
+        return self._load_backend_under(
+            self._encoder_input
+            if self._encoder_input is not None
+            else EncoderInputContract.given()
+        )
+
+    def _load_backend_under(self, encoder_input: EncoderInputContract) -> LoadedModel:
+        if self._backend is None or self._backend_encoder_input != encoder_input:
             from slide2vec.inference import load_model
 
             emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
+                encoder_input=encoder_input,
                 device=self._requested_device,
                 output_variant=self._output_variant,
                 allow_non_recommended_settings=self.allow_non_recommended_settings,
-                pooled_input_plan=self._pooled_input_plan,
             )
-            self._backend_pooled_input_plan = self._pooled_input_plan
+            self._backend_encoder_input = encoder_input
             emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 
@@ -965,7 +1021,7 @@ def _validate_model_config(
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
-    model._prepare_pooled_input(preprocessing, emit_run_info=True)
+    model._declare_encoder_input(preprocessing, emit_run_info=True)
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
     on_cpu = model._requested_device == "cpu"
     precision = None if on_cpu or execution is None else execution.precision

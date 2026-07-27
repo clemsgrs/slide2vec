@@ -64,7 +64,7 @@ from slide2vec.encoders.registry import (
 )
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.runtime.types import LoadedModel
-from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.progress import (
     emit_progress,
     read_tiling_progress_snapshot,
@@ -89,14 +89,37 @@ from slide2vec.runtime.hierarchical import num_embedding_items
 def load_model(
     *,
     name: str,
+    encoder_input: EncoderInputContract,
     device: str = "auto",
     output_variant: str | None = None,
     allow_non_recommended_settings: bool = False,
     dynamic_img_size: bool | None = None,
     token: str | None = None,
-    pooled_input_plan: PooledEncoderInputPlan | None = None,
 ) -> LoadedModel:
+    # ``encoder_input`` is required and deliberately has no default: the transform a
+    # run encodes through is a contract the caller states, never something load_model
+    # infers from an absent argument. See EncoderInputContract for the two regimes.
+    if not isinstance(encoder_input, EncoderInputContract):
+        raise TypeError(
+            "load_model requires an explicit encoder-input contract: pass "
+            "encoder_input=EncoderInputContract.declared(...) when the caller states "
+            "the encoder input geometry it wants, or EncoderInputContract.given() "
+            "when the caller supplies pixels it never requested and the encoder's "
+            f"shipped transform is the contract; got {encoder_input!r}"
+        )
     name = canonicalize_model_name(name)
+    # A declared plan is resolved against ONE model's preset, patch geometry, and
+    # variable-input capability. Applying it to another model would skip exactly those
+    # checks: the constructor kwargs are name-guarded, but the normalization-only
+    # transform is not, so a mismatched contract silently reaches the encoder. Hard
+    # error rather than silent no-op.
+    if encoder_input.plan is not None and encoder_input.plan.encoder_name != name:
+        raise ValueError(
+            f"Encoder-input contract was declared for "
+            f"'{encoder_input.plan.encoder_name}' but the model being loaded is "
+            f"'{name}'. Declared geometry is validated against the encoder it names; "
+            "resolve a contract for this model instead of reusing another's."
+        )
     info = encoder_registry.info(name)
     resolved_level = info["level"]
 
@@ -122,16 +145,16 @@ def load_model(
         extra_kwargs["dynamic_img_size"] = dynamic_img_size
     if "allow_non_recommended_settings" in ctor_params:
         extra_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
-    if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == name:
-        missing_params = set(pooled_input_plan.model_construction_kwargs) - set(ctor_params)
+    contract_kwargs = encoder_input.construction_kwargs_for(name)
+    if contract_kwargs:
+        missing_params = set(contract_kwargs) - set(ctor_params)
         if missing_params:
             missing_text = ", ".join(sorted(missing_params))
             raise ValueError(
                 f"Encoder '{name}' requires pooled variable-input constructor "
                 f"setting(s) not accepted by its implementation: {missing_text}"
             )
-        for key, value in pooled_input_plan.model_construction_kwargs.items():
-            extra_kwargs[key] = value
+        extra_kwargs.update(contract_kwargs)
     encoder = encoder_cls(output_variant=output_variant, **extra_kwargs)
 
     # Drift guard: the static patch_size declared on @register_encoder is read
@@ -151,11 +174,7 @@ def load_model(
 
     tile_encoder = None
     if resolved_level == "tile":
-        transforms = (
-            pooled_input_plan.get_transform(encoder)
-            if pooled_input_plan is not None
-            else encoder.get_transform()
-        )
+        transforms = encoder_input.get_transform(encoder)
     else:
         # Both "slide" and "patient" declare tile_encoder for transform resolution.
         tile_enc_name = info["tile_encoder"]
@@ -165,10 +184,9 @@ def load_model(
         tile_kwargs: dict[str, Any] = {"output_variant": tile_enc_ov}
         if "allow_non_recommended_settings" in tile_ctor_params:
             tile_kwargs["allow_non_recommended_settings"] = allow_non_recommended_settings
-        if pooled_input_plan is not None and pooled_input_plan.tile_encoder_name == tile_enc_name:
-            missing_params = set(pooled_input_plan.model_construction_kwargs) - set(
-                tile_ctor_params
-            )
+        tile_contract_kwargs = encoder_input.construction_kwargs_for(tile_enc_name)
+        if tile_contract_kwargs:
+            missing_params = set(tile_contract_kwargs) - set(tile_ctor_params)
             if missing_params:
                 missing_text = ", ".join(sorted(missing_params))
                 raise ValueError(
@@ -176,14 +194,9 @@ def load_model(
                     "constructor setting(s) not accepted by its implementation: "
                     f"{missing_text}"
                 )
-            for key, value in pooled_input_plan.model_construction_kwargs.items():
-                tile_kwargs[key] = value
+            tile_kwargs.update(tile_contract_kwargs)
         tile_encoder = tile_enc_cls(**tile_kwargs)
-        transforms = (
-            pooled_input_plan.get_transform(tile_encoder)
-            if pooled_input_plan is not None
-            else tile_encoder.get_transform()
-        )
+        transforms = encoder_input.get_transform(tile_encoder)
 
     target_device = batching.resolve_device(device, encoder.device)
     encoder.to(target_device)
@@ -490,6 +503,9 @@ def embed_patients(
                 embeddable_tiling_results,
             )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
+            # Encodes tiles through loaded.transforms below, so declare the requested
+            # geometry here too rather than trusting the Model.* wrapper to have done it.
+            model._declare_encoder_input(preprocessing, emit_run_info=False)
             loaded = model._load_backend()
 
             # Per-slide: tile encoding → slide encoding, accumulate for patient agg.
@@ -611,6 +627,10 @@ def embed_tiles(
     slide_records = [manifest.coerce_slide_spec(slide) for slide in slides]
     resolved_tiling_results = manifest.normalize_tiling_results(tiling_results, slide_records)
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
+    # This route encodes tiles through loaded.transforms, so it declares its own
+    # geometry rather than relying on a Model.* wrapper having done it. Declaring is
+    # idempotent, so declaring in both places is intended.
+    model._declare_encoder_input(resolved_preprocessing, emit_run_info=False)
     loaded = model._load_backend()
     hierarchical_mode = hierarchical.is_hierarchical_preprocessing(resolved_preprocessing)
     cpu_budget.log_on_the_fly_worker_override_once(
@@ -682,7 +702,9 @@ def aggregate_tiles(
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
 
-    loaded = model._load_backend()
+    # Aggregation only: already-computed tile features go into encode_slide, so no
+    # tile transform is selected here and no geometry has to be declared.
+    loaded = model._load_backend_without_transform()
 
     outputs: list[SlideEmbeddingArtifact] = []
     for artifact in tile_artifacts:

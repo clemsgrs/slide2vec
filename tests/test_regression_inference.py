@@ -28,6 +28,7 @@ from slide2vec.artifacts import (
     write_tile_embeddings,
 )
 from slide2vec.configs.resources import config_resource, load_config
+from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.runtime import (
     artifacts_collect,
     batching,
@@ -69,6 +70,11 @@ def PreprocessingConfig(*args, **kwargs):
 
 
 DEFAULT_PREPROCESSING = PreprocessingConfig()
+
+
+def _noop_declare_encoder_input(*args, **kwargs):
+    """Stand-in models declare nothing: these tests stub ``_load_backend`` outright."""
+    return None
 
 
 def make_slide(
@@ -1279,7 +1285,11 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         return SimpleNamespace(sample_id=sample_id, path=tmp_path / "slide_embeddings" / f"{sample_id}.pt")
 
     loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
-    model = SimpleNamespace(name="prism", level="slide", _load_backend=lambda: loaded)
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _load_backend_without_transform=lambda: loaded,
+    )
     artifact = SimpleNamespace(
         sample_id="slide-a",
         path=tmp_path / "tile_embeddings" / "slide-a.pt",
@@ -1444,6 +1454,7 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
         name="prism",
         level="slide",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
 
@@ -1651,7 +1662,8 @@ def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is
     ]
     seen: list[str] = []
 
-    model = SimpleNamespace(level="tile", _load_backend=lambda: SimpleNamespace())
+    model = SimpleNamespace(level="tile", _declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: SimpleNamespace())
 
     monkeypatch.setattr(embedding_pipeline, "emit_progress", lambda *args, **kwargs: None)
     monkeypatch.setattr(hierarchical, "is_hierarchical_preprocessing", lambda preprocessing: False)
@@ -1711,7 +1723,13 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input
+        ),
+    )
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
         serialization,
@@ -1775,7 +1793,13 @@ def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input
+        ),
+    )
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
         serialization,
@@ -1837,7 +1861,13 @@ def test_direct_embed_worker_streams_payloads_without_retaining_results(monkeypa
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input
+        ),
+    )
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(
         serialization,
@@ -1898,6 +1928,7 @@ def test_run_pipeline_local_branch_persists_completed_slides_before_later_failur
         name="virchow2",
         level="tile",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
     )
 
@@ -1954,6 +1985,7 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
         name="virchow2",
         level="tile",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
     )
 
@@ -2050,6 +2082,7 @@ def test_run_pipeline_local_persists_completed_embeddings_before_later_slide_fai
         name="prism",
         level="slide",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
 
@@ -2850,7 +2883,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     )
 
     loaded = SimpleNamespace(device="cpu", model=SimpleNamespace())
-    model = SimpleNamespace(level="slide", _load_backend=lambda: loaded)
+    model = SimpleNamespace(level="slide", _load_backend_without_transform=lambda: loaded)
     captured = {}
 
     def fake_aggregate(loaded_arg, model_arg, slide_arg, tiling_result_arg, tile_embeddings_arg, *, preprocessing, execution):
@@ -2924,7 +2957,7 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
     model = SimpleNamespace(
         name="h0-mini",
         level="tile",
-        _load_backend=fail_if_called,
+        _load_backend_without_transform=fail_if_called,
     )
     monkeypatch.setattr(distributed_stage, "aggregate_tile_embeddings_for_slide", fail_if_called)
 
@@ -3050,7 +3083,8 @@ def test_select_embedding_path_uses_multi_slide_distributed_when_multiple_slides
 def test_inference_embed_tiles_requires_output_dir_before_loading_runtime(monkeypatch):
     import slide2vec.inference as inference
 
-    model = SimpleNamespace(_load_backend=lambda: (_ for _ in ()).throw(AssertionError("should fail before loading model")))
+    model = SimpleNamespace(_declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: (_ for _ in ()).throw(AssertionError("should fail before loading model")))
 
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir is required to persist tile embeddings"):
         inference.embed_tiles(
@@ -3223,6 +3257,7 @@ def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monke
         name="prism",
         level="slide",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
     in_memory = inference.embed_slides(
@@ -3299,6 +3334,7 @@ def test_direct_embed_slides_persists_completed_embeddings_before_later_slide_fa
         name="prism",
         level="slide",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
 
@@ -3371,6 +3407,7 @@ def test_direct_embed_slides_single_gpu_reconciles_batched_tile_status_on_clean_
         name="uni2",
         level="tile",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
 
@@ -5011,7 +5048,11 @@ def test_load_model_auto_prefers_cuda_when_available(monkeypatch):
     monkeypatch.setattr(base.timm, "create_model", lambda *args, **kwargs: FakeModel())
     monkeypatch.delenv("HF_TOKEN", raising=False)
 
-    loaded = inference.load_model(name="h0-mini", device="auto")
+    loaded = inference.load_model(
+        name="h0-mini",
+        device="auto",
+        encoder_input=EncoderInputContract.given(),
+    )
 
     assert loaded.device == torch.device("cuda")
 
@@ -5046,6 +5087,7 @@ def test_load_model_accepts_allow_non_recommended_settings_without_forwarding(mo
     loaded = inference.load_model(
         name="dummy-model",
         allow_non_recommended_settings=True,
+        encoder_input=EncoderInputContract.given(),
     )
 
     assert loaded.name == "dummy-model"
@@ -6093,7 +6135,13 @@ def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_colli
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input
+        ),
+    )
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
     monkeypatch.setattr(direct_embed_worker, "_to_cpu_payload", lambda value: value)
@@ -6140,7 +6188,8 @@ def test_compute_embedded_slides_finished_event_carries_annotation(monkeypatch):
     tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224, annotation="tumor")
 
     loaded = SimpleNamespace()
-    model = SimpleNamespace(level="tile", _load_backend=lambda: loaded)
+    model = SimpleNamespace(level="tile", _declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: loaded)
 
     monkeypatch.setattr(
         embedding_pipeline,
@@ -6205,7 +6254,13 @@ def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, 
     monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
     monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input
+        ),
+    )
     monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
     monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
     monkeypatch.setattr(

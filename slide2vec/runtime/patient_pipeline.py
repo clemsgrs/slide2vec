@@ -44,6 +44,8 @@ def run_patient_pipeline(
     After processing all slides for a patient: aggregate slide embeddings into
     a single patient embedding via the case transformer.
     """
+    # Encodes tiles below, so this layer declares its own geometry (idempotent).
+    model._declare_encoder_input(preprocessing, emit_run_info=False)
     loaded = model._load_backend()
     tile_artifacts: list[TileEmbeddingArtifact] = []
     slide_artifacts: list[SlideEmbeddingArtifact] = []

@@ -24,6 +24,11 @@ from slide2vec.runtime import (
     tiling_pipeline,
 )
 
+
+def _noop_declare_encoder_input(*args, **kwargs):
+    """Stand-in models declare nothing: these tests stub ``_load_backend`` outright."""
+    return None
+
 DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
 
@@ -277,6 +282,7 @@ def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path
         name="prov-gigapath",
         level="slide",
         _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
         _load_backend=lambda: SimpleNamespace(),
     )
 
