@@ -1,12 +1,12 @@
-"""torchrun entry point for distributed dense feature extraction (issue #217).
+"""torchrun entry point for distributed given-image feature extraction (issue #234).
 
-One of these runs per GPU under ``torch.distributed.run``. It is deliberately near
-logic-free (D10): it reads ``RANK`` / ``WORLD_SIZE`` / ``LOCAL_RANK`` straight from the env
-torchrun exports — **no NCCL / process-group init**, because dense extraction needs no
-collectives (each rank writes its own artifacts and nobody gathers) — loads the JSON request
-plus the coordinates npz the parent staged, then calls the two pure/CPU-tested layers:
-:func:`~slide2vec.runtime.sharding.plan_contiguous_shards` to pick this rank's shard
-and :func:`~slide2vec.runtime.dense_shard.run_dense_shard` to encode + persist it.
+One of these runs per GPU under ``torch.distributed.run``. Like its dense sibling it is
+deliberately near logic-free: it reads ``RANK`` / ``WORLD_SIZE`` / ``LOCAL_RANK`` straight
+from the env torchrun exports — **no NCCL / process-group init**, because there are no
+collectives to run (each rank writes its own artifacts and nobody gathers) — loads the JSON
+request the parent staged, then calls the two CPU-tested layers:
+:func:`~slide2vec.runtime.sharding.plan_contiguous_shards` to pick this rank's contiguous
+shard and :func:`~slide2vec.runtime.image_shard.run_image_shard` to encode + persist it.
 """
 
 import argparse
@@ -17,8 +17,8 @@ from pathlib import Path
 
 
 def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser("slide2vec.distributed.dense_worker", add_help=add_help)
-    parser.add_argument("--output-dir", required=True, help="Directory dense artifacts are written to")
+    parser = argparse.ArgumentParser("slide2vec.distributed.image_worker", add_help=add_help)
+    parser.add_argument("--output-dir", required=True, help="Directory image artifacts are written to")
     parser.add_argument("--request-path", required=True, help="JSON request produced by the parent process")
     return parser
 
@@ -30,15 +30,10 @@ def main(argv=None) -> int:
         activate_progress_reporter,
         emit_progress,
     )
-    from slide2vec.runtime.dense_shard import run_dense_shard
-    from slide2vec.runtime.dense_stage import (
-        region_specs_from_request,
-        resolve_output_torch_dtype,
-    )
-    from slide2vec.runtime.serialization import (
-        deserialize_dense_options,
-        deserialize_execution,
-    )
+    from slide2vec.runtime.image_shard import run_image_shard
+    from slide2vec.runtime.image_stage import image_specs_from_request
+    from slide2vec.runtime.model_settings import resolve_output_precision
+    from slide2vec.runtime.serialization import deserialize_execution
     from slide2vec.runtime.sharding import plan_contiguous_shards
 
     args = get_args_parser(add_help=True).parse_args(argv)
@@ -50,7 +45,7 @@ def main(argv=None) -> int:
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 
-    specs = region_specs_from_request(request)
+    specs = image_specs_from_request(request)
     shard = plan_contiguous_shards(specs, world_size)[global_rank]
     if not shard:
         return 0
@@ -62,13 +57,11 @@ def main(argv=None) -> int:
         output_variant=model_spec.get("output_variant"),
         allow_non_recommended_settings=bool(model_spec.get("allow_non_recommended_settings", False)),
     )
-    dense = deserialize_dense_options(request["dense"])
     execution = deserialize_execution(request["execution"])
-    # Each rank declares its own dense encoder-input contract rather than trusting the
-    # parent to have done it (the declaration is idempotent): that is what supplies the
-    # variable-input constructor settings this ROI geometry implies. emit_run_info=False —
-    # the run-info line is logged once by the parent, not once per rank.
-    model._declare_dense_encoder_input(dense, emit_run_info=False)
+    # Each rank declares Given for itself rather than trusting the parent to have done it
+    # (the declaration is idempotent): a backend is never handed out without a stated
+    # contract. emit_run_info=False — the run-info line is logged once by the parent.
+    model._declare_given_encoder_input(emit_run_info=False)
     loaded = model._load_backend()
 
     progress_events_path = request.get("progress_events_path")
@@ -83,18 +76,18 @@ def main(argv=None) -> int:
 
     with context:
         def _on_batch(count: int) -> None:
-            emit_progress("dense.batch.finished", rank=global_rank, regions=int(count))
+            emit_progress("images.batch.finished", rank=global_rank, images=int(count))
 
-        run_dense_shard(
+        run_image_shard(
             shard,
-            model=loaded.model,
+            loaded=loaded,
             out_dir=output_dir,
-            dense=dense,
             batch_size=int(execution.batch_size),
-            device=loaded.device,
+            output_precision=resolve_output_precision(execution.output_dtype, execution.precision),
+            output_format=execution.output_format,
             precision=execution.precision,
-            output_dtype=resolve_output_torch_dtype(execution),
             num_workers=execution.resolved_num_workers_per_gpu(),
+            prefetch_factor=int(execution.prefetch_factor),
             on_batch=_on_batch,
         )
     return 0

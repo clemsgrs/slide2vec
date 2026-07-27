@@ -1,13 +1,12 @@
-"""ROI-granularity sharding + the device-agnostic dense encode/write loop (issue #217).
+"""The device-agnostic dense encode/write loop (issue #217).
 
-The two CPU-testable layers of distributed dense extraction (D12):
+Sharding itself is not here: the slide-ordered flat ROI list is split by the shared
+:func:`~slide2vec.runtime.sharding.plan_contiguous_shards`. Splitting at ROI granularity
+minimizes WSI re-opens — only the slides straddling a shard boundary are opened twice —
+and, because dense features depend only on the batch size ``B`` and never on batch
+*composition* (docs/adr/0002), needs no batch-alignment or bin-packing.
 
-* :func:`plan_dense_shards` — pure. Splits the slide-ordered flat ROI list into
-  ``world_size`` contiguous shards with :func:`numpy.array_split` (balanced to ±1 ROI,
-  deterministic, an exact partition). Sharding at ROI granularity minimizes WSI re-opens —
-  only the slides straddling a shard boundary are opened twice — and, because dense
-  features depend only on the batch size ``B`` and never on batch *composition*
-  (docs/adr/0002), needs no batch-alignment or bin-packing.
+What this module owns is the CPU-testable encode/write layer (D12):
 
 * :func:`run_dense_shard` — the encode+write loop each rank runs over its shard. It groups
   the shard's ROIs by slide (contiguous runs), builds a minimal hs2p ``TilingResult`` per
@@ -67,24 +66,6 @@ class RegionSpec:
     requested_tile_size_px: int
     backend: str
     annotation: str | None = None
-
-
-def plan_dense_shards(
-    regions: Sequence[RegionSpec], world_size: int
-) -> list[list[RegionSpec]]:
-    """Partition the slide-ordered flat ROI list into ``world_size`` contiguous shards.
-
-    Contiguous ``numpy.array_split`` over the ROI index range: exactly ``world_size``
-    shards, balanced to within one ROI, deterministic, and an exact ordered partition of
-    the input (union preserves order, shards are pairwise disjoint). Contiguity keeps ROIs
-    of a slide together so only boundary slides are opened twice. Shards may be empty when
-    ``world_size`` exceeds the ROI count.
-    """
-    if world_size < 1:
-        raise ValueError(f"world_size must be at least 1, got {world_size}")
-    regions = list(regions)
-    index_shards = np.array_split(np.arange(len(regions)), world_size)
-    return [[regions[int(i)] for i in shard] for shard in index_shards]
 
 
 def _slide_key(spec: RegionSpec) -> tuple:

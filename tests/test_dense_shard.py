@@ -1,13 +1,10 @@
-"""Tests for distributed dense sharding + the CPU encode/write loop (issue #217).
+"""Tests for the CPU dense encode/write loop (issue #217).
 
-Three layers, top two pure and CPU-testable (D12):
-
-1. ``plan_dense_shards`` — pure ROI-granularity partition of the slide-ordered flat
-   ROI list into ``world_size`` contiguous shards (balanced ±1, deterministic).
-2. ``run_dense_shard`` — the device-agnostic encode+write loop: read each ROI, encode
-   the dense grid (reusing ``iter_regions_dense``), and write ``<x>_<y>.pt`` +
-   ``<x>_<y>.meta.json`` per ROI. Tested on CPU with a fake WSI backend
-   (``_open_wsi_backend`` monkeypatch) + a random-weight encoder.
+``run_dense_shard`` is the device-agnostic encode+write loop: read each ROI, encode the
+dense grid (reusing ``iter_regions_dense``), and write ``<x>_<y>.pt`` +
+``<x>_<y>.meta.json`` per ROI. Tested on CPU with a fake WSI backend
+(``_open_wsi_backend`` monkeypatch) + a random-weight encoder. The ROI-granularity split
+itself is the shared ``plan_contiguous_shards`` (see ``test_sharding.py``).
 
 The real 4-rank equivalence check runs on CPU: world_size=1 vs 4 shards, same file
 set, grids within a per-grid cosine tolerance (docs/adr/0002).
@@ -28,11 +25,8 @@ from slide2vec.api import DenseOptions  # noqa: E402
 from slide2vec.artifacts import region_dense_paths, write_dense_region  # noqa: E402
 from slide2vec.data import tile_reader  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
-from slide2vec.runtime.dense_shard import (  # noqa: E402
-    RegionSpec,
-    plan_dense_shards,
-    run_dense_shard,
-)
+from slide2vec.runtime.dense_shard import RegionSpec, run_dense_shard  # noqa: E402
+from slide2vec.runtime.sharding import plan_contiguous_shards  # noqa: E402
 
 
 def _encoder(**kwargs) -> TimmTileEncoder:
@@ -115,65 +109,7 @@ def _spec(x, y, *, sample_id="s0", image_path="s0.tif", annotation=None,
 
 
 # --------------------------------------------------------------------------------------
-# Layer 1: plan_dense_shards (pure)
-# --------------------------------------------------------------------------------------
-
-
-def test_plan_dense_shards_partitions_exactly():
-    """Union of the shards == input, in order, with no ROI dropped or duplicated."""
-    regions = [_spec(i * 64, 0) for i in range(10)]
-    shards = plan_dense_shards(regions, 4)
-    assert len(shards) == 4
-    flat = [r for shard in shards for r in shard]
-    assert flat == regions  # order preserved, exact partition
-
-
-def test_plan_dense_shards_balanced_within_one():
-    """Shard sizes differ by at most one ROI (np.array_split balance)."""
-    regions = [_spec(i * 64, 0) for i in range(10)]
-    sizes = [len(shard) for shard in plan_dense_shards(regions, 4)]
-    assert sizes == [3, 3, 2, 2]
-    assert max(sizes) - min(sizes) <= 1
-
-
-def test_plan_dense_shards_is_contiguous_and_slide_ordered():
-    """Each shard is a contiguous slice, so a slide's ROIs stay together (few re-opens)."""
-    regions = [_spec(i * 64, 0) for i in range(10)]
-    shards = plan_dense_shards(regions, 3)
-    assert [[r.x for r in shard] for shard in shards] == [
-        [0, 64, 128, 192],
-        [256, 320, 384],
-        [448, 512, 576],
-    ]
-
-
-def test_plan_dense_shards_deterministic():
-    regions = [_spec(i * 64, 0) for i in range(7)]
-    assert [
-        [r.x for r in shard] for shard in plan_dense_shards(regions, 3)
-    ] == [[r.x for r in shard] for shard in plan_dense_shards(regions, 3)]
-
-
-def test_plan_dense_shards_world_size_one_returns_input_unchanged():
-    regions = [_spec(i * 64, 0) for i in range(5)]
-    shards = plan_dense_shards(regions, 1)
-    assert len(shards) == 1
-    assert shards[0] == regions
-
-
-def test_plan_dense_shards_allows_empty_shards_when_more_ranks_than_rois():
-    regions = [_spec(0, 0), _spec(64, 0)]
-    shards = plan_dense_shards(regions, 4)
-    assert [len(s) for s in shards] == [1, 1, 0, 0]
-
-
-def test_plan_dense_shards_rejects_non_positive_world_size():
-    with pytest.raises(ValueError):
-        plan_dense_shards([_spec(0, 0)], 0)
-
-
-# --------------------------------------------------------------------------------------
-# Layer 2: run_dense_shard (device-agnostic encode+write loop, CPU-tested)
+# run_dense_shard: the device-agnostic encode+write loop, CPU-tested
 # --------------------------------------------------------------------------------------
 
 
@@ -320,7 +256,7 @@ def test_multi_rank_matches_single_rank(fake_backend, tmp_path):
                     batch_size=3, device="cpu")
 
     multi_dir = tmp_path / "multi"
-    shards = plan_dense_shards(regions, 4)
+    shards = plan_contiguous_shards(regions, 4)
     for shard in shards:  # ranks run the identical loop over their contiguous shard
         run_dense_shard(shard, model=enc, out_dir=multi_dir, dense=_dense(),
                         batch_size=3, device="cpu")

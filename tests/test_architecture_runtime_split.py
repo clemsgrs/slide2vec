@@ -42,6 +42,7 @@ def test_internal_runtime_modules_stay_small():
         package_root / "hierarchical.py",
         package_root / "model_settings.py",
         package_root / "persistence.py",
+        package_root / "preprocessing.py",
         package_root / "progress_bridge.py",
         package_root / "registry.py",
         package_root / "serialization.py",

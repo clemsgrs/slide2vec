@@ -87,6 +87,55 @@ ordered by first appearance.
    :members:
    :undoc-members:
 
+Images to Embeddings
+--------------------
+
+When the images already exist as files — a public patch benchmark (BACH, CRC,
+Gleason, BreakHis, MHIST, PCam), an exported ROI set — there is no slide to tile
+and no geometry to request. :meth:`Model.embed_images` takes those images
+directly and writes one embedding artifact per image:
+
+.. code-block:: python
+
+   from slide2vec import ExecutionOptions, ImageSpec, Model
+
+   model = Model.from_preset("virchow2")
+   artifacts = model.embed_images(
+       [
+           ImageSpec(sample_id="bach-001", image_path="/data/bach/001.tif"),
+           ImageSpec(sample_id="bach-002", image_path="/data/bach/002.tif"),
+       ],
+       execution=ExecutionOptions(output_dir="outputs/bach", num_gpus=2),
+   )
+
+   print(artifacts[0].path)         # outputs/bach/image_embeddings/bach-001.pt
+   print(artifacts[0].feature_dim)  # 2560
+
+The run splits its images across all visible GPUs (``num_gpus=1`` encodes
+in-process) and is resume-aware: an image whose ``.meta.json`` sidecar already
+exists is skipped, so an interrupted run is restarted by re-issuing the same
+call. ``sample_id`` is the artifact's whole identity and must be unique within a
+run — slide2vec never derives it from the filename, because two directories can
+hold the same one.
+
+**Given geometry.** This is the one path where the caller supplies pixels it
+never requested, so the encoder's *shipped* transform is the contract (Resize,
+CenterCrop, Normalize — exactly what the model card prescribes), and slide2vec
+records the resulting encoder input size in each sidecar as provenance instead of
+validating it against a request. That also fixes how preprocessing runs: given
+images are heterogeneously sized (2048x1536 beside 96x96) and cannot be stacked
+into one uint8 batch before being resized, so the transform is applied **itemwise
+in the dataloader workers** and only the transformed items are stacked. The
+batched transform spec used by the pooled path stays exclusive to it.
+
+.. autoclass:: slide2vec.ImageSpec
+   :members:
+   :undoc-members:
+
+.. autoclass:: slide2vec.ImageEmbeddingArtifact
+   :members:
+   :undoc-members:
+
 Hierarchical Feature Extraction
 ---------------------------------
 

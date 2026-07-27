@@ -149,7 +149,8 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
     """``num_gpus>1`` launches ``slide2vec.distributed.dense_worker`` under torchrun, handing
     it the coordinates as an npz (D10b) — the parent itself encodes nothing. The fake torchrun
     stands in for the ranks (reconstruct specs → shard → encode) so collection sees N grids."""
-    from slide2vec.runtime.dense_shard import plan_dense_shards, run_dense_shard
+    from slide2vec.runtime.dense_shard import run_dense_shard
+    from slide2vec.runtime.sharding import plan_contiguous_shards
     from slide2vec.runtime.serialization import deserialize_dense_options
 
     caller_dir = tmp_path / "caller"
@@ -173,7 +174,7 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
         # Simulate the ranks: rebuild the flat specs, shard, encode each shard on CPU.
         specs = dense_stage.region_specs_from_request(request)
         dense = deserialize_dense_options(request["dense"])
-        for shard in plan_dense_shards(specs, num_gpus):
+        for shard in plan_contiguous_shards(specs, num_gpus):
             run_dense_shard(shard, model=rank_encoder, out_dir=Path(output_dir), dense=dense,
                             batch_size=2, device="cpu")
 

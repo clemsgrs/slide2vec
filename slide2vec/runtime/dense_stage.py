@@ -33,7 +33,6 @@ from slide2vec.progress import emit_progress
 from slide2vec.runtime.dense_shard import (
     RegionSpec,
     dense_artifact_from_disk,
-    plan_dense_shards,
     region_needs_encode,
     run_dense_shard,
 )
