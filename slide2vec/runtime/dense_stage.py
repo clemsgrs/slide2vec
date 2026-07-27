@@ -190,7 +190,9 @@ def embed_regions_dense(
 
 
 def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
-    loaded = model._load_backend()
+    # Dense builds its own transform from the encoder module (see dense_regions:
+    # get_normalization_transform) and never reads loaded.transforms.
+    loaded = model._load_backend_without_transform()
     run_dense_shard(
         specs,
         model=loaded.model,

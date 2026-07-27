@@ -463,11 +463,12 @@ class Model:
         self.allow_non_recommended_settings = bool(allow_non_recommended_settings)
         self._output_variant = output_variant
         self._backend: LoadedModel | None = None
-        # A freshly constructed Model has been handed no geometry, which is exactly the
-        # Given regime: anything encoded through it right now goes through the shipped
-        # transform. Every route that reads tiles at a requested size declares its
-        # geometry (``_declare_encoder_input``) before the backend is loaded.
-        self._encoder_input: EncoderInputContract = EncoderInputContract.given()
+        # Unset, deliberately: a Model has no encoder-input contract until a route
+        # declares one. There is no initial Given contract, because an initial value is
+        # a default by another name — it would silently hand the shipped transform to
+        # any route that forgot to declare, which is the confusion this contract exists
+        # to delete. ``_load_backend`` refuses to load until this is set.
+        self._encoder_input: EncoderInputContract | None = None
         self._backend_encoder_input: EncoderInputContract | None = None
 
     @classmethod
@@ -488,11 +489,13 @@ class Model:
 
     @property
     def device(self) -> Any:
-        return self._load_backend().device
+        # Construction fact, not an encode: see _load_backend_without_transform.
+        return self._load_backend_without_transform().device
 
     @property
     def feature_dim(self) -> int:
-        return int(self._load_backend().feature_dim)
+        # Construction fact, not an encode: see _load_backend_without_transform.
+        return int(self._load_backend_without_transform().feature_dim)
 
     def embed_tiles(
         self,
@@ -726,21 +729,58 @@ class Model:
         return contract
 
     def _load_backend(self) -> LoadedModel:
-        if (
-            self._backend is None
-            or self._backend_encoder_input != self._encoder_input
-        ):
+        """Load the backend under this run's declared encoder-input contract.
+
+        Every caller that reads ``loaded.transforms`` — i.e. everything that turns
+        pixels into features — must come through here, and must therefore have
+        declared its geometry first.
+        """
+        if self._encoder_input is None:
+            raise ValueError(
+                f"No encoder-input contract has been declared for model '{self.name}'. "
+                "A route that encodes pixels must state its geometry before the "
+                "backend is loaded: call _declare_encoder_input(preprocessing, ...) "
+                "for a run that requested a tile size. Callers that never read "
+                "loaded.transforms use _load_backend_without_transform() instead."
+            )
+        return self._load_backend_under(self._encoder_input)
+
+    def _load_backend_without_transform(self) -> LoadedModel:
+        """Load the backend for callers that never read ``loaded.transforms``.
+
+        Three kinds of caller need the constructed encoder module without ever
+        selecting a tile transform: the ``device``/``feature_dim`` properties (pure
+        construction facts), tile→slide/patient aggregation (``encode_slide`` /
+        ``encode_patient`` consume already-computed features), and dense extraction
+        (which builds its own normalization transform from the module — dense gets its
+        own contract separately). They cannot observe, let alone encode through, the
+        transform the backend happens to carry.
+
+        A declared contract is honored when one exists so the cached backend is shared;
+        otherwise an explicit Given contract is used for this load only. This never
+        assigns ``_encoder_input``: an embed route still has to declare, and
+        ``_load_backend`` reloads when the declared contract differs from the one the
+        cached backend was built under.
+        """
+        return self._load_backend_under(
+            self._encoder_input
+            if self._encoder_input is not None
+            else EncoderInputContract.given()
+        )
+
+    def _load_backend_under(self, encoder_input: EncoderInputContract) -> LoadedModel:
+        if self._backend is None or self._backend_encoder_input != encoder_input:
             from slide2vec.inference import load_model
 
             emit_progress("model.loading", model_name=self.name)
             self._backend = load_model(
                 name=self.name,
-                encoder_input=self._encoder_input,
+                encoder_input=encoder_input,
                 device=self._requested_device,
                 output_variant=self._output_variant,
                 allow_non_recommended_settings=self.allow_non_recommended_settings,
             )
-            self._backend_encoder_input = self._encoder_input
+            self._backend_encoder_input = encoder_input
             emit_progress("model.ready", model_name=self.name, device=str(self._backend.device))
         return self._backend
 

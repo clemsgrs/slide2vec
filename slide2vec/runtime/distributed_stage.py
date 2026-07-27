@@ -236,7 +236,9 @@ def embed_single_slide_distributed(
                 tile_embeddings=tile_embeddings,
                 encoder_input_size_px=encoder_input_size_px,
             )
-        loaded = model._load_backend()
+        # Aggregation only: the shards did the tile encoding, this parent-side load
+        # feeds encode_slide and never selects a tile transform.
+        loaded = model._load_backend_without_transform()
         slide_embedding, latents = aggregate_tile_embeddings_for_slide(
             loaded,
             model,

@@ -176,6 +176,135 @@ def test_given_geometry_records_the_observed_encoder_input_instead_of_vetoing_it
     torch.testing.assert_close(indices, torch.tensor([0, 1]))
 
 
+def test_load_model_rejects_a_contract_declared_for_another_encoder(stand_in_gigapath):
+    """A declared plan is resolved against ONE encoder's preset and patch geometry."""
+    import slide2vec.inference as inference
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    # conch is fixed-input, so resolving 288px against conch would have raised outright.
+    contract = EncoderInputContract.declared(
+        "gigapath",
+        requested_tile_size_px=288,
+        allow_non_recommended_settings=True,
+    )
+
+    with pytest.raises(ValueError, match="declared for 'gigapath'"):
+        inference.load_model(
+            name="conch",
+            device="cpu",
+            allow_non_recommended_settings=True,
+            encoder_input=contract,
+        )
+
+
+def test_load_backend_raises_when_no_contract_has_been_declared(stand_in_gigapath):
+    from slide2vec.api import Model
+
+    model = Model.from_preset("gigapath", device="cpu")
+
+    with pytest.raises(ValueError, match="No encoder-input contract"):
+        model._load_backend()
+
+
+def test_transform_free_backend_load_is_not_a_declaration(stand_in_gigapath):
+    """Introspection must not leave a contract behind that an embed route inherits."""
+    from slide2vec.api import Model
+
+    model = Model.from_preset("gigapath", device="cpu")
+
+    assert model.feature_dim == 4
+
+    with pytest.raises(ValueError, match="No encoder-input contract"):
+        model._load_backend()
+
+
+def test_in_process_embed_tiles_resolves_the_same_transform_as_the_model_route(
+    stand_in_gigapath, tmp_path
+):
+    """``inference.embed_tiles`` must not select a different transform than ``Model``."""
+    import slide2vec.inference as inference
+    from slide2vec.api import ExecutionOptions, Model, PreprocessingConfig
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=288,
+    )
+    execution = ExecutionOptions(output_dir=tmp_path, precision="fp32")
+
+    def fresh_model() -> Model:
+        return Model.from_preset(
+            "gigapath",
+            device="cpu",
+            allow_non_recommended_settings=True,
+        )
+
+    model_route = fresh_model()
+    model_route.embed_tiles([], [], preprocessing=preprocessing, execution=execution)
+
+    in_process_route = fresh_model()
+    inference.embed_tiles(
+        in_process_route,
+        [],
+        [],
+        preprocessing=preprocessing,
+        execution=execution,
+    )
+
+    assert in_process_route._encoder_input == model_route._encoder_input
+    assert model_route._load_backend().transforms is _StandInEncoder.normalization
+    assert in_process_route._load_backend().transforms is _StandInEncoder.normalization
+
+
+def test_in_process_embed_patients_declares_the_requested_geometry(monkeypatch, tmp_path):
+    """The patient route loads the backend too, so it must declare first."""
+    import slide2vec.inference as inference
+    from slide2vec.api import ExecutionOptions, Model, PreprocessingConfig
+    from slide2vec.runtime import process_list, tiling_pipeline
+
+    class _StandInPatientEncoder:
+        def __init__(self, *, output_variant=None):
+            self.device = torch.device("cpu")
+            self.encode_dim = 6
+
+        def to(self, device):
+            self.device = torch.device(device)
+            return self
+
+    monkeypatch.setattr(
+        inference.encoder_registry,
+        "require",
+        lambda name: _StandInPatientEncoder if name == "moozy" else _StandInEncoder,
+    )
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "prepare_tiled_slides",
+        lambda *args, **kwargs: ([], [], tmp_path / "process_list.csv"),
+    )
+    monkeypatch.setattr(process_list, "emit_tiling_summary", lambda *args, **kwargs: None)
+
+    model = Model.from_preset(
+        "moozy",
+        device="cpu",
+        allow_non_recommended_settings=True,
+    )
+
+    result = inference.embed_patients(
+        model,
+        [{"sample_id": "slide-a", "image_path": tmp_path / "slide-a.tif"}],
+        preprocessing=PreprocessingConfig(
+            requested_spacing_um=0.5,
+            requested_tile_size_px=232,
+        ),
+        execution=ExecutionOptions(output_dir=tmp_path, precision="fp32"),
+    )
+
+    assert result == []
+    assert model._encoder_input.regime == "declared"
+    assert model._encoder_input.plan.expected_encoder_input_size_px == 232
+    assert model._load_backend().transforms is _StandInEncoder.normalization
+
+
 def test_pipeline_and_in_process_embed_route_resolve_the_same_transform(
     stand_in_gigapath, monkeypatch
 ):

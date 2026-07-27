@@ -65,7 +65,7 @@ def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
     monkeypatch.setattr(
         api.Model, "from_preset",
         classmethod(lambda cls, name, **kwargs: SimpleNamespace(
-            _load_backend=lambda: SimpleNamespace(model=encoder, device="cpu"))),
+            _load_backend_without_transform=lambda: SimpleNamespace(model=encoder, device="cpu"))),
     )
 
     specs = [RegionSpec("s0", "s0.tif", i * 64, 0, 0, 64, 64, "cucim", None) for i in range(4)]

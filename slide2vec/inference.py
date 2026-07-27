@@ -108,6 +108,18 @@ def load_model(
             f"shipped transform is the contract; got {encoder_input!r}"
         )
     name = canonicalize_model_name(name)
+    # A declared plan is resolved against ONE model's preset, patch geometry, and
+    # variable-input capability. Applying it to another model would skip exactly those
+    # checks: the constructor kwargs are name-guarded, but the normalization-only
+    # transform is not, so a mismatched contract silently reaches the encoder. Hard
+    # error rather than silent no-op.
+    if encoder_input.plan is not None and encoder_input.plan.encoder_name != name:
+        raise ValueError(
+            f"Encoder-input contract was declared for "
+            f"'{encoder_input.plan.encoder_name}' but the model being loaded is "
+            f"'{name}'. Declared geometry is validated against the encoder it names; "
+            "resolve a contract for this model instead of reusing another's."
+        )
     info = encoder_registry.info(name)
     resolved_level = info["level"]
 
@@ -491,6 +503,9 @@ def embed_patients(
                 embeddable_tiling_results,
             )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
+            # Encodes tiles through loaded.transforms below, so declare the requested
+            # geometry here too rather than trusting the Model.* wrapper to have done it.
+            model._declare_encoder_input(preprocessing, emit_run_info=False)
             loaded = model._load_backend()
 
             # Per-slide: tile encoding → slide encoding, accumulate for patient agg.
@@ -612,6 +627,10 @@ def embed_tiles(
     slide_records = [manifest.coerce_slide_spec(slide) for slide in slides]
     resolved_tiling_results = manifest.normalize_tiling_results(tiling_results, slide_records)
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
+    # This route encodes tiles through loaded.transforms, so it declares its own
+    # geometry rather than relying on a Model.* wrapper having done it. Declaring is
+    # idempotent, so declaring in both places is intended.
+    model._declare_encoder_input(resolved_preprocessing, emit_run_info=False)
     loaded = model._load_backend()
     hierarchical_mode = hierarchical.is_hierarchical_preprocessing(resolved_preprocessing)
     cpu_budget.log_on_the_fly_worker_override_once(
@@ -683,7 +702,9 @@ def aggregate_tiles(
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist slide embeddings")
 
-    loaded = model._load_backend()
+    # Aggregation only: already-computed tile features go into encode_slide, so no
+    # tile transform is selected here and no geometry has to be declared.
+    loaded = model._load_backend_without_transform()
 
     outputs: list[SlideEmbeddingArtifact] = []
     for artifact in tile_artifacts:

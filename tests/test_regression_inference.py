@@ -1285,8 +1285,11 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         return SimpleNamespace(sample_id=sample_id, path=tmp_path / "slide_embeddings" / f"{sample_id}.pt")
 
     loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
-    model = SimpleNamespace(name="prism", level="slide", _declare_encoder_input=_noop_declare_encoder_input,
-        _load_backend=lambda: loaded)
+    model = SimpleNamespace(
+        name="prism",
+        level="slide",
+        _load_backend_without_transform=lambda: loaded,
+    )
     artifact = SimpleNamespace(
         sample_id="slide-a",
         path=tmp_path / "tile_embeddings" / "slide-a.pt",
@@ -2880,8 +2883,7 @@ def test_embed_single_slide_distributed_uses_shared_slide_aggregation_helper(mon
     )
 
     loaded = SimpleNamespace(device="cpu", model=SimpleNamespace())
-    model = SimpleNamespace(level="slide", _declare_encoder_input=_noop_declare_encoder_input,
-        _load_backend=lambda: loaded)
+    model = SimpleNamespace(level="slide", _load_backend_without_transform=lambda: loaded)
     captured = {}
 
     def fake_aggregate(loaded_arg, model_arg, slide_arg, tiling_result_arg, tile_embeddings_arg, *, preprocessing, execution):
@@ -2955,8 +2957,7 @@ def test_embed_single_slide_distributed_skips_parent_backend_load_for_tile_model
     model = SimpleNamespace(
         name="h0-mini",
         level="tile",
-        _declare_encoder_input=_noop_declare_encoder_input,
-        _load_backend=fail_if_called,
+        _load_backend_without_transform=fail_if_called,
     )
     monkeypatch.setattr(distributed_stage, "aggregate_tile_embeddings_for_slide", fail_if_called)
 
