@@ -28,7 +28,13 @@ _GIGAPATH_STD = (0.229, 0.224, 0.225)
     default_output_variant="default",
     input_size=256,
     supports_variable_input_size=True,
-    patch_size=14,
+    # 16, NOT 14, despite the timm architecture name `vit_giant_patch14_dinov2`
+    # and the paper's "ViT-g/14": prov-gigapath's packaged model_args override
+    # patch_size to 16, so patch_embed.proj is a 16x16 conv and the 224px input
+    # yields a 14x14 grid. (The 14 in the name and the 14 in the grid are a
+    # coincidence that makes the wrong value look right.) Pinned against the real
+    # weights by tests/test_patch_size_metadata.py::test_static_patch_size_matches_runtime.
+    patch_size=16,
     supported_spacing_um=0.5,
     precision="fp16",
     source="prov-gigapath/prov-gigapath",

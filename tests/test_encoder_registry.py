@@ -21,6 +21,7 @@ EXPECTED_TILE_ENCODERS = {
     "h0-mini",
     "hibou-b",
     "hibou-l",
+    "isight",
     "midnight",
     "mstar",
     "musk",

@@ -10,7 +10,7 @@ from slide2vec.encoders.registry import register_encoder
     default_output_variant="default",
     input_size=224,
     supports_variable_input_size=True,
-    patch_size=16,
+    patch_size=14,
     supported_spacing_um=0.5,
     precision="fp32",
     source="waticlems/Prost40M",

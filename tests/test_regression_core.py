@@ -200,6 +200,7 @@ def test_list_models_can_filter_by_level():
         "h0-mini",
         "hibou-b",
         "hibou-l",
+        "isight",
         "lunit",
         "midnight",
         "mstar",

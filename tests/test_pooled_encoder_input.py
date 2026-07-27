@@ -47,12 +47,12 @@ def test_non_preset_plan_requires_explicit_permission():
     with pytest.raises(ValueError) as error:
         PooledEncoderInputPlan.resolve(
             "gigapath",
-            requested_tile_size_px=280,
+            requested_tile_size_px=288,
             allow_non_recommended_settings=False,
         )
 
     assert str(error.value) == (
-        "Encoder 'gigapath' was requested at 280px instead of its 256px preset. "
+        "Encoder 'gigapath' was requested at 288px instead of its 256px preset. "
         "Set allow_non_recommended_settings=True to request an exact non-preset "
         "encoder input."
     )
@@ -97,20 +97,20 @@ def test_permitted_variable_plan_preserves_exact_geometry_with_normalization_onl
 
     plan = PooledEncoderInputPlan.resolve(
         "gigapath",
-        requested_tile_size_px=280,
+        requested_tile_size_px=288,
         allow_non_recommended_settings=True,
     )
     encoder = _TransformStandIn()
 
-    transformed = plan.get_transform(encoder)(torch.zeros((3, 280, 280), dtype=torch.uint8))
+    transformed = plan.get_transform(encoder)(torch.zeros((3, 288, 288), dtype=torch.uint8))
 
     assert plan.preset_input_size_px == 256
-    assert plan.requested_tile_size_px == 280
+    assert plan.requested_tile_size_px == 288
     assert plan.preprocessing_kind == "normalization_only"
     assert plan.requires_variable_model_input is True
-    assert plan.expected_encoder_input_size_px == 280
+    assert plan.expected_encoder_input_size_px == 288
     assert plan.model_construction_kwargs == {}
-    assert tuple(transformed.shape) == (3, 280, 280)
+    assert tuple(transformed.shape) == (3, 288, 288)
 
 
 def test_batch_transform_parser_accepts_scaled_float32_to_dtype():
@@ -165,7 +165,7 @@ def test_permitted_non_preset_plan_rejects_patch_incompatible_geometry():
         )
 
     assert str(error.value) == (
-        "Encoder 'gigapath' requires exact pooled inputs divisible by its 14x14 "
+        "Encoder 'gigapath' requires exact pooled inputs divisible by its 16x16 "
         "patch geometry; got requested_tile_size_px=278."
     )
 
@@ -209,7 +209,7 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
 
     plan = PooledEncoderInputPlan.resolve(
         "h-optimus-0",
-        requested_tile_size_px=280,
+        requested_tile_size_px=280,  # 14x20 — h-optimus-0 is a genuine patch-14 model
         allow_non_recommended_settings=True,
     )
     monkeypatch.setattr(inference.encoder_registry, "require", lambda name: Encoder)
@@ -229,7 +229,7 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
         },
         "normalization_transform": True,
     }
-    assert loaded.transforms(torch.zeros((3, 280, 280))).shape == (3, 280, 280)
+    assert loaded.transforms(torch.zeros((3, 288, 288))).shape == (3, 288, 288)
 
 
 def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_advice(
@@ -257,13 +257,13 @@ def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_
             [],
             preprocessing=PreprocessingConfig(
                 requested_spacing_um=0.5,
-                requested_tile_size_px=280,
+                requested_tile_size_px=288,
             ),
             execution=ExecutionOptions(batch_size=7),
         )
 
     assert result == {}
-    assert captured["plan"].expected_encoder_input_size_px == 280
+    assert captured["plan"].expected_encoder_input_size_px == 288
     assert captured["batch_size"] == 7
     messages = [
         record.getMessage()
@@ -271,8 +271,8 @@ def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_
         if record.getMessage().startswith("Pooled encoder input")
     ]
     assert messages == [
-        "Pooled encoder input for 'gigapath': preset 256px, requested 280px, "
-        "exact encoder input 280px; using normalization-only preprocessing."
+        "Pooled encoder input for 'gigapath': preset 256px, requested 288px, "
+        "exact encoder input 288px; using normalization-only preprocessing."
     ]
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
     assert "oom" not in caplog.text.lower()
@@ -295,7 +295,7 @@ def test_public_run_rejects_non_preset_before_embedding_dispatch(monkeypatch):
             [],
             preprocessing=PreprocessingConfig(
                 requested_spacing_um=0.5,
-                requested_tile_size_px=280,
+                requested_tile_size_px=288,
             ),
         )
 
@@ -321,7 +321,7 @@ def test_exact_plan_reaches_encode_tiles_at_requested_shape():
 
     plan = PooledEncoderInputPlan.resolve(
         "gigapath",
-        requested_tile_size_px=280,
+        requested_tile_size_px=288,
         allow_non_recommended_settings=True,
     )
     transforms = plan.get_transform(_TransformStandIn())
@@ -335,19 +335,19 @@ def test_exact_plan_reaches_encode_tiles_at_requested_shape():
     )
     preprocessor = build_batch_preprocessor_for_tile_images(
         loaded,
-        requested_tile_size_px=280,
+        requested_tile_size_px=288,
     )
 
     indices, embeddings = run_forward_pass(
-        [(torch.tensor([0]), torch.zeros((1, 3, 280, 280), dtype=torch.uint8))],
+        [(torch.tensor([0]), torch.zeros((1, 3, 288, 288), dtype=torch.uint8))],
         loaded,
         nullcontext(),
         batch_preprocessor=preprocessor,
     )
 
     assert preprocessor is not None
-    assert observed == [(1, 3, 280, 280)]
-    assert loaded.encoder_input_size_px == 280
+    assert observed == [(1, 3, 288, 288)]
+    assert loaded.encoder_input_size_px == 288
     torch.testing.assert_close(indices, torch.tensor([0]))
     torch.testing.assert_close(embeddings, torch.tensor([[1.0, 2.0]]))
 
@@ -397,8 +397,8 @@ def test_distributed_request_round_trip_resolves_same_exact_hierarchical_tar_pla
     )
     preprocessing = PreprocessingConfig(
         requested_spacing_um=0.5,
-        requested_tile_size_px=280,
-        requested_region_size_px=560,
+        requested_tile_size_px=288,
+        requested_region_size_px=576,  # 2 x 288, keeps region == tile * multiple
         region_tile_multiple=2,
         on_the_fly=False,
         read_tiles_from=tmp_path,
@@ -424,7 +424,7 @@ def test_distributed_request_round_trip_resolves_same_exact_hierarchical_tar_pla
     )
 
     assert worker_plan == parent_plan
-    assert worker_plan.expected_encoder_input_size_px == 280
+    assert worker_plan.expected_encoder_input_size_px == 288
     assert worker_preprocessing.region_tile_multiple == 2
     assert worker_preprocessing.on_the_fly is False
     assert worker_preprocessing.read_tiles_from == tmp_path

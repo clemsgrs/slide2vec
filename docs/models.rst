@@ -83,6 +83,11 @@ Tile-level encoders
      - 1024
      - ``0.5``
      - Chen et al. (2024)
+   * - ``isight``
+     - `iSight <https://huggingface.co/nirschl-lab/iSight>`_
+     - 1024
+     - ``0.5``
+     - Huang et al. (2026); IHC-specific, 336 px tiles — see note below
    * - ``musk``
      - `MUSK <https://huggingface.co/xiangjx/musk>`_
      - 1024 / 2048
@@ -129,6 +134,49 @@ Tile-level encoders
      - ``0.5``
      - GenBio AI (2024)
 
+iSight (IHC)
+~~~~~~~~~~~~
+
+``isight`` differs from every other preset in the table and is worth reading
+about before use.
+
+**It is IHC-specific, not a general pathology encoder.** It is
+``openai/clip-vit-large-patch14-336`` fine-tuned on HPA10M — 10.5M Human Protein
+Atlas immunohistochemistry images, all DAB + haematoxylin TMA cores from a single
+source and protocol, stored as lossy 3000x3000 JPEGs. Expect it to be useful on
+IHC and unproven elsewhere.
+
+**Tiles are 336 px, not 224 or 256.** At the ``0.5`` µm/px default that is a
+168 µm field of view. ``supports_variable_input_size`` is ``False``: the model
+was only ever trained at 336.
+
+**The spacing is inferred.** HPA acquires at 20x, giving ~0.5 µm/px for its
+3000x3000 px images of ~1.5 mm cores, but HPA10M's dataset card does not state
+µm/px directly.
+
+**Only the tile level is exposed.** iSight's gated-attention pooler operates on
+token sequences rather than pooled tile vectors — each of the 577 token positions
+carries its own distribution over tiles — so it cannot be expressed through
+:class:`~slide2vec.encoders.base.SlideEncoder`, whose ``encode_slide`` receives
+``(N, D)``. Its five classification heads are also specific to the HPA tasks.
+Use downstream MIL for slide-level pooling.
+
+**Output variants.** ``token_mean`` (default) is the mean over all 577 tokens
+including CLS, matching the reference implementation; ``cls`` selects the CLS
+token alone. Both are 1024-d.
+
+**The download is a raw training checkpoint** (~4.8 GB), of which roughly 3.7 GB
+is optimizer state that is read and discarded. There is no smaller artifact
+published upstream.
+
+**Caveats when consuming attention maps.** In the final block, 4 of 16 heads
+place under 1% of their CLS-query mass on the patch grid (attention sinks),
+against 0/16 at block 0. Consider passing an earlier ``blocks`` index.
+
+**Licence.** The upstream weights are published as ``license: unknown`` and the
+reference repository carries no LICENSE file. Confirm terms with the authors
+before relying on this preset in published or redistributed work.
+
 Natural-image control
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -163,8 +211,9 @@ instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 The following built-in tile presets are covered by the dense encoder interface:
 ``conch``, ``conchv15``, ``dinov2-vitb14``, ``genbio-pathfm``, ``gigapath``,
 ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
-``hibou-l``, ``lunit``, ``midnight``, ``mstar``, ``musk``, ``phikon``,
-``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
+``hibou-l``, ``isight``, ``lunit``, ``midnight``, ``mstar``, ``musk``,
+``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
+``virchow2``.
 
 Notes:
 
@@ -197,9 +246,9 @@ contract and knobs.
 
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
 ``dinov2-vitb14``, ``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``,
-``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``lunit``, ``midnight``, ``mstar``,
-``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
-``virchow2``.
+``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``isight``, ``lunit``, ``midnight``,
+``mstar``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``,
+``virchow``, and ``virchow2``.
 
 Notes:
 
