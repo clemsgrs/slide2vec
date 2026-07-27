@@ -29,6 +29,7 @@ from slide2vec.runtime.model_settings import (
 )
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
+from slide2vec.runtime.effective_encoder_input import format_input_size
 from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
@@ -352,9 +353,9 @@ class DenseOptions:
     image_pad_value: float | None = None
     #: Encoder field-of-view chunk fed through the backbone per forward. ``None`` (default)
     #: is one whole-tile forward; a smaller value slides the encoder and blends token grids.
-    #: Together with ``target_size`` this fixes the *effective encoder input*, from which the
-    #: variable-input constructor settings are derived — hence no ``dynamic_img_size`` knob
-    #: here (see :meth:`Model._declare_dense_encoder_input`).
+    #: Together with ``target_size`` this fixes the *effective encoder input* — the geometry
+    #: handed to ``encode_tiles_dense`` — from which the encoder's variable-input constructor
+    #: settings are derived; hence no ``dynamic_img_size`` knob here.
     window_size: int | None = None
     #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
     #: ``window_size is None``).
@@ -760,13 +761,11 @@ class Model:
         plan = contract.plan
         if emit_run_info and plan.requires_variable_model_input:
             logging.getLogger("slide2vec").info(
-                "Dense encoder input for '%s': native %dpx, effective encoder input "
-                "%dx%dpx (target_size=%dpx, window_size=%s); enabling variable input "
-                "size via %s.",
+                "Dense encoder input for '%s': native %dpx, effective encoder input %s "
+                "(target_size=%dpx, window_size=%s); enabling variable input size via %s.",
                 self.name,
                 plan.preset_input_size_px,
-                plan.effective_encoder_input_size_px[0],
-                plan.effective_encoder_input_size_px[1],
+                format_input_size(plan.effective_encoder_input_size_px),
                 plan.target_size_px,
                 plan.window_size_px,
                 plan.model_construction_kwargs or "no constructor setting",

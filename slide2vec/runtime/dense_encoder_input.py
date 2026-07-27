@@ -60,9 +60,9 @@ class DenseEncoderInputPlan:
         from slide2vec.runtime.dense_regions import compute_dense_geometry
         from slide2vec.runtime.dense_sliding import resolve_window_geometry
 
-        requirements = resolve_preprocessing_requirements(encoder_name)
-        preset_size = int(requirements["tile_size_px"])
-        tile_encoder_name = str(requirements["source_encoder"])
+        tile_encoder_name = str(
+            resolve_preprocessing_requirements(encoder_name)["source_encoder"]
+        )
         # The static registry patch size, not the loaded module's: the declaration is
         # resolved *before* the encoder is constructed. ``load_model`` asserts the two
         # agree, so the geometry resolved here is the geometry that gets encoded.
@@ -79,6 +79,9 @@ class DenseEncoderInputPlan:
         else:
             # Ask the sliding kernel itself, so the declaration cannot drift from the
             # window the encode loop will actually cut (rounding + clamping included).
+            # ``overlap`` is irrelevant to the *window* — it only sets the stride and the
+            # start offsets — so a fixed 0.0 here yields the run's actual window whatever
+            # ``DenseOptions.overlap`` is.
             effective_size, _stride, _starts_h, _starts_w = resolve_window_geometry(
                 geometry, window_size=int(window_size), overlap=0.0
             )
@@ -90,8 +93,8 @@ class DenseEncoderInputPlan:
         )
         return cls(
             encoder_name=encoder_name,
-            tile_encoder_name=effective.tile_encoder_name,
-            preset_input_size_px=preset_size,
+            tile_encoder_name=tile_encoder_name,
+            preset_input_size_px=effective.preset_input_size_px,
             target_size_px=int(target_size_px),
             window_size_px=None if window_size is None else int(window_size),
             encoded_size_px=geometry.encoded_size,

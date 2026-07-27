@@ -137,6 +137,27 @@ def test_derived_kwargs_match_what_the_hand_passed_path_produced(
     assert contract.construction_kwargs_for(encoder_name) == hand_passed
 
 
+def test_derived_kwargs_still_meet_an_encoder_card_gate(monkeypatch):
+    """Deriving the setting does not smuggle it past an encoder's own model-card gate.
+
+    H-Optimus' card loads with ``dynamic_img_size=False``, so its constructor refuses the
+    deviation unless ``allow_non_recommended_settings=True``. The contract supplies the
+    ``True``; the encoder still demands the deliberate override. The guard fires while the
+    constructor arguments are evaluated, so no weights are downloaded.
+    """
+    import slide2vec.inference as inference
+
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    contract = EncoderInputContract.declared_dense(
+        "h-optimus-0", target_size_px=518, window_size=None
+    )
+
+    assert contract.construction_kwargs_for("h-optimus-0") == {"dynamic_img_size": True}
+
+    with pytest.raises(ValueError, match="recommends dynamic_img_size=False"):
+        inference.load_model(name="h-optimus-0", device="cpu", encoder_input=contract)
+
+
 def test_dense_options_carries_no_dynamic_img_size_knob():
     """The variable-input setting is derived from the declaration + registry metadata."""
     assert "dynamic_img_size" not in {field.name for field in fields(DenseOptions)}

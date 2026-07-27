@@ -63,25 +63,18 @@ class PooledEncoderInputPlan:
             size_px=requested_size,
             origin=f"requested_tile_size_px={requested_size}",
         )
-        if effective.requires_variable_model_input:
-            return cls(
-                encoder_name=encoder_name,
-                tile_encoder_name=effective.tile_encoder_name,
-                preset_input_size_px=preset_size,
-                requested_tile_size_px=requested_size,
-                preprocessing_kind="normalization_only",
-                requires_variable_model_input=True,
-                expected_encoder_input_size_px=requested_size,
-                model_construction_kwargs=effective.model_construction_kwargs,
-            )
+        # An exact request is one the shipped recipe would not produce: it applies
+        # normalization only, and its final size is therefore known up front rather than
+        # observed from the transformed batch.
+        is_exact = effective.requires_variable_model_input
         return cls(
             encoder_name=encoder_name,
             tile_encoder_name=effective.tile_encoder_name,
-            preset_input_size_px=preset_size,
+            preset_input_size_px=effective.preset_input_size_px,
             requested_tile_size_px=requested_size,
-            preprocessing_kind="shipped",
-            requires_variable_model_input=False,
-            expected_encoder_input_size_px=None,
+            preprocessing_kind="normalization_only" if is_exact else "shipped",
+            requires_variable_model_input=is_exact,
+            expected_encoder_input_size_px=requested_size if is_exact else None,
             model_construction_kwargs=effective.model_construction_kwargs,
         )
 

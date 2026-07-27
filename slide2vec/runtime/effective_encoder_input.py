@@ -35,7 +35,11 @@ from slide2vec.encoders.registry import (
 
 
 def format_input_size(size_px: tuple[int, int]) -> str:
-    """Render an effective input size for error messages (``518px`` / ``518x504px``)."""
+    """Render an effective input size for messages (``518px`` / ``518x504px``).
+
+    Shared with the run-info logging in :meth:`slide2vec.api.Model` so an effective
+    encoder input reads the same wherever it is reported.
+    """
     height, width = size_px
     return f"{height}px" if height == width else f"{height}x{width}px"
 
@@ -50,7 +54,6 @@ class EffectiveEncoderInput:
     (empty for encoders that hardcode the setting, or that need none).
     """
 
-    encoder_name: str
     #: The encoder that actually sees the tensor: a slide/patient model resolves through
     #: the tile encoder it declares as its dependency.
     tile_encoder_name: str
@@ -90,7 +93,6 @@ class EffectiveEncoderInput:
             # The encoder's own registered geometry: no capability is being asked for, and
             # no constructor setting has to be activated.
             return cls(
-                encoder_name=encoder_name,
                 tile_encoder_name=tile_encoder_name,
                 preset_input_size_px=preset_size,
                 size_px=size,
@@ -112,7 +114,6 @@ class EffectiveEncoderInput:
             )
         tile_info = encoder_registry.info(tile_encoder_name)
         return cls(
-            encoder_name=encoder_name,
             tile_encoder_name=tile_encoder_name,
             preset_input_size_px=preset_size,
             size_px=size,
