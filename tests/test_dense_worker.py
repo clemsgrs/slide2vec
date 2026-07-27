@@ -62,10 +62,22 @@ def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
 
     encoder = TimmTileEncoder("vit_tiny_patch16_224", pretrained=False, num_classes=0,
                               dynamic_img_size=True)
+    declared: list = []
+
+    def _load_backend():
+        # A rank declares its own dense encoder-input contract before loading, so that the
+        # variable-input constructor settings its ROI geometry implies are applied.
+        assert declared, "the rank must declare its dense contract before it loads"
+        return SimpleNamespace(model=encoder, device="cpu")
+
     monkeypatch.setattr(
         api.Model, "from_preset",
         classmethod(lambda cls, name, **kwargs: SimpleNamespace(
-            _load_backend_without_transform=lambda: SimpleNamespace(model=encoder, device="cpu"))),
+            _declare_dense_encoder_input=(
+                lambda dense, *, emit_run_info: declared.append(dense)
+            ),
+            _load_backend=_load_backend,
+        )),
     )
 
     specs = [RegionSpec("s0", "s0.tif", i * 64, 0, 0, 64, 64, "cucim", None) for i in range(4)]

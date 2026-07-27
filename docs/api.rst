@@ -223,6 +223,28 @@ a ``(K, grid_h, grid_w)`` CLS-attention grid, with ``attention_blocks`` and
 ``attention_include_registers`` forwarded to that call. Both feature kinds share
 the same read / pad / window path.
 
+Variable encoder input for dense runs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A dense run states a *supervision* geometry — the ROI ``target_size`` the token
+grid registers to, plus an optional ``window_size`` — not an encoder input.
+``Model.embed_regions_dense`` derives the **effective encoder input** from it,
+i.e. the geometry of the tensor handed to ``encode_tiles_dense``:
+
+- whole-tile (``window_size=None``): the ROI padded up to the patch multiple;
+- sliding: the ``window_size`` rounded to the patch multiple and clamped to that
+  padded extent.
+
+That size then goes through the same check as a pooled
+``requested_tile_size_px``: when it differs from the encoder's registered input
+size, the encoder must declare ``supports_variable_input_size=True``, and its
+``variable_input_model_kwargs`` (e.g. ``dynamic_img_size=True``) are applied at
+construction. Whole-tile dense at a non-native size on a fixed-input encoder
+(e.g. ``phikon``) therefore fails before any region is read, instead of feeding
+the backbone a size it cannot accept; sliding at the native window passes the
+check trivially. Callers never pass ``dynamic_img_size`` — it is derived from the
+declared geometry plus the registry metadata.
+
 Dense Attention Map Extraction
 ------------------------------
 

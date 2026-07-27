@@ -352,6 +352,9 @@ class DenseOptions:
     image_pad_value: float | None = None
     #: Encoder field-of-view chunk fed through the backbone per forward. ``None`` (default)
     #: is one whole-tile forward; a smaller value slides the encoder and blends token grids.
+    #: Together with ``target_size`` this fixes the *effective encoder input*, from which the
+    #: variable-input constructor settings are derived — hence no ``dynamic_img_size`` knob
+    #: here (see :meth:`Model._declare_dense_encoder_input`).
     window_size: int | None = None
     #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
     #: ``window_size is None``).
@@ -685,6 +688,12 @@ class Model:
         (``execution.num_gpus``); ``num_gpus=1`` encodes fully in-process. Resume is
         automatic — ROIs whose sidecar already exists are skipped. Returns one
         :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI.
+
+        The effective encoder input — the padded ROI for a whole-tile run, one
+        patch-aligned window for a sliding one — is declared before any region is read, so
+        a geometry the encoder cannot accept raises here rather than at the first forward
+        pass. Variable-input capable encoders get their registry-declared constructor
+        settings applied automatically; there is nothing for the caller to pass.
         """
         from slide2vec.runtime.dense_stage import embed_regions_dense
 
@@ -699,7 +708,7 @@ class Model:
         *,
         emit_run_info: bool,
     ) -> EncoderInputContract:
-        """Declare the encoder input geometry this run requested, or raise.
+        """Declare the pooled encoder input geometry this run requested, or raise.
 
         Idempotent: resolving the same preprocessing twice yields an equal contract, so
         every layer that reaches the encoder may declare for itself rather than trust
@@ -710,7 +719,7 @@ class Model:
                 "requested_tile_size_px must be resolved before declaring the encoder "
                 "input geometry; a pooled run reads tiles at a size it requested."
             )
-        contract = EncoderInputContract.declared(
+        contract = EncoderInputContract.declared_pooled(
             self.name,
             requested_tile_size_px=int(preprocessing.requested_tile_size_px),
             allow_non_recommended_settings=self.allow_non_recommended_settings,
@@ -728,6 +737,42 @@ class Model:
             )
         return contract
 
+    def _declare_dense_encoder_input(
+        self,
+        dense: "DenseOptions",
+        *,
+        emit_run_info: bool,
+    ) -> EncoderInputContract:
+        """Declare the dense encoder input geometry this run requested, or raise.
+
+        Dense states a supervision geometry (ROI ``target_size``, optional ``window_size``)
+        rather than an encoder input; the contract derives the tensor the backbone will
+        actually see and validates it exactly as the pooled path's is validated. Like the
+        pooled declaration this is idempotent, so each layer that reaches the encoder — the
+        parent stage and every torchrun rank — declares for itself.
+        """
+        contract = EncoderInputContract.declared_dense(
+            self.name,
+            target_size_px=int(dense.target_size),
+            window_size=None if dense.window_size is None else int(dense.window_size),
+        )
+        self._encoder_input = contract
+        plan = contract.plan
+        if emit_run_info and plan.requires_variable_model_input:
+            logging.getLogger("slide2vec").info(
+                "Dense encoder input for '%s': native %dpx, effective encoder input "
+                "%dx%dpx (target_size=%dpx, window_size=%s); enabling variable input "
+                "size via %s.",
+                self.name,
+                plan.preset_input_size_px,
+                plan.effective_encoder_input_size_px[0],
+                plan.effective_encoder_input_size_px[1],
+                plan.target_size_px,
+                plan.window_size_px,
+                plan.model_construction_kwargs or "no constructor setting",
+            )
+        return contract
+
     def _load_backend(self) -> LoadedModel:
         """Load the backend under this run's declared encoder-input contract.
 
@@ -740,21 +785,26 @@ class Model:
                 f"No encoder-input contract has been declared for model '{self.name}'. "
                 "A route that encodes pixels must state its geometry before the "
                 "backend is loaded: call _declare_encoder_input(preprocessing, ...) "
-                "for a run that requested a tile size. Callers that never read "
-                "loaded.transforms use _load_backend_without_transform() instead."
+                "for a pooled run, or _declare_dense_encoder_input(dense, ...) for a "
+                "dense one. Callers that never read loaded.transforms use "
+                "_load_backend_without_transform() instead."
             )
         return self._load_backend_under(self._encoder_input)
 
     def _load_backend_without_transform(self) -> LoadedModel:
         """Load the backend for callers that never read ``loaded.transforms``.
 
-        Three kinds of caller need the constructed encoder module without ever
-        selecting a tile transform: the ``device``/``feature_dim`` properties (pure
-        construction facts), tile→slide/patient aggregation (``encode_slide`` /
-        ``encode_patient`` consume already-computed features), and dense extraction
-        (which builds its own normalization transform from the module — dense gets its
-        own contract separately). They cannot observe, let alone encode through, the
-        transform the backend happens to carry.
+        Two kinds of caller need the constructed encoder module without ever selecting a
+        tile transform: the ``device``/``feature_dim`` properties (pure construction
+        facts) and tile→slide/patient aggregation (``encode_slide`` / ``encode_patient``
+        consume already-computed features). They cannot observe, let alone encode
+        through, the transform the backend happens to carry.
+
+        Dense extraction is deliberately NOT in this set. It builds its own normalization
+        transform and never reads ``loaded.transforms``, but it does need the
+        variable-input constructor settings its geometry implies — which is exactly what
+        an encoder-input contract carries — so it declares (see
+        ``_declare_dense_encoder_input``) and loads through ``_load_backend``.
 
         A declared contract is honored when one exists so the cached backend is shared;
         otherwise an explicit Given contract is used for this load only. This never
