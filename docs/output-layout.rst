@@ -189,6 +189,49 @@ Same fields as ``tile_embeddings`` (except  ``"artifact_type": "hierarchical_emb
    }
 
 
+Image Embeddings
+----------------
+
+:meth:`~slide2vec.Model.embed_images` (see :doc:`api`) writes one flat directory,
+one payload plus one sidecar per input image, named by the caller's
+``sample_id``:
+
+.. code-block:: text
+
+   <output_dir>/
+   └── image_embeddings/
+       ├── <sample_id>.pt          ← Tensor of shape (D,)
+       └── <sample_id>.meta.json
+
+There is no per-annotation namespacing here: a given-geometry image has no slide,
+no coordinate and no sampled class. The sidecar is written **last**, after the
+payload has been published atomically, so a payload without its sidecar
+unambiguously means an interrupted image — which is exactly what makes the run
+resumable at image granularity across GPUs.
+
+**image_embeddings**
+
+.. code-block:: text
+
+   {
+     "sample_id": "bach-001",
+     "artifact_type": "image_embeddings",
+     "encoder_name": "virchow2",
+     "encoder_level": "tile",
+     "encoder_input_regime": "given",
+     "encoder_input_size_px": 224,
+     "feature_dim": 2560,
+     "feature_dtype": "fp32",
+     "format": "pt",
+     "image_path": "/data/bach/001.tif",
+   }
+
+``encoder_input_size_px`` is the factual side length of the tensor the encoder
+saw, after its shipped transform ran on that image. In the Given regime it is
+recorded, never validated: the caller supplied pixels it never requested, so
+there is no request to check it against.
+
+
 Coordinate Files
 ----------------
 

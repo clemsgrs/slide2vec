@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torchvision.transforms import functional as tvF
 
-from slide2vec.runtime.batching import apply_transforms_itemwise
+from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 
 
 class ConvertToRgbAndBack:

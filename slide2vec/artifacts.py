@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path, PureWindowsPath
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 import numpy as np
@@ -95,6 +95,27 @@ class DenseRegionArtifact:
         return load_metadata(self.metadata_path)
 
 
+@dataclass(frozen=True, kw_only=True)
+class ImageEmbeddingArtifact:
+    """One persisted given-geometry image embedding: the ``(D,)`` payload + its sidecar.
+
+    The unit of :meth:`slide2vec.api.Model.embed_images`: a caller holding pre-cropped tile
+    images (a public patch benchmark) gets one artifact per image, named by the ``sample_id``
+    it supplied. Unlike a tile artifact this holds a single vector, not a bag — the image
+    *is* the sample.
+    """
+
+    sample_id: str
+    path: Path
+    metadata_path: Path
+    format: str
+    feature_dim: int
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return load_metadata(self.metadata_path)
+
+
 def _validate_output_format(output_format: str) -> str:
     normalized = output_format.lower()
     if normalized not in {"pt", "npz"}:
@@ -136,17 +157,34 @@ def _ensure_tensor(data: Any):
     return torch.as_tensor(data)
 
 
-def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
+def write_atomically(path: Path, write: Callable[[Path], None]) -> None:
+    """Publish ``path`` in one step: *write* a hidden temp sibling, then ``os.replace``.
+
+    ``os.replace`` is atomic within a filesystem, so a concurrent reader (another rank, a
+    resume check, a downstream consumer) sees either the previous file or the complete new
+    one — never a half-written payload. The temp name carries the pid plus a uuid so two
+    ranks writing the same destination cannot collide on it, starts with a dot so it is
+    invisible to the artifact globs, and keeps the destination suffix because some writers
+    (``numpy.savez``) choose their format from it. Any temp left behind by a failed write
+    is removed rather than published.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid4().hex}")
+    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid4().hex}{path.suffix}")
     try:
-        tmp_path.write_text(
-            json.dumps(metadata, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+        write(tmp_path)
         os.replace(tmp_path, path)
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
+    write_atomically(
+        path,
+        lambda tmp_path: tmp_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True),
+            encoding="utf-8",
+        ),
+    )
 
 
 def tile_embeddings_subdir(annotation: str | None) -> str:
@@ -261,11 +299,8 @@ def write_dense_region(
     payload_path, metadata_path = region_dense_paths(
         output_dir, sample_id=sample_id, annotation=annotation, x=x, y=y
     )
-    payload_path.parent.mkdir(parents=True, exist_ok=True)
     grid_array = _ensure_array(grid)
-    tmp_path = payload_path.with_name(f"{payload_path.name}.tmp-{os.getpid()}")
-    torch.save(_ensure_tensor(grid), tmp_path)
-    os.replace(tmp_path, payload_path)
+    write_atomically(payload_path, lambda tmp_path: torch.save(_ensure_tensor(grid), tmp_path))
     _write_metadata(metadata_path, metadata)
     return DenseRegionArtifact(
         sample_id=sample_id,
@@ -276,6 +311,67 @@ def write_dense_region(
         feature_dim=int(grid_array.shape[0]),
         grid_shape=(int(grid_array.shape[1]), int(grid_array.shape[2])),
         annotation=annotation,
+    )
+
+
+def image_embedding_paths(
+    output_dir: str | Path, *, sample_id: str, output_format: str
+) -> tuple[Path, Path]:
+    """``(payload_path, sidecar_path)`` for one given-geometry image.
+
+    ``image_embeddings/<sample_id>.{pt,npz}`` plus ``image_embeddings/<sample_id>.meta.json``.
+    A given-geometry run has no slide, no coordinate and no annotation class — the caller's
+    ``sample_id`` is the whole identity — so the layout is flat and the resume check needs
+    nothing but the sample id.
+    """
+    output_root = Path(output_dir).expanduser().resolve()
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    embeddings_dir = (output_root / "image_embeddings").resolve()
+    if not embeddings_dir.is_relative_to(output_root):
+        raise ValueError("Image artifact path must stay within output_dir")
+    return (
+        embeddings_dir / f"{sample_component}.{_validate_output_format(output_format)}",
+        embeddings_dir / f"{sample_component}.meta.json",
+    )
+
+
+def write_image_embedding(
+    embedding,
+    *,
+    output_dir: str | Path,
+    sample_id: str,
+    output_format: str = "pt",
+    metadata: dict[str, Any],
+) -> ImageEmbeddingArtifact:
+    """Persist one image's ``(D,)`` embedding + its sidecar, atomically and sidecar-last.
+
+    Write order: payload through :func:`write_atomically`, then the ``.meta.json`` sidecar.
+    A payload present without its sidecar therefore unambiguously means an interrupted
+    image, and resume treats the sidecar as the done-marker — the same contract the dense
+    ROI write follows (:func:`write_dense_region`), and the reason a rank can be killed
+    mid-shard without poisoning the output.
+    """
+    output_format = _validate_output_format(output_format)
+    payload_path, metadata_path = image_embedding_paths(
+        output_dir, sample_id=sample_id, output_format=output_format
+    )
+    embedding_array = _ensure_array(embedding)
+    if output_format == "pt":
+        write_atomically(
+            payload_path, lambda tmp_path: torch.save(_ensure_tensor(embedding), tmp_path)
+        )
+    else:
+        write_atomically(
+            payload_path, lambda tmp_path: np.savez_compressed(tmp_path, features=embedding_array)
+        )
+    feature_dim = int(embedding_array.shape[-1]) if embedding_array.ndim else 1
+    _write_metadata(metadata_path, {**metadata, "feature_dim": feature_dim})
+    return ImageEmbeddingArtifact(
+        sample_id=sample_id,
+        path=payload_path,
+        metadata_path=metadata_path,
+        format=output_format,
+        feature_dim=feature_dim,
     )
 
 

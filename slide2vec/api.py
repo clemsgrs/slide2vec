@@ -13,6 +13,7 @@ from hs2p import SlideSpec
 from slide2vec.artifacts import (
     DenseRegionArtifact,
     HierarchicalEmbeddingArtifact,
+    ImageEmbeddingArtifact,
     PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
@@ -387,6 +388,22 @@ class SlideRegions:
 
 
 @dataclass(frozen=True, kw_only=True)
+class ImageSpec:
+    """One pre-cropped image to embed: ``(sample_id, image_path)``.
+
+    The input unit of :meth:`Model.embed_images` — the Given-geometry counterpart of
+    :class:`SlideRegions`. There is no slide, no coordinate and no spacing here: the caller
+    holds an image file it never asked slide2vec to produce (a public patch benchmark
+    sample), and names it. ``sample_id`` is the artifact's whole identity, so it must be
+    unique within a run and a valid filename component; slide2vec never derives it from the
+    path, because two directories can hold the same filename.
+    """
+
+    sample_id: str
+    image_path: PathLike
+
+
+@dataclass(frozen=True, kw_only=True)
 class RunResult:
     """Return value of :meth:`Pipeline.run`."""
 
@@ -703,6 +720,38 @@ class Model:
         with _auto_progress_reporting(output_dir=resolved.output_dir):
             return embed_regions_dense(self, regions, dense=dense, execution=resolved)
 
+    def embed_images(
+        self,
+        images: "Sequence[ImageSpec]",
+        *,
+        execution: ExecutionOptions | None = None,
+    ) -> list[ImageEmbeddingArtifact]:
+        """Embed + persist one embedding per caller-supplied image.
+
+        The Given-geometry entry point: the caller already holds pre-cropped images — a
+        public patch benchmark (BACH, CRC, Gleason, BreakHis, MHIST, PCam), an exported ROI
+        set — and slide2vec neither tiles nor reads a slide. Each :class:`ImageSpec` is
+        decoded, preprocessed with the encoder's **shipped** transform, encoded, and written
+        to ``image_embeddings/<sample_id>.pt`` plus a provenance sidecar. The run splits its
+        images across all visible GPUs (``execution.num_gpus``); ``num_gpus=1`` encodes
+        fully in-process. Resume is automatic — images whose sidecar already exists are
+        skipped. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
+        image, in input order.
+
+        Unlike the pooled and dense paths there is no geometry to declare: the images are
+        heterogeneously sized (2048x1536 beside 96x96) and were never requested, so the
+        encoder's shipped transform is the contract and slide2vec *records* the resulting
+        encoder input size as run provenance rather than validating it. That also means
+        preprocessing runs itemwise in the loader workers — differently sized images cannot
+        be stacked before they are resized.
+        """
+        from slide2vec.runtime.image_stage import embed_images
+
+        resolved = _coerce_execution_options(execution, model=self)
+        _require_output_dir_for_persistence(resolved, method_name="Model.embed_images(...)")
+        with _auto_progress_reporting(output_dir=resolved.output_dir):
+            return embed_images(self, images, execution=resolved)
+
     def _declare_encoder_input(
         self,
         preprocessing: PreprocessingConfig,
@@ -769,6 +818,24 @@ class Model:
                 plan.target_size_px,
                 plan.window_size_px,
                 plan.model_construction_kwargs or "no constructor setting",
+            )
+        return contract
+
+    def _declare_given_encoder_input(self, *, emit_run_info: bool) -> EncoderInputContract:
+        """Declare that this run's encoder input is whatever the caller handed over.
+
+        The Given regime's affirmative statement. It is deliberately not the same thing as
+        leaving ``_encoder_input`` unset: an absent contract means "this route forgot", and
+        the contract refuses to guess between the two. Like the declared variants this is
+        idempotent, so the parent stage and every torchrun rank declare for themselves.
+        """
+        contract = EncoderInputContract.given()
+        self._encoder_input = contract
+        if emit_run_info:
+            logging.getLogger("slide2vec").info(
+                "Given encoder input for '%s': using the encoder's shipped preprocessing; "
+                "the observed encoder input size is recorded per artifact, not validated.",
+                self.name,
             )
         return contract
 

@@ -92,7 +92,7 @@ def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
     request_path = tmp_path / "dense_request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")
 
-    # World of 2 ranks: plan_dense_shards([0,1,2,3], 2) => rank 1 owns ROIs [2, 3].
+    # World of 2 ranks: plan_contiguous_shards([0,1,2,3], 2) => rank 1 owns ROIs [2, 3].
     monkeypatch.setenv("RANK", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("LOCAL_RANK", "0")

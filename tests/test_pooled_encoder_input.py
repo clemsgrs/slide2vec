@@ -115,7 +115,7 @@ def test_permitted_variable_plan_preserves_exact_geometry_with_normalization_onl
 
 
 def test_batch_transform_parser_accepts_scaled_float32_to_dtype():
-    from slide2vec.runtime.batching import build_batch_transform_spec
+    from slide2vec.runtime.preprocessing import build_batch_transform_spec
 
     transforms = v2.Compose(
         [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)]
@@ -125,7 +125,7 @@ def test_batch_transform_parser_accepts_scaled_float32_to_dtype():
 
 
 def test_batch_transform_parser_rejects_other_to_dtype_semantics():
-    from slide2vec.runtime.batching import build_batch_transform_spec
+    from slide2vec.runtime.preprocessing import build_batch_transform_spec
 
     unscaled = v2.Compose(
         [v2.ToImage(), v2.ToDtype(torch.float32, scale=False)]
