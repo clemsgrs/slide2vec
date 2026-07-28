@@ -18,22 +18,7 @@ from slide2vec.runtime import (
 )
 
 
-class CapturingGigaPathEncoder(GigaPathSlideEncoder):
-    def __init__(self) -> None:
-        self.coordinates: torch.Tensor | None = None
-
-    def encode_slide(
-        self,
-        tile_features: torch.Tensor,
-        coordinates: torch.Tensor | None = None,
-        *,
-        tile_size_lv0: int | None = None,
-    ) -> torch.Tensor:
-        self.coordinates = coordinates
-        return torch.zeros(4)
-
-
-class CapturingPatientEncoder(PatientEncoder):
+class CapturingSlideEncoderMixin:
     def __init__(self) -> None:
         self.coordinates: torch.Tensor | None = None
 
@@ -45,7 +30,7 @@ class CapturingPatientEncoder(PatientEncoder):
     def device(self) -> torch.device:
         return torch.device("cpu")
 
-    def to(self, device: torch.device | str) -> "CapturingPatientEncoder":
+    def to(self, device: torch.device | str) -> "CapturingSlideEncoderMixin":
         return self
 
     def encode_slide(
@@ -58,41 +43,22 @@ class CapturingPatientEncoder(PatientEncoder):
         self.coordinates = coordinates
         return torch.zeros(4)
 
+
+class CapturingGigaPathEncoder(CapturingSlideEncoderMixin, GigaPathSlideEncoder):
+    pass
+
+
+class CapturingPatientEncoder(CapturingSlideEncoderMixin, PatientEncoder):
     def encode_patient(self, slide_embeddings: torch.Tensor) -> torch.Tensor:
         return slide_embeddings.mean(dim=0)
 
 
-class CapturingIdentitySlideEncoder(SlideEncoder):
-    def __init__(self) -> None:
-        self.coordinates: torch.Tensor | None = None
-
-    @property
-    def encode_dim(self) -> int:
-        return 4
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device("cpu")
-
-    def to(self, device: torch.device | str) -> "CapturingIdentitySlideEncoder":
-        return self
-
-    def encode_slide(
-        self,
-        tile_features: torch.Tensor,
-        coordinates: torch.Tensor | None = None,
-        *,
-        tile_size_lv0: int | None = None,
-    ) -> torch.Tensor:
-        self.coordinates = coordinates
-        return torch.zeros(4)
+class CapturingIdentitySlideEncoder(CapturingSlideEncoderMixin, SlideEncoder):
+    pass
 
 
-def test_direct_slide_aggregation_prepares_gigapath_coordinates() -> None:
-    encoder = CapturingGigaPathEncoder()
-    loaded = SimpleNamespace(device=torch.device("cpu"), model=encoder)
-    model = SimpleNamespace(level="slide", name="gigapath-slide")
-    tiling_result = SimpleNamespace(
+def make_tiling_result() -> SimpleNamespace:
+    return SimpleNamespace(
         x=np.array([0, 512], dtype=np.int64),
         y=np.array([0, 1024], dtype=np.int64),
         tile_size_lv0=512,
@@ -100,11 +66,17 @@ def test_direct_slide_aggregation_prepares_gigapath_coordinates() -> None:
         requested_spacing_um=0.5,
     )
 
+
+def test_direct_slide_aggregation_prepares_gigapath_coordinates() -> None:
+    encoder = CapturingGigaPathEncoder()
+    loaded = SimpleNamespace(device=torch.device("cpu"), model=encoder)
+    model = SimpleNamespace(level="slide", name="gigapath-slide")
+
     embedding_pipeline.aggregate_tile_embeddings_for_slide(
         loaded,
         model,
         SimpleNamespace(sample_id="slide-a", image_path=Path("slide-a.svs")),
-        tiling_result,
+        make_tiling_result(),
         torch.ones((2, 4)),
         preprocessing=PreprocessingConfig(
             requested_spacing_um=0.5,
@@ -131,13 +103,6 @@ def test_patient_pipeline_uses_shared_coordinate_preparation(
         _declare_encoder_input=lambda *_args, **_kwargs: None,
         _load_backend=lambda: loaded,
     )
-    tiling_result = SimpleNamespace(
-        x=np.array([0, 512], dtype=np.int64),
-        y=np.array([0, 1024], dtype=np.int64),
-        tile_size_lv0=512,
-        base_spacing_um=0.25,
-        requested_spacing_um=0.5,
-    )
     monkeypatch.setattr(
         patient_pipeline,
         "compute_tile_embeddings_for_slide",
@@ -158,7 +123,7 @@ def test_patient_pipeline_uses_shared_coordinate_preparation(
                 mask_path=None,
             )
         ],
-        embeddable_tiling_results=[tiling_result],
+        embeddable_tiling_results=[make_tiling_result()],
         patient_id_map={"slide-a": "patient-a"},
         preprocessing=PreprocessingConfig(
             requested_spacing_um=0.5,
@@ -170,8 +135,9 @@ def test_patient_pipeline_uses_shared_coordinate_preparation(
 
     assert torch.equal(
         encoder.coordinates,
-        torch.tensor([[0, 0], [512, 1024]], dtype=torch.long),
+        torch.tensor([[0, 0], [512, 1024]], dtype=torch.int),
     )
+    assert encoder.coordinates.dtype == torch.int
 
 
 def test_distributed_slide_aggregation_uses_shared_coordinate_preparation(
@@ -190,13 +156,7 @@ def test_distributed_slide_aggregation_uses_shared_coordinate_preparation(
         image_path=tmp_path / "slide-a.svs",
         mask_path=None,
     )
-    tiling_result = SimpleNamespace(
-        x=np.array([0, 512], dtype=np.int64),
-        y=np.array([0, 1024], dtype=np.int64),
-        tile_size_lv0=512,
-        base_spacing_um=0.25,
-        requested_spacing_um=0.5,
-    )
+    tiling_result = make_tiling_result()
 
     @contextmanager
     def fake_coordination_dir(_work_dir: Path):
@@ -241,19 +201,12 @@ def test_non_gigapath_slide_aggregation_retains_coordinates_with_base_identity_h
     encoder = CapturingIdentitySlideEncoder()
     loaded = SimpleNamespace(device=torch.device("cpu"), model=encoder)
     model = SimpleNamespace(level="slide", name="identity-slide")
-    tiling_result = SimpleNamespace(
-        x=np.array([0, 512], dtype=np.int64),
-        y=np.array([0, 1024], dtype=np.int64),
-        tile_size_lv0=512,
-        base_spacing_um=0.25,
-        requested_spacing_um=0.5,
-    )
 
     embedding_pipeline.aggregate_tile_embeddings_for_slide(
         loaded,
         model,
         SimpleNamespace(sample_id="slide-a", image_path=Path("slide-a.svs")),
-        tiling_result,
+        make_tiling_result(),
         torch.ones((2, 4)),
         preprocessing=PreprocessingConfig(
             requested_spacing_um=0.5,
@@ -264,8 +217,9 @@ def test_non_gigapath_slide_aggregation_retains_coordinates_with_base_identity_h
 
     assert torch.equal(
         encoder.coordinates,
-        torch.tensor([[0, 0], [512, 1024]], dtype=torch.long),
+        torch.tensor([[0, 0], [512, 1024]], dtype=torch.int),
     )
+    assert encoder.coordinates.dtype == torch.int
 
 
 def test_persisted_tile_aggregation_prepares_gigapath_coordinates(
@@ -279,13 +233,7 @@ def test_persisted_tile_aggregation_prepares_gigapath_coordinates(
         name="gigapath-slide",
         _load_backend_without_transform=lambda: loaded,
     )
-    tiling_result = SimpleNamespace(
-        x=np.array([0, 512], dtype=np.int64),
-        y=np.array([0, 1024], dtype=np.int64),
-        tile_size_lv0=512,
-        base_spacing_um=0.25,
-        requested_spacing_um=0.5,
-    )
+    tiling_result = make_tiling_result()
     monkeypatch.setattr(tiling, "load_tiling_result_from_paths", lambda *_args: tiling_result)
     monkeypatch.setattr(inference, "load_array", lambda _path: torch.ones((2, 4)))
     monkeypatch.setattr(

@@ -32,7 +32,7 @@ def encode_slide_from_tiles(
     """
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
-    coordinate_tensor = torch.tensor(coordinates, dtype=torch.long, device=loaded.device)
+    coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
     coordinate_tensor = loaded.model.prepare_coordinates(
         coordinate_tensor,
         base_spacing_um=float(tiling_result.base_spacing_um),
