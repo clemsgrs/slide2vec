@@ -22,8 +22,7 @@ from slide2vec.artifacts import (
 from slide2vec.configs.resources import load_config
 from slide2vec.encoders.registry import (
     encoder_registry,
-    resolve_preprocessing_defaults,
-    resolve_preprocessing_requirements,
+    resolve_preprocessing_fields,
 )
 from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.runtime.model_settings import (
@@ -1247,12 +1246,20 @@ def _resolve_direct_api_preprocessing(
 
     requested_spacing_um = preprocessing.requested_spacing_um
     requested_tile_size_px = preprocessing.requested_tile_size_px
-    if requested_spacing_um is None:
-        default_tile_size_px, requested_spacing_um = _default_preprocessing_from_registry(name)
-        if requested_tile_size_px is None:
-            requested_tile_size_px = default_tile_size_px
-    elif requested_tile_size_px is None:
-        requested_tile_size_px = _default_tile_size_from_registry(name)
+    if requested_spacing_um is None or requested_tile_size_px is None:
+        if not name or name not in encoder_registry:
+            raise ValueError(
+                "Cannot infer preprocessing defaults without a registered model. "
+                "Pass preprocessing.requested_spacing_um and "
+                "preprocessing.requested_tile_size_px explicitly."
+            )
+        resolved_fields = resolve_preprocessing_fields(
+            name,
+            requested_spacing_um=requested_spacing_um,
+            requested_tile_size_px=requested_tile_size_px,
+        )
+        requested_spacing_um = float(resolved_fields["spacing_um"])
+        requested_tile_size_px = int(resolved_fields["tile_size_px"])
     return _resolve_hierarchical_preprocessing(
         replace(
             preprocessing,
@@ -1269,18 +1276,12 @@ def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
             "Pass preprocessing.requested_spacing_um and preprocessing.requested_tile_size_px explicitly."
         )
 
-    defaults = resolve_preprocessing_defaults(name)
-    return int(defaults["tile_size_px"]), float(defaults["spacing_um"])
-
-
-def _default_tile_size_from_registry(name: str | None) -> int:
-    if not name or name not in encoder_registry:
-        raise ValueError(
-            "Cannot infer preprocessing defaults without a registered model. "
-            "Pass preprocessing.requested_tile_size_px explicitly."
-        )
-    requirements = resolve_preprocessing_requirements(name)
-    return int(requirements["tile_size_px"])
+    resolved_fields = resolve_preprocessing_fields(
+        name,
+        requested_spacing_um=None,
+        requested_tile_size_px=None,
+    )
+    return int(resolved_fields["tile_size_px"]), float(resolved_fields["spacing_um"])
 
 
 def _validate_model_config(
