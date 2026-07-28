@@ -116,7 +116,7 @@ def _optional_float(value: Any) -> float | None:
 
 def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     manifest_path = Path(csv_path).resolve()
-    df = pd.read_csv(manifest_path)
+    df = pd.read_csv(manifest_path, converters={"sample_id": str})
     legacy_mask_columns = sorted(
         column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
     )
@@ -165,14 +165,25 @@ def load_patient_id_mapping(csv_path: str | Path) -> dict[str, str]:
     Raises ValueError if the 'patient_id' column is absent.
     """
     manifest_path = Path(csv_path).resolve()
-    df = pd.read_csv(manifest_path)
+    df = pd.read_csv(
+        manifest_path,
+        converters={"sample_id": str, "patient_id": str},
+    )
     if "patient_id" not in df.columns:
         raise ValueError(
             f"Input CSV {manifest_path} is missing the required 'patient_id' column "
             "for patient-level models. Add a 'patient_id' column that groups slides "
             "belonging to the same patient."
         )
-    return dict(zip(df["sample_id"].astype(str), df["patient_id"].astype(str)))
+    patient_ids = df["patient_id"]
+    invalid_patient_ids = patient_ids.fillna("").str.strip().eq("")
+    if invalid_patient_ids.any():
+        invalid_samples = df.loc[invalid_patient_ids, "sample_id"].tolist()
+        raise ValueError(
+            "Invalid patient_id values for samples: "
+            + ", ".join(str(sample_id) for sample_id in invalid_samples)
+        )
+    return dict(zip(df["sample_id"].tolist(), patient_ids.tolist()))
 
 
 def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
