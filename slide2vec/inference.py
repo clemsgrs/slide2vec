@@ -752,7 +752,7 @@ def run_pipeline(
     tiling_only: bool = False,
     execution: ExecutionOptions,
 ) -> RunResult:
-    if model.level == "patient" and not tiling_only:
+    if model.level == "patient":
         patient_id_map = manifest.resolve_patient_id_map(slides=slides, manifest_path=manifest_path)
     else:
         patient_id_map = None

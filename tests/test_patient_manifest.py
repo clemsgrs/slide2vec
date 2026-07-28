@@ -1,8 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+from slide2vec.inference import run_pipeline
 from slide2vec.utils.tiling_io import load_patient_id_mapping, load_slide_manifest
 
 
@@ -56,3 +58,51 @@ def test_slide_manifest_preserves_leading_zero_sample_ids(tmp_path: Path):
     slides = load_slide_manifest(manifest)
 
     assert [slide.sample_id for slide in slides] == ["0007", "0008"]
+
+
+def test_patient_tiling_only_validates_ids_before_creating_output(tmp_path: Path):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "sample_id,image_path,patient_id\n"
+        "sample-a,/slides/a.svs,\n"
+    )
+    output_dir = tmp_path / "output"
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Invalid patient_id values for samples: sample-a$",
+    ):
+        run_pipeline(
+            SimpleNamespace(level="patient"),
+            manifest_path=manifest,
+            tiling_only=True,
+            execution=SimpleNamespace(output_dir=output_dir, num_gpus=1),
+        )
+
+    assert not output_dir.exists()
+
+
+def test_patient_mapping_preserves_text_matching_pandas_na_tokens(tmp_path: Path):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "sample_id,image_path,patient_id\n"
+        "NA,/slides/a.svs,NA\n"
+    )
+
+    mapping = load_patient_id_mapping(manifest)
+
+    assert mapping == {"NA": "NA"}
+
+
+def test_slide_manifest_preserves_sample_id_matching_pandas_na_tokens(
+    tmp_path: Path,
+):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "sample_id,image_path\n"
+        "NA,/slides/a.svs\n"
+    )
+
+    slides = load_slide_manifest(manifest)
+
+    assert [slide.sample_id for slide in slides] == ["NA"]

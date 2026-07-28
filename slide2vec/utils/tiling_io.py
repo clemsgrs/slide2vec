@@ -116,7 +116,7 @@ def _optional_float(value: Any) -> float | None:
 
 def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     manifest_path = Path(csv_path).resolve()
-    df = pd.read_csv(manifest_path, dtype={"sample_id": "string"})
+    df = pd.read_csv(manifest_path, converters={"sample_id": str})
     legacy_mask_columns = sorted(
         column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
     )
@@ -167,7 +167,7 @@ def load_patient_id_mapping(csv_path: str | Path) -> dict[str, str]:
     manifest_path = Path(csv_path).resolve()
     df = pd.read_csv(
         manifest_path,
-        dtype={"sample_id": "string", "patient_id": "string"},
+        converters={"sample_id": str, "patient_id": str},
     )
     if "patient_id" not in df.columns:
         raise ValueError(
