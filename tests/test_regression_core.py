@@ -1,4 +1,5 @@
 import ast
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,6 +54,143 @@ def test_packaged_preprocessing_config_matches_hs2p_4_tiling_schema():
     assert hasattr(cfg.tiling.preview, "save_mask_preview")
     assert hasattr(cfg.tiling.preview, "save_tiling_preview")
     assert hasattr(cfg.tiling.preview, "tissue_contour_color")
+
+
+def test_default_public_preprocessing_constructs_complete_hs2p_configs():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+    )
+
+    _, segmentation, filtering, preview, *_ = build_hs2p_configs(preprocessing)
+
+    assert asdict(segmentation) == {
+        "method": "hsv",
+        "downsample": 64,
+        "sthresh": 8,
+        "sthresh_up": 255,
+        "mthresh": 7,
+        "close": 4,
+        "sam2_checkpoint_path": None,
+        "sam2_config_path": None,
+        "sam2_device": "cpu",
+        "sam2_num_workers": None,
+    }
+    assert asdict(filtering) == {
+        "ref_tile_size": 224,
+        "a_t": 4,
+        "a_h": 2,
+        "filter_white": False,
+        "filter_black": False,
+        "white_threshold": 220,
+        "black_threshold": 25,
+        "fraction_threshold": 0.9,
+        "filter_grayspace": False,
+        "grayspace_saturation_threshold": 0.05,
+        "grayspace_fraction_threshold": 0.6,
+        "filter_blur": False,
+        "blur_threshold": 50.0,
+        "qc_spacing_um": 2.0,
+    }
+    assert asdict(preview) == {
+        "save_mask_preview": True,
+        "save_tiling_preview": True,
+        "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
+        "mask_overlay_alpha": 0.5,
+    }
+
+
+def test_partial_segmentation_override_changes_only_requested_field():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        segmentation={"downsample": 32},
+    )
+
+    segmentation = build_hs2p_configs(preprocessing)[1]
+
+    assert asdict(segmentation) == {
+        "method": "hsv",
+        "downsample": 32,
+        "sthresh": 8,
+        "sthresh_up": 255,
+        "mthresh": 7,
+        "close": 4,
+        "sam2_checkpoint_path": None,
+        "sam2_config_path": None,
+        "sam2_device": "cpu",
+        "sam2_num_workers": None,
+    }
+
+
+def test_partial_filtering_override_changes_only_requested_field():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        filtering={"a_t": 7},
+    )
+
+    filtering = build_hs2p_configs(preprocessing)[2]
+
+    assert asdict(filtering) == {
+        "ref_tile_size": 224,
+        "a_t": 7,
+        "a_h": 2,
+        "filter_white": False,
+        "filter_black": False,
+        "white_threshold": 220,
+        "black_threshold": 25,
+        "fraction_threshold": 0.9,
+        "filter_grayspace": False,
+        "grayspace_saturation_threshold": 0.05,
+        "grayspace_fraction_threshold": 0.6,
+        "filter_blur": False,
+        "blur_threshold": 50.0,
+        "qc_spacing_um": 2.0,
+    }
+
+
+def test_partial_preview_override_changes_only_requested_field():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        preview={"save_tiling_preview": False},
+    )
+
+    preview = build_hs2p_configs(preprocessing)[3]
+
+    assert asdict(preview) == {
+        "save_mask_preview": True,
+        "save_tiling_preview": False,
+        "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
+        "mask_overlay_alpha": 0.5,
+    }
+
+
+def test_public_preprocessing_defaults_match_standard_configuration():
+    cfg = load_config("default")
+    cfg.tiling.params.requested_spacing_um = 0.5
+    cfg.tiling.params.requested_tile_size_px = 224
+
+    standard = PreprocessingConfig.from_config(cfg)
+    public = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+    )
+
+    assert public.segmentation == standard.segmentation
+    assert public.filtering == standard.filtering
+    assert public.preview == standard.preview
 
 
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):

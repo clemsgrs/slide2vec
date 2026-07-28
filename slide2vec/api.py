@@ -63,14 +63,55 @@ DEFAULT_MASKS: dict[str, Any] = {
     "min_coverage": {"background": None, "tissue": 0.01},
 }
 
+#: Complete defaults for the nested public preprocessing sections. These mirror
+#: ``configs/default.yaml`` so a Python caller gets the same tiling recipe as the
+#: standard configuration without having to repeat every hs2p constructor field.
+DEFAULT_PREPROCESSING: dict[str, dict[str, Any]] = {
+    "segmentation": {
+        "method": "hsv",
+        "downsample": 64,
+        "sthresh": 8,
+        "sthresh_up": 255,
+        "mthresh": 7,
+        "close": 4,
+        "sam2_checkpoint_path": None,
+        "sam2_config_path": None,
+        "sam2_device": "cpu",
+        "sam2_num_workers": None,
+    },
+    "filtering": {
+        "ref_tile_size": 224,
+        "a_t": 4,
+        "a_h": 2,
+        "filter_white": False,
+        "filter_black": False,
+        "white_threshold": 220,
+        "black_threshold": 25,
+        "fraction_threshold": 0.9,
+        "filter_grayspace": False,
+        "grayspace_saturation_threshold": 0.05,
+        "grayspace_fraction_threshold": 0.6,
+        "filter_blur": False,
+        "blur_threshold": 50.0,
+        "qc_spacing_um": 2.0,
+    },
+    "preview": {
+        "save_mask_preview": True,
+        "save_tiling_preview": True,
+        "downsample": 32,
+        "tissue_contour_color": (157, 219, 129),
+        "mask_overlay_alpha": 0.5,
+    },
+}
 
-def _deep_merge_masks(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+
+def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
     """Deep-merge *override* onto a copy of *base* (nested dicts merge key-by-key)."""
     merged = copy.deepcopy(dict(base))
     for key, value in override.items():
         existing = merged.get(key)
         if isinstance(value, Mapping) and isinstance(existing, dict):
-            merged[key] = _deep_merge_masks(existing, value)
+            merged[key] = _deep_merge_dicts(existing, value)
         else:
             merged[key] = copy.deepcopy(value)
     return merged
@@ -80,7 +121,7 @@ def resolve_masks(masks: Mapping[str, Any] | None) -> dict[str, Any]:
     """Complete a (possibly partial) ``masks`` mapping by merging it over :data:`DEFAULT_MASKS`."""
     if not masks:
         return copy.deepcopy(DEFAULT_MASKS)
-    return _deep_merge_masks(DEFAULT_MASKS, masks)
+    return _deep_merge_dicts(DEFAULT_MASKS, masks)
 
 
 def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
@@ -146,13 +187,16 @@ class PreprocessingConfig:
     num_cucim_workers: int = 4
     #: Skip slides already present in the output directory when ``True``.
     resume: bool = False
-    #: Forwarded to hs2p segmentation config. Supported keys: ``method``,
-    #: ``downsample``, ``sam2_device``. See :doc:`preprocessing` for details.
+    #: Partial override forwarded to hs2p segmentation config. Supported keys:
+    #: ``method``, ``downsample``, ``sam2_device``. Omitted keys retain the
+    #: standard configuration defaults. See :doc:`preprocessing` for details.
     segmentation: dict[str, Any] = field(default_factory=dict)
-    #: Forwarded to hs2p tile-filtering config.
+    #: Partial override forwarded to hs2p tile-filtering config. Omitted keys
+    #: retain the standard configuration defaults.
     filtering: dict[str, Any] = field(default_factory=dict)
-    #: Controls whether hs2p writes mask and tiling preview images.
-    #: Keys: ``save_mask_preview``, ``save_tiling_preview``, ``downsample``.
+    #: Partial override controlling whether hs2p writes mask and tiling preview
+    #: images. Keys: ``save_mask_preview``, ``save_tiling_preview``,
+    #: ``downsample``. Omitted keys retain the standard configuration defaults.
     preview: dict[str, Any] = field(default_factory=dict)
     #: Annotation-mask vocabulary forwarded to hs2p's sampling resolver. Keys:
     #: ``output_mode``, ``pixel_mapping``, ``colors``, ``min_coverage``. A partial
@@ -166,6 +210,21 @@ class PreprocessingConfig:
     independent_sampling: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "segmentation",
+            _deep_merge_dicts(DEFAULT_PREPROCESSING["segmentation"], self.segmentation),
+        )
+        object.__setattr__(
+            self,
+            "filtering",
+            _deep_merge_dicts(DEFAULT_PREPROCESSING["filtering"], self.filtering),
+        )
+        object.__setattr__(
+            self,
+            "preview",
+            _deep_merge_dicts(DEFAULT_PREPROCESSING["preview"], self.preview),
+        )
         # Complete a (possibly partial) masks mapping against the shipped default.
         object.__setattr__(self, "masks", resolve_masks(self.masks))
 
