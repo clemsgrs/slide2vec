@@ -199,41 +199,34 @@ def update_process_list_after_embedding(
         df["feature_kind"] = [None] * len(df)
     if include_slide_embeddings and "aggregation_status" not in df.columns:
         df["aggregation_status"] = ["tbp"] * len(df)
-    tile_success_ids = {artifact.sample_id for artifact in tile_artifacts}
-    hierarchical_success_ids = {artifact.sample_id for artifact in hierarchical_artifacts}
     slide_success_ids = {artifact.sample_id for artifact in slide_artifacts}
     # Every embedding kind can fan out per (sample_id, annotation). Tissue/None annotations
     # normalize to the flat slot, preserving the default single-row path.
-    slide_path_by_key = {
-        (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(artifact.path)
-        for artifact in slide_artifacts
-    }
     slide_success_keys = {
         (artifact.sample_id, _normalized_annotation(artifact.annotation)) for artifact in slide_artifacts
     }
     if slide_artifacts:
-        feature_path_by_key = slide_path_by_key
+        feature_artifacts = slide_artifacts
         feature_kind = "slide"
-        feature_success_ids = slide_success_ids
     elif persist_hierarchical_embeddings:
-        feature_path_by_key = {
-            (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(artifact.path)
-            for artifact in hierarchical_artifacts
-        }
+        feature_artifacts = hierarchical_artifacts
         feature_kind = "hierarchical"
-        feature_success_ids = hierarchical_success_ids
     elif persist_tile_embeddings:
-        feature_path_by_key = {
-            (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(
-                artifact.path
-            )
-            for artifact in tile_artifacts
-        }
+        feature_artifacts = tile_artifacts
         feature_kind = "tile"
-        feature_success_ids = tile_success_ids
     else:
-        feature_path_by_key = {}
+        feature_artifacts = []
         feature_kind = None
+
+    feature_path_by_key = {
+        (artifact.sample_id, _normalized_annotation(artifact.annotation)): _resolve_path_str(
+            artifact.path
+        )
+        for artifact in feature_artifacts
+    }
+    if feature_artifacts:
+        feature_success_ids = {artifact.sample_id for artifact in feature_artifacts}
+    else:
         feature_success_ids = {slide.sample_id for slide in successful_slides}
     feature_success_keys = set(feature_path_by_key)
     annotation_aware = any(annotation is not None for _, annotation in feature_success_keys)

@@ -645,50 +645,7 @@ def test_collect_distributed_pipeline_artifacts_reconciles_per_class_tile_paths(
         output_dir=fixture.output_dir,
     )
 
-    assert [(artifact.annotation, artifact.path) for artifact in tile_artifacts] == [
-        (
-            "tumor",
-            fixture.output_dir / "tile_embeddings" / "tumor" / "slide-a.pt",
-        ),
-        (
-            "stroma",
-            fixture.output_dir / "tile_embeddings" / "stroma" / "slide-a.pt",
-        ),
-    ]
-    recorded = pd.read_csv(fixture.process_list_path).set_index("annotation")
-    assert [
-        (
-            annotation,
-            recorded.loc[annotation, "feature_status"],
-            recorded.loc[annotation, "feature_path"],
-        )
-        for annotation in ["tumor", "stroma"]
-    ] == [
-        (
-            "tumor",
-            "success",
-            str(
-                (
-                    fixture.output_dir
-                    / "tile_embeddings"
-                    / "tumor"
-                    / "slide-a.pt"
-                ).resolve()
-            ),
-        ),
-        (
-            "stroma",
-            "success",
-            str(
-                (
-                    fixture.output_dir
-                    / "tile_embeddings"
-                    / "stroma"
-                    / "slide-a.pt"
-                ).resolve()
-            ),
-        ),
-    ]
+    _assert_per_annotation_tile_reconciliation(fixture, tile_artifacts)
 
 
 def test_collect_distributed_pipeline_artifacts_fans_out_per_class_annotations_to_stage(
@@ -5287,6 +5244,35 @@ def per_annotation_tile_bags(tmp_path: Path):
     )
 
 
+def _assert_per_annotation_tile_reconciliation(fixture, tile_artifacts) -> None:
+    expected_paths = {
+        annotation: (
+            fixture.output_dir
+            / "tile_embeddings"
+            / annotation
+            / "slide-a.pt"
+        )
+        for annotation in fixture.annotations
+    }
+    assert [(artifact.annotation, artifact.path) for artifact in tile_artifacts] == [
+        (annotation, expected_paths[annotation])
+        for annotation in fixture.annotations
+    ]
+
+    recorded = pd.read_csv(fixture.process_list_path).set_index("annotation")
+    assert [
+        (
+            annotation,
+            recorded.loc[annotation, "feature_status"],
+            recorded.loc[annotation, "feature_path"],
+        )
+        for annotation in fixture.annotations
+    ] == [
+        (annotation, "success", str(expected_paths[annotation].resolve()))
+        for annotation in fixture.annotations
+    ]
+
+
 def _fake_tiling_result_loader(monkeypatch):
     """Make tiling_io.load_tiling_result return a minimal in-memory result (no file IO)."""
     def _fake_load_tiling_result(*, coordinates_npz_path, coordinates_meta_path):
@@ -5489,46 +5475,7 @@ def test_run_pipeline_single_gpu_reconciles_per_class_tile_embeddings(
         execution=ExecutionOptions(output_dir=fixture.output_dir, num_gpus=1),
     )
 
-    assert [(artifact.annotation, artifact.path) for artifact in result.tile_artifacts] == [
-        (
-            "tumor",
-            fixture.output_dir / "tile_embeddings" / "tumor" / "slide-a.pt",
-        ),
-        (
-            "stroma",
-            fixture.output_dir / "tile_embeddings" / "stroma" / "slide-a.pt",
-        ),
-    ]
-    recorded = pd.read_csv(fixture.process_list_path).set_index("annotation")
-    assert [
-        (annotation, recorded.loc[annotation, "feature_status"], recorded.loc[annotation, "feature_path"])
-        for annotation in ["tumor", "stroma"]
-    ] == [
-        (
-            "tumor",
-            "success",
-            str(
-                (
-                    fixture.output_dir
-                    / "tile_embeddings"
-                    / "tumor"
-                    / "slide-a.pt"
-                ).resolve()
-            ),
-        ),
-        (
-            "stroma",
-            "success",
-            str(
-                (
-                    fixture.output_dir
-                    / "tile_embeddings"
-                    / "stroma"
-                    / "slide-a.pt"
-                ).resolve()
-            ),
-        ),
-    ]
+    _assert_per_annotation_tile_reconciliation(fixture, result.tile_artifacts)
 
 
 # --- Issue #156: per-annotation slide embeddings (top-seam) ---
