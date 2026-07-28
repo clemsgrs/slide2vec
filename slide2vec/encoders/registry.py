@@ -267,6 +267,36 @@ def resolve_preprocessing_defaults(
     }
 
 
+def resolve_preprocessing_fields(
+    encoder_name: str,
+    *,
+    requested_spacing_um: float | None,
+    requested_tile_size_px: int | None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Fill only missing requested preprocessing fields from encoder metadata.
+
+    Spacing defaults are deliberately resolved only when spacing itself is
+    missing. A missing tile size uses the encoder requirements, which remain
+    valid for encoders that support several spacings.
+    """
+    resolved_spacing_um = requested_spacing_um
+    resolved_tile_size_px = requested_tile_size_px
+    if resolved_spacing_um is None:
+        preprocessing_defaults = resolve_preprocessing_defaults(encoder_name, metadata)
+        resolved_spacing_um = float(preprocessing_defaults["spacing_um"])
+        if resolved_tile_size_px is None:
+            resolved_tile_size_px = int(preprocessing_defaults["tile_size_px"])
+    elif resolved_tile_size_px is None:
+        preprocessing_requirements = resolve_preprocessing_requirements(encoder_name, metadata)
+        resolved_tile_size_px = int(preprocessing_requirements["tile_size_px"])
+
+    return {
+        "spacing_um": float(resolved_spacing_um),
+        "tile_size_px": int(resolved_tile_size_px),
+    }
+
+
 def resolve_encoder_output(
     encoder_name: str,
     *,
