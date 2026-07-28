@@ -32,7 +32,12 @@ def encode_slide_from_tiles(
     """
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
-    coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
+    coordinate_tensor = torch.tensor(coordinates, dtype=torch.long, device=loaded.device)
+    coordinate_tensor = loaded.model.prepare_coordinates(
+        coordinate_tensor,
+        base_spacing_um=float(tiling_result.base_spacing_um),
+        requested_spacing_um=float(tiling_result.requested_spacing_um),
+    )
     features = tile_embeddings.to(loaded.device)
     with slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
         with torch.inference_mode():
