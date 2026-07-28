@@ -193,6 +193,19 @@ def test_public_preprocessing_defaults_match_standard_configuration():
     assert public.preview == standard.preview
 
 
+def test_public_filtering_default_tracks_requested_tile_size():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=448,
+    )
+
+    filtering = build_hs2p_configs(preprocessing)[2]
+
+    assert filtering.ref_tile_size == 448
+
+
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):
     pytest.importorskip("omegaconf")
 

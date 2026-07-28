@@ -19,6 +19,7 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
+from slide2vec.configs.resources import load_config
 from slide2vec.encoders.registry import (
     encoder_registry,
     resolve_preprocessing_defaults,
@@ -63,46 +64,33 @@ DEFAULT_MASKS: dict[str, Any] = {
     "min_coverage": {"background": None, "tissue": 0.01},
 }
 
-#: Complete defaults for the nested public preprocessing sections. These mirror
-#: ``configs/default.yaml`` so a Python caller gets the same tiling recipe as the
-#: standard configuration without having to repeat every hs2p constructor field.
-DEFAULT_PREPROCESSING: dict[str, dict[str, Any]] = {
-    "segmentation": {
-        "method": "hsv",
-        "downsample": 64,
-        "sthresh": 8,
-        "sthresh_up": 255,
-        "mthresh": 7,
-        "close": 4,
-        "sam2_checkpoint_path": None,
-        "sam2_config_path": None,
-        "sam2_device": "cpu",
-        "sam2_num_workers": None,
-    },
-    "filtering": {
-        "ref_tile_size": 224,
-        "a_t": 4,
-        "a_h": 2,
-        "filter_white": False,
-        "filter_black": False,
-        "white_threshold": 220,
-        "black_threshold": 25,
-        "fraction_threshold": 0.9,
-        "filter_grayspace": False,
-        "grayspace_saturation_threshold": 0.05,
-        "grayspace_fraction_threshold": 0.6,
-        "filter_blur": False,
-        "blur_threshold": 50.0,
-        "qc_spacing_um": 2.0,
-    },
-    "preview": {
-        "save_mask_preview": True,
-        "save_tiling_preview": True,
-        "downsample": 32,
-        "tissue_contour_color": (157, 219, 129),
-        "mask_overlay_alpha": 0.5,
-    },
-}
+_REQUESTED_TILE_SIZE_INTERPOLATION = "${tiling.params.requested_tile_size_px}"
+
+
+def _load_default_preprocessing() -> dict[str, dict[str, Any]]:
+    """Read the public nested defaults from the package's canonical YAML config."""
+    from omegaconf import OmegaConf
+
+    tiling = load_config("default").tiling
+    defaults: dict[str, dict[str, Any]] = {}
+    for public_name, config_name in (
+        ("segmentation", "seg_params"),
+        ("filtering", "filter_params"),
+        ("preview", "preview"),
+    ):
+        section = OmegaConf.to_container(getattr(tiling, config_name), resolve=False)
+        if not isinstance(section, dict):
+            raise TypeError(f"tiling.{config_name} must be a mapping")
+        defaults[public_name] = section
+    defaults["preview"]["tissue_contour_color"] = tuple(
+        defaults["preview"]["tissue_contour_color"]
+    )
+    return defaults
+
+
+#: Complete defaults for the nested public preprocessing sections, loaded from
+#: ``configs/default.yaml`` so Python and YAML entry points share one source.
+DEFAULT_PREPROCESSING = _load_default_preprocessing()
 
 
 def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -210,6 +198,21 @@ class PreprocessingConfig:
     independent_sampling: bool = True
 
     def __post_init__(self) -> None:
+        filtering_defaults = DEFAULT_PREPROCESSING["filtering"]
+        filtering_override = self.filtering
+        if self.requested_tile_size_px is not None:
+            filtering_defaults = {
+                **filtering_defaults,
+                "ref_tile_size": int(self.requested_tile_size_px),
+            }
+            if (
+                filtering_override.get("ref_tile_size")
+                == _REQUESTED_TILE_SIZE_INTERPOLATION
+            ):
+                filtering_override = {
+                    **filtering_override,
+                    "ref_tile_size": int(self.requested_tile_size_px),
+                }
         object.__setattr__(
             self,
             "segmentation",
@@ -218,7 +221,7 @@ class PreprocessingConfig:
         object.__setattr__(
             self,
             "filtering",
-            _deep_merge_dicts(DEFAULT_PREPROCESSING["filtering"], self.filtering),
+            _deep_merge_dicts(filtering_defaults, filtering_override),
         )
         object.__setattr__(
             self,
