@@ -15,7 +15,6 @@ import pandas as pd
 import torch
 from hs2p import SlideSpec, tile_slides
 from hs2p.utils.stderr import run_with_filtered_stderr
-import numpy as np
 
 from slide2vec.runtime import (
     artifacts_collect,
@@ -69,7 +68,6 @@ from slide2vec.progress import (
     emit_progress,
     read_tiling_progress_snapshot,
 )
-from slide2vec.utils.coordinates import coordinate_arrays
 from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
 from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
@@ -724,27 +722,15 @@ def aggregate_tiles(
             Path(metadata["coordinates_npz_path"]),
             Path(metadata["coordinates_meta_path"]),
         )
-        x_values, y_values = coordinate_arrays(tiling_result)
-        coordinates = np.column_stack((x_values, y_values))
-        image_path = Path(metadata["image_path"])
-        if model.name == "prov-gigapath":
-            coordinates = tiling.scale_coordinates(
-                coordinates,
-                float(tiling_result.base_spacing_um),
-                float(tiling_result.requested_spacing_um),
-            )
-        coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
         tile_features = load_array(artifact.path)
         if not torch.is_tensor(tile_features):
             tile_features = torch.as_tensor(tile_features)
-        tile_features = tile_features.to(loaded.device)
-        with slide_encode.slide_encode_autocast_ctx(loaded.device, execution.precision):
-            with torch.inference_mode():
-                slide_embedding = loaded.model.encode_slide(
-                    tile_features,
-                    coordinate_tensor,
-                    tile_size_lv0=int(tiling_result.tile_size_lv0),
-                )
+        slide_embedding = slide_encode.encode_slide_from_tiles(
+            loaded,
+            tile_features,
+            tiling_result,
+            execution=execution,
+        )
         latents = None
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,

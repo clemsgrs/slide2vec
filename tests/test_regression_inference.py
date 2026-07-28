@@ -1265,6 +1265,7 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
             x=np.array([0], dtype=np.int64),
             y=np.array([1], dtype=np.int64),
             tile_size_lv0=224,
+            base_spacing_um=0.25,
             requested_spacing_um=0.5,
         ),
     )
@@ -1284,7 +1285,13 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
         captured["latents"] = latents
         return SimpleNamespace(sample_id=sample_id, path=tmp_path / "slide_embeddings" / f"{sample_id}.pt")
 
-    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    loaded = SimpleNamespace(
+        device=torch.device("cpu"),
+        model=SimpleNamespace(
+            encode_slide=encode_slide,
+            prepare_coordinates=lambda coordinates, **_spacings: coordinates,
+        ),
+    )
     model = SimpleNamespace(
         name="prism",
         level="slide",
@@ -1343,13 +1350,21 @@ def test_aggregate_tile_embeddings_for_slide_uses_autocast(monkeypatch, tmp_path
     monkeypatch.setattr(slide_encode, "autocast_dtype", lambda torch_module, precision: torch_module.float16)
     monkeypatch.setattr(slide_encode, "uses_cuda_runtime", lambda device: True)
 
-    loaded = SimpleNamespace(device=torch.device("cpu"), model=SimpleNamespace(encode_slide=encode_slide))
+    loaded = SimpleNamespace(
+        device=torch.device("cpu"),
+        model=SimpleNamespace(
+            encode_slide=encode_slide,
+            prepare_coordinates=lambda coordinates, **_spacings: coordinates,
+        ),
+    )
     model = SimpleNamespace(level="slide", name="prism")
     slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0], dtype=np.int64),
         y=np.array([1], dtype=np.int64),
         tile_size_lv0=224,
+        base_spacing_um=0.25,
+        requested_spacing_um=0.5,
     )
     tile_embeddings = np.ones((1, 4), dtype=np.float32)
 
