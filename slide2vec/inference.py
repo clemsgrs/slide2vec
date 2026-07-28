@@ -239,8 +239,12 @@ def _reconcile_embedding_process_list(
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
     annotations = None
-    if (include_slide_embeddings or persist_hierarchical_embeddings) and embeddable_tiling_results is not None:
-        # Re-read each class's namespaced slide- or hierarchical-embedding artifact so the
+    if (
+        include_tile_embeddings
+        or include_slide_embeddings
+        or persist_hierarchical_embeddings
+    ) and embeddable_tiling_results is not None:
+        # Re-read each class's namespaced tile-, slide-, or hierarchical-embedding artifact so the
         # final reconcile records the per-class feature path instead of collapsing every
         # annotation row onto the flat path. The default tissue-only path leaves annotations
         # None.

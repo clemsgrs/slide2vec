@@ -168,16 +168,18 @@ def collect_distributed_pipeline_artifacts(
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
-    # Slide- and hierarchical-embedding artifacts fan out per (sample_id, annotation); the process
-    # list (one row per pair after hs2p tiling) is the source of truth for which classes exist.
-    # Tile embeddings are sample_id-keyed only, so they don't need the per-class resolution.
-    annotation_aware = include_slide_embeddings or persist_hierarchical_embeddings
+    # Every persisted embedding kind can fan out per (sample_id, annotation); the process list
+    # (one row per pair after hs2p tiling) is the source of truth for which classes exist.
+    annotation_aware = (
+        include_tile_embeddings
+        or include_slide_embeddings
+        or persist_hierarchical_embeddings
+    )
     annotation_groups = (
         _embeddable_annotation_groups(process_list_path) if annotation_aware else {}
     )
-    # The embedding *stage* must fan out per (sample_id, annotation) for every level (tile / slide /
-    # hierarchical) so each class's tiles are actually embedded — independent of whether the
-    # process-list *reconcile* is annotation-aware (tile artifacts stay sample_id-keyed in #167).
+    # The embedding stage must fan out per (sample_id, annotation) for every level so each class's
+    # tiles are embedded independently.
     stage_annotation_groups = _embeddable_annotation_groups(process_list_path)
     # One annotation per ``successful_slides`` entry (the tiling spine fans out per class). Carry each
     # on a lightweight placeholder so the resume gate keys by (sample_id, annotation) and the surviving

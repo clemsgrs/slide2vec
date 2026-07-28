@@ -20,6 +20,7 @@ class TileEmbeddingArtifact:
     format: str
     feature_dim: int
     num_tiles: int
+    annotation: str | None = None
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -463,6 +464,7 @@ def _build_tile_embedding_metadata(
     output_format: str,
     feature_dim: int | None,
     num_tiles: int,
+    annotation: str | None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tile_metadata = {
@@ -474,6 +476,9 @@ def _build_tile_embedding_metadata(
     }
     if metadata:
         tile_metadata.update(metadata)
+    tile_metadata["annotation"] = (
+        None if is_flattened_annotation(annotation) else str(annotation)
+    )
     return tile_metadata
 
 
@@ -521,6 +526,7 @@ def write_tile_embeddings(
         output_format=output_format,
         feature_dim=int(feature_array.shape[-1]) if feature_array.ndim else 1,
         num_tiles=int(feature_array.shape[0]) if feature_array.ndim else 1,
+        annotation=annotation,
         metadata=metadata,
     )
     _write_metadata(metadata_path, tile_metadata)
@@ -531,6 +537,7 @@ def write_tile_embeddings(
         format=output_format,
         feature_dim=tile_metadata["feature_dim"],
         num_tiles=tile_metadata["num_tiles"],
+        annotation=tile_metadata["annotation"],
     )
 
 
@@ -553,6 +560,7 @@ def write_tile_embedding_metadata(
         output_format=output_format,
         feature_dim=feature_dim,
         num_tiles=num_tiles,
+        annotation=annotation,
         metadata=metadata,
     )
     _write_metadata(metadata_path, tile_metadata)
