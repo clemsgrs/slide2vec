@@ -238,6 +238,7 @@ class ExecutionOptions:
     batch_size: int = 32
     #: DataLoader worker count per GPU rank. ``None`` means auto
     #: (capped by CPU / SLURM limit, then split across the resolved GPU count).
+    #: Image-only routes safely use zero when auto selection happens after model loading.
     num_workers_per_gpu: int | None = None
     #: Tiling worker count. ``None`` means auto (capped by CPU / SLURM limit).
     num_preprocessing_workers: int | None = None
@@ -321,6 +322,12 @@ class ExecutionOptions:
         if self.num_workers_per_gpu is not None:
             return self.num_workers_per_gpu
         return max(1, cpu_worker_limit() // self.num_gpus)
+
+    def resolved_image_num_workers_per_gpu(self) -> int:
+        """Resolve safe post-model-load image-transform workers for this rank."""
+        if self.num_workers_per_gpu is None:
+            return 0
+        return self.resolved_num_workers_per_gpu()
 
     def with_output_dir(self, output_dir: PathLike | None) -> "ExecutionOptions":
         if output_dir is None:
@@ -822,8 +829,9 @@ class Model:
         heterogeneously sized (2048x1536 beside 96x96) and were never requested, so the
         encoder's shipped transform is the contract and slide2vec *records* the resulting
         encoder input size as run provenance rather than validating it. That also means
-        preprocessing runs itemwise in the loader workers — differently sized images cannot
-        be stacked before they are resized.
+        preprocessing runs itemwise before stacking — in-process by default, or in spawned
+        loader workers when ``num_workers_per_gpu`` is explicit — because differently sized
+        images cannot be stacked before they are resized.
         """
         from slide2vec.runtime.image_stage import embed_images
 

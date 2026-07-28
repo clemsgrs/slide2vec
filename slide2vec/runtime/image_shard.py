@@ -126,7 +126,7 @@ def _move_batch_to_device(loaded: "LoadedModel") -> Callable:
     """Batch 'preprocessing' for this path: the transform already ran, so only move.
 
     Passing this rather than ``None`` is what keeps the prefetcher from applying
-    ``loaded.transforms`` a second time — here the loader workers already did, per item.
+    ``loaded.transforms`` a second time — the dataset already did so itemwise.
     """
 
     def move(image):
@@ -168,7 +168,7 @@ def run_image_shard(
         loaded.encoder_input_size_px = None
         dataset = ImageFileDataset(
             [spec.image_path for spec in pending],
-            # partial, not a closure: the recipe is pickled into the loader workers.
+            # partial, not a closure: the recipe is picklable by explicit spawned workers.
             partial(apply_transforms_itemwise, transforms=loaded.transforms),
         )
         dataloader = torch.utils.data.DataLoader(
@@ -180,6 +180,7 @@ def run_image_shard(
                 device=loaded.device,
                 num_workers=int(num_workers),
                 prefetch_factor=int(prefetch_factor),
+                worker_start_method="spawn",
             ),
         )
         cast_dtype = autocast_dtype(torch, precision)

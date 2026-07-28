@@ -87,7 +87,12 @@ def test_embed_images_dense_num_gpus_one_runs_in_process(tmp_path, monkeypatch):
         lambda **kwargs: pytest.fail("num_gpus=1 must not launch torchrun"),
     )
     model = _FakeModel(_encoder())
-    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out",
+        num_gpus=1,
+        precision="fp32",
+        num_workers_per_gpu=0,
+    )
 
     artifacts = dense_image_stage.embed_images_dense(
         model, _images(tmp_path, ["a", "b", "c"]), dense=_dense(), execution=execution
@@ -100,6 +105,27 @@ def test_embed_images_dense_num_gpus_one_runs_in_process(tmp_path, monkeypatch):
     for artifact in artifacts:
         assert artifact.grid_shape == (4, 4)
         assert artifact.metadata_path.exists()
+
+
+def test_embed_images_dense_auto_workers_complete_in_a_subprocess(
+    tmp_path,
+    assert_auto_worker_workflow_completes_in_subprocess,
+    build_auto_worker_model,
+):
+    """Auto workers must not fork after the in-process encoder initialized its runtime."""
+    def workflow():
+        model, execution = build_auto_worker_model(_loaded(_encoder()))
+        return model.embed_images_dense(
+            _images(tmp_path, ["a", "b", "c"]),
+            dense=_dense(),
+            execution=execution,
+        )
+
+    assert_auto_worker_workflow_completes_in_subprocess(
+        child_env_name="SLIDE2VEC_DENSE_IMAGE_AUTO_WORKER_CHILD",
+        workflow=workflow,
+        expected_sample_ids=["a", "b", "c"],
+    )
 
 
 def test_embed_images_dense_num_gpus_gt_one_launches_the_worker(tmp_path, monkeypatch):
@@ -314,7 +340,13 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
         "model": {"name": "fake", "output_variant": None, "allow_non_recommended_settings": False},
         "dense": serialize_dense_image_options(_dense()),
         "execution": serialize_execution(
-            ExecutionOptions(output_dir=tmp_path / "out", num_gpus=2, precision="fp32", batch_size=2)
+            ExecutionOptions(
+                output_dir=tmp_path / "out",
+                num_gpus=2,
+                precision="fp32",
+                batch_size=2,
+                num_workers_per_gpu=1,
+            )
         ),
         "output_dir": str(tmp_path / "out"),
         "progress_events_path": None,

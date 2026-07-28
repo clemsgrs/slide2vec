@@ -13,12 +13,14 @@ after the pixels arrive — geometry, padding, whole-tile vs sliding encode, out
 the shared :class:`~slide2vec.runtime.dense_regions.DenseGridEncoder`, so this module owns no
 padding, batching or blending logic of its own.
 
-Decoding and the normalization-only transform run **itemwise in the loader workers** (the
-same seam :mod:`slide2vec.runtime.image_shard` uses), and only the transformed items are
-stacked. Unlike the pooled given-image path that is not because the geometry is
+Decoding and the normalization-only transform run **itemwise before stacking** (the same
+seam :mod:`slide2vec.runtime.image_shard` uses). Explicit worker counts use spawned loader
+workers; auto selection remains in-process after the model runtime is loaded. Unlike the
+pooled given-image path, itemwise handling is not required because the geometry is
 heterogeneous — here it is declared, uniform, and checked while stacking (see
 :class:`~slide2vec.data.dataset.DeclaredGeometryCollator`) — but because decoding a directory
-of large images is the bottleneck this path has, and it parallelizes per item.
+of large images is the bottleneck this path has and can be parallelized per item when
+explicitly configured.
 
 Writes are atomic and sidecar-last (see :func:`~slide2vec.artifacts.write_dense_image`), so a
 payload without a sidecar unambiguously means an interrupted image and resume trusts the
@@ -161,8 +163,8 @@ def run_dense_image_shard(
         )
         dataset = ImageFileDataset(
             [spec.image_path for spec in pending],
-            # partial, not a closure: the recipe is pickled into the loader workers. Only
-            # the transform crosses — never the encoder — so a worker carries no weights.
+            # partial, not a closure: when explicit spawned workers are used, only this
+            # transform recipe crosses — never the encoder — so a worker carries no weights.
             partial(apply_transforms_itemwise, transforms=encoder.dense_transform),
         )
         dataloader = torch.utils.data.DataLoader(
@@ -180,6 +182,7 @@ def run_dense_image_shard(
                 device=loaded.device,
                 num_workers=int(num_workers),
                 prefetch_factor=int(prefetch_factor),
+                worker_start_method="spawn",
             ),
         )
         with torch.inference_mode(), slide_encode_autocast_ctx(loaded.device, precision):
