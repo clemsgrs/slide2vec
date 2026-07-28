@@ -624,6 +624,73 @@ def test_collect_distributed_pipeline_artifacts_records_per_class_slide_paths_fo
     assert stroma_row["aggregation_status"] == "success"
 
 
+def test_collect_distributed_pipeline_artifacts_reconciles_per_class_tile_paths(
+    monkeypatch,
+    per_annotation_tile_bags,
+):
+    """Distributed final reconciliation returns and records one tile artifact per annotation."""
+    fixture = per_annotation_tile_bags
+
+    monkeypatch.setattr(
+        artifacts_collect,
+        "run_distributed_embedding_stage",
+        lambda *args, **kwargs: None,
+    )
+    tile_artifacts, _, _ = artifacts_collect.collect_distributed_pipeline_artifacts(
+        model=SimpleNamespace(name="uni2", level="tile"),
+        successful_slides=fixture.slides,
+        process_list_path=fixture.process_list_path,
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=fixture.output_dir, num_gpus=2),
+        output_dir=fixture.output_dir,
+    )
+
+    assert [(artifact.annotation, artifact.path) for artifact in tile_artifacts] == [
+        (
+            "tumor",
+            fixture.output_dir / "tile_embeddings" / "tumor" / "slide-a.pt",
+        ),
+        (
+            "stroma",
+            fixture.output_dir / "tile_embeddings" / "stroma" / "slide-a.pt",
+        ),
+    ]
+    recorded = pd.read_csv(fixture.process_list_path).set_index("annotation")
+    assert [
+        (
+            annotation,
+            recorded.loc[annotation, "feature_status"],
+            recorded.loc[annotation, "feature_path"],
+        )
+        for annotation in ["tumor", "stroma"]
+    ] == [
+        (
+            "tumor",
+            "success",
+            str(
+                (
+                    fixture.output_dir
+                    / "tile_embeddings"
+                    / "tumor"
+                    / "slide-a.pt"
+                ).resolve()
+            ),
+        ),
+        (
+            "stroma",
+            "success",
+            str(
+                (
+                    fixture.output_dir
+                    / "tile_embeddings"
+                    / "stroma"
+                    / "slide-a.pt"
+                ).resolve()
+            ),
+        ),
+    ]
+
+
 def test_collect_distributed_pipeline_artifacts_fans_out_per_class_annotations_to_stage(
     monkeypatch,
     tmp_path: Path,
@@ -2040,7 +2107,12 @@ def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: 
         save_latents=False,
         resume=True,
     )
-    tile_artifact = persistence.load_tile_artifact("slide-a", output_dir=tmp_path, output_format="npz")
+    tile_artifact = persistence.load_tile_artifact(
+        "slide-a",
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation=None,
+    )
 
     assert pending_slides == []
     assert pending_tiling_results == []
@@ -5151,6 +5223,70 @@ def _write_process_list(path: Path, rows: list[dict]) -> None:
     pd.DataFrame(rows, columns=columns).to_csv(path, index=False)
 
 
+@pytest.fixture
+def per_annotation_tile_bags(tmp_path: Path):
+    annotations = ["tumor", "stroma"]
+    slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
+    process_list_path = tmp_path / "process_list.csv"
+    tiling_results = [
+        SimpleNamespace(
+            x=np.array([index], dtype=np.int64),
+            y=np.array([index + 1], dtype=np.int64),
+            tile_size_lv0=224,
+            num_tiles=1,
+            backend="asap",
+            annotation=annotation,
+            coordinates_npz_path=Path(
+                f"/tmp/slide-a.{annotation}.coordinates.npz"
+            ),
+            coordinates_meta_path=Path(
+                f"/tmp/slide-a.{annotation}.coordinates.meta.json"
+            ),
+            tiles_tar_path=None,
+        )
+        for index, annotation in enumerate(annotations)
+    ]
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": annotation,
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": f"/tmp/slide-a.{annotation}.coordinates.npz",
+                "coordinates_meta_path": f"/tmp/slide-a.{annotation}.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            }
+            for annotation in annotations
+        ],
+    )
+    for index, annotation in enumerate(annotations):
+        write_tile_embeddings(
+            "slide-a",
+            np.array([[index + 1.0, index + 2.0]], dtype=np.float32),
+            output_dir=tmp_path,
+            annotation=annotation,
+        )
+    return SimpleNamespace(
+        annotations=annotations,
+        output_dir=tmp_path,
+        process_list_path=process_list_path,
+        slide=slide,
+        slides=[slide, slide],
+        tiling_results=tiling_results,
+    )
+
+
 def _fake_tiling_result_loader(monkeypatch):
     """Make tiling_io.load_tiling_result return a minimal in-memory result (no file IO)."""
     def _fake_load_tiling_result(*, coordinates_npz_path, coordinates_meta_path):
@@ -5279,6 +5415,120 @@ def test_persist_embedded_slide_namespaces_tile_embeddings_per_class(tmp_path: P
 
     none_artifact = _persist(None)
     assert none_artifact.path == tmp_path / "tile_embeddings" / "slide-a.pt"
+
+
+def test_collect_pipeline_artifacts_reloads_per_class_tile_embeddings(
+    per_annotation_tile_bags,
+):
+    """Tile collection preserves the parallel annotation identity used for persistence."""
+    fixture = per_annotation_tile_bags
+
+    tile_artifacts, _, _ = persistence.collect_pipeline_artifacts(
+        fixture.slides,
+        output_dir=fixture.output_dir,
+        output_format="pt",
+        include_tile_embeddings=True,
+        include_hierarchical_embeddings=False,
+        include_slide_embeddings=False,
+        annotations=fixture.annotations,
+    )
+
+    assert [
+        (artifact.sample_id, artifact.annotation, artifact.path, artifact.metadata["annotation"])
+        for artifact in tile_artifacts
+    ] == [
+        (
+            "slide-a",
+            "tumor",
+            fixture.output_dir / "tile_embeddings" / "tumor" / "slide-a.pt",
+            "tumor",
+        ),
+        (
+            "slide-a",
+            "stroma",
+            fixture.output_dir / "tile_embeddings" / "stroma" / "slide-a.pt",
+            "stroma",
+        ),
+    ]
+
+
+def test_run_pipeline_single_gpu_reconciles_per_class_tile_embeddings(
+    monkeypatch,
+    per_annotation_tile_bags,
+):
+    """Single-GPU final reconciliation keeps each annotation row and tile path distinct."""
+    import slide2vec.inference as inference
+
+    fixture = per_annotation_tile_bags
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "prepare_tiled_slides",
+        lambda *args, **kwargs: (
+            fixture.slides,
+            fixture.tiling_results,
+            fixture.process_list_path,
+        ),
+    )
+    monkeypatch.setattr(
+        embedding_pipeline,
+        "compute_tile_embeddings_for_slide",
+        lambda *args, **kwargs: np.array([[1.0, 2.0]], dtype=np.float32),
+    )
+
+    model = SimpleNamespace(
+        name="uni2",
+        level="tile",
+        _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: SimpleNamespace(),
+    )
+    result = inference.run_pipeline(
+        model,
+        slides=[fixture.slide],
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=ExecutionOptions(output_dir=fixture.output_dir, num_gpus=1),
+    )
+
+    assert [(artifact.annotation, artifact.path) for artifact in result.tile_artifacts] == [
+        (
+            "tumor",
+            fixture.output_dir / "tile_embeddings" / "tumor" / "slide-a.pt",
+        ),
+        (
+            "stroma",
+            fixture.output_dir / "tile_embeddings" / "stroma" / "slide-a.pt",
+        ),
+    ]
+    recorded = pd.read_csv(fixture.process_list_path).set_index("annotation")
+    assert [
+        (annotation, recorded.loc[annotation, "feature_status"], recorded.loc[annotation, "feature_path"])
+        for annotation in ["tumor", "stroma"]
+    ] == [
+        (
+            "tumor",
+            "success",
+            str(
+                (
+                    fixture.output_dir
+                    / "tile_embeddings"
+                    / "tumor"
+                    / "slide-a.pt"
+                ).resolve()
+            ),
+        ),
+        (
+            "stroma",
+            "success",
+            str(
+                (
+                    fixture.output_dir
+                    / "tile_embeddings"
+                    / "stroma"
+                    / "slide-a.pt"
+                ).resolve()
+            ),
+        ),
+    ]
 
 
 # --- Issue #156: per-annotation slide embeddings (top-seam) ---
