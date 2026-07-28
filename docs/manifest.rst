@@ -61,6 +61,9 @@ to group slides that belong to the same patient:
 Slides sharing the same ``patient_id`` are aggregated into a single
 :class:`~slide2vec.EmbeddedPatient` by the model's patient encoder.
 ``sample_id`` remains the unique slide identifier.
+Both identifier columns are read as text, so values such as ``0007`` retain
+their leading zeros. Every ``patient_id`` must be non-empty after surrounding
+whitespace is ignored; invalid rows are rejected before tiling begins.
 
 
 Per-slide embeddings
