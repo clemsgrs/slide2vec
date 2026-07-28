@@ -55,17 +55,6 @@ ROOT = Path(__file__).resolve().parents[1]
 def PreprocessingConfig(*args, **kwargs):
     kwargs.setdefault("requested_spacing_um", 0.5)
     kwargs.setdefault("requested_tile_size_px", 224)
-    kwargs.setdefault("segmentation", {"method": "hsv"})
-    kwargs.setdefault(
-        "preview",
-        {
-            "save_mask_preview": True,
-            "save_tiling_preview": True,
-            "downsample": 32,
-            "tissue_contour_color": (157, 219, 129),
-            "mask_overlay_alpha": 0.5,
-        },
-    )
     return BasePreprocessingConfig(*args, **kwargs)
 
 

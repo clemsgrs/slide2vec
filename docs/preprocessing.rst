@@ -93,6 +93,8 @@ Tissue Segmentation
 
 ``segmentation`` is forwarded directly to
 `hs2p <https://github.com/clemsgrs/hs2p>`_\ 's segmentation pipeline.
+It is a partial override: omitted keys retain the standard configuration
+defaults, including ``method="hsv"``.
 The ``method`` key selects the algorithm:
 
 - ``hsv`` - heuristic based on the HSV colour space. Fast and robust for H&E slides.
@@ -301,15 +303,14 @@ Preview Images
 
 ``slide2vec`` can write a tissue mask preview and a tiling preview for each slide.
 These are particularly useful for quality control.
-Both are disabled by default. Enable them via the ``preview`` dict:
+Both are enabled by default. The ``preview`` dict is a partial override, so this
+disables only the tiling preview:
 
 .. code-block:: python
 
    preprocessing = PreprocessingConfig(
        preview={
-           "save_mask_preview": True,
-           "save_tiling_preview": True,
-           "downsample": 32,
+           "save_tiling_preview": False,
        }
    )
 

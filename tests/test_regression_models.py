@@ -71,6 +71,32 @@ def test_model_embed_slide_uses_direct_api_and_returns_first_result(monkeypatch)
     assert captured["slides"][0]["sample_id"] == "slide-a"
 
 
+def test_model_embed_slide_without_preprocessing_reaches_tiling(monkeypatch):
+    from slide2vec.runtime import tiling_pipeline
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    class TilingReached(Exception):
+        pass
+
+    captured = {}
+
+    def stop_at_tiling(slides, preprocessing, **kwargs):
+        filtering = build_hs2p_configs(preprocessing)[2]
+        captured["preprocessing"] = preprocessing
+        captured["filtering"] = filtering
+        raise TilingReached
+
+    monkeypatch.setattr(tiling_pipeline, "tile_slides_call", stop_at_tiling)
+
+    model = Model.from_preset("conch")
+    with pytest.raises(TilingReached):
+        model.embed_slide("/tmp/slide-a.svs")
+
+    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
+    assert captured["preprocessing"].requested_tile_size_px == 448
+    assert captured["filtering"].ref_tile_size == 448
+
+
 def test_embed_slides_returns_nested_dict_keyed_by_sample_and_label(monkeypatch):
     model = Model.from_preset("virchow2")
     slide_a = _make_embedded_slide(sample_id="slide-a", annotation="tissue")

@@ -19,6 +19,7 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
+from slide2vec.configs.resources import load_config
 from slide2vec.encoders.registry import (
     encoder_registry,
     resolve_preprocessing_defaults,
@@ -63,14 +64,42 @@ DEFAULT_MASKS: dict[str, Any] = {
     "min_coverage": {"background": None, "tissue": 0.01},
 }
 
+_REQUESTED_TILE_SIZE_INTERPOLATION = "${tiling.params.requested_tile_size_px}"
 
-def _deep_merge_masks(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+
+def _load_default_preprocessing() -> dict[str, dict[str, Any]]:
+    """Read the public nested defaults from the package's canonical YAML config."""
+    from omegaconf import OmegaConf
+
+    tiling = load_config("default").tiling
+    defaults: dict[str, dict[str, Any]] = {}
+    for public_name, config_name in (
+        ("segmentation", "seg_params"),
+        ("filtering", "filter_params"),
+        ("preview", "preview"),
+    ):
+        section = OmegaConf.to_container(getattr(tiling, config_name), resolve=False)
+        if not isinstance(section, dict):
+            raise TypeError(f"tiling.{config_name} must be a mapping")
+        defaults[public_name] = section
+    defaults["preview"]["tissue_contour_color"] = tuple(
+        defaults["preview"]["tissue_contour_color"]
+    )
+    return defaults
+
+
+#: Complete defaults for the nested public preprocessing sections, loaded from
+#: ``configs/default.yaml`` so Python and YAML entry points share one source.
+DEFAULT_PREPROCESSING = _load_default_preprocessing()
+
+
+def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
     """Deep-merge *override* onto a copy of *base* (nested dicts merge key-by-key)."""
     merged = copy.deepcopy(dict(base))
     for key, value in override.items():
         existing = merged.get(key)
         if isinstance(value, Mapping) and isinstance(existing, dict):
-            merged[key] = _deep_merge_masks(existing, value)
+            merged[key] = _deep_merge_dicts(existing, value)
         else:
             merged[key] = copy.deepcopy(value)
     return merged
@@ -80,7 +109,7 @@ def resolve_masks(masks: Mapping[str, Any] | None) -> dict[str, Any]:
     """Complete a (possibly partial) ``masks`` mapping by merging it over :data:`DEFAULT_MASKS`."""
     if not masks:
         return copy.deepcopy(DEFAULT_MASKS)
-    return _deep_merge_masks(DEFAULT_MASKS, masks)
+    return _deep_merge_dicts(DEFAULT_MASKS, masks)
 
 
 def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
@@ -146,13 +175,16 @@ class PreprocessingConfig:
     num_cucim_workers: int = 4
     #: Skip slides already present in the output directory when ``True``.
     resume: bool = False
-    #: Forwarded to hs2p segmentation config. Supported keys: ``method``,
-    #: ``downsample``, ``sam2_device``. See :doc:`preprocessing` for details.
+    #: Partial override forwarded to hs2p segmentation config. Supported keys:
+    #: ``method``, ``downsample``, ``sam2_device``. Omitted keys retain the
+    #: standard configuration defaults. See :doc:`preprocessing` for details.
     segmentation: dict[str, Any] = field(default_factory=dict)
-    #: Forwarded to hs2p tile-filtering config.
+    #: Partial override forwarded to hs2p tile-filtering config. Omitted keys
+    #: retain the standard configuration defaults.
     filtering: dict[str, Any] = field(default_factory=dict)
-    #: Controls whether hs2p writes mask and tiling preview images.
-    #: Keys: ``save_mask_preview``, ``save_tiling_preview``, ``downsample``.
+    #: Partial override controlling whether hs2p writes mask and tiling preview
+    #: images. Keys: ``save_mask_preview``, ``save_tiling_preview``,
+    #: ``downsample``. Omitted keys retain the standard configuration defaults.
     preview: dict[str, Any] = field(default_factory=dict)
     #: Annotation-mask vocabulary forwarded to hs2p's sampling resolver. Keys:
     #: ``output_mode``, ``pixel_mapping``, ``colors``, ``min_coverage``. A partial
@@ -166,6 +198,36 @@ class PreprocessingConfig:
     independent_sampling: bool = True
 
     def __post_init__(self) -> None:
+        filtering_defaults = DEFAULT_PREPROCESSING["filtering"]
+        filtering_override = self.filtering
+        if self.requested_tile_size_px is not None:
+            filtering_defaults = {
+                **filtering_defaults,
+                "ref_tile_size": int(self.requested_tile_size_px),
+            }
+            if (
+                filtering_override.get("ref_tile_size")
+                == _REQUESTED_TILE_SIZE_INTERPOLATION
+            ):
+                filtering_override = {
+                    **filtering_override,
+                    "ref_tile_size": int(self.requested_tile_size_px),
+                }
+        object.__setattr__(
+            self,
+            "segmentation",
+            _deep_merge_dicts(DEFAULT_PREPROCESSING["segmentation"], self.segmentation),
+        )
+        object.__setattr__(
+            self,
+            "filtering",
+            _deep_merge_dicts(filtering_defaults, filtering_override),
+        )
+        object.__setattr__(
+            self,
+            "preview",
+            _deep_merge_dicts(DEFAULT_PREPROCESSING["preview"], self.preview),
+        )
         # Complete a (possibly partial) masks mapping against the shipped default.
         object.__setattr__(self, "masks", resolve_masks(self.masks))
 
