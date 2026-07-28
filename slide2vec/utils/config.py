@@ -4,6 +4,7 @@ import datetime
 import getpass
 
 from pathlib import Path
+from typing import Any
 from omegaconf import OmegaConf
 
 from slide2vec.distributed import is_main_process
@@ -14,31 +15,39 @@ from slide2vec.configs import default_config
 logger = logging.getLogger("slide2vec")
 
 
-def _encoder_derived_cfg(model_name: str) -> dict:
-    """Build OmegaConf defaults derived from encoder registry metadata."""
-    from slide2vec.encoders.registry import encoder_registry, resolve_preprocessing_defaults
+def _encoder_derived_cfg(model_name: str, missing_paths: set[str]) -> dict[str, Any]:
+    """Build only the requested OmegaConf defaults from encoder metadata."""
+    from slide2vec.encoders.registry import (
+        encoder_registry,
+        resolve_preprocessing_defaults,
+        resolve_preprocessing_requirements,
+    )
 
     canonical = canonicalize_model_name(model_name)
     if not canonical or canonical not in encoder_registry:
         return {}
 
     info = encoder_registry.info(canonical)
-    reqs = resolve_preprocessing_defaults(canonical, info)
+    defaults: dict[str, Any] = {"tiling": {"params": {}}, "speed": {}}
+    params = defaults["tiling"]["params"]
 
-    return {
-        "tiling": {
-            "params": {
-                "requested_tile_size_px": reqs["tile_size_px"],
-                "requested_spacing_um": float(reqs["spacing_um"]),
-            }
-        },
-        "speed": {
-            "precision": info["precision"],
-        },
-    }
+    spacing_path = "tiling.params.requested_spacing_um"
+    tile_size_path = "tiling.params.requested_tile_size_px"
+    if spacing_path in missing_paths:
+        reqs = resolve_preprocessing_defaults(canonical, info)
+        params["requested_spacing_um"] = float(reqs["spacing_um"])
+        if tile_size_path in missing_paths:
+            params["requested_tile_size_px"] = int(reqs["tile_size_px"])
+    elif tile_size_path in missing_paths:
+        reqs = resolve_preprocessing_requirements(canonical, info)
+        params["requested_tile_size_px"] = int(reqs["tile_size_px"])
+
+    if "speed.precision" in missing_paths:
+        defaults["speed"]["precision"] = info["precision"]
+    return defaults
 
 
-def _fill_null_encoder_defaults(cfg, encoder_defaults: dict) -> None:
+def _fill_null_encoder_defaults(cfg, encoder_defaults: dict[str, Any]) -> None:
     """Fill null leaves with encoder defaults after user/CLI config merging."""
     defaults_cfg = OmegaConf.create(encoder_defaults)
     for path in (
@@ -108,15 +117,17 @@ def get_cfg_from_args(args):
     default_cfg = OmegaConf.create(default_config)
     model_name = OmegaConf.select(requested_cfg, "model.name")
     cfg = OmegaConf.merge(default_cfg, user_cfg, cli_cfg)
-    if model_name and any(
-        OmegaConf.select(cfg, path) is None
+    missing_paths = {
+        path
         for path in (
             "tiling.params.requested_tile_size_px",
             "tiling.params.requested_spacing_um",
             "speed.precision",
         )
-    ):
-        encoder_defaults = _encoder_derived_cfg(model_name)
+        if OmegaConf.select(cfg, path) is None
+    }
+    if model_name and missing_paths:
+        encoder_defaults = _encoder_derived_cfg(model_name, missing_paths)
         _fill_null_encoder_defaults(cfg, encoder_defaults)
     OmegaConf.resolve(cfg)
     validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))

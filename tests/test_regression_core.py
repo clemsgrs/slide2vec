@@ -260,7 +260,82 @@ def test_get_cfg_from_args_fills_null_spacing_from_model_default(tmp_path: Path)
     assert cfg.tiling.params.requested_tile_size_px == 448
 
 
-def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_path: Path):
+@pytest.mark.parametrize(
+    ("encoder_name", "expected_tile_size_px", "expected_precision"),
+    [
+        ("virchow2", 224, "fp16"),
+        ("midnight", 224, "fp16"),
+        ("musk", 384, "fp16"),
+    ],
+)
+def test_yaml_and_cli_fill_fields_missing_from_explicit_spacing_identically(
+    tmp_path: Path,
+    encoder_name,
+    expected_tile_size_px,
+    expected_precision,
+):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    yaml_path = tmp_path / "yaml-config.yaml"
+    yaml_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+                "model:",
+                f"  name: {encoder_name}",
+                "tiling:",
+                "  params:",
+                "    requested_spacing_um: 0.5",
+            ]
+        )
+    )
+    cli_path = tmp_path / "cli-config.yaml"
+    cli_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+            ]
+        )
+    )
+
+    yaml_cfg = get_cfg_from_args(
+        SimpleNamespace(
+            config_file=str(yaml_path),
+            output_dir=None,
+            opts=[],
+            run_on_cpu=False,
+        )
+    )
+    cli_cfg = get_cfg_from_args(
+        SimpleNamespace(
+            config_file=str(cli_path),
+            output_dir=None,
+            opts=[
+                f"model.name={encoder_name}",
+                "tiling.params.requested_spacing_um=0.5",
+            ],
+            run_on_cpu=False,
+        )
+    )
+
+    expected = (0.5, expected_tile_size_px, expected_precision)
+    assert (
+        yaml_cfg.tiling.params.requested_spacing_um,
+        yaml_cfg.tiling.params.requested_tile_size_px,
+        yaml_cfg.speed.precision,
+    ) == expected
+    assert (
+        cli_cfg.tiling.params.requested_spacing_um,
+        cli_cfg.tiling.params.requested_tile_size_px,
+        cli_cfg.speed.precision,
+    ) == expected
+
+
+def test_yaml_fills_only_missing_precision_without_re_resolving_spacing(tmp_path: Path):
     pytest.importorskip("omegaconf")
 
     from slide2vec.utils.config import get_cfg_from_args
@@ -272,7 +347,48 @@ def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(tmp_pa
                 "csv: /tmp/slides.csv",
                 "output_dir: /tmp/output",
                 "model:",
-                    "  name: virchow2",
+                "  name: virchow2",
+                "tiling:",
+                "  params:",
+                "    requested_spacing_um: 0.5",
+                "    requested_tile_size_px: 224",
+                "speed:",
+                "  precision:",
+            ]
+        )
+    )
+
+    cfg = get_cfg_from_args(
+        SimpleNamespace(
+            config_file=str(cfg_path),
+            output_dir=None,
+            opts=[],
+            run_on_cpu=False,
+        )
+    )
+
+    assert cfg.tiling.params.requested_spacing_um == pytest.approx(0.5)
+    assert cfg.tiling.params.requested_tile_size_px == 224
+    assert cfg.speed.precision == "fp16"
+
+
+@pytest.mark.parametrize("encoder_name", ["virchow2", "midnight", "musk"])
+def test_get_cfg_from_args_rejects_models_with_ambiguous_spacing_defaults(
+    tmp_path: Path,
+    encoder_name,
+):
+    pytest.importorskip("omegaconf")
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "\n".join(
+            [
+                "csv: /tmp/slides.csv",
+                "output_dir: /tmp/output",
+                "model:",
+                f"  name: {encoder_name}",
                 "tiling:",
                 "  params: {}",
             ]

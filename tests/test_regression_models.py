@@ -427,11 +427,47 @@ def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_prep
     assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
 
 
+@pytest.mark.parametrize(
+    ("encoder_name", "expected_tile_size_px", "expected_precision"),
+    [
+        ("virchow2", 224, "fp16"),
+        ("midnight", 224, "fp16"),
+        ("musk", 384, "fp16"),
+    ],
+)
+def test_model_embed_slides_fills_fields_missing_from_spacing_only_preprocessing(
+    monkeypatch,
+    encoder_name,
+    expected_tile_size_px,
+    expected_precision,
+):
+    model = Model.from_preset(encoder_name)
+    slide = _make_embedded_slide()
+    captured = {}
+
+    def fake_embed_slides(model_arg, slides, **kwargs):
+        captured["preprocessing"] = kwargs["preprocessing"]
+        captured["execution"] = kwargs["execution"]
+        return [slide]
+
+    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
+
+    model.embed_slides(
+        ["/tmp/slide-a.svs"],
+        preprocessing=PreprocessingConfig(requested_spacing_um=0.5),
+    )
+
+    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
+    assert captured["preprocessing"].requested_tile_size_px == expected_tile_size_px
+    assert captured["execution"].precision == expected_precision
+
+
+@pytest.mark.parametrize("encoder_name", ["virchow2", "midnight", "musk"])
 def test_model_embed_slides_rejects_ambiguous_default_spacing(
     monkeypatch,
+    encoder_name,
 ):
-    # virchow2 supports multiple spacings; direct API should require an explicit choice.
-    model = Model.from_preset("virchow2")
+    model = Model.from_preset(encoder_name)
     expected = [
         EmbeddedSlide(
             sample_id="slide-a",
