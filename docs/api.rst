@@ -125,8 +125,10 @@ records the resulting encoder input size in each sidecar as provenance instead o
 validating it against a request. That also fixes how preprocessing runs: given
 images are heterogeneously sized (2048x1536 beside 96x96) and cannot be stacked
 into one uint8 batch before being resized, so the transform is applied **itemwise
-in the dataloader workers** and only the transformed items are stacked. The
-batched transform spec used by the pooled path stays exclusive to it.
+before stacking**. Auto worker selection stays in-process because the model
+runtime is already initialized; an explicit positive ``num_workers_per_gpu`` uses
+spawned dataloader workers. The batched transform spec used by the pooled path
+stays exclusive to it.
 
 .. autoclass:: slide2vec.ImageSpec
    :members:

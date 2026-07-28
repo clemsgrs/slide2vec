@@ -62,7 +62,7 @@ def main(argv=None) -> int:
             output_precision=resolve_output_precision(execution.output_dtype, execution.precision),
             output_format=execution.output_format,
             precision=execution.precision,
-            num_workers=execution.resolved_num_workers_per_gpu(),
+            num_workers=execution.resolved_image_num_workers_per_gpu(),
             prefetch_factor=int(execution.prefetch_factor),
             on_batch=_on_batch,
         )

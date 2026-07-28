@@ -661,6 +661,21 @@ def test_execution_options_auto_workers_are_split_across_gpus(monkeypatch):
     assert execution.resolved_num_workers_per_gpu() == 6
 
 
+def test_execution_options_resolve_safe_image_workers_without_losing_explicit_overrides(
+    monkeypatch,
+):
+    import slide2vec.api as api
+
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
+    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
+
+    auto = api.ExecutionOptions(num_gpus=3)
+    explicit = api.ExecutionOptions(num_gpus=3, num_workers_per_gpu=2)
+
+    assert auto.resolved_image_num_workers_per_gpu() == 0
+    assert explicit.resolved_image_num_workers_per_gpu() == 2
+
+
 def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
     import slide2vec.utils.config as config
 

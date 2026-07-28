@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from torchvision.transforms import functional as tvF
 
+from slide2vec.runtime.batching import dataloader_kwargs
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 
 
@@ -31,3 +32,22 @@ def test_apply_transforms_itemwise_converts_tensor_samples_for_pil_only_transfor
     transformed = apply_transforms_itemwise(image, ConvertToRgbAndBack())
 
     assert torch.equal(transformed, image)
+
+
+def test_dataloader_kwargs_uses_spawn_only_when_worker_processes_are_enabled():
+    assert dataloader_kwargs(
+        device=torch.device("cpu"),
+        num_workers=2,
+        prefetch_factor=3,
+        worker_start_method="spawn",
+    ) == {
+        "num_workers": 2,
+        "prefetch_factor": 3,
+        "multiprocessing_context": "spawn",
+    }
+    assert dataloader_kwargs(
+        device=torch.device("cpu"),
+        num_workers=0,
+        prefetch_factor=3,
+        worker_start_method="spawn",
+    ) == {"num_workers": 0}
