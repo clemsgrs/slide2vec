@@ -1247,13 +1247,7 @@ def _resolve_direct_api_preprocessing(
     requested_spacing_um = preprocessing.requested_spacing_um
     requested_tile_size_px = preprocessing.requested_tile_size_px
     if requested_spacing_um is None or requested_tile_size_px is None:
-        if not name or name not in encoder_registry:
-            raise ValueError(
-                "Cannot infer preprocessing defaults without a registered model. "
-                "Pass preprocessing.requested_spacing_um and "
-                "preprocessing.requested_tile_size_px explicitly."
-            )
-        resolved_fields = resolve_preprocessing_fields(
+        resolved_fields = _resolve_registered_preprocessing_fields(
             name,
             requested_spacing_um=requested_spacing_um,
             requested_tile_size_px=requested_tile_size_px,
@@ -1270,18 +1264,30 @@ def _resolve_direct_api_preprocessing(
 
 
 def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
-    if not name or name not in encoder_registry:
-        raise ValueError(
-            "Cannot infer preprocessing defaults without a registered model. "
-            "Pass preprocessing.requested_spacing_um and preprocessing.requested_tile_size_px explicitly."
-        )
-
-    resolved_fields = resolve_preprocessing_fields(
+    resolved_fields = _resolve_registered_preprocessing_fields(
         name,
         requested_spacing_um=None,
         requested_tile_size_px=None,
     )
     return int(resolved_fields["tile_size_px"]), float(resolved_fields["spacing_um"])
+
+
+def _resolve_registered_preprocessing_fields(
+    name: str | None,
+    *,
+    requested_spacing_um: float | None,
+    requested_tile_size_px: int | None,
+) -> dict[str, Any]:
+    if not name or name not in encoder_registry:
+        raise ValueError(
+            "Cannot infer preprocessing defaults without a registered model. "
+            "Pass preprocessing.requested_spacing_um and preprocessing.requested_tile_size_px explicitly."
+        )
+    return resolve_preprocessing_fields(
+        name,
+        requested_spacing_um=requested_spacing_um,
+        requested_tile_size_px=requested_tile_size_px,
+    )
 
 
 def _validate_model_config(
