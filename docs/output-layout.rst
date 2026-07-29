@@ -249,9 +249,18 @@ geometry sidecar per input image:
        ├── <sample_id>.pt          ← Tensor of shape (d, grid_h, grid_w)
        └── <sample_id>.meta.json
 
-As with every dense artifact the sidecar is written **last**, after the payload
-has been published atomically, so a payload without its sidecar unambiguously
-means an interrupted image and resume treats the sidecar as the done-marker.
+For dense images, a *compatible artifact* is a payload plus a readable sidecar
+whose ``compatibility`` object exactly matches the current image identity and
+canonical extraction recipe. Sidecar presence alone is not enough. Missing
+payloads or sidecars, legacy/incomplete compatibility records, and recipe
+differences are recomputed; unreadable or malformed sidecars are errors.
+
+Replacement follows a strict sidecar-last contract. Before recomputing an
+incompatible artifact, slide2vec removes its old sidecar done-marker. The new
+payload is written to a sibling temporary file and atomically moved into place,
+then the new sidecar is published last. If the process stops before or after
+payload replacement, no trusted sidecar remains paired with the changed
+payload.
 
 **dense_image_embeddings**
 
@@ -279,14 +288,35 @@ means an interrupted image and resume treats the sidecar as the done-marker.
      "feature_kind": "patch_features",
      "attention_blocks": [-1],
      "attention_include_registers": false,
+     "compatibility": {
+       "sample_id": "ocelot-001",
+       "image_path": "/data/ocelot/001.jpg",
+       "encoder_name": "virchow2",
+       "output_variant": "cls_patch_mean",
+       "target_size": [1024, 1024],
+       "patch_size": [14, 14],
+       "encoded_size": [1036, 1036],
+       "pad": [12, 12],
+       "grid_shape": [74, 74],
+       "pad_mode": "reflect",
+       "image_pad_value": null,
+       "window_size": 224,
+       "overlap": 0.0,
+       "feature_kind": "patch_features",
+       "attention_blocks": [-1],
+       "attention_include_registers": false,
+       "precision": "fp32",
+       "dtype": "float32"
+     }
    }
 
-The geometry fields are the whole extraction contract: ``target_size`` is what
-the caller declared, ``encoded_size`` is that padded up to the encoder's patch
-multiple, ``pad`` is the bottom/right padding applied, and ``grid_shape`` is the
-token grid the payload holds. ``encoder_input_regime`` is ``"declared"`` — unlike
-a pooled image embedding, this run *stated* its geometry and it was validated
-before any image was read.
+The compatibility identity covers the sample ID and normalized source path;
+encoder name and resolved output variant; target, patch, encoded, padding, and
+grid geometry; padding/window/overlap and attention settings; inference
+precision; and stored dtype. GPU count, batch size, workers, prefetching, output
+directory, and other execution mechanics are deliberately excluded.
+``encoder_input_regime`` is ``"declared"`` — unlike a pooled image embedding,
+this run *stated* its geometry and it was validated before any image was read.
 
 
 Coordinate Files

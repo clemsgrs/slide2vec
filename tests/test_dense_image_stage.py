@@ -50,14 +50,21 @@ class _FakeModel:
 
     def __init__(self, encoder) -> None:
         self._loaded = _loaded(encoder)
-        self.name = "fake-encoder"
+        self.name = "uni"
         self._output_variant = None
         self._requested_device = "cpu"
         self.allow_non_recommended_settings = False
         self.declared: list = []
 
     def _declare_dense_encoder_input(self, dense, *, emit_run_info):
+        from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
         self.declared.append(dense)
+        return EncoderInputContract.declared_dense(
+            self.name,
+            target_size_px=dense.target_size,
+            window_size=dense.window_size,
+        )
 
     def _load_backend(self):
         assert self.declared, "the dense image path must declare its geometry before loading"
@@ -133,6 +140,7 @@ def test_embed_images_dense_num_gpus_gt_one_launches_the_worker(tmp_path, monkey
     the parent itself encodes nothing and collects the artifacts back off disk."""
     from slide2vec.runtime.dense_image_shard import run_dense_image_shard
     from slide2vec.runtime.image_specs import image_specs_from_request
+    from slide2vec.runtime.serialization import deserialize_dense_image_recipe
     from slide2vec.runtime.sharding import plan_contiguous_shards
 
     caller_dir = tmp_path / "caller"
@@ -145,9 +153,11 @@ def test_embed_images_dense_num_gpus_gt_one_launches_the_worker(tmp_path, monkey
         request = json.loads(Path(request_path).read_text())
         captured.update(module=module, num_gpus=num_gpus, output_dir=output_dir, request=request)
         specs = image_specs_from_request(request)
+        recipe = deserialize_dense_image_recipe(request["recipe"])
         for shard in plan_contiguous_shards(specs, num_gpus):
             run_dense_image_shard(shard, loaded=rank_loaded, out_dir=Path(output_dir),
-                                  dense=_dense(), batch_size=2, num_workers=0)
+                                  dense=_dense(), recipe=recipe,
+                                  batch_size=2, num_workers=0)
 
     monkeypatch.setattr(dense_image_stage, "run_torchrun_worker", _fake_run)
     monkeypatch.setattr(dense_image_stage, "validate_multi_gpu_execution", lambda *a, **k: None)
@@ -167,6 +177,7 @@ def test_embed_images_dense_num_gpus_gt_one_launches_the_worker(tmp_path, monkey
     expected_output_dir = (caller_dir / "output").resolve()
     assert Path(captured["output_dir"]) == expected_output_dir
     assert captured["request"]["dense"]["target_size"] == 64
+    assert captured["request"]["recipe"]["encoder_name"] == "uni"
     assert [image["sample_id"] for image in captured["request"]["images"]] == ["a", "b", "c"]
     assert all(Path(image["image_path"]).is_absolute() for image in captured["request"]["images"])
     assert len(artifacts) == 3
@@ -228,6 +239,37 @@ def test_embed_images_dense_requires_at_least_one_image(tmp_path):
     execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
     with pytest.raises(ValueError, match="At least one image"):
         dense_image_stage.embed_images_dense(model, [], dense=_dense(), execution=execution)
+
+
+@pytest.mark.parametrize(
+    ("dense", "message"),
+    [
+        (_dense(pad_mode="invalid"), "pad_mode"),
+        (_dense(feature_kind="invalid"), "feature_kind"),
+        (_dense(window_size=32, overlap=1.0), "overlap"),
+        (
+            _dense(feature_kind="cls_attention", attention_blocks=()),
+            "attention_blocks",
+        ),
+    ],
+)
+def test_invalid_dense_image_recipe_fails_before_backend_load(
+    tmp_path, monkeypatch, dense, message
+):
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("request-wide validation must precede model loading"),
+    )
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+    )
+
+    with pytest.raises(ValueError, match=message):
+        dense_image_stage.embed_images_dense(
+            model, _images(tmp_path, ["a"]), dense=dense, execution=execution
+        )
 
 
 def test_dense_image_options_round_trip_through_the_request():
@@ -320,13 +362,29 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
     from slide2vec.distributed import dense_image_worker
     from slide2vec.runtime.image_specs import build_image_specs_request
     from slide2vec.runtime.serialization import (
+        serialize_dense_image_recipe,
         serialize_dense_image_options,
         serialize_execution,
     )
+    from slide2vec.runtime.dense_image_recipe import resolve_dense_image_recipe
 
     specs = _images(tmp_path, ["a", "b", "c", "d"])
     loaded = _loaded(_encoder())
     declared: list = []
+    parent_model = _FakeModel(_encoder())
+    dense = _dense()
+    recipe = resolve_dense_image_recipe(
+        model=parent_model,
+        contract=parent_model._declare_dense_encoder_input(dense, emit_run_info=False),
+        dense=dense,
+        execution=ExecutionOptions(
+            output_dir=tmp_path / "out",
+            num_gpus=2,
+            precision="fp32",
+            batch_size=2,
+            num_workers_per_gpu=1,
+        ),
+    )
 
     monkeypatch.setattr(
         api.Model, "from_preset",
@@ -338,7 +396,8 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
 
     request = {
         "model": {"name": "fake", "output_variant": None, "allow_non_recommended_settings": False},
-        "dense": serialize_dense_image_options(_dense()),
+        "dense": serialize_dense_image_options(dense),
+        "recipe": serialize_dense_image_recipe(recipe),
         "execution": serialize_execution(
             ExecutionOptions(
                 output_dir=tmp_path / "out",

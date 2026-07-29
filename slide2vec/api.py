@@ -850,8 +850,9 @@ class Model:
         — whole-image, or by sliding the encoder's native field and blending the token grids
         — and written to ``dense_image_embeddings/<sample_id>.pt`` plus a geometry sidecar.
         The run splits its images across all visible GPUs (``execution.num_gpus``);
-        ``num_gpus=1`` encodes fully in-process. Resume is automatic — images whose sidecar
-        already exists are skipped. Returns one
+        ``num_gpus=1`` encodes fully in-process. Resume is automatic: an image is skipped
+        only when its payload exists and its sidecar records the same normalized source
+        identity and complete extraction recipe. Returns one
         :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
 
         It differs from :meth:`embed_regions_dense` in exactly one respect: there is no

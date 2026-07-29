@@ -330,8 +330,11 @@ geometry resolution, the same bottom/right padding up to the patch multiple, the
 same whole-image-vs-sliding encode and raised-cosine blending, and the same
 ``feature_kind`` choice between the patch-token grid and the CLS-attention grid.
 The run splits its images across all visible GPUs (``num_gpus=1`` encodes
-in-process) and is resume-aware — an image whose ``.meta.json`` sidecar already
-exists is skipped — so an interrupted run is restarted by re-issuing the call.
+in-process) and is recipe-aware on resume. It skips an image only when both the
+payload and sidecar exist and the sidecar's image identity, encoder/output,
+geometry, dense settings, inference precision, and stored dtype exactly match
+the current call. Missing, legacy, or incompatible pairs are recomputed, so an
+interrupted run is restarted by re-issuing the call.
 
 **target_size is a declaration, not a resize.** Dense extraction encodes through
 the encoder's normalization-only transform, so it never rescales: every image

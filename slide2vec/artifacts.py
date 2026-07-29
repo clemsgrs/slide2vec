@@ -365,7 +365,8 @@ def dense_image_paths(output_dir: str | Path, *, sample_id: str) -> tuple[Path, 
     ``dense_image_embeddings/<sample_id>.pt`` plus ``<sample_id>.meta.json``. Flat, like the
     pooled image layout and unlike the per-slide dense one: a pre-cropped image has no slide
     directory to live under and no ``(x, y)`` to be named by, so the caller's ``sample_id``
-    is the whole identity and the resume check needs nothing else.
+    determines the paths. Resume additionally validates the payload and the complete
+    compatibility record in the sidecar.
     """
     output_root = Path(output_dir).expanduser().resolve()
     sample_component = _validate_path_component(sample_id, field="sample_id")

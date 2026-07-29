@@ -44,7 +44,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 from slide2vec.data.tile_reader import WSIRegionReader
-from slide2vec.runtime.dense_sliding import encode_dense_sliding
+from slide2vec.runtime.dense_sliding import encode_dense_sliding, resolve_window_geometry
 from slide2vec.runtime.model_settings import output_torch_dtype, resolve_output_precision
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
 from slide2vec.runtime.tiling import resolve_slide_backend
@@ -125,6 +125,44 @@ def compute_dense_geometry(
         grid_shape=(encoded_h // patch_h, encoded_w // patch_w),
         pad=(encoded_h - target_h, encoded_w - target_w),
     )
+
+
+def validate_dense_request_settings(
+    geometry: DenseGridGeometry,
+    *,
+    pad_mode: str,
+    window_size: int | None,
+    overlap: float,
+    feature_kind: str,
+    attention_blocks: tuple[int, ...],
+    attention_include_registers: bool,
+) -> None:
+    """Validate request-wide dense settings without constructing an encoder."""
+    if pad_mode not in _PAD_MODES:
+        raise ValueError(
+            f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}"
+        )
+    if feature_kind not in {"patch_features", "cls_attention"}:
+        raise ValueError(
+            f"unsupported feature_kind {feature_kind!r}; "
+            "expected 'patch_features' or 'cls_attention'"
+        )
+    if window_size is not None:
+        if int(window_size) <= 0:
+            raise ValueError("window_size must be positive")
+        if not 0.0 <= float(overlap) < 1.0:
+            raise ValueError("overlap must be in [0, 1)")
+        resolve_window_geometry(
+            geometry, window_size=int(window_size), overlap=float(overlap)
+        )
+    if feature_kind == "cls_attention" and not attention_blocks:
+        raise ValueError(
+            "attention_blocks must contain at least one block for cls_attention"
+        )
+    if not all(isinstance(block, int) for block in attention_blocks):
+        raise ValueError("attention_blocks must contain only integers")
+    if not isinstance(attention_include_registers, bool):
+        raise ValueError("attention_include_registers must be a boolean")
 
 
 def pad_image_to_encoded(
@@ -229,15 +267,21 @@ class DenseGridEncoder:
         output_dtype: "torch.dtype | None" = None,
         dense_transform: Callable | None = None,
     ) -> "DenseGridEncoder":
-        if pad_mode not in _PAD_MODES:
-            raise ValueError(
-                f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}"
-            )
+        geometry = compute_dense_geometry(
+            target_size=target_size, patch_size=model.patch_size
+        )
+        validate_dense_request_settings(
+            geometry,
+            pad_mode=pad_mode,
+            window_size=window_size,
+            overlap=overlap,
+            feature_kind=feature_kind,
+            attention_blocks=attention_blocks,
+            attention_include_registers=attention_include_registers,
+        )
         return cls(
             model=model,
-            geometry=compute_dense_geometry(
-                target_size=target_size, patch_size=model.patch_size
-            ),
+            geometry=geometry,
             dense_transform=(
                 model.get_normalization_transform()
                 if dense_transform is None
