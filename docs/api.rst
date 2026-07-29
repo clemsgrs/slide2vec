@@ -318,7 +318,11 @@ coordinate and no spacing→level plan.
            ImageSpec(sample_id="ocelot-001", image_path="/data/ocelot/001.jpg"),
            ImageSpec(sample_id="ocelot-002", image_path="/data/ocelot/002.jpg"),
        ],
-       dense=DenseImageOptions(target_size=1024, window_size=224),
+       dense=DenseImageOptions(
+           target_size=1024,
+           spacing_um=0.5,
+           window_size=224,
+       ),
        execution=ExecutionOptions(output_dir="outputs/ocelot", num_gpus=2),
    )
 
@@ -336,10 +340,28 @@ geometry, dense settings, inference precision, and stored dtype exactly match
 the current call. Missing, legacy, or incompatible pairs are recomputed, so an
 interrupted run is restarted by re-issuing the call.
 
+**Raster reader regime and physical scale.** Raster dense runs accept exactly
+``.png``, ``.jpg``, and ``.jpeg`` suffixes, case-insensitively. Every raster uses
+the existing Pillow ``convert("RGB")`` decoder; ``backend="auto"`` resolves to
+that reader. A positive, finite numeric ``spacing_um`` is an **asserted spacing**:
+it states that every supplied pixel array is already at that µm/px scale and is
+checked against the encoder's supported spacings by the normal
+recommended-settings policy. It never resizes or otherwise changes pixels.
+``spacing_um=None`` is **unknown spacing**, not an inferred default. A
+spacing-constrained encoder rejects unknown spacing unless
+``allow_non_recommended_settings=True`` (one warning for the run); a
+spacing-agnostic encoder accepts it normally.
+
+``ImageSpec.spacing_at_level_0`` is a level-0 source-metadata override for
+spacing-readable inputs. Raster dense extraction and :meth:`Model.embed_images`
+reject a non-null override rather than silently ignoring it, because a
+pre-cropped PNG/JPEG has no pyramid level-0 read plan.
+
 **target_size is a declaration, not a resize.** Dense extraction encodes through
 the encoder's normalization-only transform, so it never rescales: every image
 must already be exactly ``target_size`` (a non-square ``(height, width)`` pair is
-accepted), and one that is not raises naming the images. Declaring the geometry
+accepted), and one that is not raises with the sample, observed and declared
+dimensions, and the resolved or unknown spacing. Declaring the geometry
 up front is what lets the *effective* encoder input — the padded image, or one
 patch-aligned window of it — be validated, and the encoder's variable-input
 constructor settings resolved, before a single image is decoded (see

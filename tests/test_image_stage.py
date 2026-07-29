@@ -214,6 +214,24 @@ def test_embed_images_requires_at_least_one_image(tmp_path):
         image_stage.embed_images(model, [], execution=execution)
 
 
+def test_embed_images_rejects_raster_level0_spacing_override(tmp_path, monkeypatch):
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("override validation must precede backend loading"),
+    )
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    spec = ImageSpec(
+        sample_id="raster",
+        image_path=tmp_path / "image.png",
+        spacing_at_level_0=0.25,
+    )
+
+    with pytest.raises(ValueError, match=r"spacing_at_level_0.*raster"):
+        image_stage.embed_images(model, [spec], execution=execution)
+
+
 def test_image_specs_round_trip_through_request(tmp_path):
     """The request rebuilds the exact spec list the parent sharded (the worker's inverse)."""
     specs = [

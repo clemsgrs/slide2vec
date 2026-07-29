@@ -22,6 +22,7 @@ def validate_encoder_config(
     precision: str | None = None,
     output_variant: str | None = None,
     allow_non_recommended: bool = False,
+    require_known_spacing: bool = False,
 ) -> None:
     """Check config against recommended model settings.
 
@@ -44,7 +45,13 @@ def validate_encoder_config(
             )
 
     rec_spacing = info["supported_spacing_um"] if "supported_spacing_um" in info else None
-    if requested_spacing_um is not None and rec_spacing is not None:
+    if requested_spacing_um is None and require_known_spacing and rec_spacing is not None:
+        valid_spacings = rec_spacing if isinstance(rec_spacing, list) else [rec_spacing]
+        supported_text = ", ".join(f"{s:g}" for s in valid_spacings)
+        mismatches.append(
+            f"requested_spacing_um=unknown (recommended: [{supported_text}])"
+        )
+    elif requested_spacing_um is not None and rec_spacing is not None:
         valid_spacings = rec_spacing if isinstance(rec_spacing, list) else [rec_spacing]
         if not any(abs(float(requested_spacing_um) - float(s)) <= 1e-8 for s in valid_spacings):
             supported_text = ", ".join(f"{s:g}" for s in valid_spacings)

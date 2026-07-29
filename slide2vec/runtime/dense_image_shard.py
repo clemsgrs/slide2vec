@@ -8,7 +8,8 @@ very same code path runs in-process for ``num_gpus=1`` and on every torchrun ran
 exercised on CPU.
 
 It differs from the ROI loop in exactly one respect: there is no slide, no coordinate and no
-spacing→level plan, because the image *is* the region and is read from disk. Everything
+spacing→level plan, because the raster image is already at its asserted (or unknown) physical
+spacing and is read through Pillow without resampling. Everything
 after the pixels arrive — geometry, padding, whole-tile vs sliding encode, output dtype — is
 the shared :class:`~slide2vec.runtime.dense_regions.DenseGridEncoder`, so this module owns no
 padding, batching or blending logic of its own.
@@ -135,8 +136,8 @@ def dense_image_metadata(
 ) -> dict:
     """The geometry sidecar: what was encoded, and with which dense recipe.
 
-    The dense ROI sidecar's fields minus the slide's read plan (there is none) plus the
-    encoder identity, which a given-geometry artifact cannot recover from a coordinate.
+    The dense ROI sidecar's fields plus truthful raster provenance: Pillow is the resolved
+    reader, spacing is explicit or unknown, and non-applicable pyramid-plan fields are null.
     ``encoder_input_regime`` is ``"declared"``: unlike the pooled given-image path this run
     *did* state its geometry — ``target_size`` — and it was validated before any image was
     read, so the sidecar records a request that was honored rather than a size observed.
@@ -157,6 +158,17 @@ def dense_image_metadata(
         "encoder_name": compatibility["encoder_name"],
         "encoder_level": loaded.level,
         "encoder_input_regime": "declared",
+        "reader_regime": compatibility["reader_regime"],
+        "spacing_source": compatibility["spacing_source"],
+        "declared_spacing_um": compatibility["declared_spacing_um"],
+        "source_spacing_um": compatibility["source_spacing_um"],
+        "effective_spacing_um": compatibility["effective_spacing_um"],
+        "requested_backend": compatibility["requested_backend"],
+        "backend": compatibility["backend"],
+        "tolerance": compatibility["tolerance"],
+        "read_level": compatibility["read_level"],
+        "read_tile_size_px": compatibility["read_tile_size_px"],
+        "requested_tile_size_px": compatibility["requested_tile_size_px"],
         "pad_mode": compatibility["pad_mode"],
         "image_pad_value": compatibility["image_pad_value"],
         "window_size": compatibility["window_size"],
@@ -237,6 +249,7 @@ def run_dense_image_shard(
             collate_fn=DeclaredGeometryCollator(
                 sample_ids=[spec.sample_id for spec in pending],
                 target_size=encoder.geometry.target_size,
+                spacing_um=recipe.effective_spacing_um,
             ),
             **dataloader_kwargs(
                 device=loaded.device,

@@ -120,6 +120,9 @@ def serialize_dense_image_options(dense: DenseImageOptions) -> dict[str, Any]:
             if isinstance(dense.target_size, int)
             else [int(size) for size in dense.target_size]
         ),
+        "spacing_um": dense.spacing_um,
+        "tolerance": dense.tolerance,
+        "backend": dense.backend,
         "pad_mode": dense.pad_mode,
         "image_pad_value": dense.image_pad_value,
         "window_size": dense.window_size,
@@ -148,6 +151,13 @@ def deserialize_dense_image_options(payload: dict[str, Any]) -> DenseImageOption
             if isinstance(target_size, int)
             else (int(target_size[0]), int(target_size[1]))
         ),
+        spacing_um=(
+            None
+            if payload.get("spacing_um") is None
+            else float(payload["spacing_um"])
+        ),
+        tolerance=float(payload.get("tolerance", 0.05)),
+        backend=str(payload.get("backend", "auto")),
         pad_mode=str(payload.get("pad_mode", "reflect")),
         image_pad_value=(
             float(payload["image_pad_value"]) if payload.get("image_pad_value") is not None else None

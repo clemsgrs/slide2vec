@@ -62,6 +62,17 @@ class DenseImageRecipe:
 
     encoder_name: str
     output_variant: str
+    reader_regime: str
+    spacing_source: str
+    declared_spacing_um: float | None
+    source_spacing_um: float | None
+    effective_spacing_um: float | None
+    requested_backend: str
+    backend: str
+    tolerance: float | None
+    read_level: int | None
+    read_tile_size_px: int | None
+    requested_tile_size_px: int | None
     target_size: tuple[int, int]
     patch_size: tuple[int, int]
     encoded_size: tuple[int, int]
@@ -81,6 +92,17 @@ class DenseImageRecipe:
         return {
             "encoder_name": self.encoder_name,
             "output_variant": self.output_variant,
+            "reader_regime": self.reader_regime,
+            "spacing_source": self.spacing_source,
+            "declared_spacing_um": self.declared_spacing_um,
+            "source_spacing_um": self.source_spacing_um,
+            "effective_spacing_um": self.effective_spacing_um,
+            "requested_backend": self.requested_backend,
+            "backend": self.backend,
+            "tolerance": self.tolerance,
+            "read_level": self.read_level,
+            "read_tile_size_px": self.read_tile_size_px,
+            "requested_tile_size_px": self.requested_tile_size_px,
             "target_size": list(self.target_size),
             "patch_size": list(self.patch_size),
             "encoded_size": list(self.encoded_size),
@@ -110,6 +132,41 @@ class DenseImageRecipe:
         return cls(
             encoder_name=str(payload["encoder_name"]),
             output_variant=str(payload["output_variant"]),
+            reader_regime=str(payload["reader_regime"]),
+            spacing_source=str(payload["spacing_source"]),
+            declared_spacing_um=(
+                None
+                if payload["declared_spacing_um"] is None
+                else float(payload["declared_spacing_um"])
+            ),
+            source_spacing_um=(
+                None
+                if payload["source_spacing_um"] is None
+                else float(payload["source_spacing_um"])
+            ),
+            effective_spacing_um=(
+                None
+                if payload["effective_spacing_um"] is None
+                else float(payload["effective_spacing_um"])
+            ),
+            requested_backend=str(payload["requested_backend"]),
+            backend=str(payload["backend"]),
+            tolerance=(
+                None if payload["tolerance"] is None else float(payload["tolerance"])
+            ),
+            read_level=(
+                None if payload["read_level"] is None else int(payload["read_level"])
+            ),
+            read_tile_size_px=(
+                None
+                if payload["read_tile_size_px"] is None
+                else int(payload["read_tile_size_px"])
+            ),
+            requested_tile_size_px=(
+                None
+                if payload["requested_tile_size_px"] is None
+                else int(payload["requested_tile_size_px"])
+            ),
             target_size=_int_pair(payload["target_size"], field="target_size"),
             patch_size=_int_pair(payload["patch_size"], field="patch_size"),
             encoded_size=_int_pair(payload["encoded_size"], field="encoded_size"),
@@ -169,9 +226,23 @@ def resolve_dense_image_recipe(*, model, contract, dense, execution) -> DenseIma
         attention_include_registers=dense.attention_include_registers,
     )
     output_precision = resolve_output_precision(execution.output_dtype, execution.precision)
+    spacing_um = (
+        None if dense.spacing_um is None else float(dense.spacing_um)
+    )
     return DenseImageRecipe(
         encoder_name=str(model.name),
         output_variant=str(output["output_variant"]),
+        reader_regime="raster",
+        spacing_source="unknown" if spacing_um is None else "explicit",
+        declared_spacing_um=spacing_um,
+        source_spacing_um=spacing_um,
+        effective_spacing_um=spacing_um,
+        requested_backend=str(dense.backend),
+        backend="pil",
+        tolerance=None,
+        read_level=None,
+        read_tile_size_px=None,
+        requested_tile_size_px=None,
         target_size=geometry.target_size,
         patch_size=geometry.patch_size,
         encoded_size=geometry.encoded_size,

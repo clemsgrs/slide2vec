@@ -444,13 +444,13 @@ class DenseOptions:
 
 @dataclass(frozen=True, kw_only=True)
 class DenseImageOptions:
-    """Dense ``(d, gh, gw)`` grid extraction over pre-cropped images (issue #235).
+    """Dense ``(d, gh, gw)`` extraction over pre-cropped raster images.
 
-    :class:`DenseOptions` minus everything that only a slide has: there is no spacing, no
-    tolerance and no reading backend here, because the image *is* the region — it is read
-    from disk at the size it was written. What remains is the same supervision geometry and
-    the same dense encode knobs, so a run migrating from ROIs to image/mask pairs keeps its
-    recipe.
+    ``.png``, ``.jpg``, and ``.jpeg`` inputs (case-insensitive) use the existing Pillow RGB
+    reader. ``spacing_um`` is a run-level assertion that the supplied pixels already have
+    that physical scale; it never selects a pyramid level or resizes pixels. ``None`` means
+    unknown spacing, which spacing-constrained encoders reject unless
+    ``allow_non_recommended_settings=True``. Spacing-agnostic encoders accept it normally.
 
     ``target_size`` is a **declaration**, not a resize: the dense transform is
     normalization-only, so every image must already be exactly this size and one that is not
@@ -464,6 +464,14 @@ class DenseImageOptions:
     #: Supervision geometry in pixels the dense grid registers to: a square side length, or
     #: an explicit ``(height, width)`` for non-square images.
     target_size: int | tuple[int, int]
+    #: Asserted positive, finite physical spacing of the supplied raster pixels in µm/px.
+    #: ``None`` means their physical spacing is unknown.
+    spacing_um: float | None = None
+    #: Relative spacing tolerance (reserved for spacing-readable inputs; raster spacing is
+    #: an assertion and never selects or resamples pixels).
+    tolerance: float = 0.05
+    #: Requested reader backend. Raster images always resolve to the Pillow RGB reader.
+    backend: str = "auto"
     #: Padding mode used to pad the image up to the encoder's patch multiple.
     #: One of ``"reflect"`` / ``"replicate"`` / ``"constant"`` / ``"zero"``.
     pad_mode: str = "reflect"
@@ -503,18 +511,21 @@ class SlideRegions:
 
 @dataclass(frozen=True, kw_only=True)
 class ImageSpec:
-    """One pre-cropped image to embed: ``(sample_id, image_path)``.
+    """One named image source: ``(sample_id, image_path, spacing_at_level_0)``.
 
     The input unit of :meth:`Model.embed_images` — the Given-geometry counterpart of
-    :class:`SlideRegions`. There is no slide, no coordinate and no spacing here: the caller
-    holds an image file it never asked slide2vec to produce (a public patch benchmark
-    sample), and names it. ``sample_id`` is the artifact's whole identity, so it must be
-    unique within a run and a valid filename component; slide2vec never derives it from the
-    path, because two directories can hold the same filename.
+    :class:`SlideRegions`. ``spacing_at_level_0`` represents caller metadata for
+    spacing-readable image sources. The current raster paths reject a non-null value: a
+    pre-cropped PNG/JPEG has no slide pyramid or level-0 read plan to override. ``sample_id``
+    is the artifact's whole identity, so it must be unique within a run and a valid filename
+    component.
     """
 
     sample_id: str
     image_path: PathLike
+    #: Optional caller override for the source's level-0 spacing. Raster image paths reject
+    #: non-null overrides because they have no slide pyramid or level-0 read plan.
+    spacing_at_level_0: float | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -855,9 +866,13 @@ class Model:
         identity and complete extraction recipe. Returns one
         :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
 
-        It differs from :meth:`embed_regions_dense` in exactly one respect: there is no
-        slide, no coordinate and no spacing→level plan, because the image *is* the region.
-        Everything else is shared, including the effective encoder input — the padded image
+        Raster inputs are exactly ``.png``, ``.jpg``, and ``.jpeg`` (case-insensitive) and
+        always use Pillow's RGB decoder. ``dense.spacing_um`` asserts the scale those pixels
+        already have; ``None`` records unknown spacing. Neither case resizes. A raster
+        :class:`ImageSpec` cannot carry ``spacing_at_level_0`` because there is no level-0
+        pyramid spacing to override.
+
+        Everything after reading is shared with the slide path, including the effective encoder input — the padded image
         for a whole-image run, one patch-aligned window for a sliding one — which is declared
         before any image is decoded, so a geometry the encoder cannot accept raises here
         rather than on a torchrun rank's first forward pass.
@@ -896,7 +911,9 @@ class Model:
         encoder input size as run provenance rather than validating it. That also means
         preprocessing runs itemwise before stacking — in-process by default, or in spawned
         loader workers when ``num_workers_per_gpu`` is explicit — because differently sized
-        images cannot be stacked before they are resized.
+        images cannot be stacked before they are resized. ``ImageSpec.spacing_at_level_0``
+        is rejected here rather than ignored because this path has no slide level-0 read
+        plan.
         """
         from slide2vec.runtime.image_stage import embed_images
 

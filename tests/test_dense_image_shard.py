@@ -77,7 +77,7 @@ def _spec(tmp_path, sample_id: str, *, width: int = 64, height: int = 64) -> Ima
 
 
 def _dense(**kwargs) -> DenseImageOptions:
-    return DenseImageOptions(**{"target_size": 64, **kwargs})
+    return DenseImageOptions(**{"target_size": 64, "spacing_um": 0.5, **kwargs})
 
 
 def _recipe(
@@ -97,6 +97,17 @@ def _recipe(
     return DenseImageRecipe(
         encoder_name="fake-encoder",
         output_variant="default",
+        reader_regime="raster",
+        spacing_source="explicit",
+        declared_spacing_um=0.5,
+        source_spacing_um=0.5,
+        effective_spacing_um=0.5,
+        requested_backend="auto",
+        backend="pil",
+        tolerance=None,
+        read_level=None,
+        read_tile_size_px=None,
+        requested_tile_size_px=None,
         target_size=geometry.target_size,
         patch_size=geometry.patch_size,
         encoded_size=geometry.encoded_size,
@@ -279,6 +290,17 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
         "encoder_name": "fake-encoder",
         "encoder_level": "tile",
         "encoder_input_regime": "declared",
+        "reader_regime": "raster",
+        "spacing_source": "explicit",
+        "declared_spacing_um": 0.5,
+        "source_spacing_um": 0.5,
+        "effective_spacing_um": 0.5,
+        "requested_backend": "auto",
+        "backend": "pil",
+        "tolerance": None,
+        "read_level": None,
+        "read_tile_size_px": None,
+        "requested_tile_size_px": None,
         "pad_mode": "reflect",
         "image_pad_value": None,
         "window_size": 32,
@@ -291,6 +313,17 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "image_path": str(Path(specs[0].image_path).resolve()),
             "encoder_name": "fake-encoder",
             "output_variant": "default",
+            "reader_regime": "raster",
+            "spacing_source": "explicit",
+            "declared_spacing_um": 0.5,
+            "source_spacing_um": 0.5,
+            "effective_spacing_um": 0.5,
+            "requested_backend": "auto",
+            "backend": "pil",
+            "tolerance": None,
+            "read_level": None,
+            "read_tile_size_px": None,
+            "requested_tile_size_px": None,
             "target_size": [60, 60],
             "patch_size": [16, 16],
             "encoded_size": [64, 64],
@@ -307,6 +340,47 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "dtype": "float32",
         },
     }
+
+
+def test_explicit_spacing_changes_provenance_but_not_raster_pixels(tmp_path):
+    """Raster spacing is an assertion; both runs decode the same PIL RGB pixels."""
+    enc = _encoder()
+    spec = _spec(tmp_path, "same-pixels")
+    first_recipe = _recipe()
+    second_recipe = replace(
+        first_recipe,
+        declared_spacing_um=0.75,
+        source_spacing_um=0.75,
+        effective_spacing_um=0.75,
+    )
+
+    first = run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=tmp_path / "first",
+        dense=_dense(spacing_um=0.5),
+        recipe=first_recipe,
+        batch_size=1,
+        num_workers=0,
+    )[0]
+    second = run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=tmp_path / "second",
+        dense=_dense(spacing_um=0.75),
+        recipe=second_recipe,
+        batch_size=1,
+        num_workers=0,
+    )[0]
+
+    torch.testing.assert_close(
+        torch.load(first.path, weights_only=True),
+        torch.load(second.path, weights_only=True),
+        rtol=0,
+        atol=0,
+    )
+    assert json.loads(first.metadata_path.read_text())["effective_spacing_um"] == 0.5
+    assert json.loads(second.metadata_path.read_text())["effective_spacing_um"] == 0.75
 
 
 def test_run_dense_image_shard_supports_non_square_images(tmp_path):
@@ -342,12 +416,47 @@ def test_run_dense_image_shard_rejects_images_that_are_not_the_declared_size(tmp
     enc = _encoder()
     specs = [_spec(tmp_path, "small", width=32, height=32)]
 
-    with pytest.raises(ValueError, match=r"'small': \(32, 32\)"):
+    with pytest.raises(ValueError) as excinfo:
         run_dense_image_shard(
             specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=_dense(),
             recipe=_recipe(),
             batch_size=1, num_workers=0,
         )
+
+    assert str(excinfo.value) == (
+        "Image 'small' has observed size (32, 32), but target_size declares "
+        "(64, 64), at resolved spacing 0.5 µm/px. Dense raster extraction never "
+        "resizes; supply pixels at the declared geometry."
+    )
+
+
+def test_strict_geometry_error_reports_unknown_spacing(tmp_path):
+    enc = _encoder()
+    specs = [_spec(tmp_path, "small", width=32, height=32)]
+    unknown_recipe = replace(
+        _recipe(),
+        spacing_source="unknown",
+        declared_spacing_um=None,
+        source_spacing_um=None,
+        effective_spacing_um=None,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        run_dense_image_shard(
+            specs,
+            loaded=_loaded(enc),
+            out_dir=tmp_path / "out",
+            dense=_dense(spacing_um=None),
+            recipe=unknown_recipe,
+            batch_size=1,
+            num_workers=0,
+        )
+
+    assert str(excinfo.value) == (
+        "Image 'small' has observed size (32, 32), but target_size declares "
+        "(64, 64), at unknown spacing. Dense raster extraction never resizes; "
+        "supply pixels at the declared geometry."
+    )
 
 
 def test_off_size_images_are_named_even_when_a_batch_is_mixed(tmp_path):
@@ -371,7 +480,9 @@ def test_off_size_images_are_named_even_when_a_batch_is_mixed(tmp_path):
         )
 
     message = str(excinfo.value)
-    assert "'short': (48, 64)" in message and "'narrow': (64, 32)" in message
+    assert "Image 'short' has observed size (48, 64)" in message
+    assert "Image 'narrow' has observed size (64, 32)" in message
+    assert message.count("resolved spacing 0.5 µm/px") == 2
     assert "right" not in message  # the conforming image is not accused
 
 

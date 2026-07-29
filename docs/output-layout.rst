@@ -272,6 +272,17 @@ payload.
      "encoder_name": "virchow2",
      "encoder_level": "tile",
      "encoder_input_regime": "declared",
+     "reader_regime": "raster",
+     "spacing_source": "explicit",
+     "declared_spacing_um": 0.5,
+     "source_spacing_um": 0.5,
+     "effective_spacing_um": 0.5,
+     "requested_backend": "auto",
+     "backend": "pil",
+     "tolerance": null,
+     "read_level": null,
+     "read_tile_size_px": null,
+     "requested_tile_size_px": null,
      "image_path": "/data/ocelot/001.jpg",
      "format": "pt",
      "dtype": "float32",
@@ -293,6 +304,17 @@ payload.
        "image_path": "/data/ocelot/001.jpg",
        "encoder_name": "virchow2",
        "output_variant": "cls_patch_mean",
+       "reader_regime": "raster",
+       "spacing_source": "explicit",
+       "declared_spacing_um": 0.5,
+       "source_spacing_um": 0.5,
+       "effective_spacing_um": 0.5,
+       "requested_backend": "auto",
+       "backend": "pil",
+       "tolerance": null,
+       "read_level": null,
+       "read_tile_size_px": null,
+       "requested_tile_size_px": null,
        "target_size": [1024, 1024],
        "patch_size": [14, 14],
        "encoded_size": [1036, 1036],
@@ -311,12 +333,20 @@ payload.
    }
 
 The compatibility identity covers the sample ID and normalized source path;
+resolved raster reader regime, requested/resolved backend, spacing source, and
+declared/source/effective spacing;
 encoder name and resolved output variant; target, patch, encoded, padding, and
 grid geometry; padding/window/overlap and attention settings; inference
 precision; and stored dtype. GPU count, batch size, workers, prefetching, output
 directory, and other execution mechanics are deliberately excluded.
 ``encoder_input_regime`` is ``"declared"`` — unlike a pooled image embedding,
 this run *stated* its geometry and it was validated before any image was read.
+For raster inputs, ``reader_regime="raster"`` and ``backend="pil"`` record the
+unchanged Pillow RGB path. Explicit spacing repeats the caller's assertion in
+``declared_spacing_um``, ``source_spacing_um``, and ``effective_spacing_um``;
+unknown spacing records all three as ``null`` with
+``spacing_source="unknown"``. Pyramid-plan fields stay ``null`` because no
+level was selected and no spacing-driven resize occurred.
 
 
 Coordinate Files

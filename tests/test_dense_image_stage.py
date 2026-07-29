@@ -48,9 +48,9 @@ def _loaded(encoder: TimmTileEncoder) -> LoadedModel:
 class _FakeModel:
     """Minimal ``Model`` stand-in: refuses a backend until the dense contract is declared."""
 
-    def __init__(self, encoder) -> None:
+    def __init__(self, encoder, *, name="uni") -> None:
         self._loaded = _loaded(encoder)
-        self.name = "uni"
+        self.name = name
         self._output_variant = None
         self._requested_device = "cpu"
         self.allow_non_recommended_settings = False
@@ -84,7 +84,20 @@ def _images(tmp_path, names, *, width=64, height=64) -> list[ImageSpec]:
 
 
 def _dense(**kwargs) -> DenseImageOptions:
-    return DenseImageOptions(**{"target_size": 64, **kwargs})
+    return DenseImageOptions(**{"target_size": 64, "spacing_um": 0.5, **kwargs})
+
+
+def _skip_dense_image_encoding(monkeypatch) -> None:
+    monkeypatch.setattr(
+        dense_image_stage,
+        "partition_dense_images_by_resume",
+        lambda normalized, out_dir, recipe: ([], len(normalized)),
+    )
+    monkeypatch.setattr(
+        dense_image_stage,
+        "dense_image_artifact_from_disk",
+        lambda out_dir, spec: spec,
+    )
 
 
 def test_embed_images_dense_num_gpus_one_runs_in_process(tmp_path, monkeypatch):
@@ -241,6 +254,159 @@ def test_embed_images_dense_requires_at_least_one_image(tmp_path):
         dense_image_stage.embed_images_dense(model, [], dense=_dense(), execution=execution)
 
 
+def test_embed_images_dense_rejects_raster_level0_spacing_override(tmp_path, monkeypatch):
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("override validation must precede backend loading"),
+    )
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    spec = ImageSpec(
+        sample_id="raster",
+        image_path=tmp_path / "image.png",
+        spacing_at_level_0=0.25,
+    )
+
+    with pytest.raises(ValueError, match=r"spacing_at_level_0.*raster"):
+        dense_image_stage.embed_images_dense(
+            model, [spec], dense=_dense(), execution=execution
+        )
+
+
+def test_dense_image_raster_suffixes_are_exact_and_case_insensitive(tmp_path, monkeypatch):
+    """This issue's reader regime is exactly PNG/JPEG; spacing-readable inputs are #259."""
+    model = _FakeModel(_encoder())
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    accepted = [
+        ImageSpec(sample_id=f"accepted-{index}", image_path=tmp_path / f"image{suffix}")
+        for index, suffix in enumerate((".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"))
+    ]
+    monkeypatch.setattr(
+        dense_image_stage,
+        "partition_dense_images_by_resume",
+        lambda specs, out_dir, recipe: ([], len(specs)),
+    )
+    monkeypatch.setattr(
+        dense_image_stage,
+        "dense_image_artifact_from_disk",
+        lambda out_dir, spec: spec,
+    )
+
+    assert [
+        spec.sample_id
+        for spec in dense_image_stage.embed_images_dense(
+            model, accepted, dense=_dense(), execution=execution
+        )
+    ] == [spec.sample_id for spec in accepted]
+
+    for suffix in (".tif", ".tiff", ".svs", ".png.tmp", ""):
+        with pytest.raises(ValueError, match=r"raster.*\.png.*\.jpg.*\.jpeg"):
+            dense_image_stage.embed_images_dense(
+                model,
+                [ImageSpec(sample_id="unsupported", image_path=tmp_path / f"image{suffix}")],
+                dense=_dense(),
+                execution=execution,
+            )
+
+
+def test_non_recommended_numeric_raster_spacing_is_rejected(tmp_path, monkeypatch):
+    specs = _images(tmp_path, ["a", "b"])
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("spacing validation must precede backend loading"),
+    )
+
+    with pytest.raises(ValueError, match=r"requested_spacing_um=0\.75.*recommended"):
+        dense_image_stage.embed_images_dense(
+            model, specs, dense=_dense(spacing_um=0.75), execution=execution
+        )
+
+
+@pytest.mark.parametrize("spacing_um", [0.0, -0.5, float("nan"), float("inf")])
+def test_numeric_raster_spacing_must_be_positive_and_finite(
+    tmp_path, monkeypatch, spacing_um
+):
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    model = _FakeModel(_encoder(), name="dinov2-vitb14")
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("spacing validation must precede backend loading"),
+    )
+
+    with pytest.raises(ValueError, match=r"spacing_um must be a positive, finite"):
+        dense_image_stage.embed_images_dense(
+            model,
+            _images(tmp_path, ["sample"]),
+            dense=_dense(spacing_um=spacing_um),
+            execution=execution,
+        )
+
+
+def test_allowed_non_recommended_numeric_raster_spacing_warns_once(
+    tmp_path, monkeypatch, caplog
+):
+    specs = _images(tmp_path, ["a", "b"])
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    model = _FakeModel(_encoder())
+    model.allow_non_recommended_settings = True
+    _skip_dense_image_encoding(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        dense_image_stage.embed_images_dense(
+            model, specs, dense=_dense(spacing_um=0.75), execution=execution
+        )
+
+    assert caplog.text.count("allow_non_recommended_settings=True") == 1
+
+
+def test_unknown_raster_spacing_is_rejected_for_constrained_encoder(tmp_path):
+    specs = _images(tmp_path, ["a", "b"])
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    constrained = _FakeModel(_encoder(), name="uni")
+
+    with pytest.raises(ValueError, match=r"requested_spacing_um=unknown.*recommended"):
+        dense_image_stage.embed_images_dense(
+            constrained, specs, dense=_dense(spacing_um=None), execution=execution
+        )
+
+
+def test_allowed_unknown_raster_spacing_warns_once(tmp_path, monkeypatch, caplog):
+    specs = _images(tmp_path, ["a", "b"])
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    constrained = _FakeModel(_encoder(), name="uni")
+    constrained.allow_non_recommended_settings = True
+    _skip_dense_image_encoding(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        dense_image_stage.embed_images_dense(
+            constrained, specs, dense=_dense(spacing_um=None), execution=execution
+        )
+
+    assert caplog.text.count("requested_spacing_um=unknown") == 1
+
+
+def test_unknown_raster_spacing_is_accepted_for_agnostic_encoder(
+    tmp_path, monkeypatch, caplog
+):
+    specs = _images(tmp_path, ["a", "b"])
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    agnostic = _FakeModel(_encoder(), name="dinov2-vitb14")
+    _skip_dense_image_encoding(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        artifacts = dense_image_stage.embed_images_dense(
+            agnostic, specs, dense=_dense(spacing_um=None), execution=execution
+        )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["a", "b"]
+    assert caplog.text == ""
+
+
 @pytest.mark.parametrize(
     ("dense", "message"),
     [
@@ -273,7 +439,7 @@ def test_invalid_dense_image_recipe_fails_before_backend_load(
 
 
 def test_dense_image_options_round_trip_through_the_request():
-    """Every dense knob crosses to the ranks, including a non-square target size."""
+    """Every dense knob crosses to the ranks, including raster spacing/reader settings."""
     from slide2vec.runtime.serialization import (
         deserialize_dense_image_options,
         serialize_dense_image_options,
@@ -281,6 +447,9 @@ def test_dense_image_options_round_trip_through_the_request():
 
     dense = DenseImageOptions(
         target_size=(64, 96),
+        spacing_um=0.504,
+        tolerance=0.025,
+        backend="auto",
         pad_mode="constant",
         image_pad_value=0.5,
         window_size=32,
@@ -291,6 +460,14 @@ def test_dense_image_options_round_trip_through_the_request():
     )
     payload = json.loads(json.dumps(serialize_dense_image_options(dense)))
     assert deserialize_dense_image_options(payload) == dense
+
+
+def test_dense_image_options_default_to_unknown_spacing_and_auto_reader():
+    dense = DenseImageOptions(target_size=224)
+
+    assert dense.spacing_um is None
+    assert dense.tolerance == 0.05
+    assert dense.backend == "auto"
 
 
 def test_model_embed_images_dense_delegates_and_requires_output_dir(monkeypatch, tmp_path):
