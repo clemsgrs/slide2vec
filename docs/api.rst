@@ -342,25 +342,25 @@ the current call. Missing, legacy, or incompatible pairs are recomputed, so an
 interrupted run is restarted by re-issuing the call.
 
 **Reader regimes and physical scale.** One dense-image run uses exactly one
-reader regime; mixing regimes is rejected with samples grouped by regime before
-model loading or pixel decoding. Raster is the exact case-insensitive suffix set
-``.png``, ``.jpg``, and ``.jpeg`` and uses Pillow ``convert("RGB")``. Multiple
-suffixes in that set may share a run. A positive, finite numeric ``spacing_um``
-is an **asserted spacing** for raster pixels: it is checked by the normal
-recommended-settings policy but never changes the pixels. ``spacing_um=None``
-is unknown spacing for raster inputs.
+:term:`reader regime`; mixing regimes is rejected with samples grouped by
+regime before model loading or pixel decoding. A :term:`raster image` has one
+of the exact case-insensitive suffixes ``.png``, ``.jpg``, and ``.jpeg`` and
+uses Pillow ``convert("RGB")``. Multiple suffixes in that set may share a run.
+A positive, finite numeric ``spacing_um`` is the :term:`declared spacing` for
+raster pixels: it is checked by the normal recommended-settings policy but
+never changes the pixels. ``spacing_um=None`` records unknown spacing.
 
-Spacing-readable inputs are the WSI formats declared by the installed hs2p
-readers. Multiple spacing-readable suffixes may share a run. Here numeric
-``spacing_um`` is the requested read scale and ``None`` resolves the encoder's
+A :term:`spacing-readable image` has a format declared by an installed hs2p
+reader. Multiple spacing-readable suffixes may share a run. Here numeric
+``spacing_um`` is the declared spacing and ``None`` resolves the encoder's
 single registry default. Encoders with ambiguous or missing defaults, including
 unregistered/custom encoders, require an explicit value. The parent asks hs2p
 to resolve each source's level-0 spacing, concrete backend, native read level
 and spacing, and tolerance result before resume filtering. Ranks consume that
 immutable plan: hs2p reads the complete selected level and area-downsamples only
 when needed. A native level within tolerance is accepted without resize, so its
-native spacing is the effective spacing; an area-downsampled image has the
-requested spacing as its effective spacing. Reads never upsample and an
+native spacing is the :term:`effective spacing`; an area-downsampled image has
+the declared spacing as its effective spacing. Reads never upsample and an
 explicit backend never silently falls back.
 
 ``ImageSpec.spacing_at_level_0`` overrides hs2p's source level-0 metadata for
@@ -368,7 +368,8 @@ spacing-readable inputs. Without it, hs2p metadata is authoritative and missing
 spacing is an error. Raster dense extraction and :meth:`Model.embed_images`
 reject a non-null override rather than silently ignoring it.
 
-**target_size is a declaration, not a resize.** It is checked after the selected
+**target_size is a declaration, not a resize.** The :term:`target size` is
+checked after the selected
 reader finishes, including any hs2p spacing downsample. Every final image must
 be exactly ``target_size`` (a non-square ``(height, width)`` pair is accepted);
 a mismatch raises with the sample, observed and declared dimensions, and the
@@ -378,7 +379,8 @@ image, or one patch-aligned window of it — be validated, and the encoder's
 variable-input constructor settings resolved, before a single image is decoded (see
 `Variable encoder input for dense runs`_). A dataset whose images differ in size
 is therefore several runs, one per geometry — which is also the only way their
-grids could be batched downstream.
+grids could be batched downstream. See :term:`compatible artifact` for the
+resume boundary.
 
 .. autoclass:: slide2vec.DenseImageOptions
    :members:

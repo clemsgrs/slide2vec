@@ -476,14 +476,6 @@ These files can be reused across runs via
 :attr:`~slide2vec.PreprocessingConfig.read_coordinates_from` to skip
 tiling when only the encoder changes.
 
-Artifacts written with hs2p 4.3 remain loadable, but ``resume`` and
-``read_coordinates_from`` still validate artifact compatibility. hs2p 4.4
-changed ``auto`` backend priority to cucim → vips → openslide → asap, so a 4.3
-artifact created with ``backend="auto"`` may resolve to a different decoder and
-be rejected or recomputed instead of silently reused. Pin the original explicit
-backend when stable reuse across that boundary is required.
-
-
 Process List
 ------------
 
