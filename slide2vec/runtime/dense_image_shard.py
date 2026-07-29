@@ -22,13 +22,16 @@ heterogeneous — here it is declared, uniform, and checked while stacking (see
 of large images is the bottleneck this path has and can be parallelized per item when
 explicitly configured.
 
-Writes are atomic and sidecar-last (see :func:`~slide2vec.artifacts.write_dense_image`), so a
-payload without a sidecar unambiguously means an interrupted image and resume trusts the
-sidecar as the done-marker.
+An exactly compatible sidecar is the done-marker; presence alone is insufficient. Before
+replacing an incompatible pair this loop removes the old marker, then atomically replaces
+the payload, then publishes the new sidecar last (see
+:func:`~slide2vec.artifacts.write_dense_image`). Interruption at any boundary therefore
+leaves no trusted marker paired with a changed payload.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, Callable, Sequence
 
@@ -42,6 +45,10 @@ from slide2vec.artifacts import (
 )
 from slide2vec.data.dataset import DeclaredGeometryCollator, ImageFileDataset
 from slide2vec.runtime.batching import dataloader_kwargs, uses_cuda_runtime
+from slide2vec.runtime.dense_image_recipe import (
+    DenseImageRecipe,
+    malformed_dense_image_compatibility_fields,
+)
 from slide2vec.runtime.dense_regions import DenseGridEncoder
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
@@ -53,15 +60,56 @@ if TYPE_CHECKING:
     from slide2vec.runtime.types import LoadedModel
 
 
-def dense_image_needs_encode(out_dir, spec: "ImageSpec") -> bool:
-    """Resume predicate: an image needs encoding iff its sidecar is absent.
+@dataclass(frozen=True, kw_only=True)
+class DenseImageResumeDecision:
+    needs_encode: bool
+    differing_fields: tuple[str, ...] = ()
 
-    The sidecar is written last, so its presence is the done-marker; a ``.pt`` with no
-    sidecar is a crashed write and is re-encoded. Unlike the pooled image path there is no
-    format to disambiguate — a dense grid is always a ``.pt`` payload.
-    """
-    _, sidecar_path = dense_image_paths(out_dir, sample_id=spec.sample_id)
-    return not sidecar_path.exists()
+
+def dense_image_resume_decision(
+    out_dir, spec: "ImageSpec", recipe: DenseImageRecipe
+) -> DenseImageResumeDecision:
+    """Classify one on-disk pair against the current image extraction identity."""
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id=spec.sample_id)
+    missing = tuple(
+        name
+        for name, path in (("payload", payload_path), ("sidecar", sidecar_path))
+        if not path.exists()
+    )
+    if missing:
+        return DenseImageResumeDecision(needs_encode=True, differing_fields=missing)
+
+    metadata = load_metadata(sidecar_path)
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Malformed dense image sidecar {sidecar_path}: expected a JSON object")
+    recorded = metadata.get("compatibility")
+    if recorded is None:
+        return DenseImageResumeDecision(
+            needs_encode=True, differing_fields=("compatibility",)
+        )
+    if not isinstance(recorded, dict):
+        raise ValueError(
+            f"Malformed dense image sidecar {sidecar_path}: "
+            "'compatibility' must be a JSON object"
+        )
+    expected = recipe.for_image(spec)
+    malformed = malformed_dense_image_compatibility_fields(recorded, expected)
+    if malformed:
+        raise ValueError(
+            f"Malformed dense image sidecar {sidecar_path}: invalid compatibility "
+            f"fields: {', '.join(malformed)}"
+        )
+
+    differing = tuple(
+        sorted(
+            key
+            for key in set(recorded) | set(expected)
+            if key not in recorded or key not in expected or recorded[key] != expected[key]
+        )
+    )
+    return DenseImageResumeDecision(
+        needs_encode=bool(differing), differing_fields=differing
+    )
 
 
 def dense_image_artifact_from_disk(out_dir, spec: "ImageSpec") -> DenseImageArtifact:
@@ -82,8 +130,7 @@ def dense_image_metadata(
     spec: "ImageSpec",
     *,
     loaded: "LoadedModel",
-    dense: "DenseImageOptions",
-    encoder: DenseGridEncoder,
+    recipe: DenseImageRecipe,
     grid: "np.ndarray",
 ) -> dict:
     """The geometry sidecar: what was encoded, and with which dense recipe.
@@ -94,30 +141,32 @@ def dense_image_metadata(
     *did* state its geometry — ``target_size`` — and it was validated before any image was
     read, so the sidecar records a request that was honored rather than a size observed.
     """
-    geometry = encoder.geometry
-    return {
+    compatibility = recipe.for_image(spec)
+    metadata = {
         "artifact_type": "dense_image_embeddings",
-        "sample_id": spec.sample_id,
-        "image_path": str(spec.image_path),
+        "sample_id": compatibility["sample_id"],
+        "image_path": compatibility["image_path"],
         "format": "pt",
-        "dtype": str(grid.dtype),
+        "dtype": compatibility["dtype"],
         "feature_dim": int(grid.shape[0]),
-        "grid_shape": [int(geometry.grid_shape[0]), int(geometry.grid_shape[1])],
-        "target_size": [int(geometry.target_size[0]), int(geometry.target_size[1])],
-        "patch_size": [int(geometry.patch_size[0]), int(geometry.patch_size[1])],
-        "encoded_size": [int(geometry.encoded_size[0]), int(geometry.encoded_size[1])],
-        "pad": [int(geometry.pad[0]), int(geometry.pad[1])],
-        "encoder_name": loaded.name,
+        "grid_shape": compatibility["grid_shape"],
+        "target_size": compatibility["target_size"],
+        "patch_size": compatibility["patch_size"],
+        "encoded_size": compatibility["encoded_size"],
+        "pad": compatibility["pad"],
+        "encoder_name": compatibility["encoder_name"],
         "encoder_level": loaded.level,
         "encoder_input_regime": "declared",
-        "pad_mode": dense.pad_mode,
-        "image_pad_value": dense.image_pad_value,
-        "window_size": dense.window_size,
-        "overlap": float(dense.overlap),
-        "feature_kind": dense.feature_kind,
-        "attention_blocks": [int(block) for block in dense.attention_blocks],
-        "attention_include_registers": bool(dense.attention_include_registers),
+        "pad_mode": compatibility["pad_mode"],
+        "image_pad_value": compatibility["image_pad_value"],
+        "window_size": compatibility["window_size"],
+        "overlap": compatibility["overlap"],
+        "feature_kind": compatibility["feature_kind"],
+        "attention_blocks": compatibility["attention_blocks"],
+        "attention_include_registers": compatibility["attention_include_registers"],
+        "compatibility": compatibility,
     }
+    return metadata
 
 
 def run_dense_image_shard(
@@ -126,6 +175,7 @@ def run_dense_image_shard(
     loaded: "LoadedModel",
     out_dir,
     dense: "DenseImageOptions",
+    recipe: DenseImageRecipe,
     batch_size: int,
     precision: str = "fp32",
     output_dtype: "torch.dtype | None" = None,
@@ -135,16 +185,26 @@ def run_dense_image_shard(
 ) -> list[DenseImageArtifact]:
     """Encode + persist one shard's images, one grid payload + one sidecar per image.
 
-    Skips any image already complete on disk (see :func:`dense_image_needs_encode`), encodes
-    the rest through the shared dense kernel, and writes each batch's grids before the next
-    batch is encoded — which is what makes a killed rank resumable at image granularity
-    rather than losing the whole shard. Returns one
+    Skips only images whose payload and sidecar exactly match ``recipe``, invalidates every
+    incompatible done-marker, encodes the rest through the shared dense kernel, and writes
+    each batch's grids before the next batch is encoded — which is what makes a killed rank
+    resumable at image granularity rather than losing the whole shard. Returns one
     :class:`~slide2vec.artifacts.DenseImageArtifact` per input image in input order — freshly
     written or (when skipped) read back off disk. ``on_batch`` is invoked with each encoded
     batch's image count for per-batch progress.
     """
     images = list(images)
-    pending = [spec for spec in images if dense_image_needs_encode(out_dir, spec)]
+    pending = [
+        spec
+        for spec in images
+        if dense_image_resume_decision(out_dir, spec, recipe).needs_encode
+    ]
+    for spec in pending:
+        # The sidecar is the only done-marker. Remove any stale marker before the first
+        # operation that can fail so an interrupted replacement can never be resumed as a
+        # complete pair, regardless of whether the old or new payload is still present.
+        _, sidecar_path = dense_image_paths(out_dir, sample_id=spec.sample_id)
+        sidecar_path.unlink(missing_ok=True)
     written: dict[str, DenseImageArtifact] = {}
     if pending:
         encoder = DenseGridEncoder.resolve(
@@ -201,7 +261,10 @@ def run_dense_image_shard(
                         output_dir=out_dir,
                         sample_id=spec.sample_id,
                         metadata=dense_image_metadata(
-                            spec, loaded=loaded, dense=dense, encoder=encoder, grid=grid
+                            spec,
+                            loaded=loaded,
+                            recipe=recipe,
+                            grid=grid,
                         ),
                     )
                 if on_batch is not None:

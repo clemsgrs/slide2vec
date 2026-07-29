@@ -30,6 +30,7 @@ def main(argv=None) -> int:
     from slide2vec.runtime.dense_stage import resolve_output_torch_dtype
     from slide2vec.runtime.image_specs import image_specs_from_request
     from slide2vec.runtime.serialization import (
+        deserialize_dense_image_recipe,
         deserialize_dense_image_options,
         deserialize_execution,
     )
@@ -47,6 +48,7 @@ def main(argv=None) -> int:
 
     model = model_from_request(request, rank=rank)
     dense = deserialize_dense_image_options(request["dense"])
+    recipe = deserialize_dense_image_recipe(request["recipe"])
     execution = deserialize_execution(request["execution"])
     # Each rank declares the dense contract for itself rather than trusting the parent to
     # have done it (the declaration is idempotent): that is what supplies the variable-input
@@ -64,6 +66,7 @@ def main(argv=None) -> int:
             loaded=loaded,
             out_dir=output_dir,
             dense=dense,
+            recipe=recipe,
             batch_size=int(execution.batch_size),
             precision=execution.precision,
             output_dtype=resolve_output_torch_dtype(execution),

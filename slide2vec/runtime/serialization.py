@@ -8,6 +8,7 @@ from slide2vec.api import (
     ExecutionOptions,
     PreprocessingConfig,
 )
+from slide2vec.runtime.dense_image_recipe import DenseImageRecipe
 
 
 def serialize_model(model) -> dict[str, Any]:
@@ -127,6 +128,16 @@ def serialize_dense_image_options(dense: DenseImageOptions) -> dict[str, Any]:
         "attention_blocks": list(dense.attention_blocks),
         "attention_include_registers": dense.attention_include_registers,
     }
+
+
+def serialize_dense_image_recipe(recipe: DenseImageRecipe) -> dict[str, Any]:
+    """Return the canonical recipe in its JSON representation."""
+    return recipe.to_dict()
+
+
+def deserialize_dense_image_recipe(payload: dict[str, Any]) -> DenseImageRecipe:
+    """Rebuild the exact canonical recipe resolved by the parent."""
+    return DenseImageRecipe.from_dict(payload)
 
 
 def deserialize_dense_image_options(payload: dict[str, Any]) -> DenseImageOptions:

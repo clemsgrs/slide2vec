@@ -18,6 +18,8 @@ migrate onto — for both ``feature_kind`` values.
 from __future__ import annotations
 
 import json
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +35,7 @@ from slide2vec.api import DenseImageOptions, ImageSpec  # noqa: E402
 from slide2vec.artifacts import dense_image_paths, write_dense_image  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime.dense_image_shard import run_dense_image_shard  # noqa: E402
+from slide2vec.runtime.dense_image_recipe import DenseImageRecipe  # noqa: E402
 from slide2vec.runtime.dense_regions import (  # noqa: E402
     compute_dense_geometry,
     pad_image_to_encoded,
@@ -75,6 +78,40 @@ def _spec(tmp_path, sample_id: str, *, width: int = 64, height: int = 64) -> Ima
 
 def _dense(**kwargs) -> DenseImageOptions:
     return DenseImageOptions(**{"target_size": 64, **kwargs})
+
+
+def _recipe(
+    *,
+    target_size=(64, 64),
+    pad_mode="reflect",
+    image_pad_value=None,
+    window_size=None,
+    overlap=0.0,
+    feature_kind="patch_features",
+    attention_blocks=(-1,),
+    attention_include_registers=False,
+    precision="fp32",
+    dtype="float32",
+) -> DenseImageRecipe:
+    geometry = compute_dense_geometry(target_size=target_size, patch_size=(16, 16))
+    return DenseImageRecipe(
+        encoder_name="fake-encoder",
+        output_variant="default",
+        target_size=geometry.target_size,
+        patch_size=geometry.patch_size,
+        encoded_size=geometry.encoded_size,
+        pad=geometry.pad,
+        grid_shape=geometry.grid_shape,
+        pad_mode=pad_mode,
+        image_pad_value=image_pad_value,
+        window_size=window_size,
+        overlap=overlap,
+        feature_kind=feature_kind,
+        attention_blocks=attention_blocks,
+        attention_include_registers=attention_include_registers,
+        precision=precision,
+        dtype=dtype,
+    )
 
 
 def _dense_dir(out_dir) -> Path:
@@ -140,6 +177,7 @@ def test_run_dense_image_shard_writes_payload_and_sidecar_per_image(tmp_path):
         loaded=_loaded(enc),
         out_dir=tmp_path / "out",
         dense=_dense(),
+        recipe=_recipe(),
         batch_size=2,
         num_workers=0,
     )
@@ -175,6 +213,7 @@ def test_grid_matches_the_direct_dense_composition(tmp_path, feature_kind, windo
         loaded=_loaded(enc),
         out_dir=tmp_path / "out",
         dense=_dense(feature_kind=feature_kind, window_size=window_size),
+        recipe=_recipe(feature_kind=feature_kind, window_size=window_size),
         batch_size=batch_size,
         num_workers=0,
     )
@@ -218,6 +257,9 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
 
     artifacts = run_dense_image_shard(
         specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=dense,
+        recipe=_recipe(
+            target_size=(60, 60), window_size=32, overlap=0.25
+        ),
         batch_size=1, num_workers=0,
     )
 
@@ -244,6 +286,26 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
         "feature_kind": "patch_features",
         "attention_blocks": [-1],
         "attention_include_registers": False,
+        "compatibility": {
+            "sample_id": "a",
+            "image_path": str(Path(specs[0].image_path).resolve()),
+            "encoder_name": "fake-encoder",
+            "output_variant": "default",
+            "target_size": [60, 60],
+            "patch_size": [16, 16],
+            "encoded_size": [64, 64],
+            "pad": [4, 4],
+            "grid_shape": [4, 4],
+            "pad_mode": "reflect",
+            "image_pad_value": None,
+            "window_size": 32,
+            "overlap": 0.25,
+            "feature_kind": "patch_features",
+            "attention_blocks": [-1],
+            "attention_include_registers": False,
+            "precision": "fp32",
+            "dtype": "float32",
+        },
     }
 
 
@@ -262,6 +324,7 @@ def test_run_dense_image_shard_supports_non_square_images(tmp_path):
         loaded=_loaded(enc),
         out_dir=tmp_path / "out",
         dense=_dense(target_size=(64, 96)),
+        recipe=_recipe(target_size=(64, 96)),
         batch_size=1,
         num_workers=0,
     )
@@ -282,6 +345,7 @@ def test_run_dense_image_shard_rejects_images_that_are_not_the_declared_size(tmp
     with pytest.raises(ValueError, match=r"'small': \(32, 32\)"):
         run_dense_image_shard(
             specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=_dense(),
+            recipe=_recipe(),
             batch_size=1, num_workers=0,
         )
 
@@ -302,6 +366,7 @@ def test_off_size_images_are_named_even_when_a_batch_is_mixed(tmp_path):
     with pytest.raises(ValueError) as excinfo:
         run_dense_image_shard(
             specs, loaded=_loaded(enc), out_dir=tmp_path / "out", dense=_dense(),
+            recipe=_recipe(),
             batch_size=3, num_workers=0,
         )
 
@@ -316,12 +381,16 @@ def test_run_dense_image_shard_skips_images_with_existing_sidecar(tmp_path):
     specs = [_spec(tmp_path, name) for name in ("a", "b", "c")]
     out_dir = tmp_path / "out"
 
-    first = run_dense_image_shard(specs, loaded=_loaded(enc), out_dir=out_dir,
-                                  dense=_dense(), batch_size=2, num_workers=0)
+    first = run_dense_image_shard(
+        specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=2, num_workers=0
+    )
     mtimes = {a.sample_id: a.path.stat().st_mtime_ns for a in first}
 
-    second = run_dense_image_shard(specs, loaded=_loaded(enc), out_dir=out_dir,
-                                   dense=_dense(), batch_size=2, num_workers=0)
+    second = run_dense_image_shard(
+        specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=2, num_workers=0
+    )
 
     assert [a.sample_id for a in second] == [a.sample_id for a in first]
     assert {a.sample_id: a.path.stat().st_mtime_ns for a in second} == mtimes
@@ -332,19 +401,221 @@ def test_run_dense_image_shard_reencodes_payload_missing_its_sidecar(tmp_path):
     enc = _encoder()
     specs = [_spec(tmp_path, name) for name in ("a", "b")]
     out_dir = tmp_path / "out"
-    run_dense_image_shard(specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
-                          batch_size=2, num_workers=0)
+    run_dense_image_shard(
+        specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=2, num_workers=0
+    )
 
     _, sidecar_path = dense_image_paths(out_dir, sample_id="b")
     payload_path, _ = dense_image_paths(out_dir, sample_id="b")
     sidecar_path.unlink()
     payload_mtime = payload_path.stat().st_mtime_ns
 
-    run_dense_image_shard(specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
-                          batch_size=2, num_workers=0)
+    run_dense_image_shard(
+        specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=2, num_workers=0
+    )
 
     assert sidecar_path.exists()
     assert payload_path.stat().st_mtime_ns != payload_mtime
+
+
+def test_incompatible_recompute_invalidates_done_marker_before_encoding(tmp_path):
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    original_recipe = _recipe(overlap=0.0)
+    run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=out_dir,
+        dense=_dense(),
+        recipe=original_recipe,
+        batch_size=1,
+        num_workers=0,
+    )
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id="a")
+    original_payload = payload_path.read_bytes()
+
+    Path(spec.image_path).unlink()
+    with pytest.raises(FileNotFoundError):
+        run_dense_image_shard(
+            [spec],
+            loaded=_loaded(enc),
+            out_dir=out_dir,
+            dense=_dense(overlap=0.25),
+            recipe=replace(original_recipe, overlap=0.25),
+            batch_size=1,
+            num_workers=0,
+        )
+
+    assert payload_path.read_bytes() == original_payload
+    assert not sidecar_path.exists()
+
+
+def test_interruption_after_payload_replacement_leaves_no_trusted_sidecar(
+    tmp_path, monkeypatch
+):
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    original_recipe = _recipe(dtype="float32")
+    run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=out_dir,
+        dense=_dense(),
+        recipe=original_recipe,
+        batch_size=1,
+        num_workers=0,
+    )
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id="a")
+    assert torch.load(payload_path, weights_only=True).dtype == torch.float32
+
+    def _fail_sidecar(*args, **kwargs):
+        raise RuntimeError("failure before sidecar publication")
+
+    monkeypatch.setattr(Path, "write_text", _fail_sidecar)
+    replacement_recipe = replace(original_recipe, dtype="float16")
+    with pytest.raises(RuntimeError, match="failure before sidecar publication"):
+        run_dense_image_shard(
+            [spec],
+            loaded=_loaded(enc),
+            out_dir=out_dir,
+            dense=_dense(),
+            recipe=replacement_recipe,
+            batch_size=1,
+            output_dtype=torch.float16,
+            num_workers=0,
+        )
+
+    assert torch.load(payload_path, weights_only=True).dtype == torch.float16
+    assert not sidecar_path.exists()
+
+
+def test_payload_temp_write_failure_leaves_old_payload_without_sidecar(
+    tmp_path, monkeypatch
+):
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    original_recipe = _recipe(dtype="float32")
+    run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=out_dir,
+        dense=_dense(),
+        recipe=original_recipe,
+        batch_size=1,
+        num_workers=0,
+    )
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id="a")
+    original_payload = payload_path.read_bytes()
+
+    def _fail_payload_write(*args, **kwargs):
+        raise OSError("payload temp write failed")
+
+    monkeypatch.setattr(torch, "save", _fail_payload_write)
+    with pytest.raises(OSError, match="payload temp write failed"):
+        run_dense_image_shard(
+            [spec],
+            loaded=_loaded(enc),
+            out_dir=out_dir,
+            dense=_dense(),
+            recipe=replace(original_recipe, dtype="float16"),
+            batch_size=1,
+            output_dtype=torch.float16,
+            num_workers=0,
+        )
+
+    assert payload_path.read_bytes() == original_payload
+    assert not sidecar_path.exists()
+    assert not any(".tmp-" in path.name for path in payload_path.parent.iterdir())
+
+
+def test_payload_publish_failure_leaves_old_payload_without_sidecar(
+    tmp_path, monkeypatch
+):
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    original_recipe = _recipe(dtype="float32")
+    run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=out_dir,
+        dense=_dense(),
+        recipe=original_recipe,
+        batch_size=1,
+        num_workers=0,
+    )
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id="a")
+    original_payload = payload_path.read_bytes()
+    original_replace = os.replace
+
+    def _fail_payload_replace(source, destination):
+        if Path(destination) == payload_path:
+            raise OSError("payload publish failed")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", _fail_payload_replace)
+    with pytest.raises(OSError, match="payload publish failed"):
+        run_dense_image_shard(
+            [spec],
+            loaded=_loaded(enc),
+            out_dir=out_dir,
+            dense=_dense(),
+            recipe=replace(original_recipe, dtype="float16"),
+            batch_size=1,
+            output_dtype=torch.float16,
+            num_workers=0,
+        )
+
+    assert payload_path.read_bytes() == original_payload
+    assert not sidecar_path.exists()
+    assert not any(".tmp-" in path.name for path in payload_path.parent.iterdir())
+
+
+def test_sidecar_publish_failure_leaves_new_payload_without_sidecar(
+    tmp_path, monkeypatch
+):
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    original_recipe = _recipe(dtype="float32")
+    run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=out_dir,
+        dense=_dense(),
+        recipe=original_recipe,
+        batch_size=1,
+        num_workers=0,
+    )
+    payload_path, sidecar_path = dense_image_paths(out_dir, sample_id="a")
+    original_replace = os.replace
+
+    def _fail_sidecar_replace(source, destination):
+        if Path(destination) == sidecar_path:
+            raise OSError("sidecar publish failed")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", _fail_sidecar_replace)
+    with pytest.raises(OSError, match="sidecar publish failed"):
+        run_dense_image_shard(
+            [spec],
+            loaded=_loaded(enc),
+            out_dir=out_dir,
+            dense=_dense(),
+            recipe=replace(original_recipe, dtype="float16"),
+            batch_size=1,
+            output_dtype=torch.float16,
+            num_workers=0,
+        )
+
+    assert torch.load(payload_path, weights_only=True).dtype == torch.float16
+    assert not sidecar_path.exists()
+    assert not any(".tmp-" in path.name for path in payload_path.parent.iterdir())
 
 
 def test_multi_rank_matches_single_rank(tmp_path):
@@ -353,13 +624,17 @@ def test_multi_rank_matches_single_rank(tmp_path):
     specs = [_spec(tmp_path, f"image-{i}") for i in range(7)]
 
     single_dir = tmp_path / "single"
-    run_dense_image_shard(specs, loaded=_loaded(enc), out_dir=single_dir, dense=_dense(),
-                          batch_size=3, num_workers=0)
+    run_dense_image_shard(
+        specs, loaded=_loaded(enc), out_dir=single_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=3, num_workers=0
+    )
 
     multi_dir = tmp_path / "multi"
     for shard in plan_contiguous_shards(specs, 3):
-        run_dense_image_shard(shard, loaded=_loaded(enc), out_dir=multi_dir, dense=_dense(),
-                              batch_size=3, num_workers=0)
+        run_dense_image_shard(
+            shard, loaded=_loaded(enc), out_dir=multi_dir, dense=_dense(),
+            recipe=_recipe(), batch_size=3, num_workers=0
+        )
 
     def _files(root):
         base = _dense_dir(root)
@@ -381,6 +656,7 @@ def test_run_dense_image_shard_honors_the_on_disk_grid_dtype(tmp_path):
         loaded=_loaded(_encoder()),
         out_dir=tmp_path / "out",
         dense=_dense(),
+        recipe=_recipe(dtype="float16"),
         batch_size=1,
         output_dtype=torch.float16,
         num_workers=0,
@@ -400,6 +676,7 @@ def test_payload_size_is_independent_of_batch_size(tmp_path):
         out_dir = tmp_path / f"out-{batch_size}"
         artifacts = run_dense_image_shard(
             specs, loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+            recipe=_recipe(),
             batch_size=batch_size, num_workers=0,
         )
         sizes[batch_size] = [artifact.path.stat().st_size for artifact in artifacts]
