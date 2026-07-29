@@ -444,33 +444,36 @@ class DenseOptions:
 
 @dataclass(frozen=True, kw_only=True)
 class DenseImageOptions:
-    """Dense ``(d, gh, gw)`` extraction over pre-cropped raster images.
+    """Dense ``(d, gh, gw)`` extraction over pre-cropped images.
 
-    ``.png``, ``.jpg``, and ``.jpeg`` inputs (case-insensitive) use the existing Pillow RGB
-    reader. ``spacing_um`` is a run-level assertion that the supplied pixels already have
-    that physical scale; it never selects a pyramid level or resizes pixels. ``None`` means
-    unknown spacing, which spacing-constrained encoders reject unless
-    ``allow_non_recommended_settings=True``. Spacing-agnostic encoders accept it normally.
+    One run has one reader regime. ``.png``, ``.jpg``, and ``.jpeg`` inputs
+    (case-insensitive) use Pillow and treat numeric ``spacing_um`` as an assertion about
+    unchanged pixels. hs2p-supported WSI formats form the spacing-readable regime: hs2p
+    resolves source spacing, backend, pyramid level, tolerance, complete-extent read, and
+    area downsampling at the one requested run-level ``spacing_um``. Omitted spacing resolves
+    the encoder's single registry default for spacing-readable inputs and requires an
+    explicit value when no default is available.
 
-    ``target_size`` is a **declaration**, not a resize: the dense transform is
-    normalization-only, so every image must already be exactly this size and one that is not
-    is an error rather than a silent rescale. Declaring it up front is what lets the
-    effective encoder input be validated (and the encoder's variable-input constructor
-    settings resolved) before a single image is decoded. A run whose images are not all the
-    same size is therefore several runs, one per geometry — which is also the only way their
-    grids could be batched downstream.
+    ``ImageSpec.spacing_at_level_0`` overrides level-0 metadata only for spacing-readable
+    sources. ``target_size`` is always a strict post-read declaration, never a fit-to-size
+    request: each final pixel array must already be exactly this size. Declaring it up front
+    lets the effective encoder input be validated (and variable-input constructor settings
+    resolved) before model loading or pixel decoding. Differing final geometries therefore
+    require separate runs.
     """
 
     #: Supervision geometry in pixels the dense grid registers to: a square side length, or
     #: an explicit ``(height, width)`` for non-square images.
     target_size: int | tuple[int, int]
-    #: Asserted positive, finite physical spacing of the supplied raster pixels in µm/px.
-    #: ``None`` means their physical spacing is unknown.
+    #: Positive, finite run-level spacing in µm/px: asserted for raster pixels and requested
+    #: for spacing-readable reads. ``None`` is unknown for raster and resolves the encoder's
+    #: single registry default for spacing-readable inputs.
     spacing_um: float | None = None
-    #: Relative spacing tolerance (reserved for spacing-readable inputs; raster spacing is
-    #: an assertion and never selects or resamples pixels).
+    #: Relative spacing tolerance used by hs2p for spacing-readable level selection; raster
+    #: reads have no tolerance result.
     tolerance: float = 0.05
-    #: Requested reader backend. Raster images always resolve to the Pillow RGB reader.
+    #: Requested hs2p backend for spacing-readable inputs. ``"auto"`` is resolved in the
+    #: parent; raster images always resolve to Pillow.
     backend: str = "auto"
     #: Padding mode used to pad the image up to the encoder's patch multiple.
     #: One of ``"reflect"`` / ``"replicate"`` / ``"constant"`` / ``"zero"``.
@@ -866,19 +869,26 @@ class Model:
         identity and complete extraction recipe. Returns one
         :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
 
-        Raster inputs are exactly ``.png``, ``.jpg``, and ``.jpeg`` (case-insensitive) and
-        always use Pillow's RGB decoder. ``dense.spacing_um`` asserts the scale those pixels
-        already have; ``None`` records unknown spacing. Neither case resizes. A raster
-        :class:`ImageSpec` cannot carry ``spacing_at_level_0`` because there is no level-0
-        pyramid spacing to override.
+        One run uses one reader regime. Raster inputs are exactly ``.png``, ``.jpg``, and
+        ``.jpeg`` (case-insensitive) and always use Pillow's RGB decoder.
+        ``dense.spacing_um`` asserts the scale those unchanged pixels already have; ``None``
+        records unknown spacing. hs2p-supported WSI inputs are spacing-readable:
+        ``dense.spacing_um`` requests one physical read scale, or ``None`` resolves the
+        encoder's single registry default. The parent resolves each source's metadata,
+        concrete backend, native level, tolerance result, and final geometry before resume;
+        hs2p reads that complete level and area-downsamples when required, but never
+        upsamples. ``ImageSpec.spacing_at_level_0`` overrides source metadata only in this
+        spacing-readable regime and is rejected for raster inputs.
 
         Everything after reading is shared with the slide path, including the effective encoder input — the padded image
         for a whole-image run, one patch-aligned window for a sliding one — which is declared
         before any image is decoded, so a geometry the encoder cannot accept raises here
         rather than on a torchrun rank's first forward pass.
 
-        ``dense.target_size`` is a declaration, not a resize request: dense extraction never
-        rescales, so every image must already be that size (a non-square ``(h, w)`` is fine).
+        ``dense.target_size`` is a strict post-read declaration, not a fit-to-size request:
+        every final image must already be that size (a non-square ``(h, w)`` is fine).
+        Spacing-driven area downsampling establishes physical scale; it never repairs a
+        mismatch with the declared geometry.
         """
         from slide2vec.runtime.dense_image_stage import embed_images_dense
 

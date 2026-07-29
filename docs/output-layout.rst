@@ -276,11 +276,16 @@ payload.
      "spacing_source": "explicit",
      "declared_spacing_um": 0.5,
      "source_spacing_um": 0.5,
+     "spacing_at_level_0": null,
+     "read_spacing_um": null,
      "effective_spacing_um": 0.5,
      "requested_backend": "auto",
      "backend": "pil",
      "tolerance": null,
      "read_level": null,
+     "is_within_tolerance": null,
+     "read_size": null,
+     "output_size": null,
      "read_tile_size_px": null,
      "requested_tile_size_px": null,
      "image_path": "/data/ocelot/001.jpg",
@@ -308,11 +313,16 @@ payload.
        "spacing_source": "explicit",
        "declared_spacing_um": 0.5,
        "source_spacing_um": 0.5,
+       "spacing_at_level_0": null,
+       "read_spacing_um": null,
        "effective_spacing_um": 0.5,
        "requested_backend": "auto",
        "backend": "pil",
        "tolerance": null,
        "read_level": null,
+       "is_within_tolerance": null,
+       "read_size": null,
+       "output_size": null,
        "read_tile_size_px": null,
        "requested_tile_size_px": null,
        "target_size": [1024, 1024],
@@ -333,8 +343,8 @@ payload.
    }
 
 The compatibility identity covers the sample ID and normalized source path;
-resolved raster reader regime, requested/resolved backend, spacing source, and
-declared/source/effective spacing;
+resolved reader regime, requested/resolved backend, spacing source, and the
+declared/source/native-read/effective spacing chain;
 encoder name and resolved output variant; target, patch, encoded, padding, and
 grid geometry; padding/window/overlap and attention settings; inference
 precision; and stored dtype. GPU count, batch size, workers, prefetching, output
@@ -347,6 +357,38 @@ unchanged Pillow RGB path. Explicit spacing repeats the caller's assertion in
 unknown spacing records all three as ``null`` with
 ``spacing_source="unknown"``. Pyramid-plan fields stay ``null`` because no
 level was selected and no spacing-driven resize occurred.
+
+For spacing-readable inputs, the compatibility object records the complete
+parent-resolved hs2p plan. For example, a source whose level-0 spacing is
+``0.252`` µm/px may accept level 1 natively at ``0.504`` within tolerance:
+
+.. code-block:: json
+
+   {
+     "reader_regime": "spacing-readable",
+     "spacing_source": "model_default",
+     "declared_spacing_um": 0.5,
+     "source_spacing_um": 0.252,
+     "spacing_at_level_0": null,
+     "read_spacing_um": 0.504,
+     "effective_spacing_um": 0.504,
+     "requested_backend": "auto",
+     "backend": "vips",
+     "tolerance": 0.05,
+     "read_level": 1,
+     "is_within_tolerance": true,
+     "read_size": [1024, 1024],
+     "output_size": [1024, 1024]
+   }
+
+``declared_spacing_um`` is the explicit or model-default run request.
+``source_spacing_um`` is the authoritative level-0 scale after applying the
+optional ``spacing_at_level_0`` caller override. ``read_spacing_um`` is the
+selected level's native scale. ``effective_spacing_um`` is that native scale
+when no resize occurs, or the declared request after hs2p area downsampling.
+``read_size`` and ``output_size`` use ``[height, width]``. Changes in source
+metadata, the resolved result of ``backend="auto"``, or any other plan field
+invalidate compatible-artifact resume.
 
 
 Coordinate Files

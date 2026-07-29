@@ -27,6 +27,9 @@ def get_args_parser(add_help: bool = True):
 def main(argv=None) -> int:
     from slide2vec.progress import emit_progress
     from slide2vec.runtime.dense_image_shard import run_dense_image_shard
+    from slide2vec.runtime.dense_image_reading import (
+        dense_image_read_plans_from_request,
+    )
     from slide2vec.runtime.dense_stage import resolve_output_torch_dtype
     from slide2vec.runtime.image_specs import image_specs_from_request
     from slide2vec.runtime.serialization import (
@@ -42,6 +45,7 @@ def main(argv=None) -> int:
     rank = resolve_worker_rank()
 
     specs = image_specs_from_request(request)
+    read_plans = dense_image_read_plans_from_request(request)
     shard = plan_contiguous_shards(specs, rank.world_size)[rank.global_rank]
     if not shard:
         return 0
@@ -67,6 +71,7 @@ def main(argv=None) -> int:
             out_dir=output_dir,
             dense=dense,
             recipe=recipe,
+            read_plans=read_plans,
             batch_size=int(execution.batch_size),
             precision=execution.precision,
             output_dtype=resolve_output_torch_dtype(execution),

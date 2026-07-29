@@ -35,6 +35,7 @@ from slide2vec.api import DenseImageOptions, ImageSpec  # noqa: E402
 from slide2vec.artifacts import dense_image_paths, write_dense_image  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime.dense_image_shard import run_dense_image_shard  # noqa: E402
+from slide2vec.runtime.dense_image_reading import DenseImageReadPlan  # noqa: E402
 from slide2vec.runtime.dense_image_recipe import DenseImageRecipe  # noqa: E402
 from slide2vec.runtime.dense_regions import (  # noqa: E402
     compute_dense_geometry,
@@ -294,11 +295,16 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
         "spacing_source": "explicit",
         "declared_spacing_um": 0.5,
         "source_spacing_um": 0.5,
+        "spacing_at_level_0": None,
+        "read_spacing_um": None,
         "effective_spacing_um": 0.5,
         "requested_backend": "auto",
         "backend": "pil",
         "tolerance": None,
         "read_level": None,
+        "is_within_tolerance": None,
+        "read_size": None,
+        "output_size": None,
         "read_tile_size_px": None,
         "requested_tile_size_px": None,
         "pad_mode": "reflect",
@@ -317,11 +323,16 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "spacing_source": "explicit",
             "declared_spacing_um": 0.5,
             "source_spacing_um": 0.5,
+            "spacing_at_level_0": None,
+            "read_spacing_um": None,
             "effective_spacing_um": 0.5,
             "requested_backend": "auto",
             "backend": "pil",
             "tolerance": None,
             "read_level": None,
+            "is_within_tolerance": None,
+            "read_size": None,
+            "output_size": None,
             "read_tile_size_px": None,
             "requested_tile_size_px": None,
             "target_size": [60, 60],
@@ -340,6 +351,68 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "dtype": "float32",
         },
     }
+
+
+def test_spacing_readable_sidecar_records_the_complete_resolved_plan(
+    tmp_path, monkeypatch
+):
+    from hs2p.wsi import reader as hs2p_reader
+
+    pixels = np.zeros((64, 64, 3), dtype=np.uint8)
+
+    class _Reader:
+        def read_level(self, level):
+            assert level == 1
+            return pixels.copy()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        hs2p_reader,
+        "open_slide",
+        lambda path, backend, **kwargs: _Reader(),
+    )
+    enc = _encoder()
+    spec = ImageSpec(
+        sample_id="spacing-readable",
+        image_path=str((tmp_path / "source.svs").resolve()),
+        spacing_at_level_0=0.252,
+    )
+    plan = DenseImageReadPlan(
+        reader_regime="spacing-readable",
+        spacing_source="model_default",
+        declared_spacing_um=0.5,
+        source_spacing_um=0.252,
+        spacing_at_level_0=0.252,
+        read_spacing_um=0.504,
+        effective_spacing_um=0.504,
+        requested_backend="auto",
+        backend="vips",
+        tolerance=0.05,
+        read_level=1,
+        is_within_tolerance=True,
+        read_size=(64, 64),
+        output_size=(64, 64),
+    )
+
+    artifact = run_dense_image_shard(
+        [spec],
+        loaded=_loaded(enc),
+        out_dir=tmp_path / "out",
+        dense=_dense(),
+        recipe=_recipe(),
+        read_plans={spec.sample_id: plan},
+        batch_size=1,
+        num_workers=0,
+    )[0]
+
+    meta = json.loads(artifact.metadata_path.read_text())
+    expected_plan = plan.to_dict()
+    assert {field: meta[field] for field in expected_plan} == expected_plan
+    assert {
+        field: meta["compatibility"][field] for field in expected_plan
+    } == expected_plan
 
 
 def test_explicit_spacing_changes_provenance_but_not_raster_pixels(tmp_path):
