@@ -88,9 +88,16 @@ class DeclaredGeometryCollator:
     dataset position), so this stays free of any runtime dependency.
     """
 
-    def __init__(self, *, sample_ids, target_size: tuple[int, int]) -> None:
+    def __init__(
+        self,
+        *,
+        sample_ids,
+        target_size: tuple[int, int],
+        spacing_um: float | None,
+    ) -> None:
         self.sample_ids = [str(sample_id) for sample_id in sample_ids]
         self.target_size = (int(target_size[0]), int(target_size[1]))
+        self.spacing_um = None if spacing_um is None else float(spacing_um)
 
     def __call__(self, batch):
         worker_start = time.perf_counter()
@@ -102,11 +109,19 @@ class DeclaredGeometryCollator:
             if tuple(int(size) for size in image.shape[-2:]) != self.target_size
         }
         if offenders:
+            spacing = (
+                "unknown spacing"
+                if self.spacing_um is None
+                else f"resolved spacing {self.spacing_um:g} µm/px"
+            )
+            details = "; ".join(
+                f"Image {sample_id!r} has observed size {observed}, but target_size "
+                f"declares {self.target_size}, at {spacing}"
+                for sample_id, observed in offenders.items()
+            )
             raise ValueError(
-                f"images {offenders} are not the declared target_size {self.target_size} "
-                "after the normalization-only dense transform (sample_id: observed (h, w)). "
-                "Dense extraction never resizes: state the images' own geometry, or split "
-                "the run so each geometry is declared once."
+                f"{details}. Dense raster extraction never resizes; supply pixels at the "
+                "declared geometry."
             )
         return (
             torch.as_tensor(indices, dtype=torch.long),

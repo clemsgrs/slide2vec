@@ -40,7 +40,11 @@ from slide2vec.runtime.image_shard import (
     image_needs_encode,
     run_image_shard,
 )
-from slide2vec.runtime.image_specs import build_image_specs_request, normalize_image_specs
+from slide2vec.runtime.image_specs import (
+    build_image_specs_request,
+    normalize_image_specs,
+    reject_image_level0_spacing_overrides,
+)
 from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.serialization import serialize_execution, serialize_model
 
@@ -69,6 +73,7 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         method_name="embed_images()",
         artifact_location="image_embeddings/<sample_id>",
     )
+    reject_image_level0_spacing_overrides(specs, method_name="embed_images()")
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here

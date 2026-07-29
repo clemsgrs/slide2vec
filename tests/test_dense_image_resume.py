@@ -52,6 +52,7 @@ def test_dense_image_recipe_contains_the_complete_canonical_identity(tmp_path):
     model = Model(name="virchow2", output_variant="cls")
     dense = DenseImageOptions(
         target_size=(60, 92),
+        spacing_um=0.504,
         pad_mode="constant",
         image_pad_value=0.25,
         window_size=31,
@@ -79,6 +80,17 @@ def test_dense_image_recipe_contains_the_complete_canonical_identity(tmp_path):
     assert first.to_dict() == {
         "encoder_name": "virchow2",
         "output_variant": "cls",
+        "reader_regime": "raster",
+        "spacing_source": "explicit",
+        "declared_spacing_um": 0.504,
+        "source_spacing_um": 0.504,
+        "effective_spacing_um": 0.504,
+        "requested_backend": "auto",
+        "backend": "pil",
+        "tolerance": None,
+        "read_level": None,
+        "read_tile_size_px": None,
+        "requested_tile_size_px": None,
         "target_size": [60, 92],
         "patch_size": [14, 14],
         "encoded_size": [70, 98],
@@ -147,11 +159,33 @@ def test_dense_image_recipe_round_trips_exactly_through_json(tmp_path):
     assert deserialize_dense_image_recipe(payload) == recipe
 
 
+def test_unknown_raster_spacing_recipe_records_null_physical_scale(tmp_path):
+    recipe = _resolved_recipe(tmp_path, spacing_um=None)
+
+    assert {
+        key: recipe.to_dict()[key]
+        for key in (
+            "reader_regime",
+            "spacing_source",
+            "declared_spacing_um",
+            "source_spacing_um",
+            "effective_spacing_um",
+        )
+    } == {
+        "reader_regime": "raster",
+        "spacing_source": "unknown",
+        "declared_spacing_um": None,
+        "source_spacing_um": None,
+        "effective_spacing_um": None,
+    }
+
+
 def test_current_image_specs_round_trip_exactly_through_json(tmp_path):
     specs = [
         ImageSpec(
             sample_id="sample-1",
             image_path=str((tmp_path / "images" / "sample-1.png").resolve()),
+            spacing_at_level_0=0.252,
         )
     ]
     payload = json.loads(json.dumps(build_image_specs_request(specs)))
@@ -287,6 +321,17 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         "image_path",
         "encoder_name",
         "output_variant",
+        "reader_regime",
+        "spacing_source",
+        "declared_spacing_um",
+        "source_spacing_um",
+        "effective_spacing_um",
+        "requested_backend",
+        "backend",
+        "tolerance",
+        "read_level",
+        "read_tile_size_px",
+        "requested_tile_size_px",
         "target_size",
         "patch_size",
         "encoded_size",
@@ -312,6 +357,8 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         value = recorded[field]
         if isinstance(value, bool):
             recorded[field] = not value
+        elif value is None:
+            recorded.pop(field)
         elif isinstance(value, str):
             recorded[field] = f"{value}-different"
         elif isinstance(value, list):

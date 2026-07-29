@@ -20,20 +20,22 @@ because only the source of the pixels differs:
 5. **collect** one :class:`~slide2vec.artifacts.DenseImageArtifact` per input image by reading
    the sidecars back off disk (the ranks already persisted them; nobody gathers grids).
 
-There is no step here for the one thing the ROI stage does extra — resolving each slide's
-spacing→level read plan — because there is no slide: the image *is* the region.
+Raster classification and its run-level spacing assertion are resolved before this sequence:
+there is no spacing→level read plan because a PNG/JPEG is already the pixel array to encode.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from subprocess import Popen
 from typing import Sequence
 
 from slide2vec.api import DenseImageOptions, ImageSpec
 from slide2vec.artifacts import DenseImageArtifact
+from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.dense_image_shard import (
     dense_image_artifact_from_disk,
@@ -51,7 +53,12 @@ from slide2vec.runtime.distributed import (
     run_torchrun_worker,
 )
 from slide2vec.runtime.distributed_stage import validate_multi_gpu_execution
-from slide2vec.runtime.image_specs import build_image_specs_request, normalize_image_specs
+from slide2vec.runtime.image_specs import (
+    build_image_specs_request,
+    normalize_image_specs,
+    reject_image_level0_spacing_overrides,
+    validate_raster_image_specs,
+)
 from slide2vec.runtime.serialization import (
     serialize_dense_image_options,
     serialize_dense_image_recipe,
@@ -87,6 +94,26 @@ def embed_images_dense(
     execution,
 ) -> list[DenseImageArtifact]:
     """Extract + persist a dense grid per caller-supplied image across all visible GPUs."""
+    specs = normalize_image_specs(
+        images,
+        method_name="embed_images_dense()",
+        artifact_location="dense_image_embeddings/<sample_id>",
+    )
+    validate_raster_image_specs(specs)
+    reject_image_level0_spacing_overrides(
+        specs, method_name="embed_images_dense()"
+    )
+    spacing_um = None if dense.spacing_um is None else float(dense.spacing_um)
+    if spacing_um is not None and (not math.isfinite(spacing_um) or spacing_um <= 0):
+        raise ValueError(
+            "DenseImageOptions.spacing_um must be a positive, finite value or None."
+        )
+    validate_encoder_config(
+        model.name,
+        requested_spacing_um=spacing_um,
+        allow_non_recommended=bool(model.allow_non_recommended_settings),
+        require_known_spacing=True,
+    )
     # Declare the effective encoder input before anything is decoded, sharded or launched: an
     # image geometry this encoder cannot accept must fail here, not on the first forward pass
     # of a torchrun rank. Idempotent, so every rank re-declares for itself (dense_image_worker).
@@ -96,11 +123,6 @@ def embed_images_dense(
         contract=contract,
         dense=dense,
         execution=execution,
-    )
-    specs = normalize_image_specs(
-        images,
-        method_name="embed_images_dense()",
-        artifact_location="dense_image_embeddings/<sample_id>",
     )
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
