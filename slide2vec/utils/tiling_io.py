@@ -58,6 +58,7 @@ BASE_PROCESS_COLUMNS = (
 BASE_TILING_ORDERED_COLUMNS = (
     "sample_id",
     "annotation",
+    "output_mode",
     "image_path",
     "mask_path",
     "requested_backend",
@@ -78,6 +79,7 @@ BASE_TILING_ORDERED_COLUMNS = (
 BASE_EMBEDDING_ORDERED_COLUMNS = (
     "sample_id",
     "annotation",
+    "output_mode",
     "image_path",
     "mask_path",
     "requested_backend",
@@ -211,6 +213,16 @@ def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
         df["mask_backend"] = [None] * len(df)
     if "annotation" not in df.columns:
         df["annotation"] = ["tissue"] * len(df)
+    reconstructed_output_mode = df["annotation"].map(
+        lambda annotation: "merged" if str(annotation) == "merged" else None
+    )
+    if "output_mode" not in df.columns:
+        df["output_mode"] = reconstructed_output_mode
+    else:
+        df["output_mode"] = df["output_mode"].where(
+            df["output_mode"].notna(),
+            reconstructed_output_mode,
+        )
     if "tiles_tar_path" not in df.columns:
         df["tiles_tar_path"] = [None] * len(df)
     if "mask_preview_path" not in df.columns:
@@ -264,13 +276,20 @@ def load_tiling_result_from_row(row):
     if annotation is not None and pd.isna(annotation):
         annotation = None
     annotation = annotation if annotation is None else str(annotation)
-    # The merged output mode (hs2p's CoordinateOutputMode.MERGED) emits a single per-slide
-    # coordinate set over the union of tiles passing any active class threshold. hs2p labels
-    # that process-list row "merged" so it is not mistaken for plain tissue. The informative
-    # label is preserved verbatim here — artifact placement is decided downstream solely by
-    # hs2p.fileops.is_flattened_annotation (which flattens None/"tissue"/"merged" to the flat
-    # output root), so "merged" still lands flat without erasing its self-describing label.
-    setattr(tiling_result, "annotation", annotation)
+    output_mode = row.get("output_mode")
+    if output_mode is None or pd.isna(output_mode):
+        output_mode = getattr(tiling_result, "output_mode", None)
+    if output_mode is not None and pd.isna(output_mode):
+        output_mode = None
+    output_mode = output_mode if output_mode is None else str(output_mode)
+    # hs2p 4.4 deliberately separates the human-readable process row ("merged") from
+    # structural artifact identity (annotation=None, output_mode="merged"). Reconstruct
+    # output_mode for 4.3 process lists, but never copy the process sentinel into the
+    # TilingResult's artifact annotation.
+    if output_mode is None and annotation == "merged":
+        output_mode = "merged"
+    setattr(tiling_result, "output_mode", output_mode)
+    setattr(tiling_result, "annotation", None if output_mode == "merged" else annotation)
     setattr(tiling_result, "tiles_tar_path", _optional_path(row.get("tiles_tar_path")))
     setattr(tiling_result, "mask_preview_path", _optional_path(row.get("mask_preview_path")))
     setattr(tiling_result, "tiling_preview_path", _optional_path(row.get("tiling_preview_path")))

@@ -5,7 +5,6 @@ from typing import Any, Callable, Sequence
 
 import pandas as pd
 from hs2p import SlideSpec
-from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
@@ -13,6 +12,7 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
     hierarchical_embeddings_subdir,
+    normalize_artifact_annotation,
     slide_embeddings_subdir,
     slide_latents_subdir,
     tile_embeddings_subdir,
@@ -80,9 +80,7 @@ def _normalized_resume_annotation(annotation) -> str | None:
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
-    if is_flattened_annotation(str(annotation)):
-        return None
-    return str(annotation)
+    return normalize_artifact_annotation(str(annotation))
 
 
 def _row_annotation(row) -> str | None:

@@ -1,6 +1,7 @@
 import importlib
 from pathlib import Path
 from types import SimpleNamespace
+import tomllib
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,27 @@ def test_package_root_exports_api():
     assert hasattr(package, "DenseOptions")
     assert hasattr(package, "SlideRegions")
     assert hasattr(package, "DenseRegionArtifact")
+
+
+def test_dependency_declarations_require_hs2p_4_4_with_consistent_extras():
+    project = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+            encoding="utf-8"
+        )
+    )["project"]
+    hs2p_dependencies = [
+        dependency
+        for dependency in (
+            *project["dependencies"],
+            *project["optional-dependencies"]["fm"],
+        )
+        if dependency.startswith("hs2p")
+    ]
+
+    assert hs2p_dependencies == [
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.0",
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.0",
+    ]
 
 
 def test_load_slide_manifest_requires_hs2p_schema(tmp_path: Path):
@@ -91,6 +113,7 @@ def test_load_tiling_process_df_accepts_hs2p_process_list_columns(tmp_path: Path
     assert list(df.columns) == [
         "sample_id",
         "annotation",
+        "output_mode",
         "image_path",
         "mask_path",
         "requested_backend",
@@ -133,6 +156,60 @@ def test_load_tiling_process_df_backfills_missing_mask_backend_columns(tmp_path:
     assert pd.isna(df.loc[0, "mask_backend"])
 
 
+@pytest.mark.parametrize(
+    ("header_suffix", "row_suffix", "expected_output_mode"),
+    [
+        (",output_mode", ",merged", "merged"),
+        ("", "", "merged"),
+    ],
+    ids=["hs2p-4.4", "hs2p-4.3-reconstructed"],
+)
+def test_load_tiling_process_df_preserves_merged_process_identity(
+    tmp_path: Path,
+    header_suffix: str,
+    row_suffix: str,
+    expected_output_mode: str,
+):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+    process_list = tmp_path / "process_list.csv"
+    process_list.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,"
+        "tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback"
+        f"{header_suffix}\n"
+        "slide-1,merged,/data/slide-1.svs,/data/slide-1-mask.png,auto,openslide,"
+        "success,4,/tmp/slide-1.coordinates.npz,/tmp/slide-1.coordinates.meta.json,,"
+        f"{row_suffix}\n",
+        encoding="utf-8",
+    )
+
+    df = helper.load_tiling_process_df(process_list)
+
+    assert df.loc[0, ["annotation", "output_mode"]].tolist() == [
+        "merged",
+        expected_output_mode,
+    ]
+
+
+def test_load_tiling_result_preserves_metadata_output_mode_when_row_omits_it(
+    tmp_path: Path,
+    monkeypatch,
+):
+    helper = importlib.import_module("slide2vec.utils.tiling_io")
+    metadata_result = SimpleNamespace(output_mode="classes")
+    monkeypatch.setattr(helper, "load_tiling_result", lambda **kwargs: metadata_result)
+
+    result = helper.load_tiling_result_from_row(
+        {
+            "annotation": "tumor",
+            "coordinates_npz_path": str(tmp_path / "slide-1.coordinates.npz"),
+            "coordinates_meta_path": str(tmp_path / "slide-1.coordinates.meta.json"),
+        }
+    )
+
+    assert result.annotation == "tumor"
+    assert result.output_mode == "classes"
+
+
 def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: Path):
     helper = importlib.import_module("slide2vec.utils.tiling_io")
 
@@ -146,6 +223,7 @@ def test_load_embedding_process_df_accepts_hs2p_process_list_columns(tmp_path: P
     assert list(df.columns) == [
         "sample_id",
         "annotation",
+        "output_mode",
         "image_path",
         "mask_path",
         "requested_backend",

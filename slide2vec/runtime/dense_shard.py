@@ -35,6 +35,7 @@ from slide2vec.artifacts import (
     DenseRegionArtifact,
     load_metadata,
     region_dense_paths,
+    structural_artifact_annotation,
     write_dense_region,
 )
 
@@ -113,7 +114,9 @@ def dense_artifact_from_disk(out_dir, spec) -> DenseRegionArtifact:
         metadata_path=sidecar_path,
         feature_dim=int(meta["feature_dim"]),
         grid_shape=(grid_shape[0], grid_shape[1]),
-        annotation=spec.annotation,
+        annotation=structural_artifact_annotation(
+            meta.get("annotation", spec.annotation)
+        ),
     )
 
 
@@ -184,7 +187,7 @@ def _region_metadata(
     return {
         "artifact_type": "dense_embeddings",
         "sample_id": spec.sample_id,
-        "annotation": spec.annotation,
+        "annotation": structural_artifact_annotation(spec.annotation),
         "x": int(spec.x),
         "y": int(spec.y),
         "format": "pt",

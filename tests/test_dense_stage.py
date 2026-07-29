@@ -190,7 +190,10 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
 
     artifacts = dense_stage.embed_regions_dense(
         model,
-        [_regions(coords=((0, 0), (64, 0))), _regions(sample_id="s1", image_path="s1.tif", coords=((0, 0),))],
+        [
+            _regions(coords=((0, 0), (64, 0)), annotation="merged"),
+            _regions(sample_id="s1", image_path="s1.tif", coords=((0, 0),)),
+        ],
         dense=_dense(), execution=execution,
     )
 
@@ -204,11 +207,15 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
     # All three ROIs travelled to the npz, slide-ordered.
     assert captured["coords"].tolist() == [[0, 0], [64, 0], [0, 0]]
     assert [s["sample_id"] for s in captured["request"]["slides"]] == ["s0", "s1"]
+    assert [s["annotation"] for s in captured["request"]["slides"]] == ["merged", None]
     assert captured["request"]["dense"]["target_size"] == 64
     # Collection returns one artifact per input ROI, read back off disk (nobody gathered grids).
     assert len(artifacts) == 3
     assert (expected_output_dir / "dense_embeddings" / "s0" / "0_0.pt").exists()
     assert (expected_output_dir / "dense_embeddings" / "s1" / "0_0.pt").exists()
+    merged_artifacts = [artifact for artifact in artifacts if artifact.sample_id == "s0"]
+    assert [artifact.annotation for artifact in merged_artifacts] == [None, None]
+    assert [artifact.metadata["annotation"] for artifact in merged_artifacts] == [None, None]
 
 
 def test_embed_regions_dense_resume_skips_existing_and_logs(fake_backend, stub_read_plan, tmp_path, caplog):

@@ -721,8 +721,7 @@ def test_collect_distributed_pipeline_artifacts_keeps_flat_path_for_flattened_an
     annotation,
 ):
     """Issue #166 (parity): tissue / merged / None annotations stay on the flat slide_embeddings
-    path (no per-class subdir) in the distributed reconcile, mirroring is_flattened_annotation.
-    """
+    path (no per-class subdir) in the distributed reconcile."""
     process_list_path = tmp_path / "process_list.csv"
     _write_process_list(
         process_list_path,
@@ -2357,10 +2356,10 @@ def test_tile_slides_forwards_independent_sampling_selection_strategy(monkeypatc
     assert captured["kwargs"]["output_mode"] == "per_annotation"
 
 
-def test_prepare_tiled_slides_preserves_merged_row_label(monkeypatch, tmp_path: Path):
-    """A merged tiling row (hs2p labels it ``merged``) must load with its informative label
-    intact (annotation == "merged"), not blanked to None. Artifact placement still flattens
-    to the output root downstream via hs2p's ``is_flattened_annotation``."""
+def test_prepare_tiled_slides_reconstructs_legacy_merged_output_mode(
+    monkeypatch, tmp_path: Path
+):
+    """A 4.3 merged process row reconstructs hs2p 4.4 structural artifact identity."""
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
         "sample_id,annotation,image_path,mask_path,requested_backend,backend,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,error,traceback\n"
@@ -2382,7 +2381,11 @@ def test_prepare_tiled_slides_preserves_merged_row_label(monkeypatch, tmp_path: 
             result = load_tiling_result_from_row(row)
         finally:
             tiling_io.load_tiling_result = original
-        captured["annotation"] = result.annotation
+        captured["identity"] = (
+            result.annotation,
+            result.output_mode,
+            embedding.tiling_result_annotation(result),
+        )
         return result
 
     monkeypatch.setattr(tiling_pipeline, "load_tiling_result_from_row", fake_load)
@@ -2394,10 +2397,7 @@ def test_prepare_tiled_slides_preserves_merged_row_label(monkeypatch, tmp_path: 
         num_workers=0,
     )
 
-    assert captured["annotation"] == "merged"
-    from hs2p.fileops import is_flattened_annotation
-
-    assert is_flattened_annotation(captured["annotation"]) is True
+    assert captured["identity"] == (None, "merged", "merged")
 
 
 def test_tile_slides_does_not_pre_resolve_backend_auto(monkeypatch, tmp_path: Path):
@@ -5151,6 +5151,7 @@ def _write_process_list(path: Path, rows: list[dict]) -> None:
     columns = [
         "sample_id",
         "annotation",
+        "output_mode",
         "image_path",
         "mask_path",
         "requested_backend",
@@ -5682,6 +5683,55 @@ def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path:
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]
     assert len(pending_slides) == 1
+
+
+def test_merged_process_row_resumes_from_flat_structural_artifact(tmp_path: Path):
+    process_list_path = tmp_path / "process_list.csv"
+    _write_process_list(
+        process_list_path,
+        [
+            {
+                "sample_id": "slide-a",
+                "annotation": "merged",
+                "output_mode": "merged",
+                "image_path": "/tmp/slide-a.svs",
+                "mask_path": "/tmp/slide-a-mask.png",
+                "requested_backend": "asap",
+                "backend": "asap",
+                "spacing_at_level_0": None,
+                "tiling_status": "success",
+                "num_tiles": 1,
+                "coordinates_npz_path": "/tmp/slide-a.coordinates.npz",
+                "coordinates_meta_path": "/tmp/slide-a.coordinates.meta.json",
+                "tiles_tar_path": None,
+                "mask_preview_path": None,
+                "tiling_preview_path": None,
+                "error": None,
+                "traceback": None,
+            }
+        ],
+    )
+    df = pd.read_csv(process_list_path)
+    df["feature_status"] = "success"
+    df["aggregation_status"] = "success"
+    df.to_csv(process_list_path, index=False)
+    write_slide_embeddings(
+        "slide-a",
+        np.zeros((8,), dtype=np.float32),
+        output_dir=tmp_path,
+    )
+
+    keys = persist_callbacks.completed_local_embedding_keys(
+        process_list_path,
+        output_dir=tmp_path,
+        output_format="pt",
+        persist_tile_embeddings=False,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=True,
+        save_latents=False,
+    )
+
+    assert keys == {("slide-a", None)}
 
 
 def test_collect_pipeline_artifacts_reloads_per_class_slide_embeddings(tmp_path: Path):

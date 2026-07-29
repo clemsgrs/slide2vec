@@ -185,7 +185,7 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         gpu_decode=bool(payload.get("gpu_decode", False)),
         adaptive_batching=bool(payload.get("adaptive_batching", False)),
         use_supertiles=bool(payload.get("use_supertiles", True)),
-        jpeg_backend=str(payload.get("jpeg_backend", "turbojpeg")),
+        jpeg_backend=str(payload.get("jpeg_backend", "pil")),
         num_cucim_workers=int(payload.get("num_cucim_workers", 4)),
         resume=bool(payload["resume"]) if "resume" in payload else False,
         segmentation=dict(payload["segmentation"]) if "segmentation" in payload else {},
