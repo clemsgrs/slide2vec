@@ -22,10 +22,10 @@ tiling:
   gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it (experimental, may not be stable across all environments)
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)
-  jpeg_backend: "turbojpeg" # JPEG encoder for tar extraction: "turbojpeg" (faster) or "pil" (compatible with older ground truth fixtures)
+  jpeg_backend: "pil" # Portable JPEG encoder for tar extraction; set "turbojpeg" explicitly to opt in to its upstream dependency
   read_coordinates_from: # path to an existing directory containing pre-extracted `.coordinates.npz` / `.coordinates.meta.json` artifacts to reuse instead of starting tiling from scratch
   read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
-  backend: "auto" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
+  backend: "auto" # backend to use for slide reading; "auto" tries cucim -> vips -> openslide -> asap. Pin a backend for stable decoder selection across upgrades.
   mask_backend: "auto" # backend for reading source masks (precomputed tissue / annotation), resolved independently from the mask path; "auto" probes openability like `backend`. Set explicitly (e.g. "openslide") when a mask needs a different decoder than its slide — hs2p (>=4.3.0) no longer silently falls back
   independent_sampling: true # selection strategy when annotation sampling is active. true: sample each class independently against its own binary mask (independent selection); false: sample once over the union of active classes, then post-filter per class by coverage (joint selection). Ignored when the masks vocabulary is left at the tissue-only default.
   masks:

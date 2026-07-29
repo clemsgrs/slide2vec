@@ -132,7 +132,7 @@ def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
 class PreprocessingConfig:
     """Configuration for slide tiling and preprocessing."""
 
-    #: Slide reading backend. ``"auto"`` tries cucim → openslide → vips in order.
+    #: Slide reading backend. ``"auto"`` tries cucim → vips → openslide → asap.
     #: Explicit choices: ``"cucim"``, ``"openslide"``, ``"vips"``, ``"asap"``.
     backend: str = "auto"
     #: Source-mask reading backend, resolved independently from the *mask* path
@@ -169,8 +169,9 @@ class PreprocessingConfig:
     adaptive_batching: bool = False
     #: Group adjacent tiles into supertile batches for faster I/O.
     use_supertiles: bool = True
-    #: JPEG decode library — ``"turbojpeg"`` (default) or ``"pillow"``.
-    jpeg_backend: str = "turbojpeg"
+    #: JPEG encoder for extracted tile archives — portable ``"pil"`` (default) or
+    #: explicitly requested ``"turbojpeg"``.
+    jpeg_backend: str = "pil"
     #: Number of CuCIM reader threads.
     num_cucim_workers: int = 4
     #: Skip slides already present in the output directory when ``True``.
@@ -415,7 +416,8 @@ class DenseOptions:
     target_size: int
     #: Relative spacing tolerance for pyramid level selection.
     tolerance: float = 0.05
-    #: Slide reading backend. ``"auto"`` resolves per slide (cucim → openslide → vips).
+    #: Slide reading backend. ``"auto"`` resolves per slide
+    #: (cucim → vips → openslide → asap).
     backend: str = "auto"
     #: Padding mode used to pad the tile up to the encoder's patch multiple.
     #: One of ``"reflect"`` / ``"replicate"`` / ``"constant"`` / ``"zero"``.

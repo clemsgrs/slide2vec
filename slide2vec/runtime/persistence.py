@@ -6,7 +6,6 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 from hs2p import SlideSpec
-from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
@@ -15,6 +14,7 @@ from slide2vec.artifacts import (
     hierarchical_embeddings_subdir,
     load_array,
     load_metadata,
+    normalize_artifact_annotation,
     slide_embeddings_subdir,
     slide_latents_subdir,
     tile_embeddings_subdir,
@@ -274,19 +274,12 @@ def update_process_list_after_embedding(
 def _normalized_annotation(annotation: Any) -> str | None:
     """Collapse the flat-layout sentinels (``None``/``"tissue"``/``"merged"``) to a single ``None`` key.
 
-    Keying the per-class feature-path map on this normalized value lets the flat tissue-only
-    path and a real class share one matching rule without the sentinel leaking into lookups.
-    Flattening is decided solely by :func:`hs2p.fileops.is_flattened_annotation` (the single
-    source of truth), which flattens ``None``/``"tissue"``/``"merged"`` to the flat root, so
-    ``"merged"`` (hs2p's merged output-mode label, which carries no class) resolves to the flat
-    embedding path rather than being left unmatched.
+    Keying the per-class feature-path map on this normalized value lets structural/process
+    rows and genuine classes share one matching rule without a sentinel leaking into paths.
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
-    annotation = str(annotation)
-    if is_flattened_annotation(annotation):
-        return None
-    return annotation
+    return normalize_artifact_annotation(str(annotation))
 
 
 def _row_annotation_series(df: pd.DataFrame) -> pd.Series:

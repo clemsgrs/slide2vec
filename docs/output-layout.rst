@@ -63,10 +63,12 @@ embedding directory, and the tiling artifacts are namespaced the same way:
            ├── tumor/<sample_id>.png
            └── stroma/<sample_id>.png
 
-The ``tissue`` class (and the ``merged`` ``output_mode``) carry no class label
-and collapse to the flat root shown earlier — there is no ``tissue/``
-subdirectory. ``process_list.csv`` has one row per ``(sample_id, annotation)``
-pair, each recording that class's own ``feature_path``.
+The ``tissue`` class and structural ``merged`` output collapse to the flat root
+shown earlier — there is no ``tissue/`` or ``merged/`` subdirectory. hs2p 4.4
+stores merged artifacts as ``annotation=None`` plus ``output_mode="merged"``,
+while ``process_list.csv`` keeps the readable ``merged`` label. Per-class mode
+has one row per ``(sample_id, annotation)`` pair, each recording that class's
+own ``feature_path``.
 
 
 Embedding Files
@@ -371,6 +373,13 @@ tiling pipeline. It contains several sections:
 These files can be reused across runs via
 :attr:`~slide2vec.PreprocessingConfig.read_coordinates_from` to skip
 tiling when only the encoder changes.
+
+Artifacts written with hs2p 4.3 remain loadable, but ``resume`` and
+``read_coordinates_from`` still validate artifact compatibility. hs2p 4.4
+changed ``auto`` backend priority to cucim → vips → openslide → asap, so a 4.3
+artifact created with ``backend="auto"`` may resolve to a different decoder and
+be rejected or recomputed instead of silently reused. Pin the original explicit
+backend when stable reuse across that boundary is required.
 
 
 Process List

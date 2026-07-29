@@ -17,8 +17,8 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import torch
 from hs2p import SlideSpec
-from hs2p.fileops import is_flattened_annotation
 
+from slide2vec.artifacts import normalize_artifact_annotation
 from slide2vec.progress import emit_progress_event, read_progress_events
 from slide2vec.runtime.hierarchical import num_tiles
 
@@ -31,18 +31,10 @@ _WORK_UNIT_PREFIX = "\x00s2v-unit\x00"
 def normalize_work_unit_annotation(annotation: str | None) -> str | None:
     """Collapse flat-layout annotations to ``None`` so flat units key by bare ``sample_id``.
 
-    Mirrors the in-memory single-GPU path and the distributed reconcile
-    (:func:`slide2vec.runtime.artifacts_collect._normalized_row_annotation`): hs2p's flat-layout
-    sentinels (:func:`hs2p.fileops.is_flattened_annotation`, the single source of truth — it
-    flattens ``None``/``"tissue"``/``"merged"``) all collapse to ``None``. Only genuine per-class
-    annotations survive as a composite key.
+    Mirrors artifact placement: structural ``None`` and process sentinels collapse to
+    ``None``. Only genuine per-class annotations survive as a composite key.
     """
-    if annotation is None:
-        return None
-    annotation = str(annotation)
-    if is_flattened_annotation(annotation):
-        return None
-    return annotation
+    return normalize_artifact_annotation(annotation)
 
 
 def encode_work_unit(sample_id: str, annotation: str | None) -> str:

@@ -322,6 +322,42 @@ def test_run_dense_shard_namespaces_annotation_subdir(fake_backend, tmp_path):
     assert not (tmp_path / "dense_embeddings" / "s0").exists()  # not the flat root
 
 
+def test_run_dense_shard_keeps_merged_structural_identity_on_fresh_and_resume(
+    fake_backend,
+    tmp_path,
+):
+    region = _spec(0, 0, annotation="merged")
+    encoder = _encoder()
+
+    fresh = run_dense_shard(
+        [region],
+        model=encoder,
+        out_dir=tmp_path,
+        dense=_dense(),
+        batch_size=1,
+        device="cpu",
+        num_workers=0,
+    )
+    resumed = run_dense_shard(
+        [region],
+        model=encoder,
+        out_dir=tmp_path,
+        dense=_dense(),
+        batch_size=1,
+        device="cpu",
+        num_workers=0,
+    )
+
+    expected_path = tmp_path / "dense_embeddings" / "s0" / "0_0.pt"
+    metadata = json.loads(expected_path.with_suffix(".meta.json").read_text())
+    assert fresh[0].path == expected_path.resolve()
+    assert fresh[0].annotation is None
+    assert metadata["annotation"] is None
+    assert resumed[0].path == expected_path.resolve()
+    assert resumed[0].annotation is None
+    assert fake_backend.open_count == 1
+
+
 def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, tmp_path):
     """The sidecar carries the extraction geometry + encode params slide2vec owns — and no
     caller ``extra`` passthrough (D7)."""

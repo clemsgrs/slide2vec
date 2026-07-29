@@ -1351,17 +1351,21 @@ def test_independent_sampling_toggle_selects_selection_strategy():
     assert joint[-2] == "joint_sampling"
 
 
-def test_merged_annotation_label_survives_round_trip_to_flat_root(tmp_path: Path):
-    """A merged tiling row is labelled ``merged`` by hs2p. The informative label must
-    survive the round-trip (no collapse to ``None``), yet artifacts still land at the flat
-    output root because hs2p's ``is_flattened_annotation`` flattens ``"merged"``."""
+def test_merged_process_row_loads_structural_artifact_identity(tmp_path: Path):
+    """hs2p 4.4 labels the process row ``merged`` but stores a structural artifact.
+
+    Loading must retain/reconstruct ``output_mode="merged"`` while restoring the
+    TilingResult's artifact annotation to ``None``. The human-readable process label is
+    derived deliberately rather than passed to artifact routing.
+    """
+    from slide2vec.runtime.embedding import tiling_result_annotation
     from slide2vec.utils.tiling_io import load_tiling_result_from_row
 
     coordinates_meta_path = tmp_path / "slide-a.coordinates.meta.json"
     coordinates_meta_path.write_text("{}", encoding="utf-8")
 
     def fake_load_tiling_result(**kwargs):
-        return SimpleNamespace()
+        return SimpleNamespace(annotation=None, output_mode="merged")
 
     import slide2vec.utils.tiling_io as tiling_io
 
@@ -1371,6 +1375,7 @@ def test_merged_annotation_label_survives_round_trip_to_flat_root(tmp_path: Path
         result = load_tiling_result_from_row(
             {
                 "annotation": "merged",
+                "output_mode": "merged",
                 "coordinates_npz_path": str(tmp_path / "slide-a.coordinates.npz"),
                 "coordinates_meta_path": str(coordinates_meta_path),
             }
@@ -1378,8 +1383,9 @@ def test_merged_annotation_label_survives_round_trip_to_flat_root(tmp_path: Path
     finally:
         tiling_io.load_tiling_result = original
 
-    # The informative label survives the round-trip; it is not blanked to None.
-    assert result.annotation == "merged"
+    assert result.annotation is None
+    assert result.output_mode == "merged"
+    assert tiling_result_annotation(result) == "merged"
     artifact = write_tile_embeddings(
         "slide-a",
         np.arange(8, dtype=np.float32).reshape(2, 4),
@@ -1387,13 +1393,12 @@ def test_merged_annotation_label_survives_round_trip_to_flat_root(tmp_path: Path
         output_format="npz",
         annotation=result.annotation,
     )
-    # ...but placement is decided by is_flattened_annotation, so it still lands flat.
     assert artifact.path == tmp_path / "tile_embeddings" / "slide-a.npz"
 
 
 def test_tissue_annotation_survives_round_trip_to_flat_root(tmp_path: Path):
     """A ``"tissue"`` row keeps its informative label through the round-trip while still
-    resolving to flat-root placement via ``is_flattened_annotation``."""
+    resolving to flat-root artifact placement."""
     from slide2vec.utils.tiling_io import load_tiling_result_from_row
 
     coordinates_meta_path = tmp_path / "slide-t.coordinates.meta.json"
@@ -1430,7 +1435,7 @@ def test_tissue_annotation_survives_round_trip_to_flat_root(tmp_path: Path):
 
 def test_real_class_annotation_survives_round_trip_to_per_class_subdir(tmp_path: Path):
     """A genuine class label (e.g. ``"tumor"``) survives the round-trip and routes to its
-    own per-class subdir, since ``is_flattened_annotation`` does not flatten it."""
+    own per-class subdir."""
     from slide2vec.utils.tiling_io import load_tiling_result_from_row
 
     coordinates_meta_path = tmp_path / "slide-u.coordinates.meta.json"
@@ -1507,6 +1512,45 @@ def test_invalid_masks_block_with_out_of_range_value_fails_fast():
         build_hs2p_configs(preprocessing)
 
 
+def test_masks_boundary_accepts_distinct_integer_value_255():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"tumor": 255},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        }
+    )
+
+    sampling = build_hs2p_configs(preprocessing)[-3]
+
+    assert sampling.pixel_mapping["tumor"] == 255
+
+
+@pytest.mark.parametrize(
+    ("pixel_mapping", "message"),
+    [
+        ({"tumor": 256}, r"\[0, 255\]"),
+        ({"merged": 2}, "reserved"),
+    ],
+    ids=["value-256", "reserved-merged"],
+)
+def test_masks_boundary_rejects_unsupported_annotation_values(pixel_mapping, message):
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    annotation = next(iter(pixel_mapping))
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": pixel_mapping,
+            "min_coverage": {annotation: 0.5},
+        }
+    )
+
+    with pytest.raises(ValueError, match=message):
+        build_hs2p_configs(preprocessing)
+
+
 def test_write_tile_embeddings_namespaces_real_class_under_subdir(tmp_path: Path):
     features = np.arange(8, dtype=np.float32).reshape(2, 4)
     artifact = write_tile_embeddings(
@@ -1532,8 +1576,123 @@ def test_write_tile_embeddings_flattens_tissue_annotation(tmp_path: Path):
         assert artifact.path == tmp_path / "tile_embeddings" / f"sample-{annotation}.npz"
 
 
+def test_structural_merged_artifact_paths_stay_flat_while_classes_are_namespaced():
+    from slide2vec.artifacts import (
+        dense_embeddings_subdir,
+        hierarchical_embeddings_subdir,
+        slide_embeddings_subdir,
+        slide_latents_subdir,
+        tile_embeddings_subdir,
+    )
+
+    helpers = {
+        "tile": tile_embeddings_subdir,
+        "slide": slide_embeddings_subdir,
+        "latent": slide_latents_subdir,
+        "hierarchical": hierarchical_embeddings_subdir,
+        "dense": dense_embeddings_subdir,
+    }
+    expected = {
+        "tile": ("tile_embeddings", "tile_embeddings/tumor"),
+        "slide": ("slide_embeddings", "slide_embeddings/tumor"),
+        "latent": ("slide_latents", "slide_latents/tumor"),
+        "hierarchical": (
+            "hierarchical_embeddings",
+            "hierarchical_embeddings/tumor",
+        ),
+        "dense": ("dense_embeddings", "dense_embeddings/tumor"),
+    }
+
+    assert {
+        name: (helper("merged"), helper("tumor"))
+        for name, helper in helpers.items()
+    } == expected
+
+
+def test_structural_merged_persisted_artifacts_report_none_annotation(tmp_path: Path):
+    from slide2vec.artifacts import (
+        write_dense_region,
+        write_hierarchical_embeddings,
+        write_slide_embeddings,
+    )
+
+    tile = write_tile_embeddings(
+        "slide-a",
+        np.ones((2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation="merged",
+    )
+    slide = write_slide_embeddings(
+        "slide-a",
+        np.ones((4,), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation="merged",
+    )
+    hierarchical = write_hierarchical_embeddings(
+        "slide-a",
+        np.ones((1, 2, 4), dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        annotation="merged",
+    )
+    dense = write_dense_region(
+        np.ones((4, 2, 2), dtype=np.float32),
+        output_dir=tmp_path,
+        sample_id="slide-a",
+        annotation="merged",
+        x=0,
+        y=0,
+        metadata={"feature_dim": 4, "grid_shape": [2, 2]},
+    )
+
+    assert [tile.annotation, slide.annotation, hierarchical.annotation, dense.annotation] == [
+        None,
+        None,
+        None,
+        None,
+    ]
+
+
 def test_preprocessing_config_defaults_backend_to_auto():
     assert DEFAULT_PREPROCESSING.backend == "auto"
+
+
+def test_preprocessing_jpeg_default_is_pil_across_public_shipped_and_serialized_config():
+    from slide2vec.runtime.serialization import (
+        deserialize_preprocessing,
+        serialize_preprocessing,
+    )
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+    )
+    payload = serialize_preprocessing(preprocessing)
+    legacy_payload = {key: value for key, value in payload.items() if key != "jpeg_backend"}
+
+    assert preprocessing.jpeg_backend == "pil"
+    assert str(load_config("default").tiling.jpeg_backend) == "pil"
+    assert payload["jpeg_backend"] == "pil"
+    assert deserialize_preprocessing(legacy_payload).jpeg_backend == "pil"
+
+
+def test_preprocessing_turbojpeg_remains_an_explicit_serialized_opt_in():
+    from slide2vec.runtime.serialization import (
+        deserialize_preprocessing,
+        serialize_preprocessing,
+    )
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        jpeg_backend="turbojpeg",
+    )
+
+    assert deserialize_preprocessing(
+        serialize_preprocessing(preprocessing)
+    ).jpeg_backend == "turbojpeg"
 
 
 def test_preprocessing_config_defaults_spacing_and_tile_size_to_none():

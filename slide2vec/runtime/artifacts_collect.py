@@ -5,11 +5,11 @@ from typing import Sequence
 
 import pandas as pd
 from hs2p import SlideSpec
-from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
+    normalize_artifact_annotation,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
@@ -100,17 +100,12 @@ def _has_tiles(num_tiles) -> bool:
 def _normalized_row_annotation(annotation) -> str | None:
     """Collapse a process-list ``annotation`` cell to the per-class key (``None`` for the flat path).
 
-    Mirrors the in-memory single-GPU path: ``None``/NaN and hs2p's flat-layout sentinels
-    (:func:`hs2p.fileops.is_flattened_annotation` — the single source of truth, which flattens
-    ``None``/``"tissue"``/``"merged"``) land flat — so the distributed reconcile keys those rows
-    to the flat embedding path with no per-class subdir.
+    Mirrors the in-memory single-GPU path: structural/process annotations land flat,
+    while genuine classes keep their namespace.
     """
     if annotation is None or (isinstance(annotation, float) and pd.isna(annotation)):
         return None
-    annotation = str(annotation)
-    if is_flattened_annotation(annotation):
-        return None
-    return annotation
+    return normalize_artifact_annotation(str(annotation))
 
 
 def _annotations_parallel_to_slides(

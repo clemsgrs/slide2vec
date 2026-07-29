@@ -20,12 +20,14 @@ from slide2vec.runtime.model_settings import resolve_output_precision
 
 
 def tiling_result_annotation(tiling_result) -> str | None:
-    """Annotation class carried by a tiling result (from its process-list row).
+    """Human-readable process annotation carried by a tiling result.
 
-    ``None``/``"tissue"`` mean the flat tissue-only layout (see
-    :func:`slide2vec.artifacts.tile_embeddings_subdir`); any other label namespaces the
-    tile-embedding artifacts under a per-class subdirectory.
+    hs2p 4.4 represents structural merged output as ``annotation=None`` plus
+    ``output_mode="merged"`` while keeping ``"merged"`` in ``process_list.csv``. Rebuild
+    that informative label for public in-memory results without changing artifact identity.
     """
+    if getattr(tiling_result, "output_mode", None) == "merged":
+        return "merged"
     return getattr(tiling_result, "annotation", None)
 
 

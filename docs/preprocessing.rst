@@ -15,7 +15,8 @@ Backends
 
 The ``backend`` field controls which slide-reading library is used:
 
-- ``"auto"`` — tries cucim → openslide → vips in order and picks the first available one
+- ``"auto"`` — tries cucim → vips → openslide → asap and picks the first backend
+  that can open the path
 - ``"cucim"`` — NVIDIA cuCIM (fastest for SVS/TIFF on GPU-equipped machines)
 - ``"openslide"`` — broad format support, CPU-only
 - ``"vips"`` — libvips, good for large TIFF files
@@ -28,6 +29,15 @@ slide. Since hs2p no longer silently falls back to another reader, set ``mask_ba
 explicitly (e.g. ``"openslide"``) when a mask cannot be decoded by the slide backend — for
 example a deflate-compressed label TIFF that cuCIM can open but not decode. It defaults to
 ``"auto"`` and is ignored for slides with no source mask.
+
+The ``auto`` priority can change which decoder is selected when hs2p or the
+installed backend set changes. Set ``backend`` and ``mask_backend`` explicitly
+when decoder selection must remain stable across upgrades.
+
+Tile TAR export uses the portable Pillow encoder (``jpeg_backend="pil"``) by
+default. ``jpeg_backend="turbojpeg"`` remains an explicit performance opt-in;
+when its optional upstream dependency is unavailable, hs2p reports the
+actionable dependency error rather than silently choosing another encoder.
 
 
 Pooled Tile Geometry
@@ -141,7 +151,9 @@ raster**: each class occupies a distinct integer pixel value. The ``masks`` bloc
 maps that vocabulary and is deep-merged over the default, so you only state what
 you add:
 
-- ``pixel_mapping`` — ``{class_name: integer pixel value in the raster}``
+- ``pixel_mapping`` — ``{class_name: integer pixel value in the raster}``. Values
+  must be distinct integers in ``[0, 255]``; ``merged`` is reserved for structural
+  merged output and cannot be used as a class name.
 - ``min_coverage`` — ``{class_name: float | null}``; the minimum fraction of a
   tile that must be covered by that class to keep it. ``null`` means *don't
   sample that class*. The ``tissue`` entry is the single source of truth for the
@@ -231,6 +243,12 @@ a class name — its :attr:`~slide2vec.EmbeddedSlide.annotation` is ``"merged"``
 the inner ``embed_slides`` key is ``"merged"``, and on disk it lands at the flat
 output root (``tile_embeddings/<sample_id>.pt``) with **no** ``<class>/``
 subdirectory, exactly like the default ``tissue`` case:
+
+In hs2p 4.4 artifacts this structural output is represented as
+``annotation=None`` plus ``output_mode="merged"``. The human-readable
+``process_list.csv`` row and in-memory bag label remain ``"merged"``; slide2vec
+keeps those process and artifact identities separate so resume and distributed
+coordination continue to use the flat structural path.
 
 .. code-block:: python
 

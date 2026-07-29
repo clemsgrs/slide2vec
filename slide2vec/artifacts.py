@@ -7,7 +7,6 @@ from uuid import uuid4
 
 import numpy as np
 import torch
-from hs2p.fileops import is_flattened_annotation
 
 from slide2vec.runtime.model_settings import output_torch_dtype
 
@@ -209,15 +208,32 @@ def _write_metadata(path: Path, metadata: dict[str, Any]) -> None:
     )
 
 
+def normalize_artifact_annotation(annotation: str | None) -> str | None:
+    """Return the annotation component used for slide2vec artifact placement.
+
+    ``"merged"`` is a process-list sentinel, not an hs2p 4.4 artifact annotation:
+    structural merged output is ``annotation=None`` plus ``output_mode="merged"``.
+    Accepting the sentinel here keeps 4.3 process lists reusable without delegating
+    process identity to hs2p's artifact-annotation helper.
+    """
+    if annotation in (None, "tissue", "merged"):
+        return None
+    return str(annotation)
+
+
+def structural_artifact_annotation(annotation: str | None) -> str | None:
+    """Translate only the structural merged process sentinel to artifact identity."""
+    return None if annotation == "merged" else annotation
+
+
 def tile_embeddings_subdir(annotation: str | None) -> str:
     """Namespace the ``tile_embeddings`` output dir per annotation class.
 
-    Reuses hs2p's flatten rule (the single source of truth): ``None`` and the sentinel
-    ``"tissue"`` collapse to the flat ``tile_embeddings`` root, so the default tissue-only
-    path is byte-for-byte unchanged; any real class label gets its own
-    ``tile_embeddings/<class>`` subdirectory.
+    Structural ``None`` and the process sentinels ``"tissue"``/``"merged"`` collapse to
+    the flat root; a genuine class gets ``tile_embeddings/<class>``.
     """
-    if is_flattened_annotation(annotation):
+    annotation = normalize_artifact_annotation(annotation)
+    if annotation is None:
         return "tile_embeddings"
     return f"tile_embeddings/{annotation}"
 
@@ -225,19 +241,18 @@ def tile_embeddings_subdir(annotation: str | None) -> str:
 def slide_embeddings_subdir(annotation: str | None) -> str:
     """Namespace the ``slide_embeddings`` output dir per annotation class.
 
-    Reuses hs2p's flatten rule (the single source of truth, shared with
-    :func:`tile_embeddings_subdir`): ``None`` and the sentinel ``"tissue"`` collapse to the
-    flat ``slide_embeddings`` root, so the default tissue-only path is byte-for-byte
-    unchanged; any real class label gets its own ``slide_embeddings/<class>`` subdirectory.
+    Uses the same structural/process identity rule as :func:`tile_embeddings_subdir`.
     """
-    if is_flattened_annotation(annotation):
+    annotation = normalize_artifact_annotation(annotation)
+    if annotation is None:
         return "slide_embeddings"
     return f"slide_embeddings/{annotation}"
 
 
 def slide_latents_subdir(annotation: str | None) -> str:
     """Namespace the ``slide_latents`` output dir per annotation class (mirrors slide embeddings)."""
-    if is_flattened_annotation(annotation):
+    annotation = normalize_artifact_annotation(annotation)
+    if annotation is None:
         return "slide_latents"
     return f"slide_latents/{annotation}"
 
@@ -245,13 +260,10 @@ def slide_latents_subdir(annotation: str | None) -> str:
 def hierarchical_embeddings_subdir(annotation: str | None) -> str:
     """Namespace the ``hierarchical_embeddings`` output dir per annotation class.
 
-    Reuses hs2p's flatten rule (the single source of truth, shared with
-    :func:`tile_embeddings_subdir` and :func:`slide_embeddings_subdir`): ``None`` and the
-    sentinel ``"tissue"`` collapse to the flat ``hierarchical_embeddings`` root, so the
-    default tissue-only path is byte-for-byte unchanged; any real class label gets its own
-    ``hierarchical_embeddings/<class>`` subdirectory.
+    Uses the same structural/process identity rule as :func:`tile_embeddings_subdir`.
     """
-    if is_flattened_annotation(annotation):
+    annotation = normalize_artifact_annotation(annotation)
+    if annotation is None:
         return "hierarchical_embeddings"
     return f"hierarchical_embeddings/{annotation}"
 
@@ -273,12 +285,10 @@ def _validate_path_component(value: str, *, field: str) -> str:
 def dense_embeddings_subdir(annotation: str | None) -> str:
     """Namespace the ``dense_embeddings`` output dir per annotation class.
 
-    Reuses hs2p's flatten rule (the single source of truth, shared with
-    :func:`tile_embeddings_subdir` and the other pooled subdir helpers): ``None`` and the
-    sentinel ``"tissue"`` collapse to the flat ``dense_embeddings`` root; any real class
-    label gets its own ``dense_embeddings/<class>`` subdirectory.
+    Uses the same structural/process identity rule as :func:`tile_embeddings_subdir`.
     """
-    if is_flattened_annotation(annotation):
+    annotation = normalize_artifact_annotation(annotation)
+    if annotation is None:
         return "dense_embeddings"
     annotation_component = _validate_path_component(annotation, field="annotation")
     return f"dense_embeddings/{annotation_component}"
@@ -330,6 +340,7 @@ def write_dense_region(
 ) -> DenseRegionArtifact:
     """Persist one ROI's ``(d, gh, gw)`` grid + its geometry sidecar (see
     :func:`_write_dense_grid` for the write order this shares with every dense artifact)."""
+    annotation = structural_artifact_annotation(annotation)
     payload_path, metadata_path = region_dense_paths(
         output_dir, sample_id=sample_id, annotation=annotation, x=x, y=y
     )
@@ -476,9 +487,7 @@ def _build_tile_embedding_metadata(
     }
     if metadata:
         tile_metadata.update(metadata)
-    tile_metadata["annotation"] = (
-        None if is_flattened_annotation(annotation) else str(annotation)
-    )
+    tile_metadata["annotation"] = normalize_artifact_annotation(annotation)
     return tile_metadata
 
 
@@ -578,6 +587,7 @@ def write_slide_embeddings(
     annotation: str | None = None,
 ) -> SlideEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
+    annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, slide_embeddings_subdir(annotation), sample_id, output_format
     )
@@ -665,6 +675,7 @@ def write_hierarchical_embeddings(
     annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
     output_format = _validate_output_format(output_format)
+    annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, hierarchical_embeddings_subdir(annotation), sample_id, output_format
     )
