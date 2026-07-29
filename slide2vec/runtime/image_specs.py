@@ -1,35 +1,130 @@
-"""The flat list of named image files both given-geometry paths work over.
+"""Named image normalization and dense reader-regime classification.
 
 :meth:`slide2vec.api.Model.embed_images` (pooled, issue #234) and
 :meth:`slide2vec.api.Model.embed_images_dense` (dense grids, issue #235) take the same input
-unit — a caller-named image file — and stage it the same way, so normalizing that list and
-moving it to the torchrun ranks lives here rather than being copied per path. What differs
-between them is only what each rank *does* with an image, which is the shard loops' business.
+unit — a caller-named image file — and share normalization/request transport. Dense extraction
+additionally derives its one raster or hs2p spacing-readable regime from reader capabilities.
 """
 
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
+import pkgutil
 from typing import Sequence
+
+import hs2p.wsi.backends as hs2p_wsi_backends
+from hs2p.wsi import reader as hs2p_reader
 
 from slide2vec.api import ImageSpec
 
 RASTER_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg"})
 
 
-def validate_raster_image_specs(specs: Sequence[ImageSpec]) -> None:
-    """Require the closed raster suffix set owned by the Pillow dense-image path."""
-    unsupported = [
-        f"{spec.sample_id!r} ({spec.image_path})"
-        for spec in specs
-        if Path(spec.image_path).suffix.lower() not in RASTER_IMAGE_SUFFIXES
-    ]
-    if unsupported:
-        raise ValueError(
-            "Dense raster image extraction accepts exactly .png, .jpg, and .jpeg "
-            f"(case-insensitive); unsupported inputs: {unsupported}"
+@lru_cache(maxsize=1)
+def spacing_readable_image_suffixes() -> frozenset[str]:
+    """Return the suffix capabilities declared by hs2p's installed WSI readers."""
+    suffixes: set[str] = set()
+    for module_info in pkgutil.iter_modules(
+        hs2p_wsi_backends.__path__,
+        prefix=f"{hs2p_wsi_backends.__name__}.",
+    ):
+        module = import_module(module_info.name)
+        for name, value in vars(module).items():
+            if not name.endswith("_SUPPORTED_SUFFIXES"):
+                continue
+            if not isinstance(value, (set, frozenset, list, tuple)):
+                continue
+            suffixes.update(
+                str(suffix).lower()
+                for suffix in value
+                if isinstance(suffix, str) and suffix.startswith(".")
+            )
+    if not suffixes:
+        raise RuntimeError(
+            "The installed hs2p WSI readers do not declare any supported path suffixes."
         )
+    return frozenset(suffixes)
+
+
+def validate_dense_image_reader_regime(
+    specs: Sequence[ImageSpec],
+) -> tuple[str, dict[str, str]]:
+    """Resolve one regime and retain auto backends discovered by openability probes.
+
+    CuCIM and VIPS publish suffix capabilities, while hs2p's OpenSlide/ASAP readers
+    deliberately accept paths based on file contents. For a suffix outside the published
+    sets, first ask hs2p to resolve under the caller's real metadata policy. Only if that
+    fails, a synthetic-spacing probe distinguishes reader-openable content from unsupported
+    content; its backend is never carried into the real plan.
+    """
+    spacing_suffixes = spacing_readable_image_suffixes()
+    resolved_auto_backends: dict[str, str] = {}
+    grouped: dict[str, list[str]] = {
+        "raster": [],
+        "spacing-readable": [],
+        "unsupported": [],
+    }
+    for spec in specs:
+        suffix = Path(spec.image_path).suffix.lower()
+        if suffix in RASTER_IMAGE_SUFFIXES:
+            regime = "raster"
+        elif suffix in spacing_suffixes:
+            regime = "spacing-readable"
+        else:
+            spacing_override = (
+                float(spec.spacing_at_level_0)
+                if spec.spacing_at_level_0 is not None
+                else None
+            )
+            try:
+                selection = hs2p_reader.resolve_backend(
+                    "auto",
+                    wsi_path=Path(spec.image_path),
+                    spacing_override=spacing_override,
+                )
+            except RuntimeError:
+                try:
+                    synthetic_selection = hs2p_reader.resolve_backend(
+                        "auto",
+                        wsi_path=Path(spec.image_path),
+                        spacing_override=1.0,
+                    )
+                except RuntimeError:
+                    regime = "unsupported"
+                else:
+                    # The source is reader-openable, so surface the real metadata/override
+                    # error instead of mislabelling its suffix as unsupported. This metadata
+                    # open never decodes pixels, and the synthetic backend is not persisted.
+                    probe_reader = hs2p_reader.open_slide(
+                        spec.image_path,
+                        backend=synthetic_selection.backend,
+                        spacing_override=spacing_override,
+                    )
+                    probe_reader.close()
+                    regime = "spacing-readable"
+            else:
+                regime = "spacing-readable"
+                resolved_auto_backends[spec.sample_id] = str(selection.backend)
+        grouped[regime].append(f"{spec.sample_id!r} ({spec.image_path})")
+    if grouped["unsupported"]:
+        supported_spacing = ", ".join(sorted(spacing_suffixes))
+        raise ValueError(
+            "Dense image extraction received unsupported path suffixes. Raster formats are "
+            "exactly .png, .jpg, and .jpeg; hs2p spacing-readable formats include "
+            f"{supported_spacing} plus other sources its registered readers can open. "
+            f"Unsupported samples: {grouped['unsupported']}"
+        )
+    present = [regime for regime in ("raster", "spacing-readable") if grouped[regime]]
+    if len(present) != 1:
+        raise ValueError(
+            "A dense image run must use exactly one reader regime. "
+            f"raster samples: {grouped['raster']}; "
+            f"spacing-readable samples: {grouped['spacing-readable']}"
+        )
+    return present[0], resolved_auto_backends
 
 
 def reject_image_level0_spacing_overrides(
@@ -83,7 +178,7 @@ def normalize_image_specs(
     return specs
 
 
-def build_image_specs_request(specs: Sequence[ImageSpec]) -> dict:
+def build_image_specs_request(specs: Sequence[ImageSpec], *, read_plans=None) -> dict:
     """The flat image list crossing to the torchrun ranks, in the order the parent fixed.
 
     Order is the payload: every rank rebuilds this exact list and derives its own contiguous
@@ -96,6 +191,11 @@ def build_image_specs_request(specs: Sequence[ImageSpec]) -> dict:
                 "sample_id": spec.sample_id,
                 "image_path": str(spec.image_path),
                 "spacing_at_level_0": spec.spacing_at_level_0,
+                **(
+                    {}
+                    if read_plans is None
+                    else {"read_plan": read_plans[spec.sample_id].to_dict()}
+                ),
             }
             for spec in specs
         ]

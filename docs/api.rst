@@ -305,8 +305,9 @@ Dense Grids from Images
 When the supervision arrives as image/mask pairs rather than as slides —
 segmentation and detection datasets, exported ROI sets —
 :meth:`Model.embed_images_dense` is the image-sourced counterpart of
-``embed_regions_dense``: the image *is* the region, so there is no slide, no
-coordinate and no spacing→level plan.
+``embed_regions_dense``: the image *is* the region, so there is no ROI
+coordinate plan. Raster inputs need no spacing→level plan; spacing-readable
+inputs use the parent-resolved hs2p plan described below.
 
 .. code-block:: python
 
@@ -340,31 +341,41 @@ geometry, dense settings, inference precision, and stored dtype exactly match
 the current call. Missing, legacy, or incompatible pairs are recomputed, so an
 interrupted run is restarted by re-issuing the call.
 
-**Raster reader regime and physical scale.** Raster dense runs accept exactly
-``.png``, ``.jpg``, and ``.jpeg`` suffixes, case-insensitively. Every raster uses
-the existing Pillow ``convert("RGB")`` decoder; ``backend="auto"`` resolves to
-that reader. A positive, finite numeric ``spacing_um`` is an **asserted spacing**:
-it states that every supplied pixel array is already at that µm/px scale and is
-checked against the encoder's supported spacings by the normal
-recommended-settings policy. It never resizes or otherwise changes pixels.
-``spacing_um=None`` is **unknown spacing**, not an inferred default. A
-spacing-constrained encoder rejects unknown spacing unless
-``allow_non_recommended_settings=True`` (one warning for the run); a
-spacing-agnostic encoder accepts it normally.
+**Reader regimes and physical scale.** One dense-image run uses exactly one
+reader regime; mixing regimes is rejected with samples grouped by regime before
+model loading or pixel decoding. Raster is the exact case-insensitive suffix set
+``.png``, ``.jpg``, and ``.jpeg`` and uses Pillow ``convert("RGB")``. Multiple
+suffixes in that set may share a run. A positive, finite numeric ``spacing_um``
+is an **asserted spacing** for raster pixels: it is checked by the normal
+recommended-settings policy but never changes the pixels. ``spacing_um=None``
+is unknown spacing for raster inputs.
 
-``ImageSpec.spacing_at_level_0`` is a level-0 source-metadata override for
-spacing-readable inputs. Raster dense extraction and :meth:`Model.embed_images`
-reject a non-null override rather than silently ignoring it, because a
-pre-cropped PNG/JPEG has no pyramid level-0 read plan.
+Spacing-readable inputs are the WSI formats declared by the installed hs2p
+readers. Multiple spacing-readable suffixes may share a run. Here numeric
+``spacing_um`` is the requested read scale and ``None`` resolves the encoder's
+single registry default. Encoders with ambiguous or missing defaults, including
+unregistered/custom encoders, require an explicit value. The parent asks hs2p
+to resolve each source's level-0 spacing, concrete backend, native read level
+and spacing, and tolerance result before resume filtering. Ranks consume that
+immutable plan: hs2p reads the complete selected level and area-downsamples only
+when needed. A native level within tolerance is accepted without resize, so its
+native spacing is the effective spacing; an area-downsampled image has the
+requested spacing as its effective spacing. Reads never upsample and an
+explicit backend never silently falls back.
 
-**target_size is a declaration, not a resize.** Dense extraction encodes through
-the encoder's normalization-only transform, so it never rescales: every image
-must already be exactly ``target_size`` (a non-square ``(height, width)`` pair is
-accepted), and one that is not raises with the sample, observed and declared
-dimensions, and the resolved or unknown spacing. Declaring the geometry
-up front is what lets the *effective* encoder input — the padded image, or one
-patch-aligned window of it — be validated, and the encoder's variable-input
-constructor settings resolved, before a single image is decoded (see
+``ImageSpec.spacing_at_level_0`` overrides hs2p's source level-0 metadata for
+spacing-readable inputs. Without it, hs2p metadata is authoritative and missing
+spacing is an error. Raster dense extraction and :meth:`Model.embed_images`
+reject a non-null override rather than silently ignoring it.
+
+**target_size is a declaration, not a resize.** It is checked after the selected
+reader finishes, including any hs2p spacing downsample. Every final image must
+be exactly ``target_size`` (a non-square ``(height, width)`` pair is accepted);
+a mismatch raises with the sample, observed and declared dimensions, and the
+resolved or unknown spacing. It never triggers fit-to-size resizing. Declaring
+the geometry up front is what lets the *effective* encoder input — the padded
+image, or one patch-aligned window of it — be validated, and the encoder's
+variable-input constructor settings resolved, before a single image is decoded (see
 `Variable encoder input for dense runs`_). A dataset whose images differ in size
 is therefore several runs, one per geometry — which is also the only way their
 grids could be batched downstream.

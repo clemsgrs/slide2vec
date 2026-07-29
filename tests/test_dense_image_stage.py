@@ -91,12 +91,55 @@ def _skip_dense_image_encoding(monkeypatch) -> None:
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda normalized, out_dir, recipe: ([], len(normalized)),
+        lambda normalized, out_dir, recipe, read_plans=None: ([], len(normalized)),
     )
     monkeypatch.setattr(
         dense_image_stage,
         "dense_image_artifact_from_disk",
         lambda out_dir, spec: spec,
+    )
+
+
+def _mock_hs2p_spacing_reader(
+    monkeypatch,
+    *,
+    spacing=0.25,
+    level_dimensions=((64, 64),),
+    level_downsamples=((1.0, 1.0),),
+    resolved_backend="openslide",
+):
+    from hs2p.wsi import reader as hs2p_reader
+
+    class _Reader:
+        def __init__(self, *, spacing_override=None):
+            self.spacing = (
+                float(spacing)
+                if spacing_override is None
+                else float(spacing_override)
+            )
+            self.level_dimensions = list(level_dimensions)
+            self.level_downsamples = list(level_downsamples)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        hs2p_reader,
+        "resolve_backend",
+        lambda requested_backend, **kwargs: SimpleNamespace(
+            backend=(
+                resolved_backend
+                if requested_backend == "auto"
+                else requested_backend
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        hs2p_reader,
+        "open_slide",
+        lambda path, backend, spacing_override=None, **kwargs: _Reader(
+            spacing_override=spacing_override
+        ),
     )
 
 
@@ -285,7 +328,7 @@ def test_dense_image_raster_suffixes_are_exact_and_case_insensitive(tmp_path, mo
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda specs, out_dir, recipe: ([], len(specs)),
+        lambda specs, out_dir, recipe, read_plans=None: ([], len(specs)),
     )
     monkeypatch.setattr(
         dense_image_stage,
@@ -300,14 +343,406 @@ def test_dense_image_raster_suffixes_are_exact_and_case_insensitive(tmp_path, mo
         )
     ] == [spec.sample_id for spec in accepted]
 
-    for suffix in (".tif", ".tiff", ".svs", ".png.tmp", ""):
-        with pytest.raises(ValueError, match=r"raster.*\.png.*\.jpg.*\.jpeg"):
+    for suffix in (".bmp", ".png.tmp", ""):
+        with pytest.raises(ValueError, match=r"Raster.*\.png.*\.jpg.*\.jpeg"):
             dense_image_stage.embed_images_dense(
                 model,
                 [ImageSpec(sample_id="unsupported", image_path=tmp_path / f"image{suffix}")],
                 dense=_dense(),
                 execution=execution,
             )
+
+
+def test_spacing_readable_suffixes_are_case_insensitive_and_may_mix_within_one_run(
+    tmp_path, monkeypatch
+):
+    """hs2p-supported WSI suffixes form one regime even when their formats differ."""
+    _mock_hs2p_spacing_reader(monkeypatch)
+    _skip_dense_image_encoding(monkeypatch)
+    model = _FakeModel(_encoder())
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+    )
+    specs = [
+        ImageSpec(sample_id="tiff", image_path=tmp_path / "image.TiF"),
+        ImageSpec(sample_id="aperio", image_path=tmp_path / "image.SvS"),
+    ]
+
+    artifacts = dense_image_stage.embed_images_dense(
+        model,
+        specs,
+        dense=_dense(target_size=32, backend="openslide"),
+        execution=execution,
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["tiff", "aperio"]
+
+
+def test_openslide_formats_are_classified_by_hs2p_openability_and_resolution_is_reused(
+    tmp_path, monkeypatch
+):
+    """Readers without suffix constants are probed once without decoding pixels."""
+    from hs2p.wsi import reader as hs2p_reader
+
+    resolve_calls = []
+    open_calls = []
+
+    class _Reader:
+        spacing = 0.5
+        level_dimensions = [(64, 64)]
+        level_downsamples = [(1.0, 1.0)]
+
+        def read_level(self, level):
+            pytest.fail(f"classification/resume filtering must not decode level {level}")
+
+        def close(self):
+            pass
+
+    def _resolve(requested_backend, *, wsi_path, **kwargs):
+        assert requested_backend == "auto"
+        resolve_calls.append((Path(wsi_path).suffix.lower(), kwargs))
+        return SimpleNamespace(backend="openslide")
+
+    def _open(path, *, backend, spacing_override=None, **kwargs):
+        open_calls.append((Path(path).suffix.lower(), backend, spacing_override))
+        return _Reader()
+
+    monkeypatch.setattr(hs2p_reader, "resolve_backend", _resolve)
+    monkeypatch.setattr(hs2p_reader, "open_slide", _open)
+    _skip_dense_image_encoding(monkeypatch)
+    specs = [
+        ImageSpec(
+            sample_id=suffix[1:],
+            image_path=tmp_path / f"image{suffix.upper()}",
+            spacing_at_level_0=0.5,
+        )
+        for suffix in (".avs", ".dcm", ".vms", ".vmu", ".czi")
+    ]
+
+    artifacts = dense_image_stage.embed_images_dense(
+        _FakeModel(_encoder()),
+        specs,
+        dense=_dense(backend="auto"),
+        execution=ExecutionOptions(
+            output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+        ),
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == [
+        "avs",
+        "dcm",
+        "vms",
+        "vmu",
+        "czi",
+    ]
+    assert [suffix for suffix, _ in resolve_calls] == [
+        ".avs",
+        ".dcm",
+        ".vms",
+        ".vmu",
+        ".czi",
+    ]
+    assert [suffix for suffix, _, _ in open_calls] == [
+        ".avs",
+        ".dcm",
+        ".vms",
+        ".vmu",
+        ".czi",
+    ]
+    assert all(backend == "openslide" for _, backend, _ in open_calls)
+
+
+def test_synthetic_format_probe_does_not_replace_real_auto_backend_resolution(
+    tmp_path, monkeypatch
+):
+    """A probe-only spacing cannot select the backend persisted in the real plan."""
+    from hs2p.wsi import reader as hs2p_reader
+
+    resolve_calls = []
+    open_calls = []
+
+    class _Reader:
+        spacing = 0.5
+        level_dimensions = [(64, 64)]
+        level_downsamples = [(1.0, 1.0)]
+
+        def read_level(self, level):
+            pytest.fail(f"resume filtering must not decode level {level}")
+
+        def close(self):
+            pass
+
+    def _resolve(requested_backend, *, spacing_override=None, **kwargs):
+        assert requested_backend == "auto"
+        resolve_calls.append(spacing_override)
+        return SimpleNamespace(
+            backend="openslide" if spacing_override == 1.0 else "vips"
+        )
+
+    def _open(path, *, backend, spacing_override=None, **kwargs):
+        open_calls.append((backend, spacing_override))
+        return _Reader()
+
+    monkeypatch.setattr(hs2p_reader, "resolve_backend", _resolve)
+    monkeypatch.setattr(hs2p_reader, "open_slide", _open)
+    _skip_dense_image_encoding(monkeypatch)
+
+    dense_image_stage.embed_images_dense(
+        _FakeModel(_encoder()),
+        [ImageSpec(sample_id="dicom", image_path=tmp_path / "image.dcm")],
+        dense=_dense(backend="auto"),
+        execution=ExecutionOptions(
+            output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+        ),
+    )
+
+    assert resolve_calls == [None]
+    assert open_calls == [("vips", None)]
+
+
+def test_unknown_suffix_probe_surfaces_invalid_override_instead_of_unsupported(
+    tmp_path, monkeypatch
+):
+    """Synthetic openability is only a discriminator after the real policy fails."""
+    from hs2p.wsi import reader as hs2p_reader
+
+    resolve_calls = []
+
+    def _resolve(requested_backend, *, spacing_override=None, **kwargs):
+        assert requested_backend == "auto"
+        resolve_calls.append(spacing_override)
+        if spacing_override == 1.0:
+            return SimpleNamespace(backend="openslide")
+        raise RuntimeError("auto resolution rejected the source")
+
+    def _open(path, *, backend, spacing_override=None, **kwargs):
+        assert backend == "openslide"
+        assert spacing_override == -0.5
+        raise ValueError("spacing override must be positive")
+
+    monkeypatch.setattr(hs2p_reader, "resolve_backend", _resolve)
+    monkeypatch.setattr(hs2p_reader, "open_slide", _open)
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("override validation must precede model loading"),
+    )
+
+    with pytest.raises(ValueError, match="spacing override must be positive"):
+        dense_image_stage.embed_images_dense(
+            model,
+            [
+                ImageSpec(
+                    sample_id="dicom",
+                    image_path=tmp_path / "image.dcm",
+                    spacing_at_level_0=-0.5,
+                )
+            ],
+            dense=_dense(backend="auto"),
+            execution=ExecutionOptions(
+                output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+            ),
+        )
+
+    assert resolve_calls == [-0.5, 1.0]
+
+
+def test_mixed_reader_regimes_fail_with_samples_grouped_before_any_read_or_model_load(
+    tmp_path, monkeypatch
+):
+    from hs2p.wsi import reader as hs2p_reader
+
+    monkeypatch.setattr(
+        hs2p_reader,
+        "resolve_backend",
+        lambda *args, **kwargs: pytest.fail("mixed runs must fail before reader resolution"),
+    )
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("mixed runs must fail before model loading"),
+    )
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        dense_image_stage.embed_images_dense(
+            model,
+            [
+                ImageSpec(sample_id="raster-a", image_path=tmp_path / "a.PNG"),
+                ImageSpec(sample_id="slide-b", image_path=tmp_path / "b.SVS"),
+            ],
+            dense=_dense(),
+            execution=execution,
+        )
+
+    message = str(excinfo.value)
+    assert "exactly one reader regime" in message
+    assert "raster samples" in message and "raster-a" in message
+    assert "spacing-readable samples" in message and "slide-b" in message
+
+
+def test_unsupported_dense_image_suffix_fails_validation_before_loading(tmp_path, monkeypatch):
+    from hs2p.wsi import reader as hs2p_reader
+
+    monkeypatch.setattr(
+        hs2p_reader,
+        "resolve_backend",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("no registered hs2p reader can open this source")
+        ),
+    )
+    model = _FakeModel(_encoder())
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("unsupported suffixes must fail before model loading"),
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        dense_image_stage.embed_images_dense(
+            model,
+            [
+                ImageSpec(
+                    sample_id="not-an-image",
+                    image_path=tmp_path / "sample.not-a-wsi",
+                )
+            ],
+            dense=_dense(),
+            execution=ExecutionOptions(
+                output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+            ),
+        )
+    message = str(excinfo.value)
+    assert "unsupported path suffixes" in message
+    assert "not-an-image" in message
+    assert ".png, .jpg, and .jpeg" in message
+
+
+def test_omitted_spacing_readable_scale_resolves_the_model_default_before_reading(
+    tmp_path, monkeypatch
+):
+    """A constrained encoder's one registry spacing becomes the declared read scale."""
+
+    _mock_hs2p_spacing_reader(monkeypatch, spacing=0.5)
+    captured = {}
+
+    def _capture_plan(specs, out_dir, recipe, **kwargs):
+        del out_dir
+        captured.update(recipe=recipe, specs=list(specs), **kwargs)
+        return [], len(specs)
+
+    monkeypatch.setattr(
+        dense_image_stage, "partition_dense_images_by_resume", _capture_plan
+    )
+    monkeypatch.setattr(
+        dense_image_stage,
+        "dense_image_artifact_from_disk",
+        lambda out_dir, spec: spec,
+    )
+    model = _FakeModel(_encoder(), name="uni")
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+    )
+
+    dense_image_stage.embed_images_dense(
+        model,
+        [ImageSpec(sample_id="sample", image_path=tmp_path / "sample.svs")],
+        dense=_dense(spacing_um=None, backend="openslide"),
+        execution=execution,
+    )
+
+    assert captured["recipe"].spacing_source == "model_default"
+    assert captured["recipe"].declared_spacing_um == pytest.approx(0.5)
+    assert captured["read_plans"]["sample"].to_dict() == {
+        "reader_regime": "spacing-readable",
+        "spacing_source": "model_default",
+        "declared_spacing_um": 0.5,
+        "source_spacing_um": 0.5,
+        "spacing_at_level_0": None,
+        "read_spacing_um": 0.5,
+        "effective_spacing_um": 0.5,
+        "requested_backend": "openslide",
+        "backend": "openslide",
+        "tolerance": 0.05,
+        "read_level": 0,
+        "is_within_tolerance": True,
+        "read_size": [64, 64],
+        "output_size": [64, 64],
+    }
+
+
+@pytest.mark.parametrize(
+    ("encoder_name", "supported_spacing_um"),
+    [
+        ("issue259-multiple-no-default", [0.5, 1.0]),
+        ("issue259-agnostic-no-default", None),
+    ],
+)
+def test_omitted_spacing_readable_scale_requires_one_resolvable_model_default(
+    tmp_path, monkeypatch, encoder_name, supported_spacing_um
+):
+    import slide2vec.encoders.registry as encoder_registry_module
+    from slide2vec.encoders.registry import register_encoder
+    from slide2vec.runtime.registry import Registry
+
+    # Register against a fresh public registry binding so later tests see the original.
+    monkeypatch.setattr(
+        encoder_registry_module, "encoder_registry", Registry("encoders")
+    )
+
+    @register_encoder(
+        encoder_name,
+        output_variants={"default": {"encode_dim": 192}},
+        default_output_variant="default",
+        input_size=224,
+        supports_variable_input_size=True,
+        patch_size=16,
+        supported_spacing_um=supported_spacing_um,
+    )
+    class _RegisteredForSpacingTest:
+        pass
+
+    model = _FakeModel(_encoder(), name=encoder_name)
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("default resolution must precede model loading"),
+    )
+
+    with pytest.raises(ValueError, match=r"DenseImageOptions\.spacing_um.*explicit"):
+        dense_image_stage.embed_images_dense(
+            model,
+            [ImageSpec(sample_id="sample", image_path=tmp_path / "sample.svs")],
+            dense=_dense(spacing_um=None),
+            execution=ExecutionOptions(
+                output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+            ),
+        )
+
+
+def test_unregistered_encoder_requires_explicit_spacing_for_spacing_readable_inputs(
+    tmp_path, monkeypatch
+):
+    model = _FakeModel(_encoder(), name="issue259-unregistered")
+    monkeypatch.setattr(
+        model,
+        "_load_backend",
+        lambda: pytest.fail("default resolution must precede model loading"),
+    )
+
+    with pytest.raises(ValueError, match=r"DenseImageOptions\.spacing_um.*explicit"):
+        dense_image_stage.embed_images_dense(
+            model,
+            [ImageSpec(sample_id="sample", image_path=tmp_path / "sample.tif")],
+            dense=_dense(spacing_um=None),
+            execution=ExecutionOptions(
+                output_dir=tmp_path / "out", num_gpus=1, precision="fp32"
+            ),
+        )
 
 
 def test_non_recommended_numeric_raster_spacing_is_rejected(tmp_path, monkeypatch):
@@ -544,6 +979,7 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
         serialize_execution,
     )
     from slide2vec.runtime.dense_image_recipe import resolve_dense_image_recipe
+    from slide2vec.runtime.dense_image_reading import raster_read_plan
 
     specs = _images(tmp_path, ["a", "b", "c", "d"])
     loaded = _loaded(_encoder())
@@ -586,7 +1022,17 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
         ),
         "output_dir": str(tmp_path / "out"),
         "progress_events_path": None,
-        **build_image_specs_request(specs),
+        **build_image_specs_request(
+            specs,
+            read_plans={
+                spec.sample_id: raster_read_plan(
+                    spacing_source="explicit",
+                    declared_spacing_um=0.5,
+                    requested_backend="auto",
+                )
+                for spec in specs
+            },
+        ),
     }
     request_path = tmp_path / "dense_image_request.json"
     request_path.write_text(json.dumps(request), encoding="utf-8")

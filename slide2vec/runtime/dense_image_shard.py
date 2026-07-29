@@ -7,10 +7,11 @@ grid plus one geometry sidecar per image. It is device-agnostic and ``RANK``-fre
 very same code path runs in-process for ``num_gpus=1`` and on every torchrun rank — and is
 exercised on CPU.
 
-It differs from the ROI loop in exactly one respect: there is no slide, no coordinate and no
-spacing→level plan, because the raster image is already at its asserted (or unknown) physical
-spacing and is read through Pillow without resampling. Everything
-after the pixels arrive — geometry, padding, whole-tile vs sliding encode, output dtype — is
+Raster images are decoded unchanged through Pillow. Spacing-readable images consume the
+parent-resolved immutable hs2p plan: a concrete backend reads the stored full level and hs2p
+area-downsamples to the stored output geometry when required, without rank-side selection.
+Everything after the pixels arrive — geometry, padding, whole-tile vs sliding encode, output
+dtype — is
 the shared :class:`~slide2vec.runtime.dense_regions.DenseGridEncoder`, so this module owns no
 padding, batching or blending logic of its own.
 
@@ -34,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
 import torch
 
@@ -44,11 +45,16 @@ from slide2vec.artifacts import (
     load_metadata,
     write_dense_image,
 )
-from slide2vec.data.dataset import DeclaredGeometryCollator, ImageFileDataset
+from slide2vec.data.dataset import DeclaredGeometryCollator
 from slide2vec.runtime.batching import dataloader_kwargs, uses_cuda_runtime
 from slide2vec.runtime.dense_image_recipe import (
     DenseImageRecipe,
     malformed_dense_image_compatibility_fields,
+)
+from slide2vec.runtime.dense_image_reading import (
+    DenseImageReadPlan,
+    raster_read_plan,
+    read_dense_image,
 )
 from slide2vec.runtime.dense_regions import DenseGridEncoder
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
@@ -68,7 +74,10 @@ class DenseImageResumeDecision:
 
 
 def dense_image_resume_decision(
-    out_dir, spec: "ImageSpec", recipe: DenseImageRecipe
+    out_dir,
+    spec: "ImageSpec",
+    recipe: DenseImageRecipe,
+    read_plan: DenseImageReadPlan | None = None,
 ) -> DenseImageResumeDecision:
     """Classify one on-disk pair against the current image extraction identity."""
     payload_path, sidecar_path = dense_image_paths(out_dir, sample_id=spec.sample_id)
@@ -93,7 +102,7 @@ def dense_image_resume_decision(
             f"Malformed dense image sidecar {sidecar_path}: "
             "'compatibility' must be a JSON object"
         )
-    expected = recipe.for_image(spec)
+    expected = recipe.for_image(spec, read_plan)
     malformed = malformed_dense_image_compatibility_fields(recorded, expected)
     if malformed:
         raise ValueError(
@@ -132,17 +141,18 @@ def dense_image_metadata(
     *,
     loaded: "LoadedModel",
     recipe: DenseImageRecipe,
+    read_plan: DenseImageReadPlan | None = None,
     grid: "np.ndarray",
 ) -> dict:
     """The geometry sidecar: what was encoded, and with which dense recipe.
 
-    The dense ROI sidecar's fields plus truthful raster provenance: Pillow is the resolved
-    reader, spacing is explicit or unknown, and non-applicable pyramid-plan fields are null.
+    The dense ROI sidecar's fields plus truthful reader provenance. Raster records Pillow
+    with non-applicable pyramid fields null; spacing-readable records the complete hs2p plan.
     ``encoder_input_regime`` is ``"declared"``: unlike the pooled given-image path this run
     *did* state its geometry — ``target_size`` — and it was validated before any image was
     read, so the sidecar records a request that was honored rather than a size observed.
     """
-    compatibility = recipe.for_image(spec)
+    compatibility = recipe.for_image(spec, read_plan)
     metadata = {
         "artifact_type": "dense_image_embeddings",
         "sample_id": compatibility["sample_id"],
@@ -162,11 +172,16 @@ def dense_image_metadata(
         "spacing_source": compatibility["spacing_source"],
         "declared_spacing_um": compatibility["declared_spacing_um"],
         "source_spacing_um": compatibility["source_spacing_um"],
+        "spacing_at_level_0": compatibility["spacing_at_level_0"],
+        "read_spacing_um": compatibility["read_spacing_um"],
         "effective_spacing_um": compatibility["effective_spacing_um"],
         "requested_backend": compatibility["requested_backend"],
         "backend": compatibility["backend"],
         "tolerance": compatibility["tolerance"],
         "read_level": compatibility["read_level"],
+        "is_within_tolerance": compatibility["is_within_tolerance"],
+        "read_size": compatibility["read_size"],
+        "output_size": compatibility["output_size"],
         "read_tile_size_px": compatibility["read_tile_size_px"],
         "requested_tile_size_px": compatibility["requested_tile_size_px"],
         "pad_mode": compatibility["pad_mode"],
@@ -181,6 +196,28 @@ def dense_image_metadata(
     return metadata
 
 
+class _ResolvedDenseImageDataset(torch.utils.data.Dataset):
+    """Read each item through its parent-resolved plan, then normalize it."""
+
+    def __init__(self, specs, read_plans, *, target_size, preprocess) -> None:
+        self.specs = list(specs)
+        self.read_plans = dict(read_plans)
+        self.target_size = (int(target_size[0]), int(target_size[1]))
+        self.preprocess = preprocess
+
+    def __len__(self) -> int:
+        return len(self.specs)
+
+    def __getitem__(self, index: int):
+        spec = self.specs[index]
+        image = read_dense_image(
+            spec,
+            plan=self.read_plans[spec.sample_id],
+            target_size=self.target_size,
+        )
+        return int(index), self.preprocess(image)
+
+
 def run_dense_image_shard(
     images: Sequence["ImageSpec"],
     *,
@@ -188,6 +225,7 @@ def run_dense_image_shard(
     out_dir,
     dense: "DenseImageOptions",
     recipe: DenseImageRecipe,
+    read_plans: Mapping[str, DenseImageReadPlan] | None = None,
     batch_size: int,
     precision: str = "fp32",
     output_dtype: "torch.dtype | None" = None,
@@ -206,10 +244,21 @@ def run_dense_image_shard(
     batch's image count for per-batch progress.
     """
     images = list(images)
+    if read_plans is None:
+        default_plan = raster_read_plan(
+            spacing_source=recipe.spacing_source,
+            declared_spacing_um=recipe.declared_spacing_um,
+            requested_backend=recipe.requested_backend,
+        )
+        read_plans = {spec.sample_id: default_plan for spec in images}
+    else:
+        read_plans = dict(read_plans)
     pending = [
         spec
         for spec in images
-        if dense_image_resume_decision(out_dir, spec, recipe).needs_encode
+        if dense_image_resume_decision(
+            out_dir, spec, recipe, read_plans[spec.sample_id]
+        ).needs_encode
     ]
     for spec in pending:
         # The sidecar is the only done-marker. Remove any stale marker before the first
@@ -233,11 +282,14 @@ def run_dense_image_shard(
             precision=precision,
             output_dtype=output_dtype,
         )
-        dataset = ImageFileDataset(
-            [spec.image_path for spec in pending],
-            # partial, not a closure: when explicit spawned workers are used, only this
-            # transform recipe crosses — never the encoder — so a worker carries no weights.
-            partial(apply_transforms_itemwise, transforms=encoder.dense_transform),
+        dataset = _ResolvedDenseImageDataset(
+            pending,
+            read_plans,
+            target_size=encoder.geometry.target_size,
+            preprocess=partial(
+                apply_transforms_itemwise,
+                transforms=encoder.dense_transform,
+            ),
         )
         dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -277,6 +329,7 @@ def run_dense_image_shard(
                             spec,
                             loaded=loaded,
                             recipe=recipe,
+                            read_plan=read_plans[spec.sample_id],
                             grid=grid,
                         ),
                     )

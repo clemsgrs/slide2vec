@@ -58,7 +58,7 @@ def malformed_dense_image_compatibility_fields(
 
 @dataclass(frozen=True, kw_only=True)
 class DenseImageRecipe:
-    """Request-wide extraction facts that determine a dense image payload."""
+    """Request-wide extraction facts combined with one parent-resolved image read plan."""
 
     encoder_name: str
     output_variant: str
@@ -119,12 +119,28 @@ class DenseImageRecipe:
             "dtype": self.dtype,
         }
 
-    def for_image(self, spec) -> dict[str, Any]:
+    def for_image(self, spec, read_plan=None) -> dict[str, Any]:
         """Add the normalized source identity to this request-wide recipe."""
+        if read_plan is None:
+            from slide2vec.runtime.dense_image_reading import raster_read_plan
+
+            read_plan = raster_read_plan(
+                spacing_source=self.spacing_source,
+                declared_spacing_um=self.declared_spacing_um,
+                requested_backend=self.requested_backend,
+            )
+        recipe = self.to_dict()
+        encoder_name = recipe.pop("encoder_name")
+        output_variant = recipe.pop("output_variant")
+        for field in read_plan.to_dict():
+            recipe.pop(field, None)
         return {
             "sample_id": str(spec.sample_id),
             "image_path": str(Path(spec.image_path).expanduser().resolve()),
-            **self.to_dict(),
+            "encoder_name": encoder_name,
+            "output_variant": output_variant,
+            **read_plan.to_dict(),
+            **recipe,
         }
 
     @classmethod
@@ -190,7 +206,15 @@ class DenseImageRecipe:
         )
 
 
-def resolve_dense_image_recipe(*, model, contract, dense, execution) -> DenseImageRecipe:
+def resolve_dense_image_recipe(
+    *,
+    model,
+    contract,
+    dense,
+    execution,
+    reader_regime: str = "raster",
+    spacing_source: str | None = None,
+) -> DenseImageRecipe:
     """Resolve the complete request-wide identity before loading the encoder."""
     if execution.precision is None:
         raise ValueError(
@@ -232,8 +256,12 @@ def resolve_dense_image_recipe(*, model, contract, dense, execution) -> DenseIma
     return DenseImageRecipe(
         encoder_name=str(model.name),
         output_variant=str(output["output_variant"]),
-        reader_regime="raster",
-        spacing_source="unknown" if spacing_um is None else "explicit",
+        reader_regime=str(reader_regime),
+        spacing_source=(
+            str(spacing_source)
+            if spacing_source is not None
+            else ("unknown" if spacing_um is None else "explicit")
+        ),
         declared_spacing_um=spacing_um,
         source_spacing_um=spacing_um,
         effective_spacing_um=spacing_um,

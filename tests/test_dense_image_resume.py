@@ -11,6 +11,7 @@ from slide2vec.api import DenseImageOptions, ExecutionOptions, ImageSpec, Model
 from slide2vec.artifacts import dense_image_paths
 from slide2vec.runtime.dense_image_stage import partition_dense_images_by_resume
 from slide2vec.runtime.dense_image_recipe import resolve_dense_image_recipe
+from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
 from slide2vec.runtime.image_specs import (
     build_image_specs_request,
     image_specs_from_request,
@@ -208,6 +209,55 @@ def test_resume_skips_only_a_complete_exactly_compatible_pair(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("source_spacing_um", 0.26),
+        ("backend", "openslide"),
+    ],
+)
+def test_resume_recomputes_when_parent_resolved_source_or_auto_backend_changes(
+    tmp_path, changed_field, changed_value
+):
+    from dataclasses import replace
+
+    source = (tmp_path / "source.svs").resolve()
+    spec = ImageSpec(sample_id="sample-1", image_path=str(source))
+    recipe = _resolved_recipe(tmp_path)
+    original = DenseImageReadPlan(
+        reader_regime="spacing-readable",
+        spacing_source="explicit",
+        declared_spacing_um=0.5,
+        source_spacing_um=0.25,
+        spacing_at_level_0=None,
+        read_spacing_um=0.25,
+        effective_spacing_um=0.5,
+        requested_backend="auto",
+        backend="vips",
+        tolerance=0.05,
+        read_level=0,
+        is_within_tolerance=False,
+        read_size=(448, 448),
+        output_size=(224, 224),
+    )
+    _publish_pair(
+        tmp_path / "out",
+        spec,
+        recipe.for_image(spec, original),
+    )
+    current = replace(original, **{changed_field: changed_value})
+
+    remaining, skipped = partition_dense_images_by_resume(
+        [spec],
+        tmp_path / "out",
+        recipe,
+        read_plans={spec.sample_id: current},
+    )
+
+    assert remaining == [spec]
+    assert skipped == 0
+
+
+@pytest.mark.parametrize(
     ("condition", "differing_fields"),
     [
         ("missing-pair", "payload, sidecar"),
@@ -325,11 +375,16 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         "spacing_source",
         "declared_spacing_um",
         "source_spacing_um",
+        "spacing_at_level_0",
+        "read_spacing_um",
         "effective_spacing_um",
         "requested_backend",
         "backend",
         "tolerance",
         "read_level",
+        "is_within_tolerance",
+        "read_size",
+        "output_size",
         "read_tile_size_px",
         "requested_tile_size_px",
         "target_size",
