@@ -1,0 +1,109 @@
+{
+  "artifact_type": "dense_image_embeddings",
+  "attention_blocks": [
+    -1
+  ],
+  "attention_include_registers": false,
+  "backend": "pil",
+  "compatibility": {
+    "attention_blocks": [
+      -1
+    ],
+    "attention_include_registers": false,
+    "backend": "pil",
+    "declared_spacing_um": 0.5,
+    "dtype": "float32",
+    "effective_spacing_um": 0.5,
+    "encoded_size": [
+      224,
+      224
+    ],
+    "encoder_name": "lunit",
+    "feature_kind": "patch_features",
+    "grid_shape": [
+      28,
+      28
+    ],
+    "image_pad_value": null,
+    "image_path": "<IMAGE_PATH>",
+    "is_within_tolerance": null,
+    "output_size": null,
+    "output_variant": "default",
+    "overlap": 0.0,
+    "pad": [
+      0,
+      0
+    ],
+    "pad_mode": "reflect",
+    "patch_size": [
+      8,
+      8
+    ],
+    "precision": "fp32",
+    "read_level": null,
+    "read_size": null,
+    "read_spacing_um": null,
+    "read_tile_size_px": null,
+    "reader_regime": "raster",
+    "requested_backend": "auto",
+    "requested_tile_size_px": null,
+    "sample_id": "<SAMPLE_ID>",
+    "source_spacing_um": 0.5,
+    "spacing_at_level_0": null,
+    "spacing_source": "explicit",
+    "target_size": [
+      224,
+      224
+    ],
+    "tolerance": null,
+    "window_size": null
+  },
+  "declared_spacing_um": 0.5,
+  "dtype": "float32",
+  "effective_spacing_um": 0.5,
+  "encoded_size": [
+    224,
+    224
+  ],
+  "encoder_input_regime": "declared",
+  "encoder_level": "tile",
+  "encoder_name": "lunit",
+  "feature_dim": 384,
+  "feature_kind": "patch_features",
+  "format": "pt",
+  "grid_shape": [
+    28,
+    28
+  ],
+  "image_pad_value": null,
+  "image_path": "<IMAGE_PATH>",
+  "is_within_tolerance": null,
+  "output_size": null,
+  "overlap": 0.0,
+  "pad": [
+    0,
+    0
+  ],
+  "pad_mode": "reflect",
+  "patch_size": [
+    8,
+    8
+  ],
+  "read_level": null,
+  "read_size": null,
+  "read_spacing_um": null,
+  "read_tile_size_px": null,
+  "reader_regime": "raster",
+  "requested_backend": "auto",
+  "requested_tile_size_px": null,
+  "sample_id": "<SAMPLE_ID>",
+  "source_spacing_um": 0.5,
+  "spacing_at_level_0": null,
+  "spacing_source": "explicit",
+  "target_size": [
+    224,
+    224
+  ],
+  "tolerance": null,
+  "window_size": null
+}

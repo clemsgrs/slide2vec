@@ -1,0 +1,46 @@
+slide2vec 5.6.0
+===============
+
+Dense-image migration
+---------------------
+
+soma can replace its private dense image reader and extraction loop with
+``Model.embed_images_dense``. Keep the encoder, reader backend, batch size,
+precision, output dtype, inputs, dense options, and model output variant fixed
+while validating the migration. Raster image recipes preserve Pillow RGB
+pixels and dense-grid geometry. For a spacing-readable image, slide2vec uses a
+parent-resolved hs2p plan; native-level and area-downsampled reads match soma's
+current hs2p reader byte-for-byte.
+
+One-GPU and multi-GPU extraction preserve input order, artifact shapes and
+dtypes, metadata, and finite outputs. Corresponding grids are compared in
+float32 and must reach cosine similarity of at least ``0.9999``. Cross-GPU bit
+identity is not part of the contract.
+
+Resume and provenance boundary
+------------------------------
+
+Resume trusts only a compatible artifact: both payload and sidecar must exist,
+and the sidecar must match the normalized source identity and complete
+extraction recipe. The recipe includes the encoder/output, reader regime,
+declared and effective spacing, resolved backend and read plan, target size,
+padding/window/attention settings, precision, and stored dtype. GPU count,
+batch size, worker count, prefetching, and output directory are execution
+mechanics and do not change compatibility.
+
+Legacy or incomplete dense-image sidecars remain readable as files but are not
+resume proof; slide2vec recomputes them. Artifacts written with hs2p 4.3 remain
+loadable, while resume and ``read_coordinates_from`` still validate provenance.
+Because hs2p 4.4 changed ``auto`` backend priority to cucim → vips → openslide
+→ asap, an older artifact may resolve to a different decoder and be rejected or
+recomputed. Pin the original explicit backend when reuse across that boundary
+is required.
+
+Scope
+-----
+
+This release does not add supervision-mask I/O, spacing-aware
+``Model.embed_images``, mixed reader regimes, per-image requested spacing,
+raster spacing resize, fit-to-target resize, upsampling, a new backend
+priority, source hashing, heterogeneous target sizes, or cross-GPU bit
+identity.

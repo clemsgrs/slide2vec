@@ -52,3 +52,11 @@ It ships with presets for the most widely used pathology foundation models.
    preprocessing
    hierarchical
    output-layout
+   glossary
+
+.. toctree::
+   :maxdepth: 1
+   :hidden:
+   :caption: Release Notes
+
+   release-notes/5.6.0

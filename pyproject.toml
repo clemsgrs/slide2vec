@@ -141,12 +141,13 @@ slide2vec = ["py.typed"]
 "slide2vec.configs" = ["*.yaml", "models/*.yaml", "preprocessing/*.yaml"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=slide2vec"
+addopts = "--cov=slide2vec -m 'not gpu_integration'"
 testpaths = [
     "tests",
 ]
 markers = [
     "heavy: real-weight foundation-model inference on CPU; minutes per test. Excluded from the PR suite via `-m 'not heavy'`; run on the scheduled/manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
+    "gpu_integration: real one-GPU versus multi-GPU parity; requires at least two visible CUDA devices. Run explicitly with `CUDA_VISIBLE_DEVICES=0,1 python -m pytest -m gpu_integration --no-cov`.",
 ]
 
 [tool.mypy]

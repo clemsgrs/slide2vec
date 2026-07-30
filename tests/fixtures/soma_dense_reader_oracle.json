@@ -1,0 +1,33 @@
+{
+  "oracle": {
+    "package": "soma-pathology",
+    "version": "1.8.0",
+    "function": "soma.dense.reader.read_image_at_spacing",
+    "backend": "cucim",
+    "tolerance": 0.05,
+    "interpolation": "area"
+  },
+  "source_spacing_um": 0.25,
+  "native": {
+    "requested_spacing_um": 0.25,
+    "shape": [16, 16, 3],
+    "dtype": "uint8",
+    "literal_artifact": {
+      "shape": [3, 16, 16],
+      "dtype": "float32",
+      "sha256": "1886da33b7ad827b7edc83d0f6ebe58e38f4d9c643cc81bf54bc3009f23bbcaa"
+    },
+    "bytes_base64": "AAcTEQweIhEpMxY0RBs/VSBKZiVVdypgiC9rmTR2qjmBuz6MzEOX3Uii7k2t/1K4AyQgFCkrJS42NjNBRzhMWD1XaUJiekdti0x4nFGDrVaOvluZz2Ck4GWv8Wq6Am/FBkEtF0Y4KEtDOVBOSlVZW1pkbF9vfWR6jmmFn26QsHObwXim0n2x44K89IfHBYzSCV46GmNFK2hQPG1bTXJmXndxb3x8gIGHkYaSoouds5CoxJWz1Zq+5p/J96TUCKnfDHtHHYBSLoVdP4poUI9zYZR+cpmJg56UlKOfpaiqtq21x7LA2LfL6bzW+sHhC8bsD5hUIJ1fMaJqQqd1U6yAZLGLdbaWhruhl8CsqMW3ucrCys/N29TY7Nnj/d7uDuP5ErVhI7psNL93RcSCVsmNZ86YeNOjidiumt25q+LEvOfPzeza3vHl7/bwAPv7EQAGFdJuJtd5N9yESOGPWeaaauule/CwjPW7nfrGrv/RvwTc0Ann4Q7y8hP9AxgIFB0TGO97KfSGOvmRS/6cXAOnbQiyfg29jxLIoBfTsRzewiHp0yb05Cv/9TAKBjUVFzogGwyILBGTPRaeThupXyC0cCW/gSrKki/VozTgtDnrxT721kMB50gM+E0XCVIiGlctHimVLy6gQDOrUTi2Yj3Bc0LMhEfXlUziplHtt1b4yFsD2WAO6mUZ+2okDG8vHXQ6IUaiMkutQ1C4VFXDZVrOdl/Zh2TkmGnvqW76unMFy3gQ3H0b7YIm/ocxD4w8IJFHJGOvNWi6Rm3FV3LQaHfbeXzmioHxm4b8rIsHvZASzpUd35oo8J8zAaQ+EqlJI65UJ4C8OIXHSYrSWo/da5TofJnzjZ7+nqMJr6gUwK0f0bIq4rc187xABMFLFcZWJsthKp3JO6LUTKffXazqbrH1f7YAkLsLocAWssUhw8os1M835dRC9tlNB95YGONjKehuLbrWPr/hT8TsYMn3cc4CgtMNk9gYpN0jteIuxuc51+xE6PFP+fZaCvtlGwBwLAV7"
+  },
+  "area_downsampled": {
+    "requested_spacing_um": 0.5,
+    "shape": [8, 8, 3],
+    "dtype": "uint8",
+    "literal_artifact": {
+      "shape": [3, 8, 8],
+      "dtype": "float32",
+      "sha256": "f1721103d0adb5770d29584cfc4ea6ee1cb5629c5283cec0e5f09205444be32d"
+    },
+    "bytes_base64": "ChgfLCI1TixLcDZhkkB3tEqN1lSjuF65EFI5MlxPVGZldnB7mHqRuoSn3I69fpjTFoxTOJZpWqB/fKqVnrSrwL7B4sjXhNLtHMZtPtCDYNqZguSvpO7Fxnjb6ILxCkxHIoCHRIqdZhSziB7JqijfzDK17jxLEEYhKDqhSkS3bE7NjljjsGK50mwP9HYlFoA7LnS7UH7RcojnlJK9tpwT2KYperA/HLpVNK7VVrjreMJBmswXvNYt3uBDgOpZInRv"
+  }
+}
