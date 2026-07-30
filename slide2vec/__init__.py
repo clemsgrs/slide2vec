@@ -22,7 +22,7 @@ from slide2vec.artifacts import (
 )
 
 
-__version__ = "5.5.0"
+__version__ = "5.6.0"
 
 __all__ = [
     "Model",
