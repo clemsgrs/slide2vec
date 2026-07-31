@@ -464,6 +464,7 @@ def iter_regions_dense(
         num_cucim_workers=int(num_workers),
         resize_to_px=requested_tile_size_px,  # area-resizes iff read != requested
         interpolation="area",
+        spacing_at_level_0=getattr(tiling_result, "spacing_at_level_0", None),
     )
 
     def _stream() -> Iterator[np.ndarray]:

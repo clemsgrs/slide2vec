@@ -51,6 +51,7 @@ def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_res
         level_downsamples=_level_downsample_pairs(getattr(tiling_result, "level_downsamples")),
         target_size_px=(requested_tile_size_px, requested_tile_size_px),
         tolerance=float(preprocessing.tolerance),
+        content_kind="image",
     )
     read_spacing_um = float(read_plan.read_spacing_um)
     read_tile_size_px = int(read_plan.read_size_px[0])

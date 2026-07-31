@@ -211,8 +211,18 @@ def test_resume_skips_only_a_complete_exactly_compatible_pair(tmp_path):
 @pytest.mark.parametrize(
     ("changed_field", "changed_value"),
     [
+        ("spacing_at_level_0", 0.3),
         ("source_spacing_um", 0.26),
+        ("declared_spacing_um", 0.75),
+        ("read_spacing_um", 0.5),
+        ("effective_spacing_um", 0.504),
+        ("requested_backend", "openslide"),
         ("backend", "openslide"),
+        ("tolerance", 0.1),
+        ("read_level", 1),
+        ("is_within_tolerance", True),
+        ("read_size", (224, 224)),
+        ("output_size", (112, 112)),
     ],
 )
 def test_resume_recomputes_when_parent_resolved_source_or_auto_backend_changes(

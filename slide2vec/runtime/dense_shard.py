@@ -18,7 +18,8 @@ What this module owns is the CPU-testable encode/write layer (D12):
 
 Writes are atomic and sidecar-last (D6): payload to a temp file → ``os.replace`` into place
 → then the sidecar. So a payload with no sidecar unambiguously means an incomplete ROI, and
-resume trusts the sidecar as the done-marker. slide2vec owns the dense *write* because it
+the sidecar proves write completion; resume additionally requires its compatibility metadata
+to match the current read plan. slide2vec owns the dense *write* because it
 owns the dense *distribution* (docs/adr/0001): ranks are separate OS processes and a grid is
 ~1000× a pooled embedding, so ranks persist final artifacts directly and nobody gathers.
 """
@@ -38,6 +39,7 @@ from slide2vec.artifacts import (
     structural_artifact_annotation,
     write_dense_region,
 )
+from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
 
 if TYPE_CHECKING:
     import torch
@@ -50,40 +52,56 @@ class RegionSpec:
     """One ROI (the flat sharding unit): identity + its slide's resolved read geometry.
 
     ``sample_id`` / ``annotation`` / ``(x, y)`` name the persisted artifact
-    (``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``) and are geometry-independent, so
-    the resume check can run before any slide is opened. ``read_level`` /
-    ``read_tile_size_px`` / ``requested_tile_size_px`` / ``backend`` are the per-slide read
-    plan the parent resolved once (via hs2p ``plan_spacing_read``); every ROI of a slide
-    carries the same values, so :func:`run_dense_shard` rebuilds the ``TilingResult`` without
-    re-opening the slide for metadata.
+    (``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``). ``read_plan`` is the immutable
+    source/read geometry the parent resolved once through hs2p; every ROI of a slide shares
+    that value, so ranks rebuild the ``TilingResult`` without reopening source metadata.
     """
 
     sample_id: str
     image_path: str
     x: int
     y: int
-    read_level: int
-    read_tile_size_px: int
-    requested_tile_size_px: int
-    backend: str
+    read_plan: DenseImageReadPlan
     annotation: str | None = None
 
+    def slide_group_key(self) -> tuple:
+        """Identity for consecutive ROIs that share one source and read plan."""
+        return (self.image_path, self.sample_id, self.annotation, self.read_plan)
 
-def _slide_key(spec: RegionSpec) -> tuple:
-    """Group key: consecutive ROIs sharing this open one slide's reader + read plan."""
-    return (
-        spec.image_path,
-        spec.sample_id,
-        spec.annotation,
-        spec.read_level,
-        spec.read_tile_size_px,
-        spec.requested_tile_size_px,
-        spec.backend,
-    )
+    @property
+    def read_level(self) -> int:
+        if self.read_plan.read_level is None:
+            raise ValueError(f"Missing read level for dense region {self.sample_id!r}")
+        return int(self.read_plan.read_level)
+
+    @property
+    def read_tile_size_px(self) -> int:
+        if self.read_plan.read_size is None:
+            raise ValueError(f"Missing read size for dense region {self.sample_id!r}")
+        return int(self.read_plan.read_size[0])
+
+    @property
+    def requested_tile_size_px(self) -> int:
+        if self.read_plan.output_size is None:
+            raise ValueError(f"Missing output size for dense region {self.sample_id!r}")
+        return int(self.read_plan.output_size[0])
+
+    @property
+    def backend(self) -> str:
+        return self.read_plan.backend
+
+
+def region_read_compatibility(spec: RegionSpec) -> dict:
+    """Canonical source/read-plan identity used by region resume."""
+    return {
+        **spec.read_plan.to_dict(),
+        "read_tile_size_px": int(spec.read_tile_size_px),
+        "requested_tile_size_px": int(spec.requested_tile_size_px),
+    }
 
 
 def region_needs_encode(out_dir, spec: RegionSpec) -> bool:
-    """Resume/crash-safety predicate: a ROI needs encoding iff its sidecar is absent.
+    """Return whether the ROI lacks a sidecar with the current resolved read plan.
 
     The sidecar is written last (D6), so its presence is the done-marker; a ``.pt`` with no
     sidecar is a crashed write and is re-encoded.
@@ -91,7 +109,10 @@ def region_needs_encode(out_dir, spec: RegionSpec) -> bool:
     _, sidecar_path = region_dense_paths(
         out_dir, sample_id=spec.sample_id, annotation=spec.annotation, x=spec.x, y=spec.y
     )
-    return not sidecar_path.exists()
+    if not sidecar_path.exists():
+        return True
+    metadata = load_metadata(sidecar_path)
+    return metadata.get("compatibility") != region_read_compatibility(spec)
 
 
 def dense_artifact_from_disk(out_dir, spec) -> DenseRegionArtifact:
@@ -133,19 +154,31 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
     y = np.asarray([s.y for s in specs], dtype=np.int64)
     requested = int(head.requested_tile_size_px)
     read = int(head.read_tile_size_px)
-    spacing = float(dense.spacing_um)
+    plan = head.read_plan
+
+    def required_float(field: str) -> float:
+        value = getattr(plan, field)
+        if value is None:
+            raise ValueError(
+                f"Dense region read plan for {head.sample_id!r} lacks {field}"
+            )
+        return float(value)
+
+    declared_spacing = required_float("declared_spacing_um")
+    read_spacing = required_float("read_spacing_um")
+    source_spacing = required_float("source_spacing_um")
     tiles = TileGeometry(
         x=x,
         y=y,
         tissue_fractions=np.ones(len(specs), dtype=np.float32),
         requested_tile_size_px=requested,
-        requested_spacing_um=spacing,
+        requested_spacing_um=declared_spacing,
         read_level=int(head.read_level),
         read_tile_size_px=read,
-        read_spacing_um=spacing,
+        read_spacing_um=read_spacing,
         tile_size_lv0=read,
-        is_within_tolerance=True,
-        base_spacing_um=spacing,
+        is_within_tolerance=bool(plan.is_within_tolerance),
+        base_spacing_um=source_spacing,
         slide_dimensions=[0, 0],
         level_downsamples=[1.0],
         overlap=0.0,
@@ -157,13 +190,13 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
         image_path=head.image_path,
         backend=head.backend,
         requested_backend=head.backend,
-        tolerance=float(dense.tolerance),
+        tolerance=required_float("tolerance"),
         step_px_lv0=read,
         tissue_method="none",
         requested_seg_downsample=1,
         seg_downsample=1,
         seg_level=0,
-        seg_spacing_um=spacing,
+        seg_spacing_um=source_spacing,
         seg_sthresh=0,
         seg_sthresh_up=255,
         seg_mthresh=0,
@@ -176,6 +209,7 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
         white_threshold=255,
         black_threshold=0,
         fraction_threshold=0.0,
+        spacing_at_level_0=plan.spacing_at_level_0,
     )
 
 
@@ -184,6 +218,7 @@ def _region_metadata(
 ) -> dict:
     """Extraction-geometry sidecar (D5/D7): geometry + encode params slide2vec owns, nothing else."""
     grid_arr = np.asarray(grid)
+    compatibility = region_read_compatibility(spec)
     return {
         "artifact_type": "dense_embeddings",
         "sample_id": spec.sample_id,
@@ -198,12 +233,7 @@ def _region_metadata(
         "patch_size": [int(geometry.patch_size[0]), int(geometry.patch_size[1])],
         "encoded_size": [int(geometry.encoded_size[0]), int(geometry.encoded_size[1])],
         "pad": [int(geometry.pad[0]), int(geometry.pad[1])],
-        "spacing_um": float(dense.spacing_um),
-        "tolerance": float(dense.tolerance),
-        "backend": spec.backend,
-        "read_level": int(spec.read_level),
-        "read_tile_size_px": int(spec.read_tile_size_px),
-        "requested_tile_size_px": int(spec.requested_tile_size_px),
+        **compatibility,
         "pad_mode": dense.pad_mode,
         "image_pad_value": dense.image_pad_value,
         "window_size": dense.window_size,
@@ -211,6 +241,7 @@ def _region_metadata(
         "feature_kind": dense.feature_kind,
         "attention_blocks": [int(b) for b in dense.attention_blocks],
         "attention_include_registers": bool(dense.attention_include_registers),
+        "compatibility": compatibility,
     }
 
 
@@ -230,8 +261,9 @@ def run_dense_shard(
     """Encode + persist one shard's ROIs, one ``<x>_<y>.pt`` + sidecar per ROI.
 
     Groups the shard's ROIs into contiguous per-slide runs (so each slide is opened once),
-    skips any ROI whose sidecar already exists (crash-safety / resume, D9), builds a minimal
-    ``TilingResult`` for the ROIs that remain, and streams their grids through
+    skips any ROI whose completed sidecar has compatibility metadata matching the current
+    read plan (crash-safety / resume, D9), builds a minimal ``TilingResult`` for the ROIs
+    that remain, and streams their grids through
     :func:`~slide2vec.runtime.dense_regions.iter_regions_dense` — writing each grid atomically
     and sidecar-last (D6). Device-agnostic and RANK-free: the identical loop runs in-process
     for ``num_gpus=1`` and on each rank under torchrun.
@@ -244,7 +276,7 @@ def run_dense_shard(
 
     regions = list(regions)
     artifacts: list[DenseRegionArtifact] = []
-    for _key, group_iter in groupby(regions, key=_slide_key):
+    for _key, group_iter in groupby(regions, key=RegionSpec.slide_group_key):
         group = list(group_iter)
         pending = [spec for spec in group if region_needs_encode(out_dir, spec)]
         written: dict[tuple[int, int], DenseRegionArtifact] = {}

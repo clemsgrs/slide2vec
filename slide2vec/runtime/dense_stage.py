@@ -5,10 +5,10 @@ grids, mirroring the pooled distributed stage but writing dense artifacts direct
 ranks (slide2vec owns the dense write because it owns the dense distribution — docs/adr/0001):
 
 1. **flatten** every ``SlideRegions`` into the slide-ordered flat ROI list;
-2. **resume-filter** it (D9) — drop ROIs whose sidecar already exists, before sharding, so
-   no rank draws an all-done shard and idles; the skip count is logged;
-3. **resolve** each remaining slide's read plan once (hs2p ``plan_spacing_read`` against the
-   slide's own pyramid) into per-ROI :class:`~slide2vec.runtime.dense_shard.RegionSpec`;
+2. **resolve** each slide's source spacing and read plan once through public hs2p APIs into
+   per-ROI :class:`~slide2vec.runtime.dense_shard.RegionSpec`;
+3. **resume-filter** it (D9) — drop ROIs whose sidecar records that same declaration and
+   resolved plan before sharding, so no rank draws an all-done shard and idles;
 4. **dispatch**: ``num_gpus=1`` runs :func:`~slide2vec.runtime.dense_shard.run_dense_shard`
    fully in-process (no torchrun); ``num_gpus>1`` writes the coordinates to an npz + a JSON
    request and launches :mod:`slide2vec.distributed.dense_worker` under torchrun;
@@ -36,6 +36,10 @@ from slide2vec.runtime.dense_shard import (
     region_needs_encode,
     run_dense_shard,
 )
+from slide2vec.runtime.dense_image_reading import (
+    DenseImageReadPlan,
+    resolve_region_read_plan,
+)
 from slide2vec.runtime.distributed import (
     distributed_coordination_dir,
     reset_progress_event_logs,
@@ -61,6 +65,7 @@ class _FlatRegion:
     x: int
     y: int
     annotation: str | None
+    spacing_at_level_0: float | None
 
 
 def flatten_slide_regions(regions: Sequence) -> list[_FlatRegion]:
@@ -79,38 +84,48 @@ def flatten_slide_regions(regions: Sequence) -> list[_FlatRegion]:
         sample_id = str(slide_regions.sample_id)
         image_path = str(Path(slide_regions.image_path).expanduser().resolve())
         for x, y in coordinates:
-            flat.append(_FlatRegion(sample_id, image_path, int(x), int(y), annotation))
+            flat.append(
+                _FlatRegion(
+                    sample_id,
+                    image_path,
+                    int(x),
+                    int(y),
+                    annotation,
+                    slide_regions.spacing_at_level_0,
+                )
+            )
     return flat
 
 
 def partition_regions_by_resume(
-    flat: Sequence[_FlatRegion], out_dir
-) -> tuple[list[_FlatRegion], int]:
-    """Split the flat list into (needs-encode, already-on-disk-count) by sidecar existence."""
-    remaining = [region for region in flat if region_needs_encode(out_dir, region)]
-    return remaining, len(flat) - len(remaining)
+    specs: Sequence[RegionSpec], out_dir
+) -> tuple[list[RegionSpec], int]:
+    """Split specs by whether the sidecar matches the resolved read plan."""
+    remaining = [spec for spec in specs if region_needs_encode(out_dir, spec)]
+    return remaining, len(specs) - len(remaining)
 
 
-def resolve_slide_read_plan(image_path: str, dense) -> tuple[int, int, str]:
-    """Resolve one slide's ``(read_level, read_tile_size_px, resolved_backend)`` for ``dense``.
+def resolve_slide_read_plan(
+    image_path: str,
+    dense,
+    *,
+    spacing_at_level_0: float | None = None,
+) -> DenseImageReadPlan:
+    """Resolve one slide's immutable dense-region read plan through public hs2p APIs.
 
     Opens the slide once (hs2p ``WSI``) to read its level-0 spacing + pyramid and runs the
     shared ``plan_spacing_read`` kernel — the identical spacing→level resolution the pooled
     tiling path uses. This is the only step that opens a slide for metadata; it never runs on
     the CPU test path (the encode/read seam is faked separately).
     """
-    from hs2p.wsi.geometry import plan_spacing_read
-    from hs2p.wsi.wsi import WSI
-
-    wsi = WSI(Path(image_path), backend=dense.backend)
-    plan = plan_spacing_read(
+    return resolve_region_read_plan(
+        image_path,
+        spacing_at_level_0=spacing_at_level_0,
         requested_spacing_um=float(dense.spacing_um),
-        level0_spacing_um=float(wsi.get_level_spacing(0)),
-        level_downsamples=list(wsi.level_downsamples),
-        target_size_px=(int(dense.target_size), int(dense.target_size)),
+        target_size_px=int(dense.target_size),
+        requested_backend=str(dense.backend),
         tolerance=float(dense.tolerance),
     )
-    return int(plan.level), int(plan.read_size_px[0]), str(wsi.backend)
 
 
 def resolve_region_specs(flat: Sequence[_FlatRegion], dense) -> list[RegionSpec]:
@@ -119,24 +134,27 @@ def resolve_region_specs(flat: Sequence[_FlatRegion], dense) -> list[RegionSpec]
     The read plan is resolved once per unique slide (cached), so a slide's ROIs share one
     ``plan_spacing_read`` call; ordering is untouched so downstream sharding stays contiguous.
     """
-    plans: dict[str, tuple[int, int, str]] = {}
+    plans: dict[tuple[str, float | None], DenseImageReadPlan] = {}
     specs: list[RegionSpec] = []
     for region in flat:
-        plan = plans.get(region.image_path)
+        plan_key = (region.image_path, region.spacing_at_level_0)
+        plan = plans.get(plan_key)
         if plan is None:
-            plan = resolve_slide_read_plan(region.image_path, dense)
-            plans[region.image_path] = plan
-        read_level, read_tile_size_px, backend = plan
+            plan = resolve_slide_read_plan(
+                region.image_path,
+                dense,
+                spacing_at_level_0=region.spacing_at_level_0,
+            )
+            plans[plan_key] = plan
+        if plan.read_level is None or plan.read_size is None:
+            raise ValueError(f"Incomplete dense region read plan for {region.image_path}")
         specs.append(
             RegionSpec(
                 sample_id=region.sample_id,
                 image_path=region.image_path,
                 x=region.x,
                 y=region.y,
-                read_level=read_level,
-                read_tile_size_px=read_tile_size_px,
-                requested_tile_size_px=int(dense.target_size),
-                backend=backend,
+                read_plan=plan,
                 annotation=region.annotation,
             )
         )
@@ -169,7 +187,8 @@ def embed_regions_dense(
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
     flat = flatten_slide_regions(regions)
-    remaining, skipped = partition_regions_by_resume(flat, out_dir)
+    specs = resolve_region_specs(flat, dense)
+    remaining, skipped = partition_regions_by_resume(specs, out_dir)
     if skipped:
         logger.info(
             "resume: %s/%s regions already on disk, encoding %s",
@@ -183,11 +202,10 @@ def embed_regions_dense(
         num_gpus=execution.num_gpus,
     )
     if remaining:
-        specs = resolve_region_specs(remaining, dense)
         if execution.num_gpus == 1:
-            _run_dense_in_process(model, specs, dense=dense, execution=execution, out_dir=out_dir)
+            _run_dense_in_process(model, remaining, dense=dense, execution=execution, out_dir=out_dir)
         else:
-            _run_dense_distributed(model, specs, dense=dense, execution=execution, out_dir=out_dir)
+            _run_dense_distributed(model, remaining, dense=dense, execution=execution, out_dir=out_dir)
     emit_progress("dense.regions.finished", total=len(flat))
     return [dense_artifact_from_disk(out_dir, region) for region in flat]
 
@@ -211,18 +229,6 @@ def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
     )
 
 
-def _slide_group_key(spec: RegionSpec) -> tuple:
-    return (
-        spec.image_path,
-        spec.sample_id,
-        spec.annotation,
-        spec.read_level,
-        spec.read_tile_size_px,
-        spec.requested_tile_size_px,
-        spec.backend,
-    )
-
-
 def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_path):
     """Split the flat specs into per-slide groups for the request JSON (coords go to npz).
 
@@ -232,7 +238,7 @@ def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_p
     """
     slides = []
     coordinates: list[tuple[int, int]] = []
-    for _key, group_iter in groupby(specs, key=_slide_group_key):
+    for _key, group_iter in groupby(specs, key=RegionSpec.slide_group_key):
         group = list(group_iter)
         head = group[0]
         slides.append(
@@ -240,10 +246,7 @@ def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_p
                 "sample_id": head.sample_id,
                 "image_path": head.image_path,
                 "annotation": head.annotation,
-                "read_level": int(head.read_level),
-                "read_tile_size_px": int(head.read_tile_size_px),
-                "requested_tile_size_px": int(head.requested_tile_size_px),
-                "backend": head.backend,
+                "read_plan": head.read_plan.to_dict(),
                 "num_regions": len(group),
             }
         )
@@ -268,10 +271,7 @@ def region_specs_from_request(request: dict) -> list[RegionSpec]:
                     image_path=str(slide["image_path"]),
                     x=int(x),
                     y=int(y),
-                    read_level=int(slide["read_level"]),
-                    read_tile_size_px=int(slide["read_tile_size_px"]),
-                    requested_tile_size_px=int(slide["requested_tile_size_px"]),
-                    backend=str(slide["backend"]),
+                    read_plan=DenseImageReadPlan.from_dict(slide["read_plan"]),
                     annotation=slide["annotation"],
                 )
             )

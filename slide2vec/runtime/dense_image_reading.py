@@ -155,23 +155,17 @@ def resolve_spacing_read_plan(
     )
     try:
         source_spacing_um = float(reader.spacing)
-        level_selection = hs2p_geometry.select_level(
+        level_selection = hs2p_geometry.select_level_for_spacing_read(
             requested_spacing_um=float(requested_spacing_um),
             level0_spacing_um=source_spacing_um,
             level_downsamples=list(reader.level_downsamples),
             tolerance=float(tolerance),
+            content_kind="image",
         )
         read_width, read_height = reader.level_dimensions[level_selection.level]
     finally:
         reader.close()
 
-    if not level_selection.is_within_tolerance and float(
-        level_selection.read_spacing_um
-    ) > float(requested_spacing_um):
-        raise RuntimeError(
-            "hs2p selected a level coarser than the requested spacing outside tolerance; "
-            "refusing to upsample."
-        )
     if level_selection.is_within_tolerance:
         output_height, output_width = int(read_height), int(read_width)
         effective_spacing_um = float(level_selection.read_spacing_um)
@@ -199,6 +193,64 @@ def resolve_spacing_read_plan(
     )
 
 
+def resolve_region_read_plan(
+    image_path: str | Path,
+    *,
+    spacing_at_level_0: float | None,
+    requested_spacing_um: float,
+    target_size_px: int,
+    requested_backend: str,
+    tolerance: float,
+) -> DenseImageReadPlan:
+    """Resolve a dense ROI read through the same public hs2p source contract."""
+    path = Path(image_path)
+    selection = hs2p_reader.resolve_backend(
+        requested_backend,
+        wsi_path=path,
+        spacing_override=spacing_at_level_0,
+    )
+    reader = hs2p_reader.open_slide(
+        str(path),
+        backend=selection.backend,
+        spacing_override=spacing_at_level_0,
+    )
+    try:
+        source_spacing_um = float(reader.spacing)
+        plan = hs2p_geometry.plan_spacing_read(
+            requested_spacing_um=float(requested_spacing_um),
+            level0_spacing_um=source_spacing_um,
+            level_downsamples=list(reader.level_downsamples),
+            target_size_px=(int(target_size_px), int(target_size_px)),
+            tolerance=float(tolerance),
+            content_kind="image",
+        )
+    finally:
+        reader.close()
+
+    read_width, read_height = plan.read_size_px
+    effective_spacing_um = (
+        float(plan.read_spacing_um)
+        if plan.is_within_tolerance
+        else float(requested_spacing_um)
+    )
+    return DenseImageReadPlan(
+        reader_regime="spacing-readable",
+        spacing_source="explicit",
+        declared_spacing_um=float(requested_spacing_um),
+        source_spacing_um=source_spacing_um,
+        spacing_at_level_0=_optional_float(spacing_at_level_0),
+        read_spacing_um=float(plan.read_spacing_um),
+        effective_spacing_um=effective_spacing_um,
+        requested_backend=str(requested_backend),
+        backend=str(selection.backend),
+        tolerance=float(tolerance),
+        read_level=int(plan.level),
+        is_within_tolerance=bool(plan.is_within_tolerance),
+        read_size=(int(read_height), int(read_width)),
+        output_size=(int(target_size_px), int(target_size_px)),
+    )
+
+
 def read_dense_image(
     spec: ImageSpec,
     *,
@@ -219,15 +271,22 @@ def read_dense_image(
             raise ValueError(
                 f"Incomplete spacing-readable plan for sample {spec.sample_id!r}"
             )
-        reader = hs2p_reader.open_slide(
-            str(spec.image_path),
-            backend=plan.backend,
-            spacing_override=plan.spacing_at_level_0,
-        )
-        try:
-            pixels = np.asarray(reader.read_level(plan.read_level))
-        finally:
-            reader.close()
+        if plan.backend == "pil":
+            # hs2p's PIL reader intentionally preserves label modes as index arrays.
+            # Dense image encoding is RGB content, so retain the source palette/mode
+            # semantics of the pre-contract Pillow ``convert("RGB")`` read.
+            with Image.open(spec.image_path) as image:
+                pixels = np.asarray(image.convert("RGB"))
+        else:
+            reader = hs2p_reader.open_slide(
+                str(spec.image_path),
+                backend=plan.backend,
+                spacing_override=plan.spacing_at_level_0,
+            )
+            try:
+                pixels = np.asarray(reader.read_level(plan.read_level))
+            finally:
+                reader.close()
         observed_native = tuple(int(size) for size in pixels.shape[:2])
         if observed_native != plan.read_size:
             raise ValueError(

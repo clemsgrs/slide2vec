@@ -230,6 +230,7 @@ class _FakeBackend:
 @pytest.fixture
 def stand_in_virchow2(monkeypatch):
     import slide2vec.inference as inference
+    from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
 
     _StandInVirchow2.constructed = []
     monkeypatch.setattr(
@@ -242,7 +243,22 @@ def stand_in_virchow2(monkeypatch):
     )
     monkeypatch.setattr(
         dense_stage, "resolve_slide_read_plan",
-        lambda image_path, dense: (0, int(dense.target_size), "cucim"),
+        lambda image_path, dense, spacing_at_level_0=None: DenseImageReadPlan(
+            reader_regime="spacing-readable",
+            spacing_source="explicit",
+            declared_spacing_um=float(dense.spacing_um),
+            source_spacing_um=0.5,
+            spacing_at_level_0=spacing_at_level_0,
+            read_spacing_um=0.5,
+            effective_spacing_um=0.5,
+            requested_backend="auto",
+            backend="cucim",
+            tolerance=float(dense.tolerance),
+            read_level=0,
+            is_within_tolerance=True,
+            read_size=(int(dense.target_size), int(dense.target_size)),
+            output_size=(int(dense.target_size), int(dense.target_size)),
+        ),
     )
     return _StandInVirchow2
 

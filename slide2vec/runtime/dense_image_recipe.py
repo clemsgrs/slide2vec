@@ -33,8 +33,12 @@ def malformed_dense_image_compatibility_fields(
             continue
         reference = expected[field]
         valid = True
-        if field == "window_size":
+        if field in {"window_size", "spacing_at_level_0"}:
             valid = value is None or is_int(value)
+            if field == "spacing_at_level_0":
+                valid = value is None or (
+                    isinstance(value, (int, float)) and not isinstance(value, bool)
+                )
         elif field == "image_pad_value":
             valid = value is None or (
                 isinstance(value, (int, float)) and not isinstance(value, bool)

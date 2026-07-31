@@ -49,11 +49,7 @@ from slide2vec.runtime.dense_image_recipe import (
     DenseImageRecipe,
     resolve_dense_image_recipe,
 )
-from slide2vec.runtime.dense_image_reading import (
-    DenseImageReadPlan,
-    raster_read_plan,
-    resolve_spacing_read_plan,
-)
+from slide2vec.runtime.dense_image_reading import DenseImageReadPlan, resolve_spacing_read_plan
 from slide2vec.runtime.dense_stage import resolve_output_torch_dtype
 from slide2vec.runtime.distributed import (
     distributed_coordination_dir,
@@ -64,7 +60,6 @@ from slide2vec.runtime.distributed_stage import validate_multi_gpu_execution
 from slide2vec.runtime.image_specs import (
     build_image_specs_request,
     normalize_image_specs,
-    reject_image_level0_spacing_overrides,
     validate_dense_image_reader_regime,
 )
 from slide2vec.runtime.serialization import (
@@ -116,28 +111,19 @@ def embed_images_dense(
         artifact_location="dense_image_embeddings/<sample_id>",
     )
     reader_regime, probed_auto_backends = validate_dense_image_reader_regime(specs)
-    if reader_regime == "raster":
-        reject_image_level0_spacing_overrides(
-            specs, method_name="embed_images_dense()"
-        )
     spacing_source = "explicit"
     if dense.spacing_um is None:
-        if reader_regime == "spacing-readable":
-            try:
-                spacing_um = float(
-                    resolve_preprocessing_defaults(model.name)["spacing_um"]
-                )
-            except (KeyError, ValueError) as exc:
-                raise ValueError(
-                    "DenseImageOptions.spacing_um must be explicit for spacing-readable "
-                    f"inputs when encoder {model.name!r} has no single resolvable model "
-                    f"default: {exc}"
-                ) from exc
-            spacing_source = "model_default"
-            dense = replace(dense, spacing_um=spacing_um)
-        else:
-            spacing_um = None
-            spacing_source = "unknown"
+        try:
+            spacing_um = float(
+                resolve_preprocessing_defaults(model.name)["spacing_um"]
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValueError(
+                "DenseImageOptions.spacing_um must be explicit when encoder "
+                f"{model.name!r} has no single resolvable model default: {exc}"
+            ) from exc
+        spacing_source = "model_default"
+        dense = replace(dense, spacing_um=spacing_um)
     else:
         spacing_um = float(dense.spacing_um)
     if spacing_um is not None and (not math.isfinite(spacing_um) or spacing_um <= 0):
@@ -162,29 +148,24 @@ def embed_images_dense(
         reader_regime=reader_regime,
         spacing_source=spacing_source,
     )
-    if reader_regime == "raster":
-        shared_read_plan = raster_read_plan(
+    read_plans = {
+        spec.sample_id: resolve_spacing_read_plan(
+            spec,
+            requested_spacing_um=spacing_um,
             spacing_source=spacing_source,
-            declared_spacing_um=spacing_um,
             requested_backend=dense.backend,
+            tolerance=dense.tolerance,
+            resolved_backend=(
+                probed_auto_backends.get(spec.sample_id)
+                if (
+                    dense.backend.strip().lower() == "auto"
+                    or Path(spec.image_path).suffix.lower() in {".png", ".jpg", ".jpeg"}
+                )
+                else None
+            ),
         )
-        read_plans = {spec.sample_id: shared_read_plan for spec in specs}
-    else:
-        read_plans = {
-            spec.sample_id: resolve_spacing_read_plan(
-                spec,
-                requested_spacing_um=spacing_um,
-                spacing_source=spacing_source,
-                requested_backend=dense.backend,
-                tolerance=dense.tolerance,
-                resolved_backend=(
-                    probed_auto_backends.get(spec.sample_id)
-                    if dense.backend.strip().lower() == "auto"
-                    else None
-                ),
-            )
-            for spec in specs
-        }
+        for spec in specs
+    }
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here

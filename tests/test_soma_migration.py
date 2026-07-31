@@ -363,7 +363,8 @@ def test_dense_image_glossary_names_the_release_contract_terms():
     for term in (
         "raster image",
         "spacing-readable image",
-        "reader regime",
+        "source-spacing declaration",
+        "source spacing",
         "declared spacing",
         "effective spacing",
         "target size",
@@ -421,7 +422,13 @@ def gpu_parity_runs(tmp_path_factory) -> _GpuParityRuns:
         path = tmp_path / "gpu-inputs" / f"{sample_id}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(pixels).save(path)
-        specs.append(ImageSpec(sample_id=sample_id, image_path=path))
+        specs.append(
+            ImageSpec(
+                sample_id=sample_id,
+                image_path=path,
+                spacing_at_level_0=0.5,
+            )
+        )
 
     dense = DenseImageOptions(target_size=224, spacing_um=0.5)
     one_artifacts = Model.from_preset("lunit", device="cuda:0").embed_images_dense(

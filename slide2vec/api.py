@@ -1,6 +1,7 @@
 
 import copy
 import logging
+import math
 import os
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
@@ -37,6 +38,17 @@ from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
 
 PathLike = str | Path
+
+
+def _validated_spacing_at_level_0(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("spacing_at_level_0 must be a positive, finite value or None")
+    spacing = float(value)
+    if not math.isfinite(spacing) or spacing <= 0:
+        raise ValueError("spacing_at_level_0 must be a positive, finite value or None")
+    return spacing
 
 
 class SlideLike(Protocol):
@@ -446,16 +458,15 @@ class DenseOptions:
 class DenseImageOptions:
     """Dense ``(d, gh, gw)`` extraction over pre-cropped images.
 
-    One run has one reader regime. ``.png``, ``.jpg``, and ``.jpeg`` inputs
-    (case-insensitive) use Pillow and treat numeric ``spacing_um`` as an assertion about
-    unchanged pixels. hs2p-supported WSI formats form the spacing-readable regime: hs2p
-    resolves source spacing, backend, pyramid level, tolerance, complete-extent read, and
-    area downsampling at the one requested run-level ``spacing_um``. Omitted spacing resolves
-    the encoder's single registry default for spacing-readable inputs and requires an
-    explicit value when no default is available.
+    Every supported source uses hs2p's spacing-aware reader contract. ``.png``, ``.jpg``,
+    and ``.jpeg`` inputs use hs2p's one-level PIL reader and therefore require
+    ``ImageSpec.spacing_at_level_0``; WSI readers may resolve native metadata instead.
+    hs2p resolves source spacing, backend, pyramid level, tolerance, complete-extent read,
+    and permitted area downsampling at the requested run-level ``spacing_um``. Omitted
+    spacing resolves the encoder's single registry default.
 
-    ``ImageSpec.spacing_at_level_0`` overrides level-0 metadata only for spacing-readable
-    sources. ``target_size`` is always a strict post-read declaration, never a fit-to-size
+    ``ImageSpec.spacing_at_level_0`` is the optional caller declaration used by hs2p when
+    resolving level-0 spacing. ``target_size`` is always a strict post-read declaration, never a fit-to-size
     request: each final pixel array must already be exactly this size. Declaring it up front
     lets the effective encoder input be validated (and variable-input constructor settings
     resolved) before model loading or pixel decoding. Differing final geometries therefore
@@ -465,9 +476,8 @@ class DenseImageOptions:
     #: Supervision geometry in pixels the dense grid registers to: a square side length, or
     #: an explicit ``(height, width)`` for non-square images.
     target_size: int | tuple[int, int]
-    #: Positive, finite run-level spacing in µm/px: asserted for raster pixels and requested
-    #: for spacing-readable reads. ``None`` is unknown for raster and resolves the encoder's
-    #: single registry default for spacing-readable inputs.
+    #: Positive, finite requested run spacing in µm/px. ``None`` resolves the encoder's
+    #: single registry default.
     spacing_um: float | None = None
     #: Relative spacing tolerance used by hs2p for spacing-readable level selection; raster
     #: reads have no tolerance result.
@@ -502,7 +512,9 @@ class SlideRegions:
     The dense input unit soma's slide-manifest path hands to
     :meth:`Model.embed_regions_dense`. ``coordinates`` is an ``(N, 2)`` array of level-0
     top-left ``(x, y)`` pixel coordinates; each ROI is read + encoded into one persisted
-    ``(d, gh, gw)`` grid named ``<x>_<y>.pt``. ``annotation`` namespaces the output under a
+    ``(d, gh, gw)`` grid named ``<x>_<y>.pt``. ``spacing_at_level_0`` optionally declares
+    the source image's level-0 spacing when metadata is missing or must be overridden.
+    ``annotation`` namespaces the output under a
     per-class subdirectory (reusing the pooled convention); ``None`` is the flat layout.
     """
 
@@ -510,6 +522,15 @@ class SlideRegions:
     image_path: PathLike
     coordinates: Any
     annotation: str | None = None
+    #: Optional caller declaration for the source's level-0 spacing in µm/px.
+    spacing_at_level_0: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "spacing_at_level_0",
+            _validated_spacing_at_level_0(self.spacing_at_level_0),
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -517,18 +538,24 @@ class ImageSpec:
     """One named image source: ``(sample_id, image_path, spacing_at_level_0)``.
 
     The input unit of :meth:`Model.embed_images` — the Given-geometry counterpart of
-    :class:`SlideRegions`. ``spacing_at_level_0`` represents caller metadata for
-    spacing-readable image sources. The current raster paths reject a non-null value: a
-    pre-cropped PNG/JPEG has no slide pyramid or level-0 read plan to override. ``sample_id``
+    :class:`SlideRegions`. ``spacing_at_level_0`` is the optional finite positive caller
+    declaration used by hs2p to resolve source level-0 spacing. Flat PNG/JPEG sources have
+    no embedded spacing and therefore require it for dense extraction. ``sample_id``
     is the artifact's whole identity, so it must be unique within a run and a valid filename
     component.
     """
 
     sample_id: str
     image_path: PathLike
-    #: Optional caller override for the source's level-0 spacing. Raster image paths reject
-    #: non-null overrides because they have no slide pyramid or level-0 read plan.
+    #: Optional caller declaration for the source's level-0 spacing in µm/px.
     spacing_at_level_0: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "spacing_at_level_0",
+            _validated_spacing_at_level_0(self.spacing_at_level_0),
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -832,7 +859,8 @@ class Model:
         dense transform, and written to ``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``
         plus a geometry sidecar. The run splits its ROIs across all visible GPUs
         (``execution.num_gpus``); ``num_gpus=1`` encodes fully in-process. Resume is
-        automatic — ROIs whose sidecar already exists are skipped. Returns one
+        automatic — only ROIs whose sidecar has the same source-spacing declaration and
+        resolved hs2p read plan are skipped. Returns one
         :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI.
 
         The effective encoder input — the padded ROI for a whole-tile run, one
@@ -869,16 +897,14 @@ class Model:
         identity and complete extraction recipe. Returns one
         :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
 
-        One run uses one reader regime. Raster inputs are exactly ``.png``, ``.jpg``, and
-        ``.jpeg`` (case-insensitive) and always use Pillow's RGB decoder.
-        ``dense.spacing_um`` asserts the scale those unchanged pixels already have; ``None``
-        records unknown spacing. hs2p-supported WSI inputs are spacing-readable:
+        Every source is opened through hs2p. PNG/JPEG inputs use hs2p's one-level PIL reader
+        and require ``ImageSpec.spacing_at_level_0`` because they have no embedded spacing.
         ``dense.spacing_um`` requests one physical read scale, or ``None`` resolves the
         encoder's single registry default. The parent resolves each source's metadata,
         concrete backend, native level, tolerance result, and final geometry before resume;
         hs2p reads that complete level and area-downsamples when required, but never
-        upsamples. ``ImageSpec.spacing_at_level_0`` overrides source metadata only in this
-        spacing-readable regime and is rejected for raster inputs.
+        upsamples. ``ImageSpec.spacing_at_level_0`` is preserved separately from the
+        resolved source spacing and is passed to every hs2p backend.
 
         Everything after reading is shared with the slide path, including the effective encoder input — the padded image
         for a whole-image run, one patch-aligned window for a sliding one — which is declared

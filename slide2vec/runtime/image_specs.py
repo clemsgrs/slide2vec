@@ -1,9 +1,9 @@
-"""Named image normalization and dense reader-regime classification.
+"""Named image normalization and dense hs2p source classification.
 
 :meth:`slide2vec.api.Model.embed_images` (pooled, issue #234) and
 :meth:`slide2vec.api.Model.embed_images_dense` (dense grids, issue #235) take the same input
 unit — a caller-named image file — and share normalization/request transport. Dense extraction
-additionally derives its one raster or hs2p spacing-readable regime from reader capabilities.
+resolves every supported source, including flat PNG/JPEG inputs, through hs2p.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def spacing_readable_image_suffixes() -> frozenset[str]:
 def validate_dense_image_reader_regime(
     specs: Sequence[ImageSpec],
 ) -> tuple[str, dict[str, str]]:
-    """Resolve one regime and retain auto backends discovered by openability probes.
+    """Validate hs2p support and retain auto backends discovered by openability probes.
 
     CuCIM and VIPS publish suffix capabilities, while hs2p's OpenSlide/ASAP readers
     deliberately accept paths based on file contents. For a suffix outside the published
@@ -70,7 +70,16 @@ def validate_dense_image_reader_regime(
     for spec in specs:
         suffix = Path(spec.image_path).suffix.lower()
         if suffix in RASTER_IMAGE_SUFFIXES:
-            regime = "raster"
+            # hs2p 4.4.1 owns flat-raster source spacing and decoding through its
+            # one-level PIL reader. Resolve it just like any other source so missing
+            # declarations surface from the same public reader contract.
+            selection = hs2p_reader.resolve_backend(
+                "auto",
+                wsi_path=Path(spec.image_path),
+                spacing_override=spec.spacing_at_level_0,
+            )
+            regime = "spacing-readable"
+            resolved_auto_backends[spec.sample_id] = str(selection.backend)
         elif suffix in spacing_suffixes:
             regime = "spacing-readable"
         else:
@@ -117,14 +126,7 @@ def validate_dense_image_reader_regime(
             f"{supported_spacing} plus other sources its registered readers can open. "
             f"Unsupported samples: {grouped['unsupported']}"
         )
-    present = [regime for regime in ("raster", "spacing-readable") if grouped[regime]]
-    if len(present) != 1:
-        raise ValueError(
-            "A dense image run must use exactly one reader regime. "
-            f"raster samples: {grouped['raster']}; "
-            f"spacing-readable samples: {grouped['spacing-readable']}"
-        )
-    return present[0], resolved_auto_backends
+    return "spacing-readable", resolved_auto_backends
 
 
 def reject_image_level0_spacing_overrides(
