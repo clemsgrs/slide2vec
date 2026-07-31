@@ -4860,6 +4860,7 @@ def test_resolve_hierarchical_geometry_uses_hs2p_spacing_plan_for_tile_size(monk
             "level_downsamples": [(1.0, 1.0), (2.0, 2.0), (4.0, 4.0)],
             "target_size_px": (224, 224),
             "tolerance": 0.05,
+            "content_kind": "image",
         }
     ]
     assert geometry["read_tile_size_px"] == 415

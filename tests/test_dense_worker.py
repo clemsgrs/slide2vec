@@ -54,6 +54,7 @@ class _FakeBackend:
 
 
 def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
+    from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
     backends: dict[str, _FakeBackend] = {}
     monkeypatch.setattr(
         tile_reader, "_open_wsi_backend",
@@ -80,7 +81,23 @@ def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
         )),
     )
 
-    specs = [RegionSpec("s0", "s0.tif", i * 64, 0, 0, 64, 64, "cucim", None) for i in range(4)]
+    plan = DenseImageReadPlan(
+        reader_regime="spacing-readable",
+        spacing_source="explicit",
+        declared_spacing_um=0.5,
+        source_spacing_um=0.25,
+        spacing_at_level_0=None,
+        read_spacing_um=0.5,
+        effective_spacing_um=0.5,
+        requested_backend="auto",
+        backend="cucim",
+        tolerance=0.05,
+        read_level=0,
+        is_within_tolerance=True,
+        read_size=(64, 64),
+        output_size=(64, 64),
+    )
+    specs = [RegionSpec("s0", "s0.tif", i * 64, 0, plan) for i in range(4)]
     request = {
         "model": {"name": "fake", "output_variant": None, "allow_non_recommended_settings": False},
         "dense": serialize_dense_options(DenseOptions(spacing_um=0.5, target_size=64)),

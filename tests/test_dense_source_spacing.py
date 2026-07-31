@@ -17,7 +17,9 @@ from slide2vec.runtime.dense_image_reading import (
 )
 
 
-@pytest.mark.parametrize("value", [0.0, -0.25, math.inf, -math.inf, math.nan])
+@pytest.mark.parametrize(
+    "value", [False, True, 0.0, -0.25, math.inf, -math.inf, math.nan]
+)
 @pytest.mark.parametrize("input_type", [ImageSpec, SlideRegions])
 def test_dense_inputs_reject_non_positive_or_non_finite_level0_spacing(
     input_type, value
@@ -59,6 +61,30 @@ def test_exact_spacing_flat_read_matches_unchanged_pillow_rgb_bytes(tmp_path, su
     assert plan.output_size == (5, 7)
     assert plan.source_spacing_um == pytest.approx(0.25)
     assert plan.effective_spacing_um == pytest.approx(0.25)
+    np.testing.assert_array_equal(observed, expected)
+
+
+def test_exact_spacing_palette_png_preserves_pillow_rgb_bytes(tmp_path):
+    indices = np.asarray([[0, 1], [2, 1]], dtype=np.uint8)
+    source = Image.fromarray(indices, mode="P")
+    source.putpalette([255, 0, 0, 0, 255, 0, 0, 0, 255] + [0] * (256 * 3 - 9))
+    path = tmp_path / "palette.png"
+    source.save(path)
+    with Image.open(path) as image:
+        expected = np.asarray(image.convert("RGB"))
+    spec = ImageSpec(
+        sample_id="palette", image_path=path, spacing_at_level_0=0.5
+    )
+    plan = resolve_spacing_read_plan(
+        spec,
+        requested_spacing_um=0.5,
+        spacing_source="explicit",
+        requested_backend="auto",
+        tolerance=0.05,
+    )
+
+    observed = np.asarray(read_dense_image(spec, plan=plan, target_size=(2, 2)))
+
     np.testing.assert_array_equal(observed, expected)
 
 

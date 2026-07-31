@@ -325,6 +325,7 @@ class WSIRegionReader:
             self._resize_to_px if self._resize_to_px is not None else self._region_size_px
         )
         self._reader = None
+        self._pil_rgb = None
 
     def _ensure_open(self) -> None:
         if self._reader is None:
@@ -341,8 +342,34 @@ class WSIRegionReader:
                     spacing_override=self._spacing_at_level_0,
                     gpu_decode=self._gpu_decode,
                 )
+            if self._backend == "pil":
+                from PIL import Image
+
+                with Image.open(self._image_path) as image:
+                    self._pil_rgb = image.convert("RGB")
 
     def _read_regions_batch(self, locations: list[tuple[int, int]]) -> list[np.ndarray]:
+        if self._backend == "pil":
+            if self._pil_rgb is None:
+                raise RuntimeError("PIL dense region reader was not initialized")
+            size = self._region_size_px
+            width, height = self._pil_rgb.size
+            regions = []
+            for x, y in locations:
+                left, top = max(0, x), max(0, y)
+                right, bottom = min(width, x + size), min(height, y + size)
+                canvas = np.full((size, size, 3), 255, dtype=np.uint8)
+                if right > left and bottom > top:
+                    crop = np.asarray(
+                        self._pil_rgb.crop((left, top, right, bottom)),
+                        dtype=np.uint8,
+                    )
+                    canvas[
+                        top - y : bottom - y,
+                        left - x : right - x,
+                    ] = crop
+                regions.append(canvas)
+            return regions
         if self._backend == "cucim":
             return list(
                 self._reader.read_regions(

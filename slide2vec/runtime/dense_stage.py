@@ -100,7 +100,7 @@ def flatten_slide_regions(regions: Sequence) -> list[_FlatRegion]:
 def partition_regions_by_resume(
     specs: Sequence[RegionSpec], out_dir
 ) -> tuple[list[RegionSpec], int]:
-    """Split the flat list into (needs-encode, already-on-disk-count) by sidecar existence."""
+    """Split specs by whether the sidecar matches the resolved read plan."""
     remaining = [spec for spec in specs if region_needs_encode(out_dir, spec)]
     return remaining, len(specs) - len(remaining)
 
@@ -111,7 +111,7 @@ def resolve_slide_read_plan(
     *,
     spacing_at_level_0: float | None = None,
 ) -> DenseImageReadPlan:
-    """Resolve one slide's ``(read_level, read_tile_size_px, resolved_backend)`` for ``dense``.
+    """Resolve one slide's immutable dense-region read plan through public hs2p APIs.
 
     Opens the slide once (hs2p ``WSI``) to read its level-0 spacing + pyramid and runs the
     shared ``plan_spacing_read`` kernel — the identical spacing→level resolution the pooled
@@ -148,26 +148,14 @@ def resolve_region_specs(flat: Sequence[_FlatRegion], dense) -> list[RegionSpec]
             plans[plan_key] = plan
         if plan.read_level is None or plan.read_size is None:
             raise ValueError(f"Incomplete dense region read plan for {region.image_path}")
-        read_tile_size_px = int(plan.read_size[0])
         specs.append(
             RegionSpec(
                 sample_id=region.sample_id,
                 image_path=region.image_path,
                 x=region.x,
                 y=region.y,
-                read_level=int(plan.read_level),
-                read_tile_size_px=read_tile_size_px,
-                requested_tile_size_px=int(dense.target_size),
-                backend=plan.backend,
+                read_plan=plan,
                 annotation=region.annotation,
-                spacing_at_level_0=plan.spacing_at_level_0,
-                source_spacing_um=plan.source_spacing_um,
-                declared_spacing_um=plan.declared_spacing_um,
-                read_spacing_um=plan.read_spacing_um,
-                effective_spacing_um=plan.effective_spacing_um,
-                requested_backend=plan.requested_backend,
-                tolerance=float(plan.tolerance),
-                is_within_tolerance=bool(plan.is_within_tolerance),
             )
         )
     return specs
@@ -241,26 +229,6 @@ def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
     )
 
 
-def _slide_group_key(spec: RegionSpec) -> tuple:
-    return (
-        spec.image_path,
-        spec.sample_id,
-        spec.annotation,
-        spec.read_level,
-        spec.read_tile_size_px,
-        spec.requested_tile_size_px,
-        spec.backend,
-        spec.spacing_at_level_0,
-        spec.source_spacing_um,
-        spec.declared_spacing_um,
-        spec.read_spacing_um,
-        spec.effective_spacing_um,
-        spec.requested_backend,
-        spec.tolerance,
-        spec.is_within_tolerance,
-    )
-
-
 def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_path):
     """Split the flat specs into per-slide groups for the request JSON (coords go to npz).
 
@@ -270,7 +238,7 @@ def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_p
     """
     slides = []
     coordinates: list[tuple[int, int]] = []
-    for _key, group_iter in groupby(specs, key=_slide_group_key):
+    for _key, group_iter in groupby(specs, key=RegionSpec.slide_group_key):
         group = list(group_iter)
         head = group[0]
         slides.append(
@@ -278,18 +246,7 @@ def build_dense_worker_request(specs: Sequence[RegionSpec], *, coordinates_npz_p
                 "sample_id": head.sample_id,
                 "image_path": head.image_path,
                 "annotation": head.annotation,
-                "read_level": int(head.read_level),
-                "read_tile_size_px": int(head.read_tile_size_px),
-                "requested_tile_size_px": int(head.requested_tile_size_px),
-                "backend": head.backend,
-                "spacing_at_level_0": head.spacing_at_level_0,
-                "source_spacing_um": head.source_spacing_um,
-                "declared_spacing_um": head.declared_spacing_um,
-                "read_spacing_um": head.read_spacing_um,
-                "effective_spacing_um": head.effective_spacing_um,
-                "requested_backend": head.requested_backend,
-                "tolerance": head.tolerance,
-                "is_within_tolerance": head.is_within_tolerance,
+                "read_plan": head.read_plan.to_dict(),
                 "num_regions": len(group),
             }
         )
@@ -314,19 +271,8 @@ def region_specs_from_request(request: dict) -> list[RegionSpec]:
                     image_path=str(slide["image_path"]),
                     x=int(x),
                     y=int(y),
-                    read_level=int(slide["read_level"]),
-                    read_tile_size_px=int(slide["read_tile_size_px"]),
-                    requested_tile_size_px=int(slide["requested_tile_size_px"]),
-                    backend=str(slide["backend"]),
+                    read_plan=DenseImageReadPlan.from_dict(slide["read_plan"]),
                     annotation=slide["annotation"],
-                    spacing_at_level_0=slide.get("spacing_at_level_0"),
-                    source_spacing_um=slide.get("source_spacing_um"),
-                    declared_spacing_um=slide.get("declared_spacing_um"),
-                    read_spacing_um=slide.get("read_spacing_um"),
-                    effective_spacing_um=slide.get("effective_spacing_um"),
-                    requested_backend=str(slide.get("requested_backend", "auto")),
-                    tolerance=float(slide.get("tolerance", 0.05)),
-                    is_within_tolerance=bool(slide.get("is_within_tolerance", True)),
                 )
             )
         offset += count

@@ -26,6 +26,7 @@ from slide2vec.artifacts import region_dense_paths, write_dense_region  # noqa: 
 from slide2vec.data import tile_reader  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime.dense_shard import RegionSpec, run_dense_shard  # noqa: E402
+from slide2vec.runtime.dense_image_reading import DenseImageReadPlan  # noqa: E402
 from slide2vec.runtime.sharding import plan_contiguous_shards  # noqa: E402
 
 
@@ -109,19 +110,26 @@ def _spec(x, y, *, sample_id="s0", image_path="s0.tif", annotation=None,
         image_path=image_path,
         x=int(x),
         y=int(y),
-        read_level=int(read_level),
-        read_tile_size_px=int(read if read is not None else requested),
-        requested_tile_size_px=int(requested),
-        backend=backend,
+        read_plan=DenseImageReadPlan(
+            reader_regime="spacing-readable",
+            spacing_source="explicit",
+            declared_spacing_um=0.5,
+            source_spacing_um=0.25,
+            spacing_at_level_0=None,
+            read_spacing_um=0.5,
+            effective_spacing_um=0.5,
+            requested_backend="auto",
+            backend=backend,
+            tolerance=0.05,
+            read_level=int(read_level),
+            is_within_tolerance=True,
+            read_size=(
+                int(read if read is not None else requested),
+                int(read if read is not None else requested),
+            ),
+            output_size=(int(requested), int(requested)),
+        ),
         annotation=annotation,
-        spacing_at_level_0=None,
-        source_spacing_um=0.25,
-        declared_spacing_um=0.5,
-        read_spacing_um=0.5,
-        effective_spacing_um=0.5,
-        requested_backend="auto",
-        tolerance=0.05,
-        is_within_tolerance=True,
     )
 
 
@@ -315,7 +323,7 @@ def test_run_dense_shard_skips_regions_with_existing_sidecar(fake_backend, tmp_p
         ("read_spacing_um", 0.4),
         ("effective_spacing_um", 0.4),
         ("read_level", 1),
-        ("read_tile_size_px", 96),
+        ("read_size", (96, 96)),
         ("backend", "openslide"),
     ],
 )
@@ -337,7 +345,14 @@ def test_region_resume_reencodes_when_source_or_resolved_read_plan_changes(
     reads_before = len(fake_backend.locations_read)
 
     run_dense_shard(
-        [replace(original, **{changed_field: changed_value})],
+        [
+            replace(
+                original,
+                read_plan=replace(
+                    original.read_plan, **{changed_field: changed_value}
+                ),
+            )
+        ],
         model=encoder,
         out_dir=tmp_path,
         dense=_dense(),

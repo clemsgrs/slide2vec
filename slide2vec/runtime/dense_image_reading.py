@@ -271,15 +271,22 @@ def read_dense_image(
             raise ValueError(
                 f"Incomplete spacing-readable plan for sample {spec.sample_id!r}"
             )
-        reader = hs2p_reader.open_slide(
-            str(spec.image_path),
-            backend=plan.backend,
-            spacing_override=plan.spacing_at_level_0,
-        )
-        try:
-            pixels = np.asarray(reader.read_level(plan.read_level))
-        finally:
-            reader.close()
+        if plan.backend == "pil":
+            # hs2p's PIL reader intentionally preserves label modes as index arrays.
+            # Dense image encoding is RGB content, so retain the source palette/mode
+            # semantics of the pre-contract Pillow ``convert("RGB")`` read.
+            with Image.open(spec.image_path) as image:
+                pixels = np.asarray(image.convert("RGB"))
+        else:
+            reader = hs2p_reader.open_slide(
+                str(spec.image_path),
+                backend=plan.backend,
+                spacing_override=plan.spacing_at_level_0,
+            )
+            try:
+                pixels = np.asarray(reader.read_level(plan.read_level))
+            finally:
+                reader.close()
         observed_native = tuple(int(size) for size in pixels.shape[:2])
         if observed_native != plan.read_size:
             raise ValueError(

@@ -217,7 +217,9 @@ def test_embed_regions_dense_reads_flat_source_through_hs2p_pil(tmp_path):
     from PIL import Image
 
     image_path = tmp_path / "source.png"
-    Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8)).save(image_path)
+    palette = Image.fromarray(np.zeros((64, 64), dtype=np.uint8), mode="P")
+    palette.putpalette([255, 0, 0] + [0] * (256 * 3 - 3))
+    palette.save(image_path)
 
     artifacts = dense_stage.embed_regions_dense(
         _FakeModel(_encoder()),
@@ -379,14 +381,41 @@ def test_model_embed_regions_dense_delegates_and_requires_output_dir(monkeypatch
 
 def test_region_specs_round_trip_through_request(tmp_path):
     """The npz + request rebuild the exact flat spec list the parent sharded (worker inverse)."""
+    from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
     from slide2vec.runtime.dense_shard import RegionSpec
 
+    def plan(*, level, read, requested):
+        return DenseImageReadPlan(
+            reader_regime="spacing-readable",
+            spacing_source="explicit",
+            declared_spacing_um=0.5,
+            source_spacing_um=0.25,
+            spacing_at_level_0=None,
+            read_spacing_um=0.5,
+            effective_spacing_um=0.5,
+            requested_backend="auto",
+            backend="cucim",
+            tolerance=0.05,
+            read_level=level,
+            is_within_tolerance=True,
+            read_size=(read, read),
+            output_size=(requested, requested),
+        )
+
     specs = [
-        RegionSpec("s0", "s0.tif", 0, 0, 0, 64, 64, "cucim", None),
-        RegionSpec("s0", "s0.tif", 64, 0, 0, 64, 64, "cucim", None),
-        RegionSpec("s1", "s1.tif", 10, 20, 1, 96, 64, "cucim", "tumor"),
+        RegionSpec("s0", "s0.tif", 0, 0, plan(level=0, read=64, requested=64)),
+        RegionSpec("s0", "s0.tif", 64, 0, plan(level=0, read=64, requested=64)),
+        RegionSpec(
+            "s1",
+            "s1.tif",
+            10,
+            20,
+            plan(level=1, read=96, requested=64),
+            "tumor",
+        ),
     ]
     request = dense_stage.build_dense_worker_request(
         specs, coordinates_npz_path=tmp_path / "coords.npz"
     )
+    assert request["slides"][1]["read_plan"] == specs[2].read_plan.to_dict()
     assert dense_stage.region_specs_from_request(request) == specs

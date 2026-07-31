@@ -43,6 +43,8 @@ PathLike = str | Path
 def _validated_spacing_at_level_0(value: float | None) -> float | None:
     if value is None:
         return None
+    if isinstance(value, bool):
+        raise ValueError("spacing_at_level_0 must be a positive, finite value or None")
     spacing = float(value)
     if not math.isfinite(spacing) or spacing <= 0:
         raise ValueError("spacing_at_level_0 must be a positive, finite value or None")
