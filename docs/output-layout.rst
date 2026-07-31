@@ -235,6 +235,41 @@ recorded, never validated: the caller supplied pixels it never requested, so
 there is no request to check it against.
 
 
+Dense Region Grids
+------------------
+
+:meth:`~slide2vec.Model.embed_regions_dense` writes one payload and sidecar per
+level-0 point coordinate under
+``dense_embeddings/[<annotation>/]<sample_id>/<x>_<y>``. Region resume compares
+the sidecar's ``compatibility`` object, rather than trusting sidecar presence.
+It contains the same source/read geometry vocabulary as dense images:
+
+.. code-block:: json
+
+   {
+     "reader_regime": "spacing-readable",
+     "spacing_source": "explicit",
+     "spacing_at_level_0": null,
+     "source_spacing_um": 0.252,
+     "declared_spacing_um": 0.5,
+     "read_spacing_um": 0.504,
+     "effective_spacing_um": 0.504,
+     "requested_backend": "auto",
+     "backend": "vips",
+     "tolerance": 0.05,
+     "read_level": 1,
+     "is_within_tolerance": true,
+     "read_size": [224, 224],
+     "output_size": [224, 224]
+   }
+
+``spacing_at_level_0`` is the optional caller declaration;
+``source_spacing_um`` is hs2p's resolved source level-0 spacing;
+``declared_spacing_um`` is the requested run spacing; and
+``effective_spacing_um`` is the spacing of the encoded grid. Changing the
+declaration or any resolved read-plan field invalidates region resume.
+
+
 Dense Image Grids
 -----------------
 
@@ -272,20 +307,20 @@ payload.
      "encoder_name": "virchow2",
      "encoder_level": "tile",
      "encoder_input_regime": "declared",
-     "reader_regime": "raster",
+     "reader_regime": "spacing-readable",
      "spacing_source": "explicit",
      "declared_spacing_um": 0.5,
-     "source_spacing_um": 0.5,
-     "spacing_at_level_0": null,
-     "read_spacing_um": null,
+     "source_spacing_um": 0.25,
+     "spacing_at_level_0": 0.25,
+     "read_spacing_um": 0.25,
      "effective_spacing_um": 0.5,
      "requested_backend": "auto",
      "backend": "pil",
-     "tolerance": null,
-     "read_level": null,
-     "is_within_tolerance": null,
-     "read_size": null,
-     "output_size": null,
+     "tolerance": 0.05,
+     "read_level": 0,
+     "is_within_tolerance": false,
+     "read_size": [2048, 2048],
+     "output_size": [1024, 1024],
      "read_tile_size_px": null,
      "requested_tile_size_px": null,
      "image_path": "/data/ocelot/001.jpg",
@@ -309,20 +344,20 @@ payload.
        "image_path": "/data/ocelot/001.jpg",
        "encoder_name": "virchow2",
        "output_variant": "cls_patch_mean",
-       "reader_regime": "raster",
+       "reader_regime": "spacing-readable",
        "spacing_source": "explicit",
        "declared_spacing_um": 0.5,
-       "source_spacing_um": 0.5,
-       "spacing_at_level_0": null,
-       "read_spacing_um": null,
+       "source_spacing_um": 0.25,
+       "spacing_at_level_0": 0.25,
+       "read_spacing_um": 0.25,
        "effective_spacing_um": 0.5,
        "requested_backend": "auto",
        "backend": "pil",
-       "tolerance": null,
-       "read_level": null,
-       "is_within_tolerance": null,
-       "read_size": null,
-       "output_size": null,
+       "tolerance": 0.05,
+       "read_level": 0,
+       "is_within_tolerance": false,
+       "read_size": [2048, 2048],
+       "output_size": [1024, 1024],
        "read_tile_size_px": null,
        "requested_tile_size_px": null,
        "target_size": [1024, 1024],
@@ -351,12 +386,11 @@ precision; and stored dtype. GPU count, batch size, workers, prefetching, output
 directory, and other execution mechanics are deliberately excluded.
 ``encoder_input_regime`` is ``"declared"`` — unlike a pooled image embedding,
 this run *stated* its geometry and it was validated before any image was read.
-For raster inputs, ``reader_regime="raster"`` and ``backend="pil"`` record the
-unchanged Pillow RGB path. Explicit spacing repeats the caller's assertion in
-``declared_spacing_um``, ``source_spacing_um``, and ``effective_spacing_um``;
-unknown spacing records all three as ``null`` with
-``spacing_source="unknown"``. Pyramid-plan fields stay ``null`` because no
-level was selected and no spacing-driven resize occurred.
+For PNG/JPEG inputs, ``reader_regime="spacing-readable"`` and ``backend="pil"``
+record hs2p's one-level PIL path. ``spacing_at_level_0`` is required when the
+source has no embedded spacing. An exact-spacing read is byte-identical to the
+unchanged Pillow RGB read; a coarser request records level 0 as the read and the
+truthful downsampled ``output_size`` and ``effective_spacing_um``.
 
 For spacing-readable inputs, the compatibility object records the complete
 parent-resolved hs2p plan. For example, a source whose level-0 spacing is

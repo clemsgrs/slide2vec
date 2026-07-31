@@ -209,6 +209,28 @@ variable-size model setting:
 Region-level streaming
 ~~~~~~~~~~~~~~~~~~~~~~~
 
+The public region entry point accepts level-0 point coordinates and the same
+optional source-spacing declaration as dense images:
+
+.. code-block:: python
+
+   from slide2vec import DenseOptions, ExecutionOptions, SlideRegions
+
+   artifacts = model.embed_regions_dense(
+       [SlideRegions(
+           sample_id="slide-1",
+           image_path="/data/slide-1.svs",
+           coordinates=[[1024, 2048], [4096, 2048]],
+           spacing_at_level_0=0.252,
+       )],
+       dense=DenseOptions(spacing_um=0.5, target_size=224),
+       execution=ExecutionOptions(output_dir="outputs"),
+   )
+
+The coordinates remain in the source level-0 pixel frame. hs2p resolves the
+source declaration, backend, level, native read spacing, and effective encoded
+spacing once per source; every fact is persisted and checked by resume.
+
 The encoder-level API above operates on tiles you have already read and
 normalized. To extract dense grids over the regions of an hs2p ``TilingResult``,
 slide2vec provides a higher-level streaming primitive,
@@ -316,8 +338,10 @@ inputs use the parent-resolved hs2p plan described below.
    model = Model.from_preset("virchow2")
    artifacts = model.embed_images_dense(
        [
-           ImageSpec(sample_id="ocelot-001", image_path="/data/ocelot/001.jpg"),
-           ImageSpec(sample_id="ocelot-002", image_path="/data/ocelot/002.jpg"),
+           ImageSpec(sample_id="ocelot-001", image_path="/data/ocelot/001.jpg",
+                     spacing_at_level_0=0.25),
+           ImageSpec(sample_id="ocelot-002", image_path="/data/ocelot/002.jpg",
+                     spacing_at_level_0=0.25),
        ],
        dense=DenseImageOptions(
            target_size=1024,
@@ -341,20 +365,17 @@ geometry, dense settings, inference precision, and stored dtype exactly match
 the current call. Missing, legacy, or incompatible pairs are recomputed, so an
 interrupted run is restarted by re-issuing the call.
 
-**Reader regimes and physical scale.** One dense-image run uses exactly one
-:term:`reader regime`; mixing regimes is rejected with samples grouped by
-regime before model loading or pixel decoding. A :term:`raster image` has one
-of the exact case-insensitive suffixes ``.png``, ``.jpg``, and ``.jpeg`` and
-uses Pillow ``convert("RGB")``. Multiple suffixes in that set may share a run.
-A positive, finite numeric ``spacing_um`` is the :term:`declared spacing` for
-raster pixels: it is checked by the normal recommended-settings policy but
-never changes the pixels. ``spacing_um=None`` records unknown spacing.
+**Source spacing and physical scale.** Every dense source uses a public hs2p
+reader. PNG/JPEG inputs use hs2p 4.4.1's one-level PIL reader; because those
+files have no reliable embedded physical spacing, their
+``ImageSpec.spacing_at_level_0`` declaration is required. Exact-spacing reads
+preserve the same RGB bytes as an unchanged Pillow read. Coarser requests use
+hs2p area downsampling; finer image requests raise under hs2p's content-aware
+no-upsampling policy. Flat and pyramidal sources may share a run.
 
-A :term:`spacing-readable image` has a format declared by an installed hs2p
-reader. Multiple spacing-readable suffixes may share a run. Here numeric
-``spacing_um`` is the declared spacing and ``None`` resolves the encoder's
-single registry default. Encoders with ambiguous or missing defaults, including
-unregistered/custom encoders, require an explicit value. The parent asks hs2p
+Numeric ``spacing_um`` is the :term:`declared spacing`; ``None`` resolves the
+encoder's single registry default. Encoders with ambiguous or missing defaults,
+including unregistered/custom encoders, require an explicit value. The parent asks hs2p
 to resolve each source's level-0 spacing, concrete backend, native read level
 and spacing, and tolerance result before resume filtering. Ranks consume that
 immutable plan: hs2p reads the complete selected level and area-downsamples only
@@ -363,10 +384,12 @@ native spacing is the :term:`effective spacing`; an area-downsampled image has
 the declared spacing as its effective spacing. Reads never upsample and an
 explicit backend never silently falls back.
 
-``ImageSpec.spacing_at_level_0`` overrides hs2p's source level-0 metadata for
-spacing-readable inputs. Without it, hs2p metadata is authoritative and missing
-spacing is an error. Raster dense extraction and :meth:`Model.embed_images`
-reject a non-null override rather than silently ignoring it.
+``ImageSpec.spacing_at_level_0`` is an optional finite positive caller
+declaration passed to hs2p. Without it, hs2p metadata is authoritative and
+missing spacing is an error. The declaration, resolved ``source_spacing_um``,
+requested ``declared_spacing_um``, and encoded-grid ``effective_spacing_um``
+remain separate values in every dense sidecar. :meth:`Model.embed_images`
+(the pooled API) retains its existing raster policy.
 
 **target_size is a declaration, not a resize.** The :term:`target size` is
 checked after the selected

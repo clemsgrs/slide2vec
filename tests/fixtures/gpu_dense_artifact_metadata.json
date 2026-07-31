@@ -26,8 +26,11 @@
     ],
     "image_pad_value": null,
     "image_path": "<IMAGE_PATH>",
-    "is_within_tolerance": null,
-    "output_size": null,
+    "is_within_tolerance": true,
+    "output_size": [
+      224,
+      224
+    ],
     "output_variant": "default",
     "overlap": 0.0,
     "pad": [
@@ -40,22 +43,25 @@
       8
     ],
     "precision": "fp32",
-    "read_level": null,
-    "read_size": null,
-    "read_spacing_um": null,
+    "read_level": 0,
+    "read_size": [
+      224,
+      224
+    ],
+    "read_spacing_um": 0.5,
     "read_tile_size_px": null,
-    "reader_regime": "raster",
+    "reader_regime": "spacing-readable",
     "requested_backend": "auto",
     "requested_tile_size_px": null,
     "sample_id": "<SAMPLE_ID>",
     "source_spacing_um": 0.5,
-    "spacing_at_level_0": null,
+    "spacing_at_level_0": 0.5,
     "spacing_source": "explicit",
     "target_size": [
       224,
       224
     ],
-    "tolerance": null,
+    "tolerance": 0.05,
     "window_size": null
   },
   "declared_spacing_um": 0.5,
@@ -77,8 +83,11 @@
   ],
   "image_pad_value": null,
   "image_path": "<IMAGE_PATH>",
-  "is_within_tolerance": null,
-  "output_size": null,
+  "is_within_tolerance": true,
+  "output_size": [
+    224,
+    224
+  ],
   "overlap": 0.0,
   "pad": [
     0,
@@ -89,21 +98,24 @@
     8,
     8
   ],
-  "read_level": null,
-  "read_size": null,
-  "read_spacing_um": null,
+  "read_level": 0,
+  "read_size": [
+    224,
+    224
+  ],
+  "read_spacing_um": 0.5,
   "read_tile_size_px": null,
-  "reader_regime": "raster",
+  "reader_regime": "spacing-readable",
   "requested_backend": "auto",
   "requested_tile_size_px": null,
   "sample_id": "<SAMPLE_ID>",
   "source_spacing_um": 0.5,
-  "spacing_at_level_0": null,
+  "spacing_at_level_0": 0.5,
   "spacing_source": "explicit",
   "target_size": [
     224,
     224
   ],
-  "tolerance": null,
+  "tolerance": 0.05,
   "window_size": null
 }

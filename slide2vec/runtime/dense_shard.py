@@ -67,6 +67,14 @@ class RegionSpec:
     requested_tile_size_px: int
     backend: str
     annotation: str | None = None
+    spacing_at_level_0: float | None = None
+    source_spacing_um: float | None = None
+    declared_spacing_um: float | None = None
+    read_spacing_um: float | None = None
+    effective_spacing_um: float | None = None
+    requested_backend: str = "auto"
+    tolerance: float = 0.05
+    is_within_tolerance: bool = True
 
 
 def _slide_key(spec: RegionSpec) -> tuple:
@@ -79,7 +87,40 @@ def _slide_key(spec: RegionSpec) -> tuple:
         spec.read_tile_size_px,
         spec.requested_tile_size_px,
         spec.backend,
+        spec.spacing_at_level_0,
+        spec.source_spacing_um,
+        spec.declared_spacing_um,
+        spec.read_spacing_um,
+        spec.effective_spacing_um,
+        spec.requested_backend,
+        spec.tolerance,
+        spec.is_within_tolerance,
     )
+
+
+def region_read_compatibility(spec: RegionSpec) -> dict:
+    """Canonical source/read-plan identity used by region resume."""
+    return {
+        "reader_regime": "spacing-readable",
+        "spacing_source": "explicit",
+        "spacing_at_level_0": spec.spacing_at_level_0,
+        "source_spacing_um": spec.source_spacing_um,
+        "declared_spacing_um": spec.declared_spacing_um,
+        "read_spacing_um": spec.read_spacing_um,
+        "effective_spacing_um": spec.effective_spacing_um,
+        "requested_backend": spec.requested_backend,
+        "backend": spec.backend,
+        "tolerance": float(spec.tolerance),
+        "read_level": int(spec.read_level),
+        "is_within_tolerance": bool(spec.is_within_tolerance),
+        "read_size": [int(spec.read_tile_size_px), int(spec.read_tile_size_px)],
+        "output_size": [
+            int(spec.requested_tile_size_px),
+            int(spec.requested_tile_size_px),
+        ],
+        "read_tile_size_px": int(spec.read_tile_size_px),
+        "requested_tile_size_px": int(spec.requested_tile_size_px),
+    }
 
 
 def region_needs_encode(out_dir, spec: RegionSpec) -> bool:
@@ -91,7 +132,10 @@ def region_needs_encode(out_dir, spec: RegionSpec) -> bool:
     _, sidecar_path = region_dense_paths(
         out_dir, sample_id=spec.sample_id, annotation=spec.annotation, x=spec.x, y=spec.y
     )
-    return not sidecar_path.exists()
+    if not sidecar_path.exists():
+        return True
+    metadata = load_metadata(sidecar_path)
+    return metadata.get("compatibility") != region_read_compatibility(spec)
 
 
 def dense_artifact_from_disk(out_dir, spec) -> DenseRegionArtifact:
@@ -133,19 +177,33 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
     y = np.asarray([s.y for s in specs], dtype=np.int64)
     requested = int(head.requested_tile_size_px)
     read = int(head.read_tile_size_px)
-    spacing = float(dense.spacing_um)
+    declared_spacing = (
+        float(dense.spacing_um)
+        if head.declared_spacing_um is None
+        else float(head.declared_spacing_um)
+    )
+    read_spacing = (
+        declared_spacing
+        if head.read_spacing_um is None
+        else float(head.read_spacing_um)
+    )
+    source_spacing = (
+        declared_spacing
+        if head.source_spacing_um is None
+        else float(head.source_spacing_um)
+    )
     tiles = TileGeometry(
         x=x,
         y=y,
         tissue_fractions=np.ones(len(specs), dtype=np.float32),
         requested_tile_size_px=requested,
-        requested_spacing_um=spacing,
+        requested_spacing_um=declared_spacing,
         read_level=int(head.read_level),
         read_tile_size_px=read,
-        read_spacing_um=spacing,
+        read_spacing_um=read_spacing,
         tile_size_lv0=read,
-        is_within_tolerance=True,
-        base_spacing_um=spacing,
+        is_within_tolerance=bool(head.is_within_tolerance),
+        base_spacing_um=source_spacing,
         slide_dimensions=[0, 0],
         level_downsamples=[1.0],
         overlap=0.0,
@@ -157,13 +215,13 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
         image_path=head.image_path,
         backend=head.backend,
         requested_backend=head.backend,
-        tolerance=float(dense.tolerance),
+        tolerance=float(head.tolerance),
         step_px_lv0=read,
         tissue_method="none",
         requested_seg_downsample=1,
         seg_downsample=1,
         seg_level=0,
-        seg_spacing_um=spacing,
+        seg_spacing_um=source_spacing,
         seg_sthresh=0,
         seg_sthresh_up=255,
         seg_mthresh=0,
@@ -176,6 +234,7 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
         white_threshold=255,
         black_threshold=0,
         fraction_threshold=0.0,
+        spacing_at_level_0=head.spacing_at_level_0,
     )
 
 
@@ -184,6 +243,7 @@ def _region_metadata(
 ) -> dict:
     """Extraction-geometry sidecar (D5/D7): geometry + encode params slide2vec owns, nothing else."""
     grid_arr = np.asarray(grid)
+    compatibility = region_read_compatibility(spec)
     return {
         "artifact_type": "dense_embeddings",
         "sample_id": spec.sample_id,
@@ -198,12 +258,7 @@ def _region_metadata(
         "patch_size": [int(geometry.patch_size[0]), int(geometry.patch_size[1])],
         "encoded_size": [int(geometry.encoded_size[0]), int(geometry.encoded_size[1])],
         "pad": [int(geometry.pad[0]), int(geometry.pad[1])],
-        "spacing_um": float(dense.spacing_um),
-        "tolerance": float(dense.tolerance),
-        "backend": spec.backend,
-        "read_level": int(spec.read_level),
-        "read_tile_size_px": int(spec.read_tile_size_px),
-        "requested_tile_size_px": int(spec.requested_tile_size_px),
+        **compatibility,
         "pad_mode": dense.pad_mode,
         "image_pad_value": dense.image_pad_value,
         "window_size": dense.window_size,
@@ -211,6 +266,7 @@ def _region_metadata(
         "feature_kind": dense.feature_kind,
         "attention_blocks": [int(b) for b in dense.attention_blocks],
         "attention_include_registers": bool(dense.attention_include_registers),
+        "compatibility": compatibility,
     }
 
 

@@ -7,8 +7,8 @@ grid plus one geometry sidecar per image. It is device-agnostic and ``RANK``-fre
 very same code path runs in-process for ``num_gpus=1`` and on every torchrun rank — and is
 exercised on CPU.
 
-Raster images are decoded unchanged through Pillow. Spacing-readable images consume the
-parent-resolved immutable hs2p plan: a concrete backend reads the stored full level and hs2p
+All public dense sources consume a parent-resolved immutable hs2p plan: a concrete backend
+reads the stored full level and hs2p
 area-downsamples to the stored output geometry when required, without rank-side selection.
 Everything after the pixels arrive — geometry, padding, whole-tile vs sliding encode, output
 dtype — is

@@ -310,6 +310,7 @@ class WSIRegionReader:
         gpu_decode: bool = False,
         resize_to_px: int | None = None,
         interpolation: str = "area",
+        spacing_at_level_0: float | None = None,
     ):
         self._image_path = str(image_path)
         self._backend = backend
@@ -319,6 +320,7 @@ class WSIRegionReader:
         self._region_size_px = int(region_size_px)
         self._resize_to_px = int(resize_to_px) if resize_to_px is not None else None
         self._interpolation = interpolation
+        self._spacing_at_level_0 = spacing_at_level_0
         self._out_size_px = (
             self._resize_to_px if self._resize_to_px is not None else self._region_size_px
         )
@@ -326,7 +328,19 @@ class WSIRegionReader:
 
     def _ensure_open(self) -> None:
         if self._reader is None:
-            self._reader = _open_wsi_backend(self._image_path, self._backend, self._gpu_decode)
+            if self._spacing_at_level_0 is None:
+                self._reader = _open_wsi_backend(
+                    self._image_path, self._backend, self._gpu_decode
+                )
+            else:
+                from hs2p.wsi.reader import open_slide
+
+                self._reader = open_slide(
+                    self._image_path,
+                    backend=self._backend,
+                    spacing_override=self._spacing_at_level_0,
+                    gpu_decode=self._gpu_decode,
+                )
 
     def _read_regions_batch(self, locations: list[tuple[int, int]]) -> list[np.ndarray]:
         if self._backend == "cucim":

@@ -7,10 +7,16 @@ Dense-image migration
 soma can replace its private dense image reader and extraction loop with
 ``Model.embed_images_dense``. Keep the encoder, reader backend, batch size,
 precision, output dtype, inputs, dense options, and model output variant fixed
-while validating the migration. Raster image recipes preserve Pillow RGB
-pixels and dense-grid geometry. For a spacing-readable image, slide2vec uses a
-parent-resolved hs2p plan; native-level and area-downsampled reads match soma's
-current hs2p reader byte-for-byte.
+while validating the migration. PNG/JPEG sources use hs2p 4.4.1's one-level
+PIL reader: exact-spacing reads preserve Pillow RGB pixels, while coarser
+requests may area-downsample. Pyramidal sources use the same parent-resolved
+hs2p contract. Finer image requests remain forbidden.
+
+Both ``ImageSpec`` and ``SlideRegions`` accept the optional finite positive
+``spacing_at_level_0`` caller declaration. Dense image and region sidecars keep
+that declaration distinct from resolved ``source_spacing_um``, requested
+``declared_spacing_um``, and encoded-grid ``effective_spacing_um``. Those values
+and the full resolved read plan participate in resume compatibility.
 
 One-GPU and multi-GPU extraction preserve input order, artifact shapes and
 dtypes, metadata, and finite outputs. Corresponding grids are compared in
@@ -40,7 +46,7 @@ Scope
 -----
 
 This release does not add supervision-mask I/O, spacing-aware
-``Model.embed_images``, mixed reader regimes, per-image requested spacing,
-raster spacing resize, fit-to-target resize, upsampling, a new backend
+``Model.embed_images``, per-image requested spacing, fit-to-target resize,
+upsampling, a new backend
 priority, source hashing, heterogeneous target sizes, or cross-GPU bit
 identity.

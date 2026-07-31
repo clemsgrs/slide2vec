@@ -88,8 +88,17 @@ class _FakeBackendFactory:
 
 @pytest.fixture
 def fake_backend(monkeypatch) -> _FakeBackendFactory:
+    from hs2p.wsi import reader as hs2p_reader
+
     factory = _FakeBackendFactory()
     monkeypatch.setattr(tile_reader, "_open_wsi_backend", factory)
+    monkeypatch.setattr(
+        hs2p_reader,
+        "open_slide",
+        lambda path, backend, *, spacing_override=None, gpu_decode=False: factory(
+            path, backend, gpu_decode
+        ),
+    )
     return factory
 
 
@@ -105,6 +114,14 @@ def _spec(x, y, *, sample_id="s0", image_path="s0.tif", annotation=None,
         requested_tile_size_px=int(requested),
         backend=backend,
         annotation=annotation,
+        spacing_at_level_0=None,
+        source_spacing_um=0.25,
+        declared_spacing_um=0.5,
+        read_spacing_um=0.5,
+        effective_spacing_um=0.5,
+        requested_backend="auto",
+        tolerance=0.05,
+        is_within_tolerance=True,
     )
 
 
@@ -290,6 +307,47 @@ def test_run_dense_shard_skips_regions_with_existing_sidecar(fake_backend, tmp_p
     assert [a.path for a in second] == [a.path for a in first]
 
 
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("spacing_at_level_0", 0.25),
+        ("source_spacing_um", 0.4),
+        ("read_spacing_um", 0.4),
+        ("effective_spacing_um", 0.4),
+        ("read_level", 1),
+        ("read_tile_size_px", 96),
+        ("backend", "openslide"),
+    ],
+)
+def test_region_resume_reencodes_when_source_or_resolved_read_plan_changes(
+    fake_backend, tmp_path, changed_field, changed_value
+):
+    from dataclasses import replace
+
+    encoder = _encoder()
+    original = _spec(0, 0)
+    run_dense_shard(
+        [original],
+        model=encoder,
+        out_dir=tmp_path,
+        dense=_dense(),
+        batch_size=1,
+        device="cpu",
+    )
+    reads_before = len(fake_backend.locations_read)
+
+    run_dense_shard(
+        [replace(original, **{changed_field: changed_value})],
+        model=encoder,
+        out_dir=tmp_path,
+        dense=_dense(),
+        batch_size=1,
+        device="cpu",
+    )
+
+    assert len(fake_backend.locations_read) == reads_before + 1
+
+
 def test_run_dense_shard_reencodes_payload_missing_its_sidecar(fake_backend, tmp_path):
     """Crash-safety (D6): a ``.pt`` with no sidecar is re-encoded, never counted as done."""
     enc = _encoder()
@@ -380,10 +438,20 @@ def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, 
         "patch_size": [16, 16],
         "encoded_size": [64, 64],
         "pad": [4, 4],
-        "spacing_um": 0.5,
+        "reader_regime": "spacing-readable",
+        "spacing_source": "explicit",
+        "spacing_at_level_0": None,
+        "source_spacing_um": 0.25,
+        "declared_spacing_um": 0.5,
+        "read_spacing_um": 0.5,
+        "effective_spacing_um": 0.5,
+        "requested_backend": "auto",
         "tolerance": 0.05,
         "backend": "cucim",
         "read_level": 0,
+        "is_within_tolerance": True,
+        "read_size": [60, 60],
+        "output_size": [60, 60],
         "read_tile_size_px": 60,
         "requested_tile_size_px": 60,
         "pad_mode": "reflect",
@@ -393,6 +461,24 @@ def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, 
         "feature_kind": "patch_features",
         "attention_blocks": [-1],
         "attention_include_registers": False,
+        "compatibility": {
+            "reader_regime": "spacing-readable",
+            "spacing_source": "explicit",
+            "spacing_at_level_0": None,
+            "source_spacing_um": 0.25,
+            "declared_spacing_um": 0.5,
+            "read_spacing_um": 0.5,
+            "effective_spacing_um": 0.5,
+            "requested_backend": "auto",
+            "backend": "cucim",
+            "tolerance": 0.05,
+            "read_level": 0,
+            "is_within_tolerance": True,
+            "read_size": [60, 60],
+            "output_size": [60, 60],
+            "read_tile_size_px": 60,
+            "requested_tile_size_px": 60,
+        },
     }
 
 

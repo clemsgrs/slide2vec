@@ -57,21 +57,50 @@ class _FakeBackend:
 
 @pytest.fixture
 def fake_backend(monkeypatch):
+    from hs2p.wsi import reader as hs2p_reader
+
     backends: dict[str, _FakeBackend] = {}
 
     def _open(image_path, backend, gpu_decode):
         return backends.setdefault(str(image_path), _FakeBackend())
 
     monkeypatch.setattr(tile_reader, "_open_wsi_backend", _open)
+    monkeypatch.setattr(
+        hs2p_reader,
+        "open_slide",
+        lambda path, backend, *, spacing_override=None, gpu_decode=False: _open(
+            path, backend, gpu_decode
+        ),
+    )
     return backends
 
 
 @pytest.fixture
 def stub_read_plan(monkeypatch):
     """Stub per-slide read-plan resolution so no real slide is opened for metadata."""
+    from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
+
     monkeypatch.setattr(
-        dense_stage, "resolve_slide_read_plan",
-        lambda image_path, dense: (0, int(dense.target_size), "cucim"),
+        dense_stage,
+        "resolve_slide_read_plan",
+        lambda image_path, dense, spacing_at_level_0=None: DenseImageReadPlan(
+            reader_regime="spacing-readable",
+            spacing_source="explicit",
+            declared_spacing_um=float(dense.spacing_um),
+            source_spacing_um=(
+                0.25 if spacing_at_level_0 is None else float(spacing_at_level_0)
+            ),
+            spacing_at_level_0=spacing_at_level_0,
+            read_spacing_um=float(dense.spacing_um),
+            effective_spacing_um=float(dense.spacing_um),
+            requested_backend=str(dense.backend),
+            backend="cucim",
+            tolerance=float(dense.tolerance),
+            read_level=0,
+            is_within_tolerance=True,
+            read_size=(int(dense.target_size), int(dense.target_size)),
+            output_size=(int(dense.target_size), int(dense.target_size)),
+        ),
     )
 
 
@@ -106,10 +135,11 @@ class _FakeModel:
 
 
 def _regions(sample_id="s0", image_path="s0.tif", coords=((0, 0), (64, 0), (0, 64)),
-             annotation=None) -> SlideRegions:
+             annotation=None, spacing_at_level_0=None) -> SlideRegions:
     return SlideRegions(
         sample_id=sample_id, image_path=image_path,
         coordinates=np.asarray(coords, dtype=np.int64), annotation=annotation,
+        spacing_at_level_0=spacing_at_level_0,
     )
 
 
@@ -143,6 +173,75 @@ def test_embed_regions_dense_num_gpus_one_runs_in_process(fake_backend, stub_rea
         assert art.metadata_path.exists()
         assert art.grid_shape == (4, 4)
     assert {num_workers for backend in fake_backend.values() for num_workers in backend.num_workers} == {7}
+
+
+def test_dense_region_sidecar_preserves_source_declaration_and_resolved_spacing(
+    fake_backend, stub_read_plan, tmp_path
+):
+    artifacts = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()),
+        [_regions(coords=((0, 0),), spacing_at_level_0=0.4)],
+        dense=_dense(),
+        execution=ExecutionOptions(
+            output_dir=tmp_path,
+            num_gpus=1,
+            num_workers_per_gpu=0,
+            precision="fp32",
+        ),
+    )
+
+    metadata = json.loads(artifacts[0].metadata_path.read_text())
+    expected_spacing = {
+        "spacing_at_level_0": 0.4,
+        "source_spacing_um": 0.4,
+        "declared_spacing_um": 0.5,
+        "read_spacing_um": 0.5,
+        "effective_spacing_um": 0.5,
+    }
+    assert {
+        field: metadata[field]
+        for field in (
+            "spacing_at_level_0",
+            "source_spacing_um",
+            "declared_spacing_um",
+            "read_spacing_um",
+            "effective_spacing_um",
+        )
+    } == expected_spacing
+    assert {
+        field: metadata["compatibility"][field] for field in expected_spacing
+    } == expected_spacing
+
+
+def test_embed_regions_dense_reads_flat_source_through_hs2p_pil(tmp_path):
+    from PIL import Image
+
+    image_path = tmp_path / "source.png"
+    Image.fromarray(np.zeros((64, 64, 3), dtype=np.uint8)).save(image_path)
+
+    artifacts = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()),
+        [
+            _regions(
+                image_path=image_path,
+                coords=((0, 0),),
+                spacing_at_level_0=0.5,
+            )
+        ],
+        dense=_dense(target_size=32),
+        execution=ExecutionOptions(
+            output_dir=tmp_path / "out",
+            num_gpus=1,
+            num_workers_per_gpu=0,
+            precision="fp32",
+        ),
+    )
+
+    metadata = json.loads(artifacts[0].metadata_path.read_text())
+    assert metadata["backend"] == "pil"
+    assert metadata["spacing_at_level_0"] == pytest.approx(0.5)
+    assert metadata["source_spacing_um"] == pytest.approx(0.5)
+    assert metadata["effective_spacing_um"] == pytest.approx(0.5)
 
 
 def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend, stub_read_plan, tmp_path, monkeypatch):
