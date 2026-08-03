@@ -322,9 +322,10 @@ class ExecutionOptions:
     #: Forward-pass dtype — ``"fp16"``, ``"bf16"``, ``"fp32"``,
     #: or ``None`` (auto-determined from the model preset).
     precision: str | None = None
-    #: On-disk feature dtype — ``"fp16"``, ``"fp32"``, or ``None`` to follow
-    #: :attr:`precision` (fp16 → fp16, else fp32). Applies to tile, slide, hierarchical,
-    #: and patient artifacts; ``"bf16"`` is rejected (numpy has no bfloat16).
+    #: Feature output dtype — ``"fp16"``, ``"fp32"``, or ``None`` to follow
+    #: :attr:`precision` (fp16 → fp16, else fp32). Applies to live dense grids and to
+    #: tile, slide, hierarchical, and patient artifacts; ``"bf16"`` is rejected because
+    #: persisted features cross a numpy boundary.
     output_dtype: str | None = None
     #: DataLoader prefetch queue depth per worker (default ``4``).
     prefetch_factor: int = 4
@@ -672,6 +673,33 @@ class Model:
     def feature_dim(self) -> int:
         # Construction fact, not an encode: see _load_backend_without_transform.
         return int(self._load_backend_without_transform().feature_dim)
+
+    def prepare_dense_encoder(
+        self,
+        *,
+        dense: "DenseImageOptions | DenseOptions",
+        execution: ExecutionOptions | None = None,
+    ):
+        """Prepare live dense encoding for one augmented RGB tensor at a time.
+
+        Only the encoding fields shared by :class:`DenseImageOptions` and
+        :class:`DenseOptions` apply after the augmented-pixel handoff. Source-reading
+        fields (spacing, tolerance, and backend) are intentionally ignored.
+        """
+        from slide2vec.runtime.dense_encode import _prepare_dense_encode_kit
+
+        if not isinstance(dense, (DenseImageOptions, DenseOptions)):
+            raise TypeError(
+                "Model.prepare_dense_encoder(dense=...) expects DenseImageOptions "
+                f"or DenseOptions, got {type(dense).__name__}"
+            )
+        if self.level != "tile":
+            raise ValueError(
+                "Model.prepare_dense_encoder(...) requires a tile-level foundation "
+                f"encoder; model {self.name!r} is registered at level {self.level!r}."
+            )
+        resolved = _coerce_execution_options(execution, model=self)
+        return _prepare_dense_encode_kit(self, dense=dense, execution=resolved)
 
     def embed_tiles(
         self,

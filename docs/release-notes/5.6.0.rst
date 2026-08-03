@@ -1,6 +1,25 @@
 slide2vec 5.6.0
 ===============
 
+Live dense encoding after augmentation
+--------------------------------------
+
+``Model.prepare_dense_encoder`` now returns a shareable ``DenseEncodeKit`` for
+training and inference loops that already own paired reading and augmentation.
+Its pickle-safe item preprocessor accepts one CPU RGB ``uint8`` ``(3, H, W)``
+tensor and returns the normalized, bottom/right-padded ``(3, Henc, Wenc)``
+tensor. ``encode`` accepts the collated CPU batch and returns an on-device
+``(B, D, Gh, Gw)`` grid with the frozen encoder in evaluation/no-grad/autocast
+mode and the resolved output dtype.
+
+The immutable geometry records target, patch, encoded and grid sizes, padding,
+and the top-left crop box. Whole/sliding patch features and CLS attention use
+the same implementation as persisted dense extraction. This live path performs
+no source reading, caching, persistence, sidecar, artifact, or output-directory
+work. ``DenseImageOptions`` and ``DenseOptions`` are both accepted; their
+spacing, backend, and tolerance fields are outside the augmented-pixel handoff
+and therefore ignored.
+
 Dense-image migration
 ---------------------
 

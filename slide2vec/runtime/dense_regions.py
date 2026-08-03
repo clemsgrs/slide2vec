@@ -142,6 +142,15 @@ def validate_dense_request_settings(
         raise ValueError(
             f"unsupported pad_mode {pad_mode!r}; expected one of {sorted(_PAD_MODES)}"
         )
+    if pad_mode == "reflect":
+        target_h, target_w = geometry.target_size
+        pad_bottom, pad_right = geometry.pad
+        if pad_bottom >= target_h or pad_right >= target_w:
+            raise ValueError(
+                "reflect padding must be smaller than the input geometry in each "
+                f"dimension; target_size={geometry.target_size} requires bottom/right "
+                f"pad={geometry.pad}. Choose a larger target or another pad_mode."
+            )
     if feature_kind not in {"patch_features", "cls_attention"}:
         raise ValueError(
             f"unsupported feature_kind {feature_kind!r}; "
@@ -279,7 +288,7 @@ class DenseGridEncoder:
             attention_blocks=attention_blocks,
             attention_include_registers=attention_include_registers,
         )
-        return cls(
+        return cls._from_resolved(
             model=model,
             geometry=geometry,
             dense_transform=(
@@ -287,19 +296,52 @@ class DenseGridEncoder:
                 if dense_transform is None
                 else dense_transform
             ),
+            target_size_origin=str(target_size_origin),
+            pad_mode=str(pad_mode),
+            image_pad_value=image_pad_value,
+            window_size=None if window_size is None else int(window_size),
+            overlap=float(overlap),
+            feature_kind=str(feature_kind),
+            attention_blocks=tuple(attention_blocks),
+            attention_include_registers=bool(attention_include_registers),
+            output_dtype=_resolve_output_dtype(output_dtype, precision),
+        )
+
+    @classmethod
+    def _from_resolved(
+        cls,
+        *,
+        model,
+        geometry: DenseGridGeometry,
+        dense_transform: Callable,
+        target_size_origin: str,
+        pad_mode: str,
+        image_pad_value: float | None,
+        window_size: int | None,
+        overlap: float,
+        feature_kind: str,
+        attention_blocks: tuple[int, ...],
+        attention_include_registers: bool,
+        output_dtype: torch.dtype,
+    ) -> "DenseGridEncoder":
+        """Build from an already-validated plan without resolving its fields again."""
+        return cls(
+            model=model,
+            geometry=geometry,
+            dense_transform=dense_transform,
             encode_fn=_resolve_encode_fn(
                 model,
                 feature_kind=feature_kind,
                 attention_blocks=attention_blocks,
                 attention_include_registers=attention_include_registers,
             ),
-            feature_kind=str(feature_kind),
-            target_size_origin=str(target_size_origin),
-            pad_mode=str(pad_mode),
+            feature_kind=feature_kind,
+            target_size_origin=target_size_origin,
+            pad_mode=pad_mode,
             image_pad_value=image_pad_value,
-            window_size=None if window_size is None else int(window_size),
-            overlap=float(overlap),
-            output_dtype=_resolve_output_dtype(output_dtype, precision),
+            window_size=window_size,
+            overlap=overlap,
+            output_dtype=output_dtype,
         )
 
     def pad_to_encoded(self, tensor: torch.Tensor) -> torch.Tensor:
@@ -338,6 +380,15 @@ class DenseGridEncoder:
         short-circuits to a single whole-tile forward (byte-identical to the whole-region
         encode), so there is no separate whole-region branch.
         """
+        return self.encode_tensor(batch).detach().cpu().numpy()
+
+    def encode_tensor(self, batch: torch.Tensor) -> torch.Tensor:
+        """Padded batch → live ``(B, d, gh, gw)`` tensor on the input device.
+
+        The persisted path calls this same primitive before crossing its intentional
+        NumPy/CPU boundary in :meth:`encode_batch`; live consumers retain the tensor.
+        Autograd and autocast policy remain the owning caller's responsibility.
+        """
         out = encode_dense_sliding(
             self.model,
             batch,
@@ -350,7 +401,13 @@ class DenseGridEncoder:
             raise ValueError(
                 f"{self.feature_kind} encode returned a {out.ndim}-D tensor; expected (B, d, gh, gw)."
             )
-        return out.detach().to(self.output_dtype).cpu().numpy()
+        if int(out.shape[0]) != int(batch.shape[0]) or tuple(out.shape[-2:]) != self.geometry.grid_shape:
+            raise ValueError(
+                f"{self.feature_kind} encode returned shape {tuple(out.shape)}; expected "
+                f"(B, d, {self.geometry.grid_shape[0]}, {self.geometry.grid_shape[1]}) "
+                f"for batch size {int(batch.shape[0])}."
+            )
+        return out.to(self.output_dtype)
 
 
 def iter_regions_dense(
