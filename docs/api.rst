@@ -155,59 +155,84 @@ Enable hierarchical mode by setting ``region_tile_multiple`` in
 The tile embeddings tensor will have shape ``(R, T, D)`` instead of ``(N, D)``.
 See :doc:`hierarchical` for the full explanation.
 
-Dense Tile Feature Extraction
------------------------------
+Live Dense Encoding after Augmentation
+--------------------------------------
 
-Some tile encoders can return the spatial grid of ViT patch-token features
-instead of a single pooled vector per tile. This is useful for dense downstream
-tasks where patch-token features must stay registered to the input tile.
-
-Dense extraction is a low-level encoder API:
-
-- ``get_dense_transform()`` applies the encoder's photometric normalization
-  without resize or center-crop, so tile geometry is preserved.
-- ``encode_tiles_dense(batch)`` accepts a normalized ``(B, C, H, W)`` tensor and
-  returns ``(B, d, h, w)``.
-- ``h`` and ``w`` are resolved from the input size and encoder patch size
-  (for example, a 224 px tile with an 8 px patch size returns a 28 x 28 grid).
-
-Example:
+Use :meth:`Model.prepare_dense_encoder` when a training or inference loop
+already owns image/mask reading and joint augmentation. The handoff is one CPU
+RGB ``uint8`` tensor in ``(3, H, W)`` layout. slide2vec then owns the shipped
+normalization, geometry check, bottom/right padding, device transfer, frozen
+evaluation-mode encoder, autocast, whole/sliding encode, attention selection,
+and output dtype.
 
 .. code-block:: python
 
    import torch
-   from PIL import Image
 
-   from slide2vec.encoders import encoder_registry
+   from slide2vec import DenseImageOptions, ExecutionOptions, Model
 
-   encoder = encoder_registry.require("lunit")().to("cuda")
-   transform = encoder.get_dense_transform()
+   model = Model.from_preset("virchow2", device="cuda")
+   kit = model.prepare_dense_encoder(
+       dense=DenseImageOptions(
+           target_size=(1024, 768),
+           window_size=224,
+           overlap=0.5,
+           feature_kind="patch_features",
+       ),
+       execution=ExecutionOptions(precision="fp16", output_dtype="fp32"),
+   )
 
-   tile = Image.open("/data/tile.png").convert("RGB")
-   batch = transform(tile).unsqueeze(0).to(encoder.device)
+   preprocess = kit.preprocessor()  # lightweight and safe to pickle into workers
+   items = [preprocess(augmented_rgb_uint8_chw) for augmented_rgb_uint8_chw in images]
+   cpu_batch = torch.stack(items)    # batching starts after item preprocessing
+   grids = kit.encode(cpu_batch)
 
-   with torch.no_grad():
-       dense = encoder.encode_tiles_dense(batch)
+   print(cpu_batch.shape)            # (B, 3, Henc, Wenc), on CPU
+   print(grids.shape)                # (B, D, Gh, Gw), on the model device
 
-   print(dense.shape)  # torch.Size([1, 384, 28, 28]) for a 224 px Lunit tile
+``preprocessor()`` accepts exactly one unbatched CPU ``uint8`` RGB tensor. It
+does not resize or crop: the post-augmentation ``(H, W)`` must equal
+``kit.geometry.target_size``. It applies the encoder's normalization-only
+recipe and bottom/right padding, returning one CPU floating-point tensor with
+shape ``(3, Henc, Wenc)`` for normal DataLoader collation.
 
-The dense transform deliberately does not resize, crop, or pad. The input
-height and width passed to ``encode_tiles_dense`` must be divisible by the
-encoder patch size, unless the specific encoder is pinned to a native input
-size. Unsupported encoders raise ``NotImplementedError``.
+``encode(batch)`` accepts the resulting collated CPU tensor, transfers it to
+the model device, and returns an on-device grid with no gradient history.
+``D`` is the patch-feature dimension for ``feature_kind="patch_features"``;
+for ``"cls_attention"`` it is the selected block/head/prefix-query channel
+count, including register-token queries when requested. The result uses
+``ExecutionOptions.output_dtype``, or the same precision-derived default as
+persisted dense extraction.
 
-For H-Optimus encoders, non-native dense extraction requires opting into the
-variable-size model setting:
+The immutable ``kit.geometry`` is authoritative:
 
-.. code-block:: python
+- ``target_size`` — required augmented input ``(H, W)``;
+- ``patch_size`` — encoder patch ``(Ph, Pw)``;
+- ``encoded_size`` — padded encoder input ``(Henc, Wenc)``;
+- ``grid_shape`` — output ``(Gh, Gw)``;
+- ``pad`` — ``(bottom, right)`` padding;
+- ``crop_box`` — top-left ``(left, top, right, bottom)`` box for mapping the
+  padded extent back to the target.
 
-   encoder = encoder_registry.require("h-optimus-0")(
-       dynamic_img_size=True,
-       allow_non_recommended_settings=True,
-   ).to("cuda")
+Both :class:`DenseImageOptions` and :class:`DenseOptions` are accepted. Only
+their shared encoding fields apply: ``target_size``, padding, window/overlap,
+feature kind, and attention selection. Source-reading fields such as spacing,
+backend, and tolerance are outside this augmented-pixel interface and are
+ignored. This path never reads a source or creates caches, sidecars, artifacts,
+or output directories; corresponding persistence/execution fields have no
+effect. Reuse one prepared kit across loops or folds with the same resolved
+geometry and encoding recipe.
 
-Region-level streaming
-~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: slide2vec.DenseEncodeKit
+   :members:
+   :undoc-members:
+
+.. autoclass:: slide2vec.DenseEncodeGeometry
+   :members:
+   :undoc-members:
+
+Persisted Region Grids
+----------------------
 
 The public region entry point accepts level-0 point coordinates and the same
 optional source-spacing declaration as dense images:
@@ -230,71 +255,6 @@ optional source-spacing declaration as dense images:
 The coordinates remain in the source level-0 pixel frame. hs2p resolves the
 source declaration, backend, level, native read spacing, and effective encoded
 spacing once per source; every fact is persisted and checked by resume.
-
-The encoder-level API above operates on tiles you have already read and
-normalized. To extract dense grids over the regions of an hs2p ``TilingResult``,
-slide2vec provides a higher-level streaming primitive,
-``iter_regions_dense`` (from ``slide2vec.runtime.dense_regions``), that wraps the
-region reads, padding, and encoding into a single generator:
-
-.. code-block:: python
-
-   from slide2vec.runtime.dense_regions import iter_regions_dense
-
-   # ``tiling_result`` is an hs2p TilingResult (from annotation/tissue sampling);
-   # it already resolved spacing -> level (read_level / read_tile_size_px /
-   # requested_tile_size_px) and carries the region coordinates and slide path.
-   for grid in iter_regions_dense(
-       model=model,
-       device=model.device,
-       tiling_result=tiling_result,
-       num_workers=4,
-   ):
-       print(grid.shape)  # (d, grid_h, grid_w), float32
-
-Reads go through the **same shared batched reader the pooled path uses**
-(``WSIRegionReader``, cuCIM ``read_regions(num_workers=…)``). For each region the
-reader reads ``read_tile_size_px`` at ``read_level`` and, when that differs from
-``requested_tile_size_px``, **area-resizes** to the supervision size reusing
-hs2p's own ``resize_array(..., "area")`` — the identical operation the tiling
-planner assumed — so the read pixels are unchanged. Each region is then run
-through the encoder's normalization-only ``get_dense_transform``, padded on the
-bottom/right up to the encoder's patch multiple, and encoded into a
-``(d, grid_h, grid_w)`` token grid. The low-level backend is opened lazily via
-``slide2vec.data.tile_reader._open_wsi_backend``, so the loop runs offline in
-tests by monkeypatching that seam with a fake backend.
-
-Streaming contract:
-
-- Grids are yielded **one per coordinate, in coordinate order**; an empty
-  ``tiling_result`` yields nothing.
-- Regions are read and encoded one ``batch_size`` chunk at a time, so resident
-  host memory is bounded by ``batch_size`` rather than by the slide's coordinate
-  count — there is no per-slide accumulation.
-- Each yielded grid is a standalone C-contiguous ``float32`` copy, so consuming
-  one grid does not pin the rest of its batch's memory alive.
-- Arguments and geometry are validated **eagerly** at the call site (an invalid
-  ``pad_mode`` or ``feature_kind`` raises before any region is read); iteration
-  itself is lazy and advances one batch at a time.
-
-The ``window_size`` / ``overlap`` parameters select the encode strategy:
-
-- ``window_size=None`` (the default) runs a single whole-region forward —
-  byte-identical to encoding the full padded tile in one pass.
-- A ``window_size`` smaller than the encoded region slides the encoder's native
-  field over patch-aligned windows and blends the per-window token grids with a
-  separable raised-cosine map; ``overlap`` (in ``[0, 1)``) sets the fractional
-  window overlap and the stride is ``window * (1 - overlap)``. This lets a
-  native-field encoder serve a larger region without interpolating its position
-  embeddings. The output grid is always the whole region's ``(grid_h, grid_w)``
-  either way — sliding is internal to extraction.
-
-``feature_kind`` selects which dense map is streamed. ``"patch_features"`` (the
-default) uses ``encode_tiles_dense`` to produce the ``(d, grid_h, grid_w)``
-patch-token grid; ``"cls_attention"`` uses ``encode_tiles_attention`` to produce
-a ``(K, grid_h, grid_w)`` CLS-attention grid, with ``attention_blocks`` and
-``attention_include_registers`` forwarded to that call. Both feature kinds share
-the same read / pad / window path.
 
 Variable encoder input for dense runs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

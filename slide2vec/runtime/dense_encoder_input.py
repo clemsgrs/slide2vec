@@ -65,6 +65,8 @@ class DenseEncoderInputPlan:
         from slide2vec.runtime.dense_regions import compute_dense_geometry
         from slide2vec.runtime.dense_sliding import resolve_window_geometry
 
+        if window_size is not None and int(window_size) <= 0:
+            raise ValueError("window_size must be positive")
         tile_encoder_name = str(
             resolve_preprocessing_requirements(encoder_name)["source_encoder"]
         )

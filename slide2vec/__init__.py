@@ -20,6 +20,7 @@ from slide2vec.artifacts import (
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
 )
+from slide2vec.runtime.dense_encode import DenseEncodeGeometry, DenseEncodeKit
 
 
 __version__ = "5.6.0"
@@ -31,6 +32,8 @@ __all__ = [
     "PreprocessingConfig",
     "DenseOptions",
     "DenseImageOptions",
+    "DenseEncodeGeometry",
+    "DenseEncodeKit",
     "SlideRegions",
     "ImageSpec",
     "ExecutionOptions",
