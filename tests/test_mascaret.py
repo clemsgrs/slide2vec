@@ -322,7 +322,9 @@ def test_mascaret_real_weights_pooled_and_dense_shape_contract():
     try:
         encoder = Mascaret().to("cpu")
     except (ImportError, OSError) as exc:
-        pytest.skip(f"Mascaret weights/runtime unavailable: {type(exc).__name__}: {exc}")
+        pytest.skip(
+            f"Mascaret weights/runtime unavailable: {type(exc).__name__}: {exc}"
+        )
 
     pixel_values = encoder.get_transform()(
         torch.zeros(3, 224, 224, dtype=torch.uint8)

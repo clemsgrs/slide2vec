@@ -128,6 +128,11 @@ Tile-level encoders
      - 1536
      - ``0.5``
      - Saillard et al. (2024)
+   * - ``mascaret``
+     - `Mascaret <https://huggingface.co/wearewaiv/mascaret>`_
+     - 1536
+     - ``0.5`` (inferred)
+     - Waiv (2026); spacing inferred
    * - ``midnight``
      - `Midnight <https://huggingface.co/AtlasAnalyticsLab/Midnight>`_
      - 3072
@@ -216,7 +221,7 @@ instead of the pooled ``(B, D)`` tensor returned by ``encode_tiles``.
 The following built-in tile presets are covered by the dense encoder interface:
 ``conch``, ``conchv15``, ``dinov2-vitb14``, ``genbio-pathfm``, ``gigapath``,
 ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
-``hibou-l``, ``isight``, ``lunit``, ``midnight``, ``mstar``, ``musk``,
+``hibou-l``, ``isight``, ``lunit``, ``mascaret``, ``midnight``, ``mstar``, ``musk``,
 ``phaet``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
 ``virchow2``.
 

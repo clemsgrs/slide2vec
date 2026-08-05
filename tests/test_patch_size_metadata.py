@@ -42,6 +42,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "phikon": (16, 16),
     "phikonv2": (16, 16),
     "phaet": (16, 16),
+    "mascaret": (14, 14),
     "midnight": (14, 14),
     "mstar": (16, 16),
     "musk": (16, 16),
