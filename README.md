@@ -26,6 +26,10 @@ pip install git+https://github.com/prov-gigapath/prov-gigapath.git
 
 AtlasPatch-backed tissue segmentation is available through hs2p's `sam2` path in the bundled install.
 
+Waiv encoders use a separately tested Transformers 5 runtime. Install them in
+their own environment with `pip install "slide2vec[waiv]"`; the `waiv` extra is
+incompatible with the existing `fm`, `prism`, and `titan` dependency pins.
+
 ## Python API
 
 ```python
@@ -119,7 +123,8 @@ The package writes explicit artifact directories:
 
 ### Supported Models
 
-`slide2vec` currently ships preset configs for 22 tile-level models and 3 slide-level models.  
+`slide2vec` currently ships presets for 24 tile-level models, 4 slide-level models,
+and 1 patient-level model.
 For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
 
 ## CLI

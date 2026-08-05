@@ -63,6 +63,11 @@ Tile-level encoders
      - 1024
      - ``0.5``
      - Filiot et al. (2024)
+   * - ``phaet``
+     - `Phaet <https://huggingface.co/wearewaiv/phaet>`_
+     - 1024
+     - ``0.5`` (inferred)
+     - Waiv (2026); spacing inferred from the Phikon-v2 base model
    * - ``hibou-l``
      - `Hibou-L <https://huggingface.co/histai/hibou-L>`_
      - 1024
@@ -212,7 +217,7 @@ The following built-in tile presets are covered by the dense encoder interface:
 ``conch``, ``conchv15``, ``dinov2-vitb14``, ``genbio-pathfm``, ``gigapath``,
 ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
 ``hibou-l``, ``isight``, ``lunit``, ``midnight``, ``mstar``, ``musk``,
-``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
+``phaet``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
 ``virchow2``.
 
 Notes:

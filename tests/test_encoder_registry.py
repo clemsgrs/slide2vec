@@ -27,6 +27,7 @@ EXPECTED_TILE_ENCODERS = {
     "musk",
     "phikon",
     "phikonv2",
+    "phaet",
     "prost40m",
 }
 

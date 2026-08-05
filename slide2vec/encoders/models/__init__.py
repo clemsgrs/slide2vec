@@ -23,6 +23,7 @@ from . import (
     titan,
     uni,
     virchow,
+    waiv,
 )
 
 __all__ = [
@@ -45,4 +46,5 @@ __all__ = [
     "titan",
     "uni",
     "virchow",
+    "waiv",
 ]
