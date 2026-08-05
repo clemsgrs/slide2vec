@@ -123,7 +123,7 @@ The package writes explicit artifact directories:
 
 ### Supported Models
 
-`slide2vec` currently ships presets for 24 tile-level models, 4 slide-level models,
+`slide2vec` currently ships presets for 25 tile-level models, 4 slide-level models,
 and 1 patient-level model.
 For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
 

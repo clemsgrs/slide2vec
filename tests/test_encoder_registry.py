@@ -22,6 +22,7 @@ EXPECTED_TILE_ENCODERS = {
     "hibou-b",
     "hibou-l",
     "isight",
+    "mascaret",
     "midnight",
     "mstar",
     "musk",

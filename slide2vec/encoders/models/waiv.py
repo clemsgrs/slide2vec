@@ -18,6 +18,9 @@ from slide2vec.encoders.registry import register_encoder
 _PHAET_REVISION = "e0ce6e0ee248470bd8604823e412ca64048a2495"
 _PHAET_INPUT_SIZE = 224
 _PHAET_PATCH_SIZE = 16
+_MASCARET_REVISION = "e95e7ea15e039e78d74def101415e19d9a67ba80"
+_MASCARET_INPUT_SIZE = 224
+_MASCARET_PATCH_SIZE = 14
 
 
 class _WaivEncoder(TileEncoder):
@@ -134,5 +137,31 @@ class Phaet(_WaivEncoder):
         super().__init__(
             "wearewaiv/phaet",
             revision=_PHAET_REVISION,
+            output_variant=output_variant,
+        )
+
+
+@register_encoder(
+    "mascaret",
+    output_variants={"default": {"encode_dim": 1536}},
+    default_output_variant="default",
+    input_size=_MASCARET_INPUT_SIZE,
+    supports_variable_input_size=False,
+    patch_size=_MASCARET_PATCH_SIZE,
+    supported_spacing_um=0.5,
+    precision="fp32",
+    source="wearewaiv/mascaret",
+)
+class Mascaret(_WaivEncoder):
+    """Mascaret tile encoder."""
+
+    _encode_dim = 1536
+    _input_size = _MASCARET_INPUT_SIZE
+    _patch_size = _MASCARET_PATCH_SIZE
+
+    def __init__(self, *, output_variant: str | None = None):
+        super().__init__(
+            "wearewaiv/mascaret",
+            revision=_MASCARET_REVISION,
             output_variant=output_variant,
         )
