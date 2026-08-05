@@ -16,12 +16,15 @@ from slide2vec.encoders.base import (
 from slide2vec.encoders.registry import register_encoder
 
 _PHAET_REVISION = "e0ce6e0ee248470bd8604823e412ca64048a2495"
+_PHAET_INPUT_SIZE = 224
+_PHAET_PATCH_SIZE = 16
 
 
 class _WaivEncoder(TileEncoder):
     """Shared runtime boundary for Waiv's reviewed Hugging Face remote code."""
 
     _encode_dim: int
+    _input_size: int
     _patch_size: int
 
     def __init__(
@@ -49,8 +52,8 @@ class _WaivEncoder(TileEncoder):
         return v2.Compose(
             [
                 v2.ToImage(),
-                v2.Resize(224),
-                v2.CenterCrop(224),
+                v2.Resize(self._input_size),
+                v2.CenterCrop(self._input_size),
                 v2.ToDtype(torch.float32, scale=True),
                 self._normalization(),
             ]
@@ -113,9 +116,9 @@ class _WaivEncoder(TileEncoder):
     "phaet",
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
-    input_size=224,
+    input_size=_PHAET_INPUT_SIZE,
     supports_variable_input_size=False,
-    patch_size=16,
+    patch_size=_PHAET_PATCH_SIZE,
     supported_spacing_um=0.5,
     precision="fp32",
     source="wearewaiv/phaet",
@@ -124,7 +127,8 @@ class Phaet(_WaivEncoder):
     """Phaet tile encoder."""
 
     _encode_dim = 1024
-    _patch_size = 16
+    _input_size = _PHAET_INPUT_SIZE
+    _patch_size = _PHAET_PATCH_SIZE
 
     def __init__(self, *, output_variant: str | None = None):
         super().__init__(
