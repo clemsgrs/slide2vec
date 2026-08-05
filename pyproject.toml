@@ -81,6 +81,11 @@ titan = [
     "einops-exts==0.0.4",
     "transformers==4.46.0",
 ]
+waiv = [
+    "transformers>=5.14,<6",
+    "safetensors>=0.8",
+    "huggingface_hub==1.25.1",
+]
 fm = [
     "omegaconf>=2.3.0",
     "matplotlib",

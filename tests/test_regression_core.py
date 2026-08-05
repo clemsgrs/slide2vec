@@ -472,6 +472,7 @@ def test_list_models_can_filter_by_level():
         "midnight",
         "mstar",
         "musk",
+        "phaet",
         "phikon",
         "phikonv2",
         "prost40m",
