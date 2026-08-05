@@ -43,7 +43,7 @@ def test_phaet_loads_the_reviewed_remote_code_revision_in_eval_mode(monkeypatch)
     class FakeModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.config = SimpleNamespace(patch_size=16)
+            self.config = SimpleNamespace()
 
     fake_model = FakeModel()
 
@@ -79,7 +79,6 @@ def test_phaet_pooled_transform_uses_shorter_side_crop_and_config_normalization(
         def __init__(self):
             super().__init__()
             self.config = SimpleNamespace(
-                patch_size=16,
                 pixel_mean=[0.25, 0.5, 0.75],
                 pixel_std=[0.5, 0.25, 0.25],
             )
@@ -122,7 +121,6 @@ def test_phaet_dense_normalization_preserves_geometry(monkeypatch):
         def __init__(self):
             super().__init__()
             self.config = SimpleNamespace(
-                patch_size=16,
                 pixel_mean=[0.25, 0.5, 0.75],
                 pixel_std=[0.5, 0.25, 0.25],
             )
@@ -163,7 +161,7 @@ def test_phaet_pooled_encoding_returns_upstream_normalized_cls_unchanged(monkeyp
     class FakeModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.config = SimpleNamespace(patch_size=16)
+            self.config = SimpleNamespace()
 
         def encode(self, pixel_values):
             calls.append(pixel_values)
@@ -193,7 +191,7 @@ def test_phaet_dense_encoding_strips_cls_into_row_major_14_by_14_grid(monkeypatc
     class FakeModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.config = SimpleNamespace(patch_size=16)
+            self.config = SimpleNamespace()
 
         def forward(self, *, pixel_values):
             calls.append(pixel_values)
@@ -228,7 +226,7 @@ def test_phaet_dense_encoding_rejects_invalid_rank_clearly(monkeypatch):
     class FakeModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.config = SimpleNamespace(patch_size=16)
+            self.config = SimpleNamespace()
 
         def forward(self, *, pixel_values):  # pragma: no cover - rejected first
             raise AssertionError("model must not run for invalid input rank")
@@ -255,7 +253,7 @@ def test_phaet_dense_encoding_rejects_indivisible_geometry_clearly(monkeypatch):
     class FakeModel(torch.nn.Module):
         def __init__(self):
             super().__init__()
-            self.config = SimpleNamespace(patch_size=16)
+            self.config = SimpleNamespace()
 
         def forward(self, *, pixel_values):  # pragma: no cover - rejected first
             raise AssertionError("model must not run for indivisible geometry")
@@ -289,7 +287,6 @@ def test_phaet_public_lifecycle_reports_dimension_and_moves_to_requested_device(
             super().__init__()
             self.anchor = torch.nn.Parameter(torch.ones(1))
             self.config = SimpleNamespace(
-                patch_size=16,
                 pixel_mean=[0.485, 0.456, 0.406],
                 pixel_std=[0.229, 0.224, 0.225],
             )

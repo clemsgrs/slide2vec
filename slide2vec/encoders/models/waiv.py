@@ -22,6 +22,7 @@ class _WaivEncoder(TileEncoder):
     """Shared runtime boundary for Waiv's reviewed Hugging Face remote code."""
 
     _encode_dim: int
+    _patch_size: int
 
     def __init__(
         self,
@@ -74,7 +75,7 @@ class _WaivEncoder(TileEncoder):
                 f"{tuple(batch.shape)}."
             )
         _, _, height, width = batch.shape
-        patch = int(self._model.config.patch_size)
+        patch = self._patch_size
         if height % patch != 0 or width % patch != 0:
             raise ValueError(
                 f"Dense extraction for '{type(self).__name__}' requires input "
@@ -96,8 +97,7 @@ class _WaivEncoder(TileEncoder):
 
     @property
     def patch_size(self) -> tuple[int, int]:
-        patch = int(self._model.config.patch_size)
-        return patch, patch
+        return self._patch_size, self._patch_size
 
     @property
     def device(self) -> torch.device:
@@ -124,6 +124,7 @@ class Phaet(_WaivEncoder):
     """Phaet tile encoder."""
 
     _encode_dim = 1024
+    _patch_size = 16
 
     def __init__(self, *, output_variant: str | None = None):
         super().__init__(
