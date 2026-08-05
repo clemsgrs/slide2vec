@@ -183,9 +183,7 @@ def test_mascaret_pooled_encoding_returns_upstream_normalized_cls_unchanged(
     assert output is expected
 
 
-def test_mascaret_dense_encoding_strips_cls_into_row_major_16_by_16_grid(
-    monkeypatch,
-):
+def test_mascaret_dense_encoding_strips_cls_into_1536_by_16_by_16_grid(monkeypatch):
     from types import SimpleNamespace
 
     from slide2vec.encoders.models.waiv import Mascaret
@@ -200,8 +198,7 @@ def test_mascaret_dense_encoding_strips_cls_into_row_major_16_by_16_grid(
         def forward(self, *, pixel_values):
             calls.append(pixel_values)
             cls = torch.full((2, 1, 1536), -1000.0)
-            patches = torch.arange(256, dtype=torch.float32).reshape(1, 256, 1)
-            patches = patches.expand(2, 256, 1536)
+            patches = torch.zeros(2, 256, 1536)
             return SimpleNamespace(last_hidden_state=torch.cat([cls, patches], dim=1))
 
     monkeypatch.setattr(
@@ -216,10 +213,56 @@ def test_mascaret_dense_encoding_strips_cls_into_row_major_16_by_16_grid(
 
     assert calls == [batch]
     assert output.shape == (2, 1536, 16, 16)
-    assert output[0, 0, 0, 0].item() == 0.0
-    assert output[0, 0, 0, 15].item() == 15.0
-    assert output[0, 0, 1, 0].item() == 16.0
-    assert output[0, 0, 15, 15].item() == 255.0
+    torch.testing.assert_close(
+        output,
+        torch.zeros(2, 1536, 16, 16),
+        rtol=0,
+        atol=0,
+    )
+
+
+def test_mascaret_dense_encoding_preserves_the_entire_row_major_patch_layout(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from slide2vec.encoders.models.waiv import Mascaret
+
+    calls = []
+    last_hidden_state = torch.tensor(
+        [
+            [[-1000.0, -1000.0], [1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0]],
+            [[-2000.0, -2000.0], [5.0, 50.0], [6.0, 60.0], [7.0, 70.0], [8.0, 80.0]],
+        ]
+    )
+    expected = torch.tensor(
+        [
+            [[[1.0, 2.0], [3.0, 4.0]], [[10.0, 20.0], [30.0, 40.0]]],
+            [[[5.0, 6.0], [7.0, 8.0]], [[50.0, 60.0], [70.0, 80.0]]],
+        ]
+    )
+
+    class FakeModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace()
+
+        def forward(self, *, pixel_values):
+            calls.append(pixel_values)
+            return SimpleNamespace(last_hidden_state=last_hidden_state)
+
+    monkeypatch.setattr(
+        transformers.AutoModel,
+        "from_pretrained",
+        lambda *args, **kwargs: FakeModel(),
+    )
+    encoder = Mascaret()
+    batch = torch.ones(2, 3, 28, 28)
+
+    output = encoder.encode_tiles_dense(batch)
+
+    assert calls == [batch]
+    torch.testing.assert_close(output, expected, rtol=0, atol=0)
 
 
 def test_mascaret_dense_encoding_rejects_invalid_rank_clearly(monkeypatch):
