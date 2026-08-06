@@ -239,8 +239,14 @@ def test_prepare_dense_encoder_rejects_invalid_requests_before_loading(
     assert load_attempted is False
 
 
-def test_prepare_dense_encoder_rejects_unsupported_attention_before_loading(monkeypatch):
-    model = Model(name="musk", device="cpu")
+@pytest.mark.parametrize(
+    ("model_name", "target_size"),
+    [("musk", 384), ("phaet", 224), ("mascaret", 224)],
+)
+def test_prepare_dense_encoder_rejects_unsupported_attention_before_loading(
+    model_name, target_size, monkeypatch
+):
+    model = Model(name=model_name, device="cpu")
     load_attempted = False
 
     def _unexpected_load():
@@ -252,7 +258,7 @@ def test_prepare_dense_encoder_rejects_unsupported_attention_before_loading(monk
 
     with pytest.raises(ValueError, match="does not support cls_attention"):
         model.prepare_dense_encoder(
-            dense=_dense_image(target_size=384, feature_kind="cls_attention"),
+            dense=_dense_image(target_size=target_size, feature_kind="cls_attention"),
             execution=ExecutionOptions(num_gpus=1, precision="fp32"),
         )
 

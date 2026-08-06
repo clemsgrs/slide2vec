@@ -273,6 +273,11 @@ Notes:
   colour channels as independent single-channel images, so there is no single
   coherent CLS-over-patches attention to extract; ``encode_tiles_attention`` raises
   ``NotImplementedError`` (dense patch-token extraction is still available).
+- ``phaet`` / ``mascaret`` are **not** covered: their pinned Waiv wrappers accept
+  ``output_attentions=True`` through ``**kwargs`` but do not forward it to the
+  inner backbone, and return ``attentions=None``. Their
+  ``encode_tiles_attention`` methods therefore raise ``NotImplementedError``
+  (dense patch-token extraction is still available).
 - ``hibou-b`` / ``hibou-l`` carry register tokens; pass ``include_registers=True``
   to add their query rows as extra channels.
 - ``conch`` / ``conchv15`` recover attention from their inner timm ViT trunk, the
