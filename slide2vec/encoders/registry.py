@@ -176,8 +176,9 @@ def resolve_preprocessing_requirements(
 ) -> dict[str, Any]:
     """Resolve encoder-driven preprocessing requirements.
 
-    Tile encoders define their own `input_size` and `supported_spacing_um`.
-    Slide encoders inherit both values from their declared tile encoder.
+    Tile encoders define their own image geometry and spacing contract. Slide
+    encoders inherit image geometry from their declared tile encoder while
+    retaining their own supported spacing contract.
     """
     info = metadata if metadata is not None else encoder_registry.info(encoder_name)
     level = resolve_encoder_level(encoder_name, info)
@@ -199,7 +200,16 @@ def resolve_preprocessing_requirements(
             require_encoder_metadata_field(encoder_name, info, "tile_encoder")
         )
         tile_metadata = encoder_registry.info(tile_encoder_name)
-        return resolve_preprocessing_requirements(tile_encoder_name, tile_metadata)
+        tile_requirements = resolve_preprocessing_requirements(
+            tile_encoder_name, tile_metadata
+        )
+        if level == "slide":
+            return {
+                "tile_size_px": tile_requirements["tile_size_px"],
+                "spacing_um": info.get("supported_spacing_um"),
+                "source_encoder": tile_requirements["source_encoder"],
+            }
+        return tile_requirements
     raise AssertionError("unreachable")
 
 
@@ -253,13 +263,17 @@ def resolve_preprocessing_defaults(
     when the encoder advertises several supported spacings without an explicit
     ``default_spacing_um``.
     """
-    reqs = resolve_preprocessing_requirements(encoder_name, metadata)
+    info = metadata if metadata is not None else encoder_registry.info(encoder_name)
+    reqs = resolve_preprocessing_requirements(encoder_name, info)
     source_encoder = reqs["source_encoder"]
-    # Resolve the default off the *tile* encoder's metadata: slide/patient
-    # encoders inherit both tile size and spacing from their tile encoder, so
-    # source_encoder already points at the model that carries the spacing fields.
-    source_info = encoder_registry.info(source_encoder)
-    spacing_um = _resolve_default_spacing(source_encoder, source_info)
+    level = resolve_encoder_level(encoder_name, info)
+    if level == "slide":
+        spacing_encoder = encoder_name
+        spacing_info = info
+    else:
+        spacing_encoder = source_encoder
+        spacing_info = encoder_registry.info(source_encoder)
+    spacing_um = _resolve_default_spacing(spacing_encoder, spacing_info)
     return {
         "tile_size_px": int(reqs["tile_size_px"]),
         "spacing_um": float(spacing_um),
@@ -319,13 +333,20 @@ def resolve_encoder_output(
             f"Encoder '{encoder_name}' has invalid default_output_variant "
             f"'{default_output_variant}'"
         )
-    if requested_output_variant is not None and level in {"slide", "patient"}:
+    fixed_hierarchical_output = level == "patient" or (
+        level == "slide" and len(output_variants) == 1
+    )
+    if requested_output_variant is not None and fixed_hierarchical_output:
         raise ValueError(
             f"Slide encoder '{encoder_name}' (level={level}) has a fixed output_variant; "
             "do not override output_variant for slide or patient encoders."
         )
 
-    output_variant = requested_output_variant or str(default_output_variant)
+    output_variant = (
+        str(default_output_variant)
+        if requested_output_variant is None
+        else requested_output_variant
+    )
     if output_variant not in output_variants:
         available = ", ".join(sorted(output_variants))
         raise ValueError(
