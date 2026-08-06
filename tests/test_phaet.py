@@ -306,7 +306,7 @@ def test_phaet_public_lifecycle_reports_dimension_and_moves_to_requested_device(
 
 
 @pytest.mark.heavy
-def test_phaet_real_weights_pooled_and_dense_shape_contract():
+def test_phaet_real_weights_pooled_dense_and_attention_contract():
     from slide2vec.encoders.models.waiv import Phaet
 
     transformers_major = int(transformers.__version__.split(".", maxsplit=1)[0])
@@ -316,9 +316,10 @@ def test_phaet_real_weights_pooled_and_dense_shape_contract():
         )
 
     try:
-        encoder = Phaet().to("cpu")
+        encoder = Phaet()
     except (ImportError, OSError) as exc:
         pytest.skip(f"Phaet weights/runtime unavailable: {type(exc).__name__}: {exc}")
+    encoder.to("cpu")
 
     pixel_values = encoder.get_transform()(
         torch.zeros(3, 224, 224, dtype=torch.uint8)
@@ -326,6 +327,10 @@ def test_phaet_real_weights_pooled_and_dense_shape_contract():
     with torch.no_grad():
         pooled = encoder.encode_tiles(pixel_values)
         dense = encoder.encode_tiles_dense(pixel_values)
+        wrapper_output = encoder._model(
+            pixel_values=pixel_values,
+            output_attentions=True,
+        )
 
     assert pooled.shape == (1, 1024)
     torch.testing.assert_close(
@@ -335,3 +340,5 @@ def test_phaet_real_weights_pooled_and_dense_shape_contract():
         atol=1e-5,
     )
     assert dense.shape == (1, 1024, 14, 14)
+    assert wrapper_output.last_hidden_state.shape == (1, 197, 1024)
+    assert wrapper_output.attentions is None
