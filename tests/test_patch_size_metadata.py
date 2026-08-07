@@ -59,7 +59,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
 NON_DENSE_TILE_ENCODERS: list[str] = []
 
 # Non-dense encoders: no recoverable patch grid, so no declared patch_size.
-NON_DENSE_ENCODERS = ["gigapath-slide", "titan", "prism"] + NON_DENSE_TILE_ENCODERS
+NON_DENSE_ENCODERS = ["gigapath-slide", "titan", "prism", "prism2"] + NON_DENSE_TILE_ENCODERS
 
 
 def test_normalize_patch_size_int_and_tuple():

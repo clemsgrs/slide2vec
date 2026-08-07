@@ -486,6 +486,7 @@ def test_list_models_can_filter_by_level():
         "gigapath-slide",
         "moozy-slide",
         "prism",
+        "prism2",
         "titan",
     ]
     assert list_models("patient") == ["moozy"]

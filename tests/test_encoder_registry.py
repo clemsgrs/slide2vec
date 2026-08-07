@@ -36,6 +36,7 @@ EXPECTED_SLIDE_ENCODERS = {
     "gigapath-slide",
     "titan",
     "prism",
+    "prism2",
 }
 
 EXPECTED_ENCODERS = EXPECTED_TILE_ENCODERS | EXPECTED_SLIDE_ENCODERS
