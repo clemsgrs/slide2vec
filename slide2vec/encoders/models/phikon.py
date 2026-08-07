@@ -24,6 +24,7 @@ class _PhikonBase(TileEncoder):
     """Base for Phikon models using HuggingFace transformers."""
 
     _encode_dim: int
+    _interpolate_pos_encoding = False
 
     def __init__(self, model_name: str, *, output_variant: str | None = None):
         self._model = AutoModel.from_pretrained(model_name).eval()
@@ -42,8 +43,8 @@ class _PhikonBase(TileEncoder):
 
     def get_normalization_transform(self) -> Callable:
         # Normalization only — no resize/crop.
-        # Reuses the HF processor's normalization so it matches pooled extraction;
-        # Phikon is pinned to its native 224, so the dense pipeline must feed 224.
+        # Reuses the HF processor's normalization so it matches pooled extraction
+        # while preserving whatever patch-divisible geometry the caller selected.
         from torchvision.transforms import v2
 
         return v2.Compose([
@@ -58,16 +59,14 @@ class _PhikonBase(TileEncoder):
         return patch, patch
 
     def encode_tiles(self, batch: Tensor) -> Tensor:
-        output = self._model(pixel_values=batch)
+        output = self._forward_model(batch)
         return output.last_hidden_state[:, 0, :]  # CLS token
 
     def encode_tiles_dense(self, batch: Tensor) -> Tensor:
         """Encode tiles into a dense spatial grid. (B, C, H, W) -> (B, d, h, w).
 
         Phikon's ViT emits ``[CLS, patch tokens...]`` (one prefix token, no
-        register tokens). The model is pinned to its native input size, so the
-        grid is ``input_size / patch_size`` (e.g. 224/16 -> 14x14); feeding a
-        larger tile raises inside the HF backbone (positional-embedding mismatch).
+        register tokens). The runtime input and patch size determine the grid.
         """
         if batch.ndim != 4:
             raise ValueError(
@@ -82,7 +81,7 @@ class _PhikonBase(TileEncoder):
                 f"divisible by the patch size: got {height}x{width}, patch "
                 f"{patch}. Pad the tile up to a patch multiple first."
             )
-        output = self._model(pixel_values=batch)
+        output = self._forward_model(batch)
         return reshape_tokens_to_grid(
             output.last_hidden_state,
             grid_h=height // patch,
@@ -120,7 +119,7 @@ class _PhikonBase(TileEncoder):
                 f"{patch}. Pad the tile up to a patch multiple first."
             )
         with hf_eager_attention(self._model):
-            output = self._model(pixel_values=batch, output_attentions=True)
+            output = self._forward_model(batch, output_attentions=True)
         return attentions_tuple_to_grids(
             output.attentions,  # tuple: per-layer (B, nh, N, N)
             num_prefix_tokens=1,
@@ -135,6 +134,11 @@ class _PhikonBase(TileEncoder):
     def encode_dim(self) -> int:
         return self._encode_dim
 
+    def _forward_model(self, batch: Tensor, **kwargs):
+        if self._interpolate_pos_encoding:
+            kwargs["interpolate_pos_encoding"] = True
+        return self._model(pixel_values=batch, **kwargs)
+
     @property
     def device(self) -> torch.device:
         return self._device
@@ -143,12 +147,14 @@ class _PhikonBase(TileEncoder):
         self._device = torch.device(device)
         self._model = self._model.to(self._device)
         return self
+
+
 @register_encoder(
     "phikon",
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=224,
-    supports_variable_input_size=False,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",
@@ -156,10 +162,10 @@ class _PhikonBase(TileEncoder):
 )
 class Phikon(_PhikonBase):
     _encode_dim = 768
+    _interpolate_pos_encoding = True
 
     def __init__(self, *, output_variant: str | None = None):
         super().__init__("owkin/phikon", output_variant=output_variant)
-
 
 
 @register_encoder(
@@ -167,7 +173,7 @@ class Phikon(_PhikonBase):
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
     input_size=224,
-    supports_variable_input_size=False,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",

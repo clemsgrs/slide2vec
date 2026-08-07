@@ -19,11 +19,11 @@ Every numerically-relevant choice mirrors https://github.com/zhihuanglab/iSight
 * Tile features are ``vision_model(..., output_hidden_states=True)
   .hidden_states[-1]`` passed through the learned ``visual_token_projection``
   — ``patch_encoder_with_clam.py:217-219``.
-* Reduction to one vector per tile is the **mean over all 577 tokens**
-  (CLS included) — ``patch_encoder_with_clam.py:254-255``, where the CLS line
-  is immediately overwritten by the token-mean line, and corroborated by
-  ``model_version = v3_all_tokens`` in ``config/config.ini:3``. The dead CLS
-  branch is still offered as the non-default ``cls`` output variant.
+* Reduction to one vector per tile is the **mean over all tokens** (577 at the
+  native 336 x 336 input, CLS included) — ``patch_encoder_with_clam.py:254-255``,
+  where the CLS line is immediately overwritten by the token-mean line, and
+  corroborated by ``model_version = v3_all_tokens`` in ``config/config.ini:3``.
+  The dead CLS branch is still offered as the non-default ``cls`` output variant.
 * Preprocessing is the model's own ``AutoProcessor`` — the reference builds it
   as ``self.patch_processor`` (``patch_encoder_with_clam.py:128``) and applies
   it per tile in ``dataset/hpadataset.py:152``.
@@ -65,12 +65,13 @@ check on the download.
 Slide level is deliberately absent
 ----------------------------------
 iSight's gated attention runs at *token* level, not tile level: ``A`` has shape
-``(n_tiles, n_tokens, 1)`` and is softmaxed over tiles, so each of the 577 token
-positions gets its own distribution over tiles
+``(n_tiles, n_tokens, 1)`` and is softmaxed over tiles, so every token position
+gets its own distribution over tiles
 (``patch_encoder_with_clam.py:230-255``). The pooled result is therefore not a
 function of per-tile ``(N, D)`` vectors, which is what
 :meth:`SlideEncoder.encode_slide` receives. Reproducing it would require caching
-``577 x 1024`` per tile. The heads are also specific to the five HPA tasks, so
+``n_tokens x 1024`` per tile (577 x 1024 at the native input). The heads are
+also specific to the five HPA tasks, so
 the pooled vector is not a general slide representation. Downstream MIL should
 do the pooling instead.
 """
@@ -125,7 +126,7 @@ def _load_isight_state_dict() -> dict[str, Tensor]:
     },
     default_output_variant="token_mean",
     input_size=336,
-    supports_variable_input_size=False,
+    supports_variable_input_size=True,
     patch_size=14,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -208,15 +209,19 @@ class ISight(TileEncoder):
         ])
 
     def _token_features(self, batch: Tensor) -> Tensor:
-        """Projected token sequence ``(B, 577, 1024)`` — patch_encoder_with_clam.py:217-219."""
-        outputs = self._vision(batch, output_hidden_states=True)
+        """Projected ``(B, 1 + H/14 * W/14, 1024)`` token sequence."""
+        outputs = self._vision(
+            batch,
+            output_hidden_states=True,
+            interpolate_pos_encoding=True,
+        )
         return self._projection(outputs.hidden_states[-1])
 
     def encode_tiles(self, batch: Tensor) -> Tensor:
         features = self._token_features(batch)
         if self._output_variant == "cls":
             return features[:, 0]
-        # Mean over all 577 tokens, CLS included — patch_encoder_with_clam.py:255.
+        # Mean over every runtime token, CLS included — 577 at the native input.
         return features.mean(dim=1)
 
     def encode_tiles_dense(self, batch: Tensor) -> Tensor:
@@ -273,7 +278,11 @@ class ISight(TileEncoder):
             )
         # SDPA silently returns attentions=None; flip the PreTrainedModel to eager.
         with hf_eager_attention(self._clip):
-            outputs = self._vision(batch, output_attentions=True)
+            outputs = self._vision(
+                batch,
+                output_attentions=True,
+                interpolate_pos_encoding=True,
+            )
         return attentions_tuple_to_grids(
             outputs.attentions,
             num_prefix_tokens=1,

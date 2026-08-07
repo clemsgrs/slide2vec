@@ -211,7 +211,7 @@ def test_prepare_dense_encoder_accepts_both_option_types_and_ignores_source_fiel
             "attention_include_registers must be a boolean",
         ),
         (
-            "phikon",
+            "musk",
             _dense_image(target_size=512),
             "does not support a variable encoder input",
         ),

@@ -31,15 +31,26 @@ from slide2vec.runtime.encoder_input_contract import EncoderInputContract  # noq
 # --------------------------------------------------------------------------------------
 
 
-def test_dense_whole_tile_at_a_non_native_size_is_rejected_without_the_capability():
-    """phikon declares supports_variable_input_size=False; a 512px whole tile must raise.
+@pytest.mark.parametrize(
+    "name,target_size",
+    [
+        ("conch", (464, 480)),
+        ("conchv15", (464, 480)),
+        ("phikon", (240, 256)),
+        ("phikonv2", (240, 256)),
+        ("isight", (350, 364)),
+    ],
+)
+def test_dense_whole_tile_accepts_verified_non_native_rectangles_without_kwargs(
+    name, target_size
+):
+    contract = EncoderInputContract.declared_dense(
+        name, target_size_px=target_size, window_size=None
+    )
 
-    The old route hand-passed ``dynamic_img_size=True`` to ``load_model``, which silently
-    dropped it because phikon's constructor takes no such parameter — the run proceeded to
-    feed the encoder a size it cannot accept.
-    """
-    with pytest.raises(ValueError, match="does not support a variable encoder input"):
-        EncoderInputContract.declared_dense("phikon", target_size_px=512, window_size=None)
+    assert contract.plan.effective_encoder_input_size_px == target_size
+    assert contract.plan.requires_variable_model_input is True
+    assert contract.construction_kwargs_for(name) == {}
 
 
 def test_dense_whole_tile_derives_the_registry_variable_input_kwargs():
@@ -77,10 +88,14 @@ def test_dense_sliding_at_the_native_window_needs_no_variable_input():
     assert contract.construction_kwargs_for("phikon") == {}
 
 
-def test_dense_sliding_above_the_native_window_still_asks_the_capability_question():
-    """A 256px window on a 224px fixed-input encoder is as unsupported as a 512px tile."""
-    with pytest.raises(ValueError, match="does not support a variable encoder input"):
-        EncoderInputContract.declared_dense("phikon", target_size_px=512, window_size=256)
+def test_dense_sliding_above_the_native_window_uses_verified_capability():
+    contract = EncoderInputContract.declared_dense(
+        "phikon", target_size_px=512, window_size=256
+    )
+
+    assert contract.plan.effective_encoder_input_size_px == (256, 256)
+    assert contract.plan.requires_variable_model_input is True
+    assert contract.construction_kwargs_for("phikon") == {}
 
 
 def test_dense_sliding_window_is_clamped_to_the_encoded_extent():
@@ -291,17 +306,17 @@ def test_public_api_reaches_whole_tile_dense_at_a_non_native_size(
     assert model._encoder_input.plan.effective_encoder_input_size_px == (518, 518)
 
 
-def test_public_api_refuses_whole_tile_dense_the_encoder_cannot_accept(
+def test_public_api_refuses_whole_tile_dense_for_fixed_size_musk(
     stand_in_virchow2, tmp_path, monkeypatch
 ):
-    """phikon at 512px whole-tile raises before a single region is read."""
+    """MUSK at 400px whole-tile raises before a single region is read."""
     import slide2vec.inference as inference
 
     monkeypatch.setattr(
         inference.encoder_registry, "require",
         lambda name: pytest.fail("the model must not be constructed"),
     )
-    model = Model.from_preset("phikon", device="cpu")
+    model = Model.from_preset("musk", device="cpu")
     regions = SlideRegions(
         sample_id="s0",
         image_path="s0.tif",
@@ -311,7 +326,7 @@ def test_public_api_refuses_whole_tile_dense_the_encoder_cannot_accept(
     with pytest.raises(ValueError, match="does not support a variable encoder input"):
         model.embed_regions_dense(
             [regions],
-            dense=DenseOptions(spacing_um=0.5, target_size=512),
+            dense=DenseOptions(spacing_um=0.5, target_size=400),
             execution=ExecutionOptions(
                 output_dir=tmp_path, num_gpus=1, batch_size=1, precision="fp32"
             ),

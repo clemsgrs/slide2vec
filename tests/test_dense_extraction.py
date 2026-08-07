@@ -308,9 +308,9 @@ def test_conch_dense_uses_visual_trunk_not_attentional_tokens():
 
     enc = CONCH.__new__(CONCH)
     enc._model = SimpleNamespace(visual=_Visual())
-    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 448))
-    assert grid.shape == (1, 768, 28, 28)
-    expected = torch.arange(28 * 28, dtype=torch.float32).reshape(28, 28)
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 464))
+    assert grid.shape == (1, 768, 28, 29)
+    expected = torch.arange(28 * 29, dtype=torch.float32).reshape(28, 29)
     assert torch.equal(grid[0, 0], expected)
 
 
@@ -319,8 +319,8 @@ def test_conchv15_dense_uses_returned_conch_trunk():
 
     enc = CONCHv15.__new__(CONCHv15)
     enc._model = SimpleNamespace(trunk=_FakeTrunk(hidden_size=1024))
-    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 448))
-    assert grid.shape == (1, 1024, 28, 28)
+    grid = enc.encode_tiles_dense(torch.randn(1, 3, 448, 464))
+    assert grid.shape == (1, 1024, 28, 29)
 
 
 class _FakeMUSKModel:

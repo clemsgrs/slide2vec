@@ -87,7 +87,7 @@ def test_isight_metadata_contract():
     assert info["supported_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp16"
     assert info["source"] == "nirschl-lab/iSight"
-    assert info["supports_variable_input_size"] is False
+    assert info["supports_variable_input_size"] is True
     assert info["output_variants"]["token_mean"]["encode_dim"] == 1024
     assert info["output_variants"]["cls"]["encode_dim"] == 1024
     assert info["default_output_variant"] == "token_mean"
@@ -165,6 +165,57 @@ def test_isight_dense_applies_projection_and_preserves_row_major_grid():
     assert grid.shape == (2, _HIDDEN, 2, 2)
     expected = (2.0 * tokens[:, 1:]).transpose(1, 2).reshape(2, _HIDDEN, 2, 2)
     torch.testing.assert_close(grid, expected, rtol=0, atol=1e-6)
+
+
+def test_isight_interpolates_positions_for_every_variable_extraction_path():
+    enc = _tiny_encoder()
+    rectangular = torch.randn(1, 3, 42, 28)
+
+    with torch.no_grad():
+        tokens = enc._projection(
+            enc._vision(
+                rectangular,
+                output_hidden_states=True,
+                interpolate_pos_encoding=True,
+            ).hidden_states[-1]
+        )
+        pooled = enc.encode_tiles(rectangular)
+        dense = enc.encode_tiles_dense(rectangular)
+        attention = enc.encode_tiles_attention(rectangular)
+
+    assert pooled.shape == (1, _HIDDEN)
+    assert dense.shape == (1, _HIDDEN, 3, 2)
+    assert attention.shape == (1, _HEADS, 3, 2)
+    expected_dense = tokens[:, 1:].transpose(1, 2).reshape(1, _HIDDEN, 3, 2)
+    torch.testing.assert_close(dense, expected_dense, rtol=0, atol=0)
+
+
+def test_isight_positional_interpolation_is_exactly_inert_at_native_size():
+    from slide2vec.encoders.base import attentions_tuple_to_grids, hf_eager_attention
+
+    enc = _tiny_encoder()
+    native = torch.randn(1, 3, _IMAGE, _IMAGE)
+
+    with torch.no_grad():
+        prior_tokens = enc._projection(
+            enc._vision(native, output_hidden_states=True).hidden_states[-1]
+        )
+        tokens = enc._token_features(native)
+        with hf_eager_attention(enc._clip):
+            prior_with_attention = enc._vision(native, output_attentions=True)
+        attention = enc.encode_tiles_attention(native)
+
+    prior_attention = attentions_tuple_to_grids(
+        prior_with_attention.attentions,
+        num_prefix_tokens=1,
+        blocks=(-1,),
+        include_registers=False,
+        grid_h=2,
+        grid_w=2,
+        encoder_name="ISight",
+    )
+    assert torch.equal(tokens, prior_tokens)
+    assert torch.equal(attention, prior_attention)
 
 
 def test_isight_dense_rejects_indivisible_input():
