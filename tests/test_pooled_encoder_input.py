@@ -168,6 +168,52 @@ def test_permitted_variable_plan_preserves_exact_geometry_with_normalization_onl
     assert tuple(transformed.shape) == (3, 288, 288)
 
 
+def test_mascaret_permitted_non_preset_plan_preserves_exact_geometry():
+    from dataclasses import asdict
+
+    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+
+    plan = PooledEncoderInputPlan.resolve(
+        "mascaret",
+        requested_tile_size_px=238,
+        allow_non_recommended_settings=True,
+    )
+
+    assert asdict(plan) == {
+        "encoder_name": "mascaret",
+        "tile_encoder_name": "mascaret",
+        "preset_input_size_px": 224,
+        "requested_tile_size_px": 238,
+        "preprocessing_kind": "normalization_only",
+        "requires_variable_model_input": True,
+        "expected_encoder_input_size_px": 238,
+        "model_construction_kwargs": {},
+    }
+
+
+def test_phaet_permitted_non_preset_plan_preserves_exact_geometry():
+    from dataclasses import asdict
+
+    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+
+    plan = PooledEncoderInputPlan.resolve(
+        "phaet",
+        requested_tile_size_px=240,
+        allow_non_recommended_settings=True,
+    )
+
+    assert asdict(plan) == {
+        "encoder_name": "phaet",
+        "tile_encoder_name": "phaet",
+        "preset_input_size_px": 224,
+        "requested_tile_size_px": 240,
+        "preprocessing_kind": "normalization_only",
+        "requires_variable_model_input": True,
+        "expected_encoder_input_size_px": 240,
+        "model_construction_kwargs": {},
+    }
+
+
 def test_batch_transform_parser_accepts_scaled_float32_to_dtype():
     from slide2vec.runtime.preprocessing import build_batch_transform_spec
 

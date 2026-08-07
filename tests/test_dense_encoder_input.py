@@ -64,6 +64,26 @@ def test_dense_whole_tile_derives_the_registry_variable_input_kwargs():
     assert contract.construction_kwargs_for("virchow2") == {"dynamic_img_size": True}
 
 
+def test_mascaret_dense_whole_tile_accepts_verified_variable_input_without_kwargs():
+    contract = EncoderInputContract.declared_dense(
+        "mascaret", target_size_px=(238, 252), window_size=None
+    )
+
+    assert contract.plan.effective_encoder_input_size_px == (238, 252)
+    assert contract.plan.requires_variable_model_input is True
+    assert contract.construction_kwargs_for("mascaret") == {}
+
+
+def test_phaet_dense_whole_tile_accepts_verified_variable_input_without_kwargs():
+    contract = EncoderInputContract.declared_dense(
+        "phaet", target_size_px=(240, 256), window_size=None
+    )
+
+    assert contract.plan.effective_encoder_input_size_px == (240, 256)
+    assert contract.plan.requires_variable_model_input is True
+    assert contract.construction_kwargs_for("phaet") == {}
+
+
 def test_dense_whole_tile_effective_input_is_the_padded_encoded_size():
     """512 is not a multiple of virchow2's 14px patch: the encoder sees the padded 518."""
     contract = EncoderInputContract.declared_dense(

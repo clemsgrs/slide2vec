@@ -246,6 +246,10 @@ Notes:
   patch-divisible square or rectangular encoder inputs. Their positional
   embeddings are interpolated by the checkpoint's timm/Hugging Face backbone;
   no variable-input constructor setting is required.
+- ``phaet`` and ``mascaret`` keep their 224 x 224 pooled preset, while their pinned
+  DINOv2 checkpoints also accept patch-divisible variable inputs without additional model
+  settings. Exact non-preset pooled sizes require ``allow_non_recommended_settings=True``;
+  dense region and window sizes use the same verified capability automatically.
 - H-Optimus dense extraction at non-native input sizes requires
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
   constructing the encoder directly. Through ``Model.embed_regions_dense`` the
