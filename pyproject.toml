@@ -69,7 +69,7 @@ prism = [
 ]
 prism2 = [
     "torch>=2.3",
-    "transformers>=4.51",
+    "transformers==4.51.3",
     "safetensors",
     "einops",
     "flash-attn>=2.6.3",

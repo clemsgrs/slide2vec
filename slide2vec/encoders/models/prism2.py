@@ -19,7 +19,10 @@ PRISM2_REVISION = "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
     level="slide",
     tile_encoder="virchow2",
     tile_encoder_output_variant="cls",
-    output_variants={"base": {"encode_dim": 2560}},
+    output_variants={
+        "base": {"encode_dim": 2560},
+        "diagnostic": {"encode_dim": 3072},
+    },
     default_output_variant="base",
     supported_spacing_um=0.5,
     precision="bf16",
@@ -27,6 +30,11 @@ PRISM2_REVISION = "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
 )
 class Prism2SlideEncoder(SlideEncoder):
     def __init__(self, *, output_variant: str | None = None):
+        self._output_variant = resolve_requested_output_variant(
+            output_variant,
+            default="base",
+            allowed=("base", "diagnostic"),
+        )
         shared_load_kwargs = {
             "revision": PRISM2_REVISION,
             "trust_remote_code": True,
@@ -41,15 +49,10 @@ class Prism2SlideEncoder(SlideEncoder):
             **shared_load_kwargs,
         )
         self._device = preferred_default_device()
-        self._output_variant = resolve_requested_output_variant(
-            output_variant,
-            default="base",
-            allowed=("base",),
-        )
 
     @property
     def encode_dim(self) -> int:
-        return 2560
+        return 2560 if self._output_variant == "base" else 3072
 
     @property
     def device(self) -> torch.device:
@@ -57,10 +60,22 @@ class Prism2SlideEncoder(SlideEncoder):
 
     def to(self, device: torch.device | str) -> "Prism2SlideEncoder":
         self._device = torch.device(device)
-        # The pinned upstream get_base_embedding path uses image_resampler only.
-        # Keep the excluded Phi-3 decoder on CPU instead of spending GPU memory
-        # on text-generation parameters this base-only preset can never call.
-        self._model.image_resampler.to(self._device)
+        if self._output_variant == "base":
+            # The pinned upstream get_base_embedding path uses image_resampler only.
+            # Keep the excluded Phi-3 decoder on CPU instead of spending GPU memory
+            # on text-generation parameters this base-only preset can never call.
+            self._model.image_resampler.to(self._device)
+        else:
+            diagnostic_modules = (
+                self._model.image_resampler,
+                self._model.img_projection,
+                self._model.text_decoder,
+            )
+            for module in diagnostic_modules:
+                if self._device.type == "cuda":
+                    module.to(self._device, dtype=torch.bfloat16)
+                else:
+                    module.to(self._device)
         return self
 
     def encode_slide(
@@ -71,4 +86,9 @@ class Prism2SlideEncoder(SlideEncoder):
         tile_size_lv0: int | None = None,
     ) -> torch.Tensor:
         batch = self._processor(tile_embeddings=[tile_features]).to(self._device)
-        return self._model.get_base_embedding(**batch).squeeze(0)
+        embedding_method = (
+            self._model.get_base_embedding
+            if self._output_variant == "base"
+            else self._model.get_diagnostic_embedding
+        )
+        return embedding_method(**batch).squeeze(0)

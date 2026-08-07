@@ -319,8 +319,8 @@ Slide-level encoders
      - `PRISM2 <https://huggingface.co/paige-ai/Prism2>`_
      - ``virchow2`` (CLS only)
      - ``0.5``
-     - 2560
-     - Base embedding; Shaikovski et al. (2026)
+     - 2560 (base); 3072 (diagnostic)
+     - Base is default; Shaikovski et al. (2026)
    * - ``moozy-slide``
      - `MOOZY <https://huggingface.co/AtlasAnalyticsLab/MOOZY>`_
      - ``lunit``
@@ -332,10 +332,14 @@ Slide-level encoders
 PRISM2 gated-use contract
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``prism2`` exposes only PRISM2's 2560-dimensional **base embedding** (the
-Perceiver-pool output) through slide2vec's slide-embedding API. Diagnostic
-embeddings, text generation, yes/no scoring, and concatenating multiple slides
-into one specimen are not part of this preset.
+``prism2`` defaults to PRISM2's 2560-dimensional **base embedding**, the
+Perceiver-pool output used for general slide representation. Select
+``output_variant="diagnostic"`` for the documented 3072-dimensional
+**diagnostic embedding**. That representation is the Phi-3 final-layer hidden
+state at the ``<|assistant|>`` position after PRISM2's fixed image-only prompt;
+the official ``get_diagnostic_embedding`` method owns that prompt and hidden-state
+selection. Free-form text generation, yes/no scoring, and concatenating multiple
+slides into one specimen remain outside this preset.
 
 The upstream repository is gated. Request access individually, accept its terms,
 then authenticate the machine that runs slide2vec with ``hf auth login`` (or set
@@ -347,9 +351,12 @@ isolated runtime only where this preset is needed:
 
    python -m pip install "slide2vec[prism2]"
 
-PRISM2 requires a CUDA-capable GPU and ``flash-attn>=2.6.3``; flash attention is
-mandatory because its Perceiver cross-attention uses the training-time
-``flash_attn_varlen_func`` kernel. The recommended compute precision is bf16.
+The pinned PRISM2 revision declares Transformers 4.51.3, which the isolated
+``prism2`` extra installs exactly; newer Transformers releases can remove Phi-3
+internals used by the gated custom code. PRISM2 also requires a CUDA-capable GPU
+and ``flash-attn>=2.6.3``. Flash attention is mandatory because its Perceiver
+cross-attention uses the training-time ``flash_attn_varlen_func`` kernel. The
+recommended compute precision is bf16.
 Because numpy-backed slide artifacts cannot persist bf16, slide2vec's existing
 default output-dtype policy widens bf16 results to fp32 on disk; pass an explicit
 supported ``output_dtype`` only when a different persisted dtype is intended.
@@ -363,11 +370,13 @@ override. The default slide2vec preprocessing path segments and samples tissue;
 review custom masks and filtering overrides carefully so background tiles do not
 enter the bag.
 
-Coordinates are intentionally not supplied to PRISM2: at tested revision
+Both output variants use this identical tile extraction and preprocessing path;
+changing ``output_variant`` changes only the slide representation. Coordinates
+are intentionally not supplied to PRISM2: at tested revision
 ``450352d0ddc6b42b21ce20794ce0fbefe6b5a47a``, the official processor accepts
-only tile embeddings (plus an optional attention mask), and
-``get_base_embedding`` consumes only the processed tile tensor and mask. The
-same revision was used for the deterministic contract tests and CUDA smoke:
+only tile embeddings (plus an optional attention mask), and both official
+embedding methods consume that same processed batch. The same revision was used
+for the deterministic contract tests and CUDA diagnostic smoke:
 
 .. code-block:: bash
 
@@ -376,11 +385,17 @@ same revision was used for the deterministic contract tests and CUDA smoke:
    from slide2vec.encoders.models.prism2 import PRISM2_REVISION, Prism2SlideEncoder
 
    assert PRISM2_REVISION == "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
-   encoder = Prism2SlideEncoder().to("cuda")
+   encoder = Prism2SlideEncoder(output_variant="diagnostic").to("cuda")
    with torch.autocast("cuda", torch.bfloat16):
        output = encoder.encode_slide(torch.zeros(2, 1280))
-   assert output.shape == (2560,)
+   assert output.shape == (3072,)
    PY
+
+The diagnostic path moves only the modules used by the official method
+(``image_resampler``, ``img_projection``, and ``text_decoder``) to CUDA and casts
+them to bf16. This avoids materializing the pinned checkpoint's roughly 16.7 GiB
+fp32 diagnostic path on-device while preserving the upstream computation. The
+default base path remains unchanged and moves only ``image_resampler``.
 
 PRISM2 is released under CC-BY-NC-ND-4.0 and its additional gated terms. It is
 for non-commercial academic research/evaluation only and must not be used for
