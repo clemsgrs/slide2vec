@@ -315,12 +315,78 @@ Slide-level encoders
      - ``0.5``
      - 1280
      - Shaikovski et al. (2024)
+   * - ``prism2``
+     - `PRISM2 <https://huggingface.co/paige-ai/Prism2>`_
+     - ``virchow2`` (CLS only)
+     - ``0.5``
+     - 2560
+     - Base embedding; Shaikovski et al. (2026)
    * - ``moozy-slide``
      - `MOOZY <https://huggingface.co/AtlasAnalyticsLab/MOOZY>`_
      - ``lunit``
      - ``0.5``
      - 768
      - Kotp et al. (2026)
+
+
+PRISM2 gated-use contract
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``prism2`` exposes only PRISM2's 2560-dimensional **base embedding** (the
+Perceiver-pool output) through slide2vec's slide-embedding API. Diagnostic
+embeddings, text generation, yes/no scoring, and concatenating multiple slides
+into one specimen are not part of this preset.
+
+The upstream repository is gated. Request access individually, accept its terms,
+then authenticate the machine that runs slide2vec with ``hf auth login`` (or set
+up Hugging Face authentication by another supported method). Tokens must not be
+stored in a project configuration or committed to source control. Install the
+isolated runtime only where this preset is needed:
+
+.. code-block:: bash
+
+   python -m pip install "slide2vec[prism2]"
+
+PRISM2 requires a CUDA-capable GPU and ``flash-attn>=2.6.3``; flash attention is
+mandatory because its Perceiver cross-attention uses the training-time
+``flash_attn_varlen_func`` kernel. The recommended compute precision is bf16.
+Because numpy-backed slide artifacts cannot persist bf16, slide2vec's existing
+default output-dtype policy widens bf16 results to fp32 on disk; pass an explicit
+supported ``output_dtype`` only when a different persisted dtype is intended.
+
+Input tiles must be foreground H&E tissue (background/glass removed), exactly
+224×224 pixels at 0.5 µm/px. The tile dependency is ``virchow2`` with its
+1280-dimensional ``cls`` output, not Virchow2's usual CLS+patch-mean vector.
+Although Virchow2 itself supports other spacings, the ``prism2`` preset rejects
+them unless the caller deliberately enables slide2vec's non-recommended-settings
+override. The default slide2vec preprocessing path segments and samples tissue;
+review custom masks and filtering overrides carefully so background tiles do not
+enter the bag.
+
+Coordinates are intentionally not supplied to PRISM2: at tested revision
+``450352d0ddc6b42b21ce20794ce0fbefe6b5a47a``, the official processor accepts
+only tile embeddings (plus an optional attention mask), and
+``get_base_embedding`` consumes only the processed tile tensor and mask. The
+same revision was used for the deterministic contract tests and CUDA smoke:
+
+.. code-block:: bash
+
+   CUDA_VISIBLE_DEVICES=0 python - <<'PY'
+   import torch
+   from slide2vec.encoders.models.prism2 import PRISM2_REVISION, Prism2SlideEncoder
+
+   assert PRISM2_REVISION == "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
+   encoder = Prism2SlideEncoder().to("cuda")
+   with torch.autocast("cuda", torch.bfloat16):
+       output = encoder.encode_slide(torch.zeros(2, 1280))
+   assert output.shape == (2560,)
+   PY
+
+PRISM2 is released under CC-BY-NC-ND-4.0 and its additional gated terms. It is
+for non-commercial academic research/evaluation only and must not be used for
+clinical care, diagnosis, treatment, or other medical decision support. Do not
+redistribute its weights or gated custom code; consult the upstream model page
+for the complete current terms before use.
 
 
 Patient-level encoders
