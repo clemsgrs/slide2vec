@@ -1,3 +1,4 @@
+import pytest
 import torch
 from torchvision.transforms import v2
 
@@ -74,23 +75,76 @@ def test_every_tile_registration_declares_variable_input_capability():
     assert resolve_variable_input_capability("moozy") is True
 
 
-def test_fixed_size_encoder_rejects_permitted_non_preset_request():
+def test_musk_rejects_permitted_non_preset_request():
     import pytest
 
     from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 
     with pytest.raises(ValueError) as error:
         PooledEncoderInputPlan.resolve(
-            "conch",
-            requested_tile_size_px=464,
+            "musk",
+            requested_tile_size_px=400,
             allow_non_recommended_settings=True,
         )
 
     assert str(error.value) == (
-        "Encoder 'conch' does not support a variable encoder input; its registered "
-        "input size is 448px, so an effective encoder input of 464px "
-        "(requested_tile_size_px=464) is unsupported."
+        "Encoder 'musk' does not support a variable encoder input; its registered "
+        "input size is 384px, so an effective encoder input of 400px "
+        "(requested_tile_size_px=400) is unsupported."
     )
+
+
+@pytest.mark.parametrize(
+    "name,requested_size",
+    [
+        ("conch", 464),
+        ("conchv15", 464),
+        ("phikon", 240),
+        ("phikonv2", 240),
+        ("isight", 350),
+    ],
+)
+def test_verified_vit_encoder_plans_exact_non_preset_input_without_constructor_kwargs(
+    name, requested_size
+):
+    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+
+    plan = PooledEncoderInputPlan.resolve(
+        name,
+        requested_tile_size_px=requested_size,
+        allow_non_recommended_settings=True,
+    )
+
+    assert plan.requires_variable_model_input is True
+    assert plan.expected_encoder_input_size_px == requested_size
+    assert plan.model_construction_kwargs == {}
+
+
+@pytest.mark.parametrize(
+    "name,default_size",
+    [
+        ("conch", 448),
+        ("conchv15", 448),
+        ("phikon", 224),
+        ("phikonv2", 224),
+        ("isight", 336),
+    ],
+)
+def test_variable_vit_native_defaults_still_select_shipped_preprocessing(
+    name, default_size
+):
+    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+
+    plan = PooledEncoderInputPlan.resolve(
+        name,
+        requested_tile_size_px=default_size,
+        allow_non_recommended_settings=False,
+    )
+
+    assert plan.preset_input_size_px == default_size
+    assert plan.preprocessing_kind == "shipped"
+    assert plan.requires_variable_model_input is False
+    assert plan.model_construction_kwargs == {}
 
 
 def test_permitted_variable_plan_preserves_exact_geometry_with_normalization_only():

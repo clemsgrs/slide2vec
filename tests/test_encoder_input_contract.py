@@ -91,8 +91,8 @@ def test_declared_geometry_rejects_an_encoder_without_variable_input_capability(
 
     with pytest.raises(ValueError, match="does not support a variable encoder input"):
         EncoderInputContract.declared_pooled(
-            "conch",
-            requested_tile_size_px=464,
+            "musk",
+            requested_tile_size_px=400,
             allow_non_recommended_settings=True,
         )
 
@@ -181,7 +181,7 @@ def test_load_model_rejects_a_contract_declared_for_another_encoder(stand_in_gig
     import slide2vec.inference as inference
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
-    # conch is fixed-input, so resolving 288px against conch would have raised outright.
+    # The contract remains bound to gigapath even though conch can accept 288px too.
     contract = EncoderInputContract.declared_pooled(
         "gigapath",
         requested_tile_size_px=288,

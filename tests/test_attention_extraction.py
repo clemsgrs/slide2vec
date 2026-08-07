@@ -21,7 +21,9 @@ from slide2vec.encoders.base import (  # noqa: E402
     TileEncoder,
     TimmTileEncoder,
     attentions_tuple_to_grids,
+    hf_eager_attention,
     prefix_attention_to_grid,
+    reshape_tokens_to_grid,
     resolve_block_indices,
     timm_self_attention_weights,
     timm_trunk_attention,
@@ -169,12 +171,12 @@ def test_conch_reuses_timm_trunk_attention():
     trunk = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)._model
     enc = CONCH.__new__(CONCH)
     enc._model = SimpleNamespace(visual=SimpleNamespace(trunk=trunk))
-    x = torch.randn(1, 3, 224, 224)
+    x = torch.randn(1, 3, 224, 256)
     with torch.no_grad():
         out = enc.encode_tiles_attention(x, blocks=(-1,))
         direct = timm_trunk_attention(trunk, x, blocks=(-1,), encoder_name="CONCH")
     nh = trunk.blocks[-1].attn.num_heads
-    assert out.shape == (1, nh, 14, 14)
+    assert out.shape == (1, nh, 14, 16)
     torch.testing.assert_close(out, direct, rtol=0, atol=0)
 
 
@@ -257,6 +259,84 @@ class _FakeHFAttnOutput:
         self.attentions = attentions
 
 
+def _tiny_phikon_encoder():
+    """A real tiny HF ViT wired behind the public Phikon extraction API."""
+    from transformers import ViTConfig, ViTModel
+
+    from slide2vec.encoders.models.phikon import Phikon
+
+    enc = Phikon.__new__(Phikon)
+    enc._model = ViTModel(
+        ViTConfig(
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            image_size=32,
+            patch_size=16,
+        )
+    ).eval()
+    enc._device = torch.device("cpu")
+    enc._output_variant = "default"
+    return enc
+
+
+def test_phikon_interpolates_positions_for_every_variable_extraction_path():
+    enc = _tiny_phikon_encoder()
+    rectangular = torch.randn(1, 3, 48, 32)
+
+    with torch.no_grad():
+        tokens = enc._model(
+            pixel_values=rectangular,
+            interpolate_pos_encoding=True,
+        ).last_hidden_state
+        pooled = enc.encode_tiles(rectangular)
+        dense = enc.encode_tiles_dense(rectangular)
+        attention = enc.encode_tiles_attention(rectangular)
+
+    assert pooled.shape == (1, 32)
+    assert dense.shape == (1, 32, 3, 2)
+    assert attention.shape == (1, 4, 3, 2)
+    expected_dense = tokens[:, 1:].transpose(1, 2).reshape(1, 32, 3, 2)
+    torch.testing.assert_close(dense, expected_dense, rtol=0, atol=0)
+
+
+def test_phikon_positional_interpolation_is_exactly_inert_at_native_size():
+    enc = _tiny_phikon_encoder()
+    native = torch.randn(1, 3, 32, 32)
+
+    with torch.no_grad():
+        prior = enc._model(pixel_values=native)
+        pooled = enc.encode_tiles(native)
+        dense = enc.encode_tiles_dense(native)
+        with hf_eager_attention(enc._model):
+            prior_with_attention = enc._model(
+                pixel_values=native,
+                output_attentions=True,
+            )
+        attention = enc.encode_tiles_attention(native)
+
+    prior_dense = reshape_tokens_to_grid(
+        prior.last_hidden_state,
+        grid_h=2,
+        grid_w=2,
+        num_prefix_tokens=1,
+        encoder_name="Phikon",
+    )
+    prior_attention = attentions_tuple_to_grids(
+        prior_with_attention.attentions,
+        num_prefix_tokens=1,
+        blocks=(-1,),
+        include_registers=False,
+        grid_h=2,
+        grid_w=2,
+        encoder_name="Phikon",
+    )
+    assert torch.equal(pooled, prior.last_hidden_state[:, 0])
+    assert torch.equal(dense, prior_dense)
+    assert torch.equal(attention, prior_attention)
+
+
 class _FakeHFViTWithAttn:
     """Minimal HF ViT double exposing per-layer output_attentions."""
 
@@ -265,8 +345,15 @@ class _FakeHFViTWithAttn:
         self._num_heads = num_heads
         self._num_layers = num_layers
 
-    def __call__(self, *, pixel_values, output_attentions=False):
+    def __call__(
+        self,
+        *,
+        pixel_values,
+        output_attentions=False,
+        interpolate_pos_encoding=False,
+    ):
         assert output_attentions is True
+        assert interpolate_pos_encoding is True
         b, _, h, w = pixel_values.shape
         n = 1 + (h // self.config.patch_size) * (w // self.config.patch_size)
         # Per-layer softmax-normalized attention so the slice invariants hold.
@@ -343,7 +430,13 @@ class _FakeSdpaHFViT:
     def set_attn_implementation(self, impl):
         self.config._attn_implementation = impl
 
-    def __call__(self, pixel_values=None, *, output_attentions=False):
+    def __call__(
+        self,
+        pixel_values=None,
+        *,
+        output_attentions=False,
+        interpolate_pos_encoding=False,
+    ):
         b, _, h, w = pixel_values.shape
         n = 1 + (h // self.config.patch_size) * (w // self.config.patch_size)
         if self.config._attn_implementation != "eager" or not output_attentions:

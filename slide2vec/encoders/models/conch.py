@@ -78,7 +78,7 @@ def _encode_trunk_dense(*, trunk, batch: Tensor, encoder_name: str) -> Tensor:
     output_variants={"default": {"encode_dim": 512}},
     default_output_variant="default",
     input_size=448,
-    supports_variable_input_size=False,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp32",
@@ -145,9 +145,8 @@ class CONCH(TileEncoder):
 
     @property
     def patch_size(self) -> tuple[int, int]:
-        # The CONCH vision trunk is a timm ViT-B/16; expose its patch size so the
-        # dense path can resolve the token grid. open_clip builds the trunk without
-        # dynamic_img_size, so dense extraction must use the native 448 window.
+        # The CONCH vision trunk is a dynamic timm ViT-B/16; expose its patch size
+        # so dense and attention paths can resolve each runtime token grid.
         return _patch_size_from_trunk(self._model.visual.trunk)
 
     @property
@@ -165,7 +164,7 @@ class CONCH(TileEncoder):
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
     input_size=448,
-    supports_variable_input_size=False,
+    supports_variable_input_size=True,
     patch_size=16,
     supported_spacing_um=0.5,
     precision="fp16",

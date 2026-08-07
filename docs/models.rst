@@ -157,23 +157,26 @@ source and protocol, stored as lossy 3000x3000 JPEGs. Expect it to be useful on
 IHC and unproven elsewhere.
 
 **Tiles are 336 px, not 224 or 256.** At the ``0.5`` µm/px default that is a
-168 µm field of view. ``supports_variable_input_size`` is ``False``: the model
-was only ever trained at 336.
+168 µm field of view. The CLIP backbone can interpolate its positional
+embeddings for other patch-divisible geometries, but 336 remains the trained,
+registered default. A different pooled size is an explicit non-recommended
+override; dense extraction can select a different geometry automatically.
 
 **The spacing is inferred.** HPA acquires at 20x, giving ~0.5 µm/px for its
 3000x3000 px images of ~1.5 mm cores, but HPA10M's dataset card does not state
 µm/px directly.
 
 **Only the tile level is exposed.** iSight's gated-attention pooler operates on
-token sequences rather than pooled tile vectors — each of the 577 token positions
-carries its own distribution over tiles — so it cannot be expressed through
+token sequences rather than pooled tile vectors — each runtime token position
+carries its own distribution over tiles (577 positions at 336 x 336) — so it
+cannot be expressed through
 :class:`~slide2vec.encoders.base.SlideEncoder`, whose ``encode_slide`` receives
 ``(N, D)``. Its five classification heads are also specific to the HPA tasks.
 Use downstream MIL for slide-level pooling.
 
-**Output variants.** ``token_mean`` (default) is the mean over all 577 tokens
-including CLS, matching the reference implementation; ``cls`` selects the CLS
-token alone. Both are 1024-d.
+**Output variants.** ``token_mean`` (default) is the mean over all runtime tokens
+including CLS (577 at 336 x 336), matching the reference implementation;
+``cls`` selects the CLS token alone. Both are 1024-d.
 
 **The download is a raw training checkpoint** (~4.8 GB), of which roughly 3.7 GB
 is optimizer state that is read and discarded. There is no smaller artifact
@@ -239,6 +242,10 @@ Notes:
   patch multiple, and optional sliding-window blending on top of this encoder
   API — see the "Dense Tile Feature Extraction" section of :doc:`api`.
 - ``musk`` dense extraction currently requires its native 384 x 384 input size.
+- ``conch``, ``conchv15``, ``phikon``, ``phikonv2``, and ``isight`` accept
+  patch-divisible square or rectangular encoder inputs. Their positional
+  embeddings are interpolated by the checkpoint's timm/Hugging Face backbone;
+  no variable-input constructor setting is required.
 - H-Optimus dense extraction at non-native input sizes requires
   ``dynamic_img_size=True`` and ``allow_non_recommended_settings=True`` when
   constructing the encoder directly. Through ``Model.embed_regions_dense`` the

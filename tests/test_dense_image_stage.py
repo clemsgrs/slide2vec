@@ -990,10 +990,10 @@ def test_model_embed_images_dense_delegates_and_requires_output_dir(monkeypatch,
 
 
 def test_declaring_the_dense_contract_rejects_a_geometry_the_encoder_cannot_take(tmp_path):
-    """The #233 capability check runs before any image is decoded: phikon is fixed-input."""
+    """The #233 capability check runs before any image is decoded: MUSK is fixed-input."""
     from slide2vec.api import Model
 
-    model = Model(name="phikon", device="cpu")
+    model = Model(name="musk", device="cpu")
     execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
 
     with pytest.raises(ValueError, match="does not support a variable encoder input"):
