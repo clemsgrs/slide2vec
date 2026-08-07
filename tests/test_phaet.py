@@ -6,7 +6,7 @@ torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 
 
-def test_phaet_is_a_public_fixed_input_tile_preset():
+def test_phaet_is_a_public_variable_input_tile_preset():
     from slide2vec import Model, list_models
     from slide2vec.encoders import encoder_registry
 
@@ -21,7 +21,7 @@ def test_phaet_is_a_public_fixed_input_tile_preset():
         "default_output_variant": "default",
         "level": "tile",
         "input_size": 224,
-        "supports_variable_input_size": False,
+        "supports_variable_input_size": True,
         "variable_input_model_kwargs": {},
         "patch_size": 16,
         "tile_encoder": None,
@@ -321,24 +321,32 @@ def test_phaet_real_weights_pooled_dense_and_attention_contract():
         pytest.skip(f"Phaet weights/runtime unavailable: {type(exc).__name__}: {exc}")
     encoder.to("cpu")
 
-    pixel_values = encoder.get_transform()(
+    default_pixel_values = encoder.get_transform()(
         torch.zeros(3, 224, 224, dtype=torch.uint8)
     ).unsqueeze(0)
+    non_default_pooled_pixel_values = encoder.get_normalization_transform()(
+        torch.zeros(3, 240, 240, dtype=torch.uint8)
+    ).unsqueeze(0)
+    rectangular_dense_pixel_values = encoder.get_normalization_transform()(
+        torch.zeros(3, 240, 256, dtype=torch.uint8)
+    ).unsqueeze(0)
     with torch.no_grad():
-        pooled = encoder.encode_tiles(pixel_values)
-        dense = encoder.encode_tiles_dense(pixel_values)
+        non_default_pooled = encoder.encode_tiles(non_default_pooled_pixel_values)
+        rectangular_dense = encoder.encode_tiles_dense(
+            rectangular_dense_pixel_values
+        )
         wrapper_output = encoder._model(
-            pixel_values=pixel_values,
+            pixel_values=default_pixel_values,
             output_attentions=True,
         )
 
-    assert pooled.shape == (1, 1024)
+    assert non_default_pooled.shape == (1, 1024)
     torch.testing.assert_close(
-        pooled.norm(dim=-1),
+        non_default_pooled.norm(dim=-1),
         torch.ones(1),
         rtol=0,
         atol=1e-5,
     )
-    assert dense.shape == (1, 1024, 14, 14)
+    assert rectangular_dense.shape == (1, 1024, 15, 16)
     assert wrapper_output.last_hidden_state.shape == (1, 197, 1024)
     assert wrapper_output.attentions is None
