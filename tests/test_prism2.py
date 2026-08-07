@@ -227,15 +227,39 @@ def test_prism2_rejects_unsupported_variant_before_gated_load(monkeypatch):
     assert load_calls == []
 
 
-def test_prism2_processes_one_slide_on_device_and_returns_exact_base_vector(
+@pytest.mark.parametrize(
+    ("output_variant", "processed_value", "expected_method", "expected"),
+    [
+        pytest.param(
+            None,
+            3.0,
+            "base",
+            torch.arange(2560, dtype=torch.float32).reshape(1, 2560),
+            id="base-default",
+        ),
+        pytest.param(
+            "diagnostic",
+            7.0,
+            "diagnostic",
+            torch.arange(3072, dtype=torch.float32).reshape(1, 3072),
+            id="diagnostic",
+        ),
+    ],
+)
+def test_prism2_processes_one_slide_and_returns_exact_selected_vector(
     monkeypatch,
+    output_variant,
+    processed_value,
+    expected_method,
+    expected,
 ):
     from slide2vec.encoders.models.prism2 import Prism2SlideEncoder
 
     processor_calls = []
     model_calls = []
     device_moves = []
-    expected = torch.arange(2560, dtype=torch.float32).reshape(1, 2560)
+    expected_processed_tiles = torch.full((1, 2, 1280), processed_value)
+    expected_attention_mask = torch.tensor([[1, 1]], dtype=torch.int32)
 
     class FakeBatch(dict):
         def to(self, device):
@@ -246,82 +270,17 @@ def test_prism2_processes_one_slide_on_device_and_returns_exact_base_vector(
         def __call__(self, *, tile_embeddings):
             processor_calls.append(tile_embeddings)
             return FakeBatch(
-                tile_embeddings=torch.full((1, 2, 1280), 3.0),
-                attention_mask=torch.tensor([[1, 1]], dtype=torch.int32),
+                tile_embeddings=expected_processed_tiles.clone(),
+                attention_mask=expected_attention_mask.clone(),
             )
 
     class FakeModel(torch.nn.Module):
         def get_base_embedding(self, **batch):
-            model_calls.append(batch)
+            model_calls.append(("base", batch))
             return expected
-
-    monkeypatch.setattr(
-        transformers.AutoModel,
-        "from_pretrained",
-        lambda *args, **kwargs: FakeModel(),
-    )
-    monkeypatch.setattr(
-        transformers.AutoProcessor,
-        "from_pretrained",
-        lambda *args, **kwargs: FakeProcessor(),
-    )
-    encoder = Prism2SlideEncoder()
-    tiles = torch.arange(2 * 1280, dtype=torch.float32).reshape(2, 1280)
-    coordinates = torch.tensor([[100, 200], [300, 400]])
-
-    output = encoder.encode_slide(
-        tiles,
-        coordinates,
-        tile_size_lv0=448,
-    )
-
-    assert processor_calls == [[tiles]]
-    assert device_moves == [torch.device("cpu")]
-    assert list(model_calls[0]) == ["tile_embeddings", "attention_mask"]
-    torch.testing.assert_close(
-        model_calls[0]["tile_embeddings"],
-        torch.full((1, 2, 1280), 3.0),
-        rtol=0,
-        atol=0,
-    )
-    torch.testing.assert_close(
-        model_calls[0]["attention_mask"],
-        torch.tensor([[1, 1]], dtype=torch.int32),
-        rtol=0,
-        atol=0,
-    )
-    torch.testing.assert_close(output, expected[0], rtol=0, atol=0)
-
-
-def test_prism2_processes_one_slide_and_returns_exact_diagnostic_vector(
-    monkeypatch,
-):
-    from slide2vec.encoders.models.prism2 import Prism2SlideEncoder
-
-    processor_calls = []
-    model_calls = []
-    device_moves = []
-    expected = torch.arange(3072, dtype=torch.float32).reshape(1, 3072)
-
-    class FakeBatch(dict):
-        def to(self, device):
-            device_moves.append(torch.device(device))
-            return self
-
-    class FakeProcessor:
-        def __call__(self, *, tile_embeddings):
-            processor_calls.append(tile_embeddings)
-            return FakeBatch(
-                tile_embeddings=torch.full((1, 2, 1280), 7.0),
-                attention_mask=torch.tensor([[1, 1]], dtype=torch.int32),
-            )
-
-    class FakeModel(torch.nn.Module):
-        def get_base_embedding(self, **batch):
-            raise AssertionError("diagnostic must not dispatch to the base method")
 
         def get_diagnostic_embedding(self, **batch):
-            model_calls.append(batch)
+            model_calls.append(("diagnostic", batch))
             return expected
 
     monkeypatch.setattr(
@@ -334,7 +293,7 @@ def test_prism2_processes_one_slide_and_returns_exact_diagnostic_vector(
         "from_pretrained",
         lambda *args, **kwargs: FakeProcessor(),
     )
-    encoder = Prism2SlideEncoder(output_variant="diagnostic")
+    encoder = Prism2SlideEncoder(output_variant=output_variant)
     tiles = torch.arange(2 * 1280, dtype=torch.float32).reshape(2, 1280)
     coordinates = torch.tensor([[100, 200], [300, 400]])
 
@@ -346,16 +305,18 @@ def test_prism2_processes_one_slide_and_returns_exact_diagnostic_vector(
 
     assert processor_calls == [[tiles]]
     assert device_moves == [torch.device("cpu")]
-    assert list(model_calls[0]) == ["tile_embeddings", "attention_mask"]
+    assert model_calls[0][0] == expected_method
+    processed_batch = model_calls[0][1]
+    assert list(processed_batch) == ["tile_embeddings", "attention_mask"]
     torch.testing.assert_close(
-        model_calls[0]["tile_embeddings"],
-        torch.full((1, 2, 1280), 7.0),
+        processed_batch["tile_embeddings"],
+        expected_processed_tiles,
         rtol=0,
         atol=0,
     )
     torch.testing.assert_close(
-        model_calls[0]["attention_mask"],
-        torch.tensor([[1, 1]], dtype=torch.int32),
+        processed_batch["attention_mask"],
+        expected_attention_mask,
         rtol=0,
         atol=0,
     )
