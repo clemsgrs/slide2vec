@@ -23,7 +23,7 @@ from slide2vec.artifacts import (
 from slide2vec.runtime.dense_encode import DenseEncodeGeometry, DenseEncodeKit
 
 
-__version__ = "5.6.0"
+__version__ = "5.7.0"
 
 __all__ = [
     "Model",
