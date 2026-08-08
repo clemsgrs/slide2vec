@@ -49,6 +49,9 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "hibou-b": (14, 14),
     "hibou-l": (14, 14),
     "isight": (14, 14),
+    "rudolfv2": (8, 8),
+    "rudolfv2-b": (8, 8),
+    "rudolfv2-s": (8, 8),
 }
 
 # Non-dense tile encoders: real tile encoders with no recoverable patch grid

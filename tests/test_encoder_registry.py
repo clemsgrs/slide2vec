@@ -30,6 +30,9 @@ EXPECTED_TILE_ENCODERS = {
     "phikonv2",
     "phaet",
     "prost40m",
+    "rudolfv2",
+    "rudolfv2-b",
+    "rudolfv2-s",
 }
 
 EXPECTED_SLIDE_ENCODERS = {
