@@ -128,6 +128,21 @@ Tile-level encoders
      - 1536
      - ``0.5``
      - Saillard et al. (2024)
+   * - ``rudolfv2``
+     - `RudolfV 2 <https://huggingface.co/Aignostics/RudolfV-2>`_
+     - 1536 / 3072
+     - ``0.25``, ``0.5``, ``1.0``, ``2.0``
+     - Aignostics (2026); CLS or CLS+patch-mean outputs
+   * - ``rudolfv2-b``
+     - `RudolfV 2-B <https://huggingface.co/Aignostics/RudolfV-2-B>`_
+     - 768 / 1536
+     - ``0.25``, ``0.5``, ``1.0``, ``2.0``
+     - Aignostics (2026); CLS or CLS+patch-mean outputs
+   * - ``rudolfv2-s``
+     - `RudolfV 2-S <https://huggingface.co/Aignostics/RudolfV-2-S>`_
+     - 384 / 768
+     - ``0.25``, ``0.5``, ``1.0``, ``2.0``
+     - Aignostics (2026); CLS or CLS+patch-mean outputs
    * - ``mascaret``
      - `Mascaret <https://huggingface.co/wearewaiv/mascaret>`_
      - 1536
@@ -225,8 +240,8 @@ The following built-in tile presets are covered by the dense encoder interface:
 ``conch``, ``conchv15``, ``dinov2-vitb14``, ``genbio-pathfm``, ``gigapath``,
 ``gpfm``, ``h0-mini``, ``h-optimus-0``, ``h-optimus-1``, ``hibou-b``,
 ``hibou-l``, ``isight``, ``lunit``, ``mascaret``, ``midnight``, ``mstar``, ``musk``,
-``phaet``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``, ``virchow``, and
-``virchow2``.
+``phaet``, ``phikon``, ``phikonv2``, ``prost40m``, ``rudolfv2``, ``rudolfv2-b``,
+``rudolfv2-s``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
@@ -259,6 +274,12 @@ Notes:
 - ``genbio-pathfm`` is a single-channel ViT: its dense grid (via
   ``forward_with_patches``) concatenates the three per-colour-channel patch grids
   along the feature dim, so ``d`` = 4608 matches the pooled output dimension.
+- RudolfV 2, RudolfV 2-B, and RudolfV 2-S expose the 8px patch-token grid after
+  stripping CLS plus eight register tokens. Their native pooled input is 224px,
+  while dense and explicitly declared pooled inputs may be any patch-divisible
+  square or rectangle; the adapter preserves both grid dimensions for 2D rotary
+  position encoding. The default pooled output is ``cls_patch_mean`` and
+  ``output_variant="cls"`` selects CLS alone.
 
 Dense attention maps
 ~~~~~~~~~~~~~~~~~~~~~
@@ -271,8 +292,8 @@ contract and knobs.
 The following built-in tile presets are covered: ``conch``, ``conchv15``,
 ``dinov2-vitb14``, ``gigapath``, ``gpfm``, ``h0-mini``, ``h-optimus-0``,
 ``h-optimus-1``, ``hibou-b``, ``hibou-l``, ``isight``, ``lunit``, ``midnight``,
-``mstar``, ``phikon``, ``phikonv2``, ``prost40m``, ``uni``, ``uni2``,
-``virchow``, and ``virchow2``.
+``mstar``, ``phikon``, ``phikonv2``, ``prost40m``, ``rudolfv2``, ``rudolfv2-b``,
+``rudolfv2-s``, ``uni``, ``uni2``, ``virchow``, and ``virchow2``.
 
 Notes:
 
