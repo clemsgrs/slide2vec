@@ -99,16 +99,61 @@ py-modules = ["private_encoder_plugin"]
 """
 
 
-PLUGIN_CONSUMER_SCRIPT = """
-from concurrent.futures import ThreadPoolExecutor
+PLUGIN_WORKER_SCRIPT = """
+import json
 import os
 from pathlib import Path
 import socket
+
+from slide2vec.distributed.worker_entry import model_from_request
+from slide2vec.encoders import encoder_registry
+
+
+def reject_network(*args, **kwargs):
+    raise AssertionError("worker reconstruction attempted network access")
+
+
+socket.socket = reject_network
+
+
+class CpuWorkerRank:
+    device = "cpu"
+
+
+request = json.loads(Path(os.environ["PLUGIN_REQUEST_PATH"]).read_text())
+model = model_from_request(request, rank=CpuWorkerRank())
+metadata = encoder_registry.info(model.name)
+registered_class = encoder_registry.require(model.name)
+feature_dim = model.feature_dim
+
+# A second reconstruction in this interpreter must reuse the completed discovery
+# pass. The provider's exclusive-create sentinel fails if it is invoked twice.
+second_model = model_from_request(request, rank=CpuWorkerRank())
+assert encoder_registry.require(second_model.name) is registered_class
+
+Path(os.environ["PLUGIN_WORKER_REPORT"]).write_text(json.dumps({
+    "model_request": request["model"],
+    "metadata": metadata,
+    "registered_class": [registered_class.__module__, registered_class.__qualname__],
+    "feature_dim": feature_dim,
+}))
+"""
+
+
+PLUGIN_CONSUMER_SCRIPT = """
+from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
 from threading import Barrier
 
 import slide2vec
 from slide2vec import Model, list_models
 from slide2vec.encoders import encoder_registry
+from slide2vec.runtime.serialization import serialize_model
 
 discovered = Path(os.environ["PLUGIN_DISCOVERED_SENTINEL"])
 constructed = Path(os.environ["PLUGIN_CONSTRUCTED_SENTINEL"])
@@ -168,10 +213,47 @@ assert constructed.read_text() == "constructed"
 # Repeated public access is process-global and idempotent: the provider would fail
 # on duplicate preset names if slide2vec invoked it a second time.
 assert list_models() == expected_models
+
+model_request = serialize_model(model)
+assert model_request == {
+    "name": "private-alpha",
+    "output_variant": None,
+    "allow_non_recommended_settings": False,
+}
+request_path = Path(os.environ["PLUGIN_REQUEST_PATH"])
+request_path.write_text(json.dumps({"model": model_request}))
+parent_metadata = encoder_registry.info("private-alpha")
+parent_class = encoder_registry.require("private-alpha")
+parent_class_identity = [parent_class.__module__, parent_class.__qualname__]
+
+# Each launch is a new worker interpreter. It sees only the ordinary name-based
+# request and the installed distribution; no parent import or live class crosses.
+for worker_index in range(2):
+    worker_env = os.environ.copy()
+    worker_env["PLUGIN_DISCOVERED_SENTINEL"] = str(
+        request_path.parent / f"worker-{worker_index}-discovered"
+    )
+    worker_env["PLUGIN_CONSTRUCTED_SENTINEL"] = str(
+        request_path.parent / f"worker-{worker_index}-constructed"
+    )
+    worker_report = request_path.parent / f"worker-{worker_index}-report.json"
+    worker_env["PLUGIN_WORKER_REPORT"] = str(worker_report)
+    subprocess.run(
+        [sys.executable, os.environ["PLUGIN_WORKER_SCRIPT_PATH"]],
+        env=worker_env,
+        check=True,
+    )
+    report = json.loads(worker_report.read_text())
+    assert report == {
+        "model_request": model_request,
+        "metadata": parent_metadata,
+        "registered_class": parent_class_identity,
+        "feature_dim": 3,
+    }
 """
 
 
-def test_installed_distribution_contributes_presets_to_public_model_api(
+def test_installed_plugin_reconstructs_from_model_request_in_fresh_workers(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -180,6 +262,8 @@ def test_installed_distribution_contributes_presets_to_public_model_api(
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text(textwrap.dedent(PLUGIN_PYPROJECT))
     (plugin / "private_encoder_plugin.py").write_text(textwrap.dedent(PLUGIN_MODULE))
+    worker_script = tmp_path / "plugin_worker.py"
+    worker_script.write_text(textwrap.dedent(PLUGIN_WORKER_SCRIPT))
 
     target = tmp_path / "site-packages"
     subprocess.run(
@@ -204,6 +288,8 @@ def test_installed_distribution_contributes_presets_to_public_model_api(
     env["PYTHONPATH"] = os.pathsep.join((str(target), str(repository_root)))
     env["PLUGIN_DISCOVERED_SENTINEL"] = str(tmp_path / "discovered")
     env["PLUGIN_CONSTRUCTED_SENTINEL"] = str(tmp_path / "constructed")
+    env["PLUGIN_REQUEST_PATH"] = str(tmp_path / "request.json")
+    env["PLUGIN_WORKER_SCRIPT_PATH"] = str(worker_script)
     subprocess.run(
         [sys.executable, "-c", textwrap.dedent(PLUGIN_CONSUMER_SCRIPT)],
         cwd=tmp_path,
