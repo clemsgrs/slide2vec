@@ -499,60 +499,80 @@ positive static ``patch_size`` accepted by ``register_encoder``. A pooled-only t
 encoder needs none of those dense members and resolves with ``dense=False`` and
 ``attention=False``.
 
-Custom registry-backed encoders
---------------------------------
+Custom encoder plugin package
+-----------------------------
 
-If you want to use a model that is not shipped with ``slide2vec``, wrap it in
-an encoder class and register it under a new preset name.
+An encoder owned outside this repository can behave exactly like a built-in preset.
+Package it as a Python distribution with a zero-argument provider in the
+``slide2vec.encoders`` entry-point group. Installing the distribution is enough:
+the Python API and CLI discover it lazily, without a manual import or a module path.
 
-Where to put the file
-~~~~~~~~~~~~~~~~~~~~~
+Minimal package layout
+~~~~~~~~~~~~~~~~~~~~~~
 
-The registry only sees a preset once the module containing
-``@register_encoder`` is imported. ``slide2vec`` auto-imports everything under
-``slide2vec/encoders/models/``, so the simplest way to expose a custom encoder
-to **both the Python API and the CLI** is:
+Create these two files in a separate repository:
 
-1. Add your file as ``slide2vec/encoders/models/my_tile_model.py``.
-2. Add it to ``slide2vec/encoders/models/__init__.py`` (both the
-   ``from . import (...)`` block and ``__all__``).
-3. Reinstall in editable mode if needed (``pip install -e .``).
+.. code-block:: text
 
-The preset name can then be used in YAML configs (``model.name: my-tile-model``),
-``Model.from_preset(...)``, and ``slide2vec.list_models()``.
+   my-slide2vec-encoders/
+   ├── pyproject.toml
+   └── src/
+       └── my_slide2vec_encoders/
+           └── __init__.py
 
-Tile encoder example
-~~~~~~~~~~~~~~~~~~~~
+``pyproject.toml`` declares the installed provider:
+
+.. code-block:: toml
+
+   [build-system]
+   requires = ["setuptools>=61"]
+   build-backend = "setuptools.build_meta"
+
+   [project]
+   name = "my-slide2vec-encoders"
+   version = "0.1.0"
+   dependencies = ["slide2vec>=5.7", "torch", "torchvision"]
+
+   [project.entry-points."slide2vec.encoders"]
+   my_org = "my_slide2vec_encoders:register_encoders"
+
+   [tool.setuptools.packages.find]
+   where = ["src"]
+
+``src/my_slide2vec_encoders/__init__.py`` implements the existing public Encoder
+contract and registers its static preset metadata from the provider:
 
 .. code-block:: python
 
+   from pathlib import Path
+
    import torch
    from torch import Tensor
+   from torchvision.transforms import v2
 
-   from slide2vec.encoders import TileEncoder
-   from slide2vec.encoders import register_encoder, resolve_requested_output_variant
-
-
-   @register_encoder(
-       "my-tile-model",
-       output_variants={"default": {"encode_dim": 768}},
-       default_output_variant="default",
-       input_size=224,
-       supported_spacing_um=0.5,
-       precision="fp16",
-       source="my-org/my-tile-model",
+   from slide2vec.encoders import (
+       TileEncoder,
+       register_encoder,
+       resolve_requested_output_variant,
    )
+
+   CHECKPOINT = Path("/models/my-tile-model.ts")
+
+
    class MyTileModel(TileEncoder):
        def __init__(self, *, output_variant: str | None = None):
            self._output_variant = resolve_requested_output_variant(output_variant)
-           self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-           self._model = self._load_model().eval()
-
-       def _load_model(self):
-           ...
+           self._device = torch.device("cpu")
+           # Loading belongs in construction, never in register_encoders().
+           self._model = torch.jit.load(CHECKPOINT, map_location="cpu").eval()
 
        def get_transform(self):
-           ...
+           return v2.Compose([
+               v2.ToImage(),
+               v2.Resize((224, 224)),
+               v2.ToDtype(torch.float32, scale=True),
+               v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+           ])
 
        def encode_tiles(self, batch: Tensor) -> Tensor:
            return self._model(batch)
@@ -570,101 +590,60 @@ Tile encoder example
            self._model = self._model.to(self._device)
            return self
 
-Once the module is imported, the preset is available through the existing API:
+
+   def register_encoders() -> None:
+       register_encoder(
+           "my-tile-model",
+           level="tile",
+           output_variants={"default": {"encode_dim": 768}},
+           default_output_variant="default",
+           input_size=224,
+           supports_variable_input_size=False,
+           supported_spacing_um=0.5,
+           precision="fp16",
+           source="/models/my-tile-model.ts",
+       )(MyTileModel)
+
+The provider may register more than one class. Keep it metadata-only: importing the
+module and calling ``register_encoders()`` must not construct an encoder, read a
+checkpoint, contact a model hub, or otherwise access the network. Those operations
+belong to the encoder constructor, which runs only when slide2vec loads that preset.
+
+Install and use it
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: console
+
+   pip install ./my-slide2vec-encoders
 
 .. code-block:: python
 
-   from slide2vec import Model
+   from slide2vec import Model, list_models
+   from slide2vec.encoders import encoder_registry
 
+   assert "my-tile-model" in list_models()
+   print(encoder_registry.info("my-tile-model"))  # static metadata; no weights loaded
    model = Model.from_preset("my-tile-model")
 
+The same preset name works as ``model.name`` in YAML and in the CLI. Every process
+discovers installed providers on its first encoder-registry read; no plugin import is
+needed in application code.
 
-Slide encoder example
-~~~~~~~~~~~~~~~~~~~~~
+Loading ownership and trust
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
+The plugin owns its checkpoint loader and credentials. The example uses a fixed local
+TorchScript path. For a private Hugging Face repository, replace that constructor line
+with the appropriate ``from_pretrained("my-org/my-private-model", token=True)`` call
+and supply credentials through the Hugging Face login/token mechanisms. This remains
+construction-time work; the provider itself stays offline and metadata-only.
 
-   import torch
-   from torch import Tensor
+``trust_remote_code=True`` executes Python supplied by the model repository. Enable it
+only after reviewing that code and pinning a trusted commit; leave it disabled for
+unreviewed or mutable repositories.
 
-   from slide2vec.encoders import SlideEncoder
-   from slide2vec.encoders import register_encoder, resolve_requested_output_variant
-
-
-   @register_encoder(
-       "my-slide-model",
-       level="slide",
-       tile_encoder="my-tile-model",
-       tile_encoder_output_variant="default",
-       output_variants={"default": {"encode_dim": 512}},
-       default_output_variant="default",
-       supported_spacing_um=0.5,
-       precision="fp16",
-       source="my-org/my-slide-model",
-   )
-   class MySlideModel(SlideEncoder):
-       def __init__(self, *, output_variant: str | None = None):
-           self._output_variant = resolve_requested_output_variant(output_variant)
-           self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-           self._model = self._load_model().eval()
-
-       def _load_model(self):
-           ...
-
-       @property
-       def encode_dim(self) -> int:
-           return 512
-
-       @property
-       def device(self) -> torch.device:
-           return self._device
-
-       def to(self, device: torch.device | str):
-           self._device = torch.device(device)
-           self._model = self._model.to(self._device)
-           return self
-
-       def encode_slide(
-           self,
-           tile_features: Tensor,
-           coordinates: Tensor | None = None,
-           *,
-           tile_size_lv0: int | None = None,
-       ) -> Tensor:
-           return self._model(tile_features)
-
-
-Multiple weights for the same architecture
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Encoders are instantiated as ``encoder_cls(output_variant=...)``, so the
-weights are tied to the registered class. To expose several checkpoints of
-the same architecture (e.g. different pretraining stages), put the shared
-logic in a base class and register one thin subclass per checkpoint. This
-keeps "preset name → exact weights" as a stable invariant and avoids any
-runtime configuration of paths.
-
-The built-in ``phikon`` encoder
-(``slide2vec/encoders/models/phikon.py``) follows this pattern:
-
-.. code-block:: python
-
-   class _PhikonBase(TileEncoder):
-       def __init__(self, model_name: str, *, output_variant: str | None = None):
-           self._model = AutoModel.from_pretrained(model_name).eval()
-           ...
-
-   @register_encoder("phikon", ..., source="owkin/phikon")
-   class Phikon(_PhikonBase):
-       def __init__(self, *, output_variant: str | None = None):
-           super().__init__("owkin/phikon", output_variant=output_variant)
-
-   @register_encoder("phikonv2", ..., source="owkin/phikon-v2")
-   class PhikonV2(_PhikonBase):
-       def __init__(self, *, output_variant: str | None = None):
-           super().__init__("owkin/phikon-v2", output_variant=output_variant)
-
-For local checkpoints, swap the HuggingFace identifier for a path (or any
-loader you control) in each subclass. Each preset can then be selected
-through the usual ``model.name`` field in YAML configs or
-``Model.from_preset(...)``.
+A preset name is the sole model and artifact identity. Once published, never repoint a
+name to different weights, preprocessing, output semantics, or architecture. Publish a
+new preset name and register a separate class when any of those change; distribution
+versions, checkpoint paths, providers, and recipe revisions are not added to artifact
+identity by slide2vec.

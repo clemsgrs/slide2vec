@@ -1,13 +1,78 @@
 """Encoder registry with enforced metadata schema."""
 
 from dataclasses import dataclass
+from enum import Enum, auto
+from importlib import metadata as importlib_metadata
 import inspect
+from threading import Condition, RLock, get_ident
 from typing import Any
 
 from slide2vec.encoders.base import PatientEncoder, SlideEncoder, TileEncoder
 from slide2vec.runtime.registry import Registry
 
-encoder_registry = Registry("encoders")
+
+_ENCODER_ENTRY_POINT_GROUP = "slide2vec.encoders"
+
+
+class _DiscoveryState(Enum):
+    PENDING = auto()
+    RUNNING = auto()
+    COMPLETE = auto()
+    FAILED = auto()
+
+
+def _installed_encoder_providers() -> list[importlib_metadata.EntryPoint]:
+    entry_points = importlib_metadata.entry_points()
+    providers = entry_points.select(group=_ENCODER_ENTRY_POINT_GROUP)
+    return sorted(providers, key=lambda provider: (provider.name, provider.value))
+
+
+class EncoderRegistry(Registry):
+    """Encoder registry with one lazy, process-global plugin discovery pass."""
+
+    def __init__(self) -> None:
+        super().__init__("encoders")
+        self._discovery_condition = Condition(RLock())
+        self._discovery_state = _DiscoveryState.PENDING
+        self._discovery_owner: int | None = None
+        self._discovery_error: BaseException | None = None
+
+    def _ensure_plugins_discovered(self) -> None:
+        current_thread = get_ident()
+        with self._discovery_condition:
+            while self._discovery_state is _DiscoveryState.RUNNING:
+                if self._discovery_owner == current_thread:
+                    return
+                self._discovery_condition.wait()
+            if self._discovery_state is _DiscoveryState.COMPLETE:
+                return
+            if self._discovery_state is _DiscoveryState.FAILED:
+                assert self._discovery_error is not None
+                raise self._discovery_error
+            self._discovery_state = _DiscoveryState.RUNNING
+            self._discovery_owner = current_thread
+
+        try:
+            for entry_point in _installed_encoder_providers():
+                entry_point.load()()
+        except BaseException as error:
+            with self._discovery_condition:
+                self._discovery_state = _DiscoveryState.FAILED
+                self._discovery_owner = None
+                self._discovery_error = error
+                self._discovery_condition.notify_all()
+            raise
+        else:
+            with self._discovery_condition:
+                self._discovery_state = _DiscoveryState.COMPLETE
+                self._discovery_owner = None
+                self._discovery_condition.notify_all()
+
+    def _before_read(self) -> None:
+        self._ensure_plugins_discovered()
+
+
+encoder_registry = EncoderRegistry()
 
 
 @dataclass(frozen=True)
