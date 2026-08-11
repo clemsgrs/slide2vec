@@ -636,8 +636,46 @@ encoder class, provider, or checkpoint location from the parent process. Any wei
 credentials, environment variables, and local paths used by the plugin must therefore
 be reachable with the same meaning from every worker and node.
 
+Provider failures and diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each provider registers transactionally. If loading or calling a provider raises,
+its metadata is invalid, or any of its preset names already belongs to a built-in or
+an earlier provider, slide2vec discards every preset registered by that provider.
+Built-ins and healthy providers remain available. Provider order is deterministic,
+and an existing preset is never replaced.
+
+``list_models()`` emits a concise ``RuntimeWarning`` when it skips a provider. The
+warning includes the provider's entry-point key, exception type, and single-line
+message. Downstream tools can consume the same information without parsing warning
+text through the stable top-level API:
+
+.. code-block:: python
+
+   from slide2vec import list_encoder_provider_diagnostics, list_models
+
+   available = list_models()
+   for diagnostic in list_encoder_provider_diagnostics():
+       print(
+           diagnostic.provider_key,
+           diagnostic.provider,
+           diagnostic.exception_type,
+           diagnostic.message,
+       )
+
+The accessor returns a tuple of frozen
+:class:`~slide2vec.EncoderProviderDiagnostic` values, so callers cannot mutate the
+process-global discovery result. Looking up an unavailable preset includes these
+provider failures after the ordinary available-preset list. Successful lookup and
+model construction are unchanged.
+
 Loading ownership and trust
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Installing an Encoder provider authorizes slide2vec to import and execute that
+provider as trusted Python code during lazy discovery. There is no sandbox,
+signature system, dependency isolation, or allowlist. Review and control installed
+provider distributions with the same care as any other Python dependency.
 
 The plugin owns its checkpoint loader and credentials. The example uses a fixed local
 TorchScript path. For a private Hugging Face repository, replace that constructor line

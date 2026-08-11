@@ -16,7 +16,9 @@ from slide2vec.encoders.base import (
 )
 from slide2vec.encoders.registry import (
     EncoderCapabilities,
+    EncoderProviderDiagnostic,
     encoder_registry,
+    list_encoder_provider_diagnostics,
     normalize_patch_size,
     register_encoder,
     resolve_encoder_capabilities,
@@ -32,6 +34,7 @@ from slide2vec.encoders import models  # noqa: F401
 __all__ = [
     "Encoder",
     "EncoderCapabilities",
+    "EncoderProviderDiagnostic",
     "PatientEncoder",
     "TileEncoder",
     "SlideEncoder",
@@ -40,6 +43,7 @@ __all__ = [
     "resolve_recommended_dynamic_img_size",
     "resolve_requested_output_variant",
     "encoder_registry",
+    "list_encoder_provider_diagnostics",
     "normalize_patch_size",
     "register_encoder",
     "resolve_encoder_capabilities",
