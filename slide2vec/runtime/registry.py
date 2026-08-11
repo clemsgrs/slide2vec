@@ -34,8 +34,12 @@ class Registry:
 
         return decorator
 
+    def _before_read(self) -> None:
+        """Run domain-specific setup before registry entries are observed."""
+
     def require(self, name: str) -> type:
         """Retrieve a registered class by name."""
+        self._before_read()
         if name not in self._entries:
             available = ", ".join(sorted(self._entries)) or "(none)"
             msg = f"'{name}' not found in {self._domain} registry. Available: {available}"
@@ -43,14 +47,17 @@ class Registry:
         return self._entries[name].cls
 
     def __contains__(self, name: str) -> bool:
+        self._before_read()
         return name in self._entries
 
     def names(self) -> list[str]:
         """List all registered component names."""
+        self._before_read()
         return list(self._entries.keys())
 
     def info(self, name: str) -> dict[str, Any]:
         """Get metadata for a registered component."""
+        self._before_read()
         if name not in self._entries:
             msg = f"'{name}' not found in {self._domain} registry"
             raise KeyError(msg)
@@ -59,6 +66,7 @@ class Registry:
 
     def list_with_metadata(self) -> list[dict[str, Any]]:
         """List all components with their metadata."""
+        self._before_read()
         return [self.info(name) for name in self._entries]
 
 
@@ -68,4 +76,3 @@ class _Entry:
     def __init__(self, cls: type, metadata: dict[str, Any]) -> None:
         self.cls = cls
         self.metadata = metadata
-
