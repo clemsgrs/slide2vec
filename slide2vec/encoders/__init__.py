@@ -15,9 +15,11 @@ from slide2vec.encoders.base import (
     resolve_requested_output_variant,
 )
 from slide2vec.encoders.registry import (
+    EncoderCapabilities,
     encoder_registry,
     normalize_patch_size,
     register_encoder,
+    resolve_encoder_capabilities,
     resolve_encoder_output,
     resolve_patch_size,
     resolve_preprocessing_requirements,
@@ -29,6 +31,7 @@ from slide2vec.encoders import models  # noqa: F401
 
 __all__ = [
     "Encoder",
+    "EncoderCapabilities",
     "PatientEncoder",
     "TileEncoder",
     "SlideEncoder",
@@ -39,6 +42,7 @@ __all__ = [
     "encoder_registry",
     "normalize_patch_size",
     "register_encoder",
+    "resolve_encoder_capabilities",
     "resolve_patch_size",
     "resolve_preprocessing_requirements",
     "resolve_encoder_output",

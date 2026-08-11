@@ -1,10 +1,70 @@
 """Encoder registry with enforced metadata schema."""
 
+from dataclasses import dataclass
+import inspect
 from typing import Any
 
+from slide2vec.encoders.base import PatientEncoder, SlideEncoder, TileEncoder
 from slide2vec.runtime.registry import Registry
 
 encoder_registry = Registry("encoders")
+
+
+@dataclass(frozen=True)
+class EncoderCapabilities:
+    """Resolved, metadata-only preflight view of one registered Encoder preset."""
+
+    name: str
+    level: str
+    pooled: bool
+    dense: bool
+    attention: bool
+    slide: bool
+    patient: bool
+    patch_size: tuple[int, int] | None
+    tile_encoder: str | None
+    tile_encoder_output_variant: str | None
+
+
+def resolve_encoder_capabilities(encoder_name: str) -> EncoderCapabilities:
+    """Resolve supported extraction contracts without constructing the encoder."""
+    encoder_cls = encoder_registry.require(encoder_name)
+    metadata = encoder_registry.info(encoder_name)
+    _validate_encoder_capability_contract(encoder_name, encoder_cls, metadata)
+    level = resolve_encoder_level(encoder_name, metadata)
+    dense = all(_dense_class_contract(encoder_cls))
+    attention = _supports_attention(encoder_cls)
+    tile_encoder = None
+    tile_encoder_output_variant = None
+    if level in {"slide", "patient"}:
+        tile_encoder, tile_encoder_output_variant = (
+            _resolve_hierarchical_tile_dependency(encoder_name, metadata)
+        )
+        dependency_metadata = encoder_registry.info(tile_encoder)
+        dependency_level = resolve_encoder_level(tile_encoder, dependency_metadata)
+        if dependency_level != "tile":
+            raise ValueError(
+                f"Encoder '{encoder_name}' tile_encoder dependency '{tile_encoder}' "
+                f"must have level='tile', got level='{dependency_level}'."
+            )
+        dependency_output = resolve_tile_dependency_output(
+            encoder_name,
+            metadata=metadata,
+        )
+        tile_encoder_output_variant = str(dependency_output["output_variant"])
+        resolve_encoder_capabilities(tile_encoder)
+    return EncoderCapabilities(
+        name=encoder_name,
+        level=level,
+        pooled=issubclass(encoder_cls, TileEncoder),
+        dense=dense,
+        attention=attention,
+        slide=issubclass(encoder_cls, (SlideEncoder, PatientEncoder)),
+        patient=issubclass(encoder_cls, PatientEncoder),
+        patch_size=resolve_patch_size(encoder_name, metadata) if dense else None,
+        tile_encoder=tile_encoder,
+        tile_encoder_output_variant=tile_encoder_output_variant,
+    )
 
 
 def require_encoder_metadata_field(
@@ -29,6 +89,122 @@ def resolve_encoder_level(
     if level not in {"tile", "slide", "patient"}:
         raise ValueError(f"Unsupported encoder level '{level}'")
     return level
+
+
+_DENSE_CLASS_MEMBERS = (
+    "encode_tiles_dense",
+    "patch_size",
+    "get_normalization_transform",
+)
+
+
+def _dense_class_contract(encoder_cls: type) -> tuple[bool, ...]:
+    if not issubclass(encoder_cls, TileEncoder):
+        return (False,) * len(_DENSE_CLASS_MEMBERS)
+    return tuple(
+        getattr(encoder_cls, member) is not getattr(TileEncoder, member)
+        for member in _DENSE_CLASS_MEMBERS
+    )
+
+
+def _supports_attention(encoder_cls: type) -> bool:
+    return (
+        issubclass(encoder_cls, TileEncoder)
+        and getattr(encoder_cls, "encode_tiles_attention")
+        is not TileEncoder.encode_tiles_attention
+    )
+
+
+def _format_names(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return " and ".join(names)
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+def _validate_encoder_capability_contract(
+    encoder_name: str,
+    encoder_cls: type,
+    metadata: dict[str, Any],
+) -> None:
+    level = resolve_encoder_level(encoder_name, metadata)
+    required_base = {
+        "tile": TileEncoder,
+        "slide": SlideEncoder,
+        "patient": PatientEncoder,
+    }[level]
+    if not issubclass(encoder_cls, required_base):
+        raise ValueError(
+            f"Encoder '{encoder_name}' declares level='{level}', but class "
+            f"{encoder_cls.__name__} must subclass {required_base.__name__}."
+        )
+    if inspect.isabstract(encoder_cls):
+        missing = sorted(getattr(encoder_cls, "__abstractmethods__"))
+        raise ValueError(
+            f"Encoder '{encoder_name}' class {encoder_cls.__name__} is abstract; "
+            f"implement {_format_names(missing)} before registration."
+        )
+    if level in {"slide", "patient"}:
+        require_encoder_metadata_field(encoder_name, metadata, "tile_encoder")
+        require_encoder_metadata_field(
+            encoder_name,
+            metadata,
+            "tile_encoder_output_variant",
+        )
+    dense_members = _dense_class_contract(encoder_cls)
+    has_static_patch_size = metadata.get("patch_size") is not None
+    if any(dense_members) and not all(dense_members):
+        implemented = [
+            member
+            for member, is_implemented in zip(_DENSE_CLASS_MEMBERS, dense_members)
+            if is_implemented
+        ]
+        missing = [
+            member
+            for member, is_implemented in zip(_DENSE_CLASS_MEMBERS, dense_members)
+            if not is_implemented
+        ]
+        raise ValueError(
+            f"Encoder '{encoder_name}' has an incomplete dense class contract: "
+            f"{_format_names(implemented)} "
+            f"{'is' if len(implemented) == 1 else 'are'} overridden, but "
+            f"{_format_names(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} inherited as unsupported. "
+            "Override all three dense members together and declare patch_size metadata."
+        )
+    if has_static_patch_size and not all(dense_members):
+        raise ValueError(
+            f"Encoder '{encoder_name}' has an inconsistent dense contract: "
+            "patch_size metadata is declared, but the class must also override "
+            "encode_tiles_dense, patch_size, and get_normalization_transform."
+        )
+    if all(dense_members) and not has_static_patch_size:
+        raise ValueError(
+            f"Encoder '{encoder_name}' implements the dense class contract but does "
+            "not declare patch_size metadata. Add the encoder's static patch size "
+            "to @register_encoder."
+        )
+    if has_static_patch_size:
+        patch = metadata["patch_size"]
+        patch_values = patch if isinstance(patch, tuple) else (patch, patch)
+        valid_patch = (
+            len(patch_values) == 2
+            and all(type(value) is int and value > 0 for value in patch_values)
+        )
+        if not valid_patch:
+            raise ValueError(
+                f"Encoder '{encoder_name}' must declare patch_size as a positive int "
+                f"or pair of positive ints; got {patch!r}."
+            )
+    if _supports_attention(encoder_cls) and not (
+        all(dense_members) and has_static_patch_size
+    ):
+        raise ValueError(
+            f"Encoder '{encoder_name}' overrides encode_tiles_attention without a "
+            "complete dense contract. Attention maps require encode_tiles_dense, "
+            "patch_size, get_normalization_transform, and static patch_size metadata."
+        )
 
 
 def register_encoder(
@@ -66,9 +242,9 @@ def register_encoder(
             cache key can be resolved via :func:`resolve_patch_size` WITHOUT
             instantiating the (multi-GB) encoder; the model-load path asserts this
             static value still equals the loaded model's runtime ``patch_size``.
-        level: Encoder output level ("tile" or "slide").
-        tile_encoder: Registered tile encoder dependency for slide-level models.
-        tile_encoder_output_variant: Fixed tile-encoder output variant for slide models.
+        level: Encoder output level ("tile", "slide", or "patient").
+        tile_encoder: Registered tile encoder dependency for slide/patient models.
+        tile_encoder_output_variant: Fixed tile output variant for slide/patient models.
         supported_spacing_um: The spacing(s) in µm/px the model was trained/validated
             for; :func:`validate_encoder_config` rejects requests outside this set
             unless ``allow_non_recommended_settings=True``. ``None`` marks a
@@ -111,7 +287,13 @@ def register_encoder(
         "precision": precision,
         "source": source,
     }
-    return encoder_registry.register_decorator(name, metadata=metadata)
+
+    def decorator(encoder_cls: type) -> type:
+        _validate_encoder_capability_contract(name, encoder_cls, metadata)
+        encoder_registry.register(name, encoder_cls, metadata=metadata)
+        return encoder_cls
+
+    return decorator
 
 
 def resolve_variable_input_capability(
@@ -372,16 +554,8 @@ def resolve_tile_dependency_output(
         resolved["encoder_name"] = encoder_name
         return resolved
 
-    # Both "slide" and "patient" declare tile_encoder / tile_encoder_output_variant.
-    tile_encoder_name = str(
-        require_encoder_metadata_field(encoder_name, info, "tile_encoder")
-    )
-    tile_encoder_output_variant = str(
-        require_encoder_metadata_field(
-            encoder_name,
-            info,
-            "tile_encoder_output_variant",
-        )
+    tile_encoder_name, tile_encoder_output_variant = (
+        _resolve_hierarchical_tile_dependency(encoder_name, info)
     )
     tile_info = encoder_registry.info(tile_encoder_name)
     resolved = resolve_encoder_output(
@@ -391,3 +565,21 @@ def resolve_tile_dependency_output(
     )
     resolved["encoder_name"] = tile_encoder_name
     return resolved
+
+
+def _resolve_hierarchical_tile_dependency(
+    encoder_name: str,
+    metadata: dict[str, Any],
+) -> tuple[str, str]:
+    """Read the fixed tile preset and output variant for a hierarchical encoder."""
+    tile_encoder_name = str(
+        require_encoder_metadata_field(encoder_name, metadata, "tile_encoder")
+    )
+    tile_encoder_output_variant = str(
+        require_encoder_metadata_field(
+            encoder_name,
+            metadata,
+            "tile_encoder_output_variant",
+        )
+    )
+    return tile_encoder_name, tile_encoder_output_variant
