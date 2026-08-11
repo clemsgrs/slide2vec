@@ -735,6 +735,7 @@ def test_omitted_spacing_readable_scale_requires_one_resolvable_model_default(
     tmp_path, monkeypatch, encoder_name, supported_spacing_um
 ):
     import slide2vec.encoders.registry as encoder_registry_module
+    from slide2vec.encoders import TileEncoder
     from slide2vec.encoders.registry import register_encoder
     from slide2vec.runtime.registry import Registry
 
@@ -749,11 +750,25 @@ def test_omitted_spacing_readable_scale_requires_one_resolvable_model_default(
         default_output_variant="default",
         input_size=224,
         supports_variable_input_size=True,
-        patch_size=16,
         supported_spacing_um=supported_spacing_um,
     )
-    class _RegisteredForSpacingTest:
-        pass
+    class _RegisteredForSpacingTest(TileEncoder):
+        @property
+        def encode_dim(self):
+            return 192
+
+        @property
+        def device(self):
+            return torch.device("cpu")
+
+        def to(self, device):
+            return self
+
+        def get_transform(self):
+            return lambda image: image
+
+        def encode_tiles(self, batch):
+            return batch
 
     model = _FakeModel(_encoder(), name=encoder_name)
     monkeypatch.setattr(

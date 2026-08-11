@@ -461,6 +461,44 @@ the Python API).
      - Kotp et al. (2026)
 
 
+Preflight capability reports
+----------------------------
+
+Use :func:`slide2vec.encoders.resolve_encoder_capabilities` to inspect a registered
+preset before constructing its encoder or loading weights:
+
+.. code-block:: python
+
+   from slide2vec.encoders import resolve_encoder_capabilities
+
+   capabilities = resolve_encoder_capabilities("uni2")
+   print(capabilities.level)       # "tile"
+   print(capabilities.pooled)      # True
+   print(capabilities.dense)       # True
+   print(capabilities.attention)   # True
+   print(capabilities.patch_size)  # (14, 14)
+
+The frozen :class:`slide2vec.encoders.EncoderCapabilities` report is the preflight
+view of the existing :class:`~slide2vec.encoders.base.Encoder` contract. It is
+*derived* from the registered class behavior and the preset's existing static
+registry metadata; it is not a second capability declaration. Resolution does not
+instantiate the encoder, load weights, select a GPU, download files, or access the
+network.
+
+``level`` identifies tile, slide, or patient presets. The ``pooled``, ``dense``,
+``attention``, ``slide``, and ``patient`` flags identify the corresponding public
+Encoder methods supported by that class. Dense reports include the normalized static
+``patch_size``. Slide and patient reports include ``tile_encoder`` and
+``tile_encoder_output_variant``, so callers can preflight the fixed tile dependency
+through the same report.
+
+Registration rejects mismatches between the class contract and static metadata. A
+dense tile class, for example, must override ``encode_tiles_dense``, ``patch_size``,
+and ``get_normalization_transform`` together and must declare the same kind of
+positive static ``patch_size`` accepted by ``register_encoder``. A pooled-only tile
+encoder needs none of those dense members and resolves with ``dense=False`` and
+``attention=False``.
+
 Custom registry-backed encoders
 --------------------------------
 
