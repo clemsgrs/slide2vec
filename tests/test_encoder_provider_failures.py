@@ -175,6 +175,45 @@ def test_late_builtin_collision_rejects_the_whole_provider() -> None:
     )
 
 
+def test_later_provider_collision_preserves_the_earlier_plugin_owner() -> None:
+    _run_isolated(
+        _plugin_scenario("""
+        state = {}
+
+        def earlier_provider():
+            state["earlier_owner"] = register_test_encoder("shared-plugin-preset")
+
+        def colliding_provider():
+            register_test_encoder("discarded-before-plugin-collision")
+            register_test_encoder("shared-plugin-preset")
+
+        install_providers(
+            EntryPoint("a-earlier", "earlier_plugin:register", earlier_provider),
+            EntryPoint("z-collision", "collision_plugin:register", colliding_provider),
+        )
+
+        from slide2vec import list_encoder_provider_diagnostics, list_models
+        from slide2vec.encoders import encoder_registry
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            models = list_models()
+
+        assert "shared-plugin-preset" in models
+        assert "discarded-before-plugin-collision" not in models
+        assert encoder_registry.require("shared-plugin-preset") is state["earlier_owner"]
+        diagnostics = list_encoder_provider_diagnostics()
+        assert [(item.provider_key, item.exception_type, item.message) for item in diagnostics] == [
+            (
+                "z-collision",
+                "ValueError",
+                "'shared-plugin-preset' is already registered in the encoders registry",
+            )
+        ]
+        """)
+    )
+
+
 def test_invalid_metadata_rolls_back_an_earlier_valid_preset() -> None:
     _run_isolated(
         _plugin_scenario("""
