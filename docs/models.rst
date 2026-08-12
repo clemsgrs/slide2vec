@@ -629,6 +629,13 @@ The same preset name works as ``model.name`` in YAML and in the CLI. Every proce
 discovers installed providers on its first encoder-registry read; no plugin import is
 needed in application code.
 
+For distributed extraction, install the plugin distribution in the same Python
+environment used by every worker on every node. Workers reconstruct the model from
+the serialized preset name; slide2vec does not transfer the plugin's Python package,
+encoder class, provider, or checkpoint location from the parent process. Any weights,
+credentials, environment variables, and local paths used by the plugin must therefore
+be reachable with the same meaning from every worker and node.
+
 Loading ownership and trust
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
