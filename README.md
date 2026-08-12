@@ -91,7 +91,7 @@ embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
 Hierarchical outputs have shape `(num_regions, tiles_per_region, feature_dim)` and are written to `hierarchical_embeddings/` when persisted.
 
-See [`docs/python-api.md`](docs/python-api.md) for details.
+See the [hierarchical features guide](https://clemsgrs.github.io/slide2vec/hierarchical.html) for details.
 
 ### Input Manifest
 
@@ -125,7 +125,7 @@ The package writes explicit artifact directories:
 
 `slide2vec` currently ships presets for 28 tile-level models, 4 slide-level models,
 and 1 patient-level model.
-For the full catalog and preset names, see [`docs/models.md`](docs/models.md).
+For the full catalog and preset names, see the [model zoo](https://clemsgrs.github.io/slide2vec/models.html).
 
 ## CLI
 
@@ -138,7 +138,7 @@ slide2vec /path/to/config.yaml
 
 By default, manifest-driven CLI runs use all available GPUs. Set `speed.num_gpus=4` when you want to cap the sharding explicitly.
 
-New to the CLI or doing batch runs to disk? Start with [`docs/cli.md`](docs/cli.md) for the config-driven workflow, overrides, and common run patterns.
+New to the CLI or doing batch runs to disk? Start with the [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html) for the config-driven workflow and common run patterns.
 
 ## Docker
 
@@ -156,8 +156,8 @@ docker run --rm -it \
 
 ## Documentation
 
-- [Documentation website](https://clemsgrs.github.io/slide2vec/) for the polished docs site
-- [`docs/python-api.md`](docs/python-api.md) for the detailed API reference
-- [`docs/cli.md`](docs/cli.md) for the config-driven CLI guide
-- [`docs/models.md`](docs/models.md) for the full supported-model catalog
+- [Documentation website](https://clemsgrs.github.io/slide2vec/)
+- [API guide](https://clemsgrs.github.io/slide2vec/api.html)
+- [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html)
+- [Model zoo](https://clemsgrs.github.io/slide2vec/models.html)
 - [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API
