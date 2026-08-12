@@ -21,6 +21,10 @@ from slide2vec.artifacts import (
     TileEmbeddingArtifact,
 )
 from slide2vec.runtime.dense_encode import DenseEncodeGeometry, DenseEncodeKit
+from slide2vec.encoders import (
+    EncoderProviderDiagnostic,
+    list_encoder_provider_diagnostics,
+)
 
 
 __version__ = "5.7.0"
@@ -28,6 +32,8 @@ __version__ = "5.7.0"
 __all__ = [
     "Model",
     "list_models",
+    "EncoderProviderDiagnostic",
+    "list_encoder_provider_diagnostics",
     "Pipeline",
     "PreprocessingConfig",
     "DenseOptions",

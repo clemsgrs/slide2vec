@@ -21,6 +21,20 @@ class _DiscoveryState(Enum):
     FAILED = auto()
 
 
+@dataclass(frozen=True)
+class EncoderProviderDiagnostic:
+    """Public, immutable description of one skipped installed provider."""
+
+    provider_key: str
+    provider: str
+    exception_type: str
+    message: str
+
+    def concise(self) -> str:
+        """Format the diagnostic without traceback details."""
+        return f"{self.exception_type}: {self.message}"
+
+
 def _installed_encoder_providers() -> list[importlib_metadata.EntryPoint]:
     entry_points = importlib_metadata.entry_points()
     providers = entry_points.select(group=_ENCODER_ENTRY_POINT_GROUP)
@@ -36,6 +50,7 @@ class EncoderRegistry(Registry):
         self._discovery_state = _DiscoveryState.PENDING
         self._discovery_owner: int | None = None
         self._discovery_error: BaseException | None = None
+        self._provider_diagnostics: tuple[EncoderProviderDiagnostic, ...] = ()
 
     def _ensure_plugins_discovered(self) -> None:
         current_thread = get_ident()
@@ -52,9 +67,23 @@ class EncoderRegistry(Registry):
             self._discovery_state = _DiscoveryState.RUNNING
             self._discovery_owner = current_thread
 
+        diagnostics: list[EncoderProviderDiagnostic] = []
         try:
             for entry_point in _installed_encoder_providers():
-                entry_point.load()()
+                entries_before_provider = dict(self._entries)
+                try:
+                    entry_point.load()()
+                except BaseException as error:
+                    self._entries = entries_before_provider
+                    message = " ".join(str(error).split()) or "No error message"
+                    diagnostics.append(
+                        EncoderProviderDiagnostic(
+                            provider_key=entry_point.name,
+                            provider=entry_point.value,
+                            exception_type=type(error).__name__,
+                            message=message,
+                        )
+                    )
         except BaseException as error:
             with self._discovery_condition:
                 self._discovery_state = _DiscoveryState.FAILED
@@ -64,6 +93,7 @@ class EncoderRegistry(Registry):
             raise
         else:
             with self._discovery_condition:
+                self._provider_diagnostics = tuple(diagnostics)
                 self._discovery_state = _DiscoveryState.COMPLETE
                 self._discovery_owner = None
                 self._discovery_condition.notify_all()
@@ -71,8 +101,44 @@ class EncoderRegistry(Registry):
     def _before_read(self) -> None:
         self._ensure_plugins_discovered()
 
+    def provider_diagnostics(self) -> tuple[EncoderProviderDiagnostic, ...]:
+        """Return an immutable snapshot of skipped provider diagnostics."""
+        self._ensure_plugins_discovered()
+        return self._provider_diagnostics
+
+    def _missing_preset_error(self, name: str) -> KeyError:
+        available = ", ".join(sorted(self._entries)) or "(none)"
+        message = f"'{name}' not found in encoders registry. Available: {available}"
+        if self._provider_diagnostics:
+            failures = "; ".join(
+                f"'{item.provider_key}' ({item.concise()})"
+                for item in self._provider_diagnostics
+            )
+            message += f". Skipped Encoder providers: {failures}"
+        return KeyError(message)
+
+    def require(self, name: str) -> type:
+        """Retrieve an Encoder class, including provider context when it is missing."""
+        self._ensure_plugins_discovered()
+        if name not in self._entries:
+            raise self._missing_preset_error(name)
+        return self._entries[name].cls
+
+    def info(self, name: str) -> dict[str, Any]:
+        """Return Encoder metadata, including provider context when it is missing."""
+        self._ensure_plugins_discovered()
+        if name not in self._entries:
+            raise self._missing_preset_error(name)
+        entry = self._entries[name]
+        return {"name": name, **entry.metadata}
+
 
 encoder_registry = EncoderRegistry()
+
+
+def list_encoder_provider_diagnostics() -> tuple[EncoderProviderDiagnostic, ...]:
+    """List deterministic diagnostics for installed providers skipped at discovery."""
+    return encoder_registry.provider_diagnostics()
 
 
 @dataclass(frozen=True)

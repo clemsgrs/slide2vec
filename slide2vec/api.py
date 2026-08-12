@@ -3,6 +3,7 @@ import copy
 import logging
 import math
 import os
+import warnings
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,6 +24,7 @@ from slide2vec.artifacts import (
 from slide2vec.configs.resources import load_config
 from slide2vec.encoders.registry import (
     encoder_registry,
+    list_encoder_provider_diagnostics,
     resolve_preprocessing_fields,
 )
 from slide2vec.encoders.validation import validate_encoder_config
@@ -1146,16 +1148,32 @@ def list_models(level: str | None = None) -> list[str]:
         level: Optional model level filter. Supported values are ``"tile"``,
             ``"slide"``, and ``"patient"``.
     """
-    if level is None:
-        return sorted(encoder_registry.names())
+    normalized_level = None
+    if level is not None:
+        normalized_level = str(level).strip().lower()
+        if normalized_level not in {"tile", "slide", "patient"}:
+            raise ValueError(
+                "list_models(level=...) must be one of: tile, slide, patient"
+            )
 
-    normalized_level = str(level).strip().lower()
-    if normalized_level not in {"tile", "slide", "patient"}:
-        raise ValueError("list_models(level=...) must be one of: tile, slide, patient")
+    names = encoder_registry.names()
+    diagnostics = list_encoder_provider_diagnostics()
+    if diagnostics:
+        detail = "; ".join(
+            f"'{item.provider_key}': {item.concise()}" for item in diagnostics
+        )
+        warnings.warn(
+            f"Skipped Encoder provider{'' if len(diagnostics) == 1 else 's'} {detail}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    if level is None:
+        return sorted(names)
 
     return sorted(
         name
-        for name in encoder_registry.names()
+        for name in names
         if encoder_registry.info(name)["level"] == normalized_level
     )
 

@@ -10,6 +10,17 @@ examples.
   :meth:`Model.embed_slides`
 - artifact generation with :meth:`Pipeline.run`
 
+Encoder provider diagnostics
+----------------------------
+
+.. autoclass:: slide2vec.EncoderProviderDiagnostic
+   :members:
+
+.. autofunction:: slide2vec.list_encoder_provider_diagnostics
+
+See :doc:`models` for provider packaging, transactional discovery, and trust
+guidance.
+
 EmbeddedSlide
 -------------
 
