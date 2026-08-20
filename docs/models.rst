@@ -103,11 +103,11 @@ Tile-level encoders
      - 1536
      - ``0.5``
    * - ``h-optimus-0``
-     - `H-Optimus-0 <https://huggingface.co/histai/h-optimus-0>`_
+     - `H-Optimus-0 <https://huggingface.co/bioptimus/H-optimus-0>`_
      - 1536
      - ``0.5``
    * - ``h-optimus-1``
-     - `H-Optimus-1 <https://huggingface.co/histai/h-optimus-1>`_
+     - `H-Optimus-1 <https://huggingface.co/bioptimus/H-optimus-1>`_
      - 1536
      - ``0.5``
    * - ``rudolfv2``
@@ -127,7 +127,7 @@ Tile-level encoders
      - 1536
      - ``0.5``
    * - ``midnight``
-     - `Midnight <https://huggingface.co/AtlasAnalyticsLab/Midnight>`_
+     - `Midnight <https://huggingface.co/kaiko-ai/midnight>`_
      - 3072
      - ``0.25``, ``0.5``, ``1.0``, ``2.0``
    * - ``genbio-pathfm``
@@ -158,7 +158,7 @@ Slide-level encoders
      - ``0.5``
      - 768
    * - ``prism``
-     - `PRISM <https://huggingface.co/paige-ai/PRISM>`_
+     - `PRISM <https://huggingface.co/paige-ai/Prism>`_
      - ``virchow``
      - ``0.5``
      - 1280
