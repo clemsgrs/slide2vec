@@ -123,6 +123,9 @@ class GigaPathSlideEncoder(SlideEncoder):
             tile_features = tile_features.unsqueeze(0)
         if coordinates.ndim == 2:
             coordinates = coordinates.unsqueeze(0)
+        # prov-gigapath's reference usage feeds fp32 tile embeddings under autocast;
+        # fp16 input risks dtype mismatches in ops autocast does not cover.
+        tile_features = tile_features.float()
         # gigapath_slide_enc12l768d.forward always returns a list of per-layer
         # embeddings (a single element when all_layer_embed is False); the final
         # slide embedding is the last layer, matching prov-gigapath's own usage.

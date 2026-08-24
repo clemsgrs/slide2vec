@@ -51,6 +51,9 @@ class TitanSlideEncoder(SlideEncoder):
             tile_features = tile_features.unsqueeze(0)
         if coordinates.ndim == 2:
             coordinates = coordinates.unsqueeze(0)
+        # TITAN's remote code index_add_s features into an fp32 grid and crashes on
+        # fp16 input; its reference usage is fp32 features under autocast.
+        tile_features = tile_features.float()
         return self._model.encode_slide_from_patch_features(
             tile_features,
             coordinates.long(),
