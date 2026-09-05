@@ -158,7 +158,7 @@ testpaths = [
     "tests",
 ]
 markers = [
-    "heavy: real-weight foundation-model inference on CPU; minutes per test. Excluded from the PR suite via `-m 'not heavy'`; run on the scheduled/manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
+    "heavy: real-weight foundation-model inference on CPU; minutes per test. Included in the PR suite and available separately through the manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
     "gpu_integration: real one-GPU versus multi-GPU parity; requires at least two visible CUDA devices. Run explicitly with `CUDA_VISIBLE_DEVICES=0,1 python -m pytest -m gpu_integration --no-cov`.",
 ]
 
@@ -182,12 +182,13 @@ max-line-length = 160
 [tool.bumpver]
 current_version = "5.8.2"
 version_pattern = "MAJOR.MINOR.PATCH"
-commit = false       # We do version bumping in CI, not as a commit
-tag = false          # Git tag already exists — we don't auto-tag
-push = false         # Don't push anything in CI
+commit = false
+tag = false
+push = false
 files = [
     "pyproject.toml",
-    "slide2vec/__init__.py"
+    "slide2vec/__init__.py",
+    "docs/conf.py",
 ]
 
 [tool.bumpver.file_patterns]
@@ -197,4 +198,7 @@ files = [
 ]
 "slide2vec/__init__.py" = [
     '^__version__ = "{version}"$',
+]
+"docs/conf.py" = [
+    '^release = "{version}"$',
 ]

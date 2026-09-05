@@ -52,7 +52,6 @@ def _open_wsi_backend(image_path: str, backend: str, gpu_decode: bool):
         return VIPSReader(image_path)
     elif backend == "asap":
         from hs2p.wsi.backends.asap import ASAPReader
-        from slide2vec.utils.log_utils import suppress_c_stderr
         with suppress_c_stderr():
             return ASAPReader(image_path)
     else:

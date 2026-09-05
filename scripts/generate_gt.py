@@ -98,19 +98,15 @@ def main():
             check=True,
         )
 
-        # Copy slide embedding
         slide_emb_src = tmp_path / "slide_embeddings" / "test-wsi.pt"
         shutil.copyfile(slide_emb_src, output_dir / "test-wsi.pt")
         print(f"Saved slide embedding: {output_dir / 'test-wsi.pt'}")
 
-        # Copy tile embeddings
         tile_emb_src = tmp_path / "tile_embeddings" / "test-wsi.pt"
         tile_emb = torch.load(tile_emb_src, map_location="cpu", weights_only=True)
         torch.save(tile_emb, output_dir / "test-wsi.tiles.pt")
         print(f"Saved tile embeddings: {output_dir / 'test-wsi.tiles.pt'} — shape {tuple(tile_emb.shape)}")
 
-        # Copy coordinates
-        import numpy as np
         coords_src = tmp_path / "tiles" / "test-wsi.coordinates.npz"
         shutil.copyfile(coords_src, output_dir / "test-wsi.coordinates.npz")
         print(f"Saved coordinates: {output_dir / 'test-wsi.coordinates.npz'}")

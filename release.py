@@ -11,10 +11,6 @@ def release_branch(version: str) -> str:
     return f"release-{version}"
 
 
-def release_tag(version: str) -> str:
-    return version
-
-
 def get_current_version() -> str:
     out = run("bumpver show")
     for line in out.splitlines():
@@ -43,31 +39,9 @@ def commit_bump(version: str) -> None:
 def push_branch_and_tag(branch: str, version: str) -> None:
     run(f"git push origin {branch}")
 
-    tag = release_tag(version)
-    print(f"🏷️ Creating and pushing tag {tag}...")
-    run(f"git tag {tag}")
-    run(f"git push origin {tag}")
-
-
-def push_tag_and_branch(version: str) -> str:
-    branch = release_branch(version)
-    tag = release_tag(version)
-
-    print(f"🌿 Creating branch {branch}...")
-    run(f"git checkout -b {branch}")
-    run(f"git push origin {branch}")
-
-    print(f"🏷️ Creating tag {tag}...")
-    # Check if tag already exists
-    existing_tags = run("git tag")
-    if tag not in existing_tags.split():
-        run(f"git tag {tag}")
-    else:
-        print(f"✅ Tag {tag} already exists.")
-
-    run(f"git push origin {tag}")
-
-    return branch
+    print(f"🏷️ Creating and pushing tag {version}...")
+    run(f"git tag {version}")
+    run(f"git push origin {version}")
 
 
 def create_pull_request(branch: str, version: str) -> None:
@@ -99,9 +73,8 @@ if __name__ == "__main__":
     parser.add_argument("--no-draft", action="store_true", help="Don't open GitHub release page")
     args = parser.parse_args()
 
-    # always start from main branch
     run("git checkout main")
-    run("git pull origin main")  # make sure it's up-to-date
+    run("git pull origin main")
 
     version = bump_version(args.level)
     branch = release_branch(version)
@@ -114,6 +87,6 @@ if __name__ == "__main__":
         create_pull_request(branch, version)
 
     if not args.no_draft:
-        open_release_draft(release_tag(version))
+        open_release_draft(version)
 
     print(f"\n✅ Release flow completed for version {version}!")

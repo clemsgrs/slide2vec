@@ -48,13 +48,8 @@ class GigaPath(TimmTileEncoder):
         )
 
     def get_transform(self) -> Callable:
-        # POOLED transform only: center-crops the 256px tile to the model's 224px
-        # native input (paper recipe, center 224 @ native 0.5 mpp). Dense extraction
-        # must NOT route through this — it needs the full uncropped tile so the grid
-        # covers the whole source tile. The dense path supplies its own no-crop
-        # transform (Resize(256), no CenterCrop) → a 16x16 grid over the full tile;
-        # encode_tiles_dense itself is transform-agnostic (inherited from
-        # TimmTileEncoder) and operates on whatever batch the dense pipeline feeds.
+        # Pooled recipe: center 224px at native spacing. Dense extraction uses
+        # get_normalization_transform() to preserve the caller's tile geometry.
         return v2.Compose([
             v2.ToImage(),
             v2.Resize(256, interpolation=v2.InterpolationMode.BICUBIC, antialias=True),
