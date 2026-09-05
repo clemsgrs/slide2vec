@@ -73,11 +73,6 @@ def cover_origins(extent: int, size: int, stride: int) -> list[int]:
     return starts
 
 
-def _window_starts(extent: int, win: int, stride: int) -> list[int]:
-    """Patch-aligned encoder-window starts — the token-space use of :func:`cover_origins`."""
-    return cover_origins(extent, win, stride)
-
-
 def resolve_window_geometry(
     geometry: DenseGridGeometry, *, window_size: int | None, overlap: float
 ) -> tuple[tuple[int, int], tuple[int, int], list[int], list[int]]:
@@ -99,8 +94,8 @@ def resolve_window_geometry(
     keep = 1.0 - float(overlap)
     stride_h = min(win_h, _round_to(win_h * keep, ph))
     stride_w = min(win_w, _round_to(win_w * keep, pw))
-    starts_h = _window_starts(enc_h, win_h, stride_h)
-    starts_w = _window_starts(enc_w, win_w, stride_w)
+    starts_h = cover_origins(enc_h, win_h, stride_h)
+    starts_w = cover_origins(enc_w, win_w, stride_w)
     return (win_h, win_w), (stride_h, stride_w), starts_h, starts_w
 
 

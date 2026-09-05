@@ -170,12 +170,10 @@ def collect_distributed_pipeline_artifacts(
         or include_slide_embeddings
         or persist_hierarchical_embeddings
     )
-    annotation_groups = (
-        _embeddable_annotation_groups(process_list_path) if annotation_aware else {}
-    )
     # The embedding stage must fan out per (sample_id, annotation) for every level so each class's
     # tiles are embedded independently.
     stage_annotation_groups = _embeddable_annotation_groups(process_list_path)
+    annotation_groups = stage_annotation_groups if annotation_aware else {}
     # One annotation per ``successful_slides`` entry (the tiling spine fans out per class). Carry each
     # on a lightweight placeholder so the resume gate keys by (sample_id, annotation) and the surviving
     # pending entries hand the stage the right per-class work units.
@@ -269,9 +267,6 @@ def collect_distributed_pipeline_artifacts(
         annotations=pending_annotations,
         on_progress_event=_update_process_list_for_finished_slide,
     )
-    # ``successful_slides`` is already one entry per (sample_id, annotation) row, so resolve a
-    # parallel annotations list (not an expansion) to re-read each entry's namespaced artifact.
-    annotations_for_collect = _annotations_parallel_to_slides(successful_slides, annotation_groups)
     tile_artifacts, hierarchical_artifacts, slide_artifacts = collect_pipeline_artifacts(
         successful_slides,
         output_dir=output_dir,
@@ -279,7 +274,7 @@ def collect_distributed_pipeline_artifacts(
         include_tile_embeddings=include_tile_embeddings,
         include_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
-        annotations=annotations_for_collect if annotation_aware else None,
+        annotations=stage_annotations if annotation_aware else None,
     )
     update_process_list_after_embedding(
         process_list_path,

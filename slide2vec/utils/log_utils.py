@@ -7,12 +7,6 @@ import sys
 from slide2vec.progress import emit_progress_log
 
 
-def _distributed_module():
-    import slide2vec.distributed as distributed
-
-    return distributed
-
-
 @contextlib.contextmanager
 def suppress_c_stderr():
     """Temporarily redirect C-level stderr to /dev/null.
@@ -62,16 +56,17 @@ def _configure_logger(
         level: The logging level to use.
         output: A file name or a directory to save log. If None, will not save log file.
             If ends with ".txt" or ".log", assumed to be a file name.
-            Otherwise, logs will be saved to `output/log.txt`.
+            Otherwise, logs will be saved to `output/logs/log.txt`.
 
     Returns:
         The configured logger.
     """
 
+    import slide2vec.distributed as distributed
+
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
-    distributed = _distributed_module()
 
     # Loosely match Google glog format:
     #   [IWEF]yyyymmdd hh:mm:ss.uuuuuu threadid file:line] msg
@@ -127,7 +122,7 @@ def setup_logging(
         output: A file name or a directory to save log files. If None, log
             files will not be saved. If output ends with ".txt" or ".log", it
             is assumed to be a file name.
-            Otherwise, logs will be saved to `output/log.txt`.
+            Otherwise, logs will be saved to `output/logs/log.txt`.
         name: The name of the logger to configure, by default the root logger.
         level: The logging level to use.
         capture_warnings: Whether warnings should be captured as logs.

@@ -211,8 +211,6 @@ def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
         df["requested_mask_backend"] = [None] * len(df)
     if "mask_backend" not in df.columns:
         df["mask_backend"] = [None] * len(df)
-    if "annotation" not in df.columns:
-        df["annotation"] = ["tissue"] * len(df)
     reconstructed_output_mode = df["annotation"].map(
         lambda annotation: "merged" if str(annotation) == "merged" else None
     )

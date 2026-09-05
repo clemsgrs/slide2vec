@@ -133,7 +133,6 @@ class _TorchDistributedEnvironment:
 
     # Single node job with preset environment (i.e. torchrun)
     def _set_from_preset_env(self):
-        # logger.info("Initialization from preset environment")
         self.rank = int(os.environ["RANK"])
         self.world_size = int(os.environ["WORLD_SIZE"])
         assert self.rank < self.world_size
@@ -143,7 +142,6 @@ class _TorchDistributedEnvironment:
 
     # Single node and GPU job (i.e. local script run)
     def _set_from_local(self):
-        # logger.info("Initialization from local")
         self.rank = 0
         self.world_size = 1
         self.local_rank = 0
@@ -196,7 +194,6 @@ def enable(
     if set_cuda_current_device:
         torch.cuda.set_device(torch_env.local_rank)
 
-    # Finalize setup
     _RANK = torch_env.rank
     _WORLD_SIZE = torch_env.world_size
     _LOCAL_RANK = torch_env.local_rank

@@ -1,26 +1,14 @@
-import json
-import importlib
 import os
-import tempfile
-import threading
-import time
-from contextlib import contextmanager, nullcontext
-from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
-import logging
-import pandas as pd
 import torch
-from hs2p import SlideSpec, tile_slides
-from hs2p.utils.stderr import run_with_filtered_stderr
+from hs2p import SlideSpec
 
 from slide2vec.runtime import (
     artifacts_collect,
     batching,
     cpu_budget,
-    distributed,
     distributed_stage,
     embedding,
     embedding_persist,
@@ -31,11 +19,9 @@ from slide2vec.runtime import (
     persist_callbacks,
     persistence,
     process_list,
-    serialization,
     slide_encode,
     tiling,
     tiling_pipeline,
-    worker_io,
 )
 from slide2vec.api import (
     EmbeddedPatient,
@@ -43,43 +29,21 @@ from slide2vec.api import (
     ExecutionOptions,
     PreprocessingConfig,
     RunResult,
-    _resolve_hierarchical_preprocessing,
 )
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
-    PatientEmbeddingArtifact,
     SlideEmbeddingArtifact,
     TileEmbeddingArtifact,
-    write_hierarchical_embeddings,
     load_array,
-    write_patient_embeddings,
-    write_tile_embedding_metadata,
 )
 from slide2vec.encoders.registry import (
     encoder_registry,
-    resolve_encoder_output,
     resolve_patch_size,
-    resolve_preprocessing_defaults,
 )
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.runtime.types import LoadedModel
 from slide2vec.runtime.encoder_input_contract import EncoderInputContract
-from slide2vec.progress import (
-    emit_progress,
-    read_tiling_progress_snapshot,
-)
-from slide2vec.utils.log_utils import suppress_c_stderr
-from slide2vec.data.dataset import BatchTileCollator, TileIndexDataset
-from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator, OnTheFlyHierarchicalBatchCollator
-from slide2vec.utils.tiling_io import (
-    load_embedding_process_df,
-    load_patient_id_mapping,
-    load_slide_manifest,
-    load_tiling_process_df,
-    load_tiling_result_from_row,
-    _optional_float,
-)
-from slide2vec.utils.utils import cpu_worker_limit, slurm_cpu_limit
+from slide2vec.progress import emit_progress
 
 from slide2vec.runtime.hierarchical import num_embedding_items
 
@@ -716,11 +680,7 @@ def aggregate_tiles(
     outputs: list[SlideEmbeddingArtifact] = []
     for artifact in tile_artifacts:
         metadata = artifact.metadata
-        if "coordinates_npz_path" not in metadata or "coordinates_meta_path" not in metadata:
-            raise ValueError(
-                f"Tile artifact for {artifact.sample_id} is missing tiling metadata paths required for slide aggregation"
-            )
-        if not metadata["coordinates_npz_path"] or not metadata["coordinates_meta_path"]:
+        if not metadata.get("coordinates_npz_path") or not metadata.get("coordinates_meta_path"):
             raise ValueError(
                 f"Tile artifact for {artifact.sample_id} is missing tiling metadata paths required for slide aggregation"
             )
@@ -737,13 +697,12 @@ def aggregate_tiles(
             tiling_result,
             execution=execution,
         )
-        latents = None
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,
             slide_embedding,
             execution=execution,
             metadata=embedding.build_slide_embedding_metadata(model, image_path=metadata["image_path"]),
-            latents=latents,
+            latents=None,
         )
         outputs.append(slide_artifact)
     return outputs
@@ -923,9 +882,8 @@ def run_pipeline(
             execution=execution,
             process_list_path=process_list_path,
         )
-        embedded_slides: list[EmbeddedSlide] = []
         if pending_slides:
-            embedded_slides = embedding_pipeline.compute_embedded_slides(
+            embedding_pipeline.compute_embedded_slides(
                 model,
                 pending_slides,
                 pending_tiling_results,

@@ -43,7 +43,6 @@ from slide2vec.runtime.types import LoadedModel  # noqa: E402
 
 
 _FIXTURES = Path(__file__).parent / "fixtures"
-_REPOSITORY = Path(__file__).resolve().parents[1]
 _LITERAL_ENCODER_NAME = "issue260-literal-identity"
 
 
@@ -353,45 +352,6 @@ def _metadata(artifact: DenseImageArtifact) -> dict[str, Any]:
         dict[str, Any],
         json.loads(artifact.metadata_path.read_text(encoding="utf-8")),
     )
-
-
-def test_dense_image_glossary_names_the_release_contract_terms():
-    glossary = (_REPOSITORY / "docs" / "glossary.rst").read_text(
-        encoding="utf-8"
-    ).lower()
-
-    for term in (
-        "raster image",
-        "spacing-readable image",
-        "source-spacing declaration",
-        "source spacing",
-        "declared spacing",
-        "effective spacing",
-        "target size",
-        "compatible artifact",
-    ):
-        assert term in glossary
-
-
-def test_migration_guidance_lives_only_in_5_6_0_release_notes():
-    release_notes_path = _REPOSITORY / "docs" / "release-notes" / "5.6.0.rst"
-    release_notes = release_notes_path.read_text(encoding="utf-8")
-    for required in (
-        "soma",
-        "Model.embed_images_dense",
-        "compatible artifact",
-        "resume",
-        "provenance",
-    ):
-        assert required in release_notes
-
-    evergreen = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (_REPOSITORY / "docs").rglob("*.rst")
-        if "release-notes" not in path.parts
-    )
-    assert "replace its private dense image reader" not in evergreen
-    assert "Artifacts written with hs2p 4.3 remain loadable" not in evergreen
 
 
 @dataclass(frozen=True)

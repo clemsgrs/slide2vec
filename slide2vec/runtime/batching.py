@@ -17,6 +17,7 @@ import torch
 
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
+from slide2vec.runtime.worker_io import uses_cuda_runtime
 from slide2vec.utils.log_utils import suppress_c_stderr
 
 from .preprocessing import (
@@ -29,17 +30,8 @@ from .preprocessing import (
 from .types import PreparedBatch
 
 
-def uses_cuda_runtime(device) -> bool:
-    return str(device).startswith("cuda") and torch.cuda.is_available()
-
-
-
 def should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
-    if dataloader is None:
-        return False
     collate_fn = getattr(dataloader, "collate_fn", None)
-    if collate_fn is None:
-        return False
     return bool(getattr(collate_fn, "_suppress_cucim_stderr", False))
 
 

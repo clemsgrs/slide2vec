@@ -50,7 +50,7 @@ class MOOZYSlideEncoder(nn.Module):
                     dropout=dropout,
                     attn_dropout=attn_dropout,
                     alibi=self.pos_bias,
-                    drop_path_rate=dpr[i] if i < len(dpr) else 0.0,
+                    drop_path_rate=dpr[i],
                     qk_norm=qk_norm,
                     layerscale_init=layerscale_init,
                 )
@@ -109,26 +109,18 @@ class MOOZYSlideEncoder(nn.Module):
         x = torch.cat(tokens, dim=1)
 
         coords_xy = coords_xy.to(device=x.device, dtype=torch.float32).reshape(bsz, n_tokens, 2)
-        zeros_cls = torch.zeros(bsz, 1, 2, dtype=coords_xy.dtype, device=coords_xy.device)
-        if self.num_registers > 0:
-            zeros_reg = torch.zeros(bsz, self.num_registers, 2, dtype=coords_xy.dtype, device=coords_xy.device)
-            positions = torch.cat([zeros_cls, zeros_reg, coords_xy], dim=1)
-        else:
-            positions = torch.cat([zeros_cls, coords_xy], dim=1)
-
-        valid_flat = ~invalid_flat
-        reg_valid = (
-            torch.ones(bsz, self.num_registers, dtype=torch.bool, device=x.device)
-            if self.num_registers > 0
-            else torch.zeros(bsz, 0, dtype=torch.bool, device=x.device)
+        num_prefix = 1 + self.num_registers
+        prefix_positions = torch.zeros(
+            bsz, num_prefix, 2, dtype=coords_xy.dtype, device=coords_xy.device
         )
-        valid_with_cls = torch.cat([torch.ones(bsz, 1, dtype=torch.bool, device=x.device), reg_valid, valid_flat], dim=1)
+        positions = torch.cat([prefix_positions, coords_xy], dim=1)
+        prefix_valid = torch.ones(bsz, num_prefix, dtype=torch.bool, device=x.device)
+        valid_with_cls = torch.cat([prefix_valid, ~invalid_flat], dim=1)
 
         if mask is None and bsz == 1:
             keep = valid_with_cls[0]
-            if keep.sum() > 0:
-                x = x[:, keep, :]
-                positions = positions[:, keep, :]
+            x = x[:, keep, :]
+            positions = positions[:, keep, :]
             attn_mask = None
         else:
             pair_valid = valid_with_cls.unsqueeze(2) & valid_with_cls.unsqueeze(1)

@@ -1,7 +1,4 @@
-import logging
 from typing import Any
-
-logger = logging.getLogger("slide2vec")
 
 
 PRECISION_ALIASES = {
@@ -66,8 +63,8 @@ def resolve_output_precision(output_dtype: Any, compute_precision: Any) -> str:
     """Resolve the concrete on-disk feature precision (``"fp16"`` or ``"fp32"``).
 
     ``output_dtype is None`` follows ``compute_precision``: an fp16 forward keeps fp16
-    features, while bf16 / fp32 (and an unset or unknown compute precision) widen to fp32 —
-    fp32 is bf16's lossless container and the only float dtype a numpy artifact can hold.
+    features, while bf16 / fp32 (and an unset compute precision) widen to fp32.
+    NumPy has no bfloat16 dtype, so fp32 is its lossless storage container.
     A non-null ``output_dtype`` is honored verbatim (after :func:`normalize_output_dtype`).
     This is the single source of truth shared by the pooled write path and the dense
     ``iter_regions_dense`` path.
@@ -98,4 +95,3 @@ def output_torch_dtype(precision: str):
 def canonicalize_model_name(name: str) -> str:
     normalized = name.strip().lower()
     return MODEL_NAME_ALIASES.get(normalized, normalized)
-

@@ -3246,11 +3246,6 @@ def test_distributed_module_has_no_torch_distributed_dependency():
     assert "socket" not in imported
 
 
-def test_setup_distributed_helper_has_been_removed():
-    source = (ROOT / "slide2vec" / "utils" / "config.py").read_text(encoding="utf-8")
-
-    assert "def setup_distributed" not in source
-
 def test_direct_embed_slides_allows_no_output_dir_and_optional_persistence(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 

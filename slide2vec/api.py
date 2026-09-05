@@ -128,15 +128,12 @@ def resolve_masks(masks: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
     """Normalize a masks config node (OmegaConf, mapping, or namespace) to a plain dict."""
+    from omegaconf import OmegaConf
+
     if node is None:
         return {}
-    try:
-        from omegaconf import OmegaConf
-
-        if OmegaConf.is_config(node):
-            return copy.deepcopy(OmegaConf.to_container(node, resolve=True))  # type: ignore[return-value]
-    except ImportError:
-        pass
+    if OmegaConf.is_config(node):
+        return copy.deepcopy(OmegaConf.to_container(node, resolve=True))  # type: ignore[return-value]
     if isinstance(node, Mapping):
         return copy.deepcopy(dict(node))
     return copy.deepcopy(dict(vars(node)))
@@ -243,7 +240,6 @@ class PreprocessingConfig:
             "preview",
             _deep_merge_dicts(DEFAULT_PREPROCESSING["preview"], self.preview),
         )
-        # Complete a (possibly partial) masks mapping against the shipped default.
         object.__setattr__(self, "masks", resolve_masks(self.masks))
 
     @classmethod
