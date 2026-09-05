@@ -126,13 +126,15 @@ def load_model(
     info = encoder_registry.info(name)
     resolved_level = info["level"]
 
-    if token is None and "HF_TOKEN" in os.environ:
-        token = os.environ["HF_TOKEN"]
-
+    # Never call ``huggingface_hub.login()`` here. Every encoder resolves its auth
+    # through the process-global ``huggingface_hub.get_token()``, which reads
+    # ``HF_TOKEN`` from the environment ahead of any stored token file, so an
+    # exported ``HF_TOKEN`` is all the hub needs. ``login()`` additionally rewrites a
+    # shared ``stored_tokens`` file without a lock; under distributed extraction every
+    # rank re-runs load_model per chunk and the concurrent truncate/re-read races,
+    # crashing runs with ``ValueError: Token ... not found``.
     if token is not None:
-        from huggingface_hub import login as hf_login
-
-        hf_login(token=token, add_to_git_credential=False)
+        os.environ["HF_TOKEN"] = token
 
     encoder_cls = encoder_registry.require(name)
     # Pass allow_non_recommended_settings ONLY to encoders whose constructor accepts it
