@@ -17,6 +17,13 @@ Zero-tile slides, slides skipped by ``resume``, and failed slides do not fire
 the callback. An exception raised inside it propagates out of the entry point.
 Omitting the argument leaves every return value unchanged.
 
+hs2p 4.4.3 requirement
+----------------------
+
+slide2vec now requires ``hs2p>=4.4.3``. The hs2p public API is unchanged from
+4.4.2; the release lowers tiling and mask-decoding memory use. Existing
+coordinate and embedding artifacts stay valid.
+
 Scope
 -----
 

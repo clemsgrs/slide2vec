@@ -23,7 +23,7 @@ def test_package_root_exports_api():
     assert hasattr(package, "DenseRegionArtifact")
 
 
-def test_dependency_declarations_require_hs2p_4_4_2_with_consistent_extras():
+def test_dependency_declarations_require_hs2p_4_4_3_with_consistent_extras():
     project = tomllib.loads(
         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
             encoding="utf-8"
@@ -39,8 +39,8 @@ def test_dependency_declarations_require_hs2p_4_4_2_with_consistent_extras():
     ]
 
     assert hs2p_dependencies == [
-        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.2",
-        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.2",
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.3",
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.3",
     ]
 
 
