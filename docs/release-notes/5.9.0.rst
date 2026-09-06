@@ -1,0 +1,24 @@
+slide2vec 5.9.0
+===============
+
+Per-slide completion callback
+-----------------------------
+
+``Pipeline.run_with_coordinates`` and ``Model.embed_tiles`` accept an optional
+``on_slide_persisted`` callable. slide2vec calls it in the calling process,
+once per persisted ``(sample_id, annotation)`` work unit, with the unit's
+``TileEmbeddingArtifact`` (or ``HierarchicalEmbeddingArtifact`` under
+hierarchical preprocessing) after the artifact is complete on disk and before
+the entry point returns. With ``num_gpus > 1`` it fires as each rank reports a
+finished slide, so a caller can act on one slide while the others are still
+running.
+
+Zero-tile slides, slides skipped by ``resume``, and failed slides do not fire
+the callback. An exception raised inside it propagates out of the entry point.
+Omitting the argument leaves every return value unchanged.
+
+Scope
+-----
+
+This release does not add a callback to ``Model.embed_images`` or the dense
+entry points, and does not change progress reporting.

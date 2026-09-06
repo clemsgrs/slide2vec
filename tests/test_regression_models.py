@@ -604,7 +604,7 @@ def test_model_embed_tiles_forwards_preprocessing(monkeypatch, tmp_path: Path):
     model = Model.from_preset("virchow2")
     captured = {}
 
-    def fake_embed_tiles(model_arg, slides, tiling_results, *, execution, preprocessing=None):
+    def fake_embed_tiles(model_arg, slides, tiling_results, *, execution, preprocessing=None, on_slide_persisted=None):
         captured["model"] = model_arg
         captured["preprocessing"] = preprocessing
         captured["execution"] = execution

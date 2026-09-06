@@ -59,4 +59,5 @@ It ships with presets for the most widely used pathology foundation models.
    :hidden:
    :caption: Release Notes
 
+   release-notes/5.9.0
    release-notes/5.6.0

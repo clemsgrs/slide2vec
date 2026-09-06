@@ -7,7 +7,7 @@ import warnings
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import torch
 from hs2p import SlideSpec
@@ -706,6 +706,7 @@ class Model:
         *,
         preprocessing: PreprocessingConfig | None = None,
         execution: ExecutionOptions | None = None,
+        on_slide_persisted: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
     ) -> list[TileEmbeddingArtifact] | list[HierarchicalEmbeddingArtifact]:
         from slide2vec.inference import embed_tiles
 
@@ -720,6 +721,7 @@ class Model:
                 tiling_results,
                 execution=resolved,
                 preprocessing=resolved_preprocessing,
+                on_slide_persisted=on_slide_persisted,
             )
 
     def aggregate_tiles(
@@ -1213,6 +1215,7 @@ class Pipeline:
         coordinates_dir: str | Path,
         *,
         slides: SlideSequence | None = None,
+        on_slide_persisted: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
     ) -> RunResult:
         from slide2vec.inference import run_pipeline_with_coordinates
 
@@ -1225,6 +1228,7 @@ class Pipeline:
                 slides=slides,
                 preprocessing=resolved_preprocessing,
                 execution=self.execution,
+                on_slide_persisted=on_slide_persisted,
             )
 
 

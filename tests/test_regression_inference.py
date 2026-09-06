@@ -285,6 +285,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
         execution,
         output_dir,
         tiling_input_dir,
+        on_slide_persisted=None,
     ):
         captured["successful_slides"] = successful_slides
         captured["process_list_path"] = process_list_path
