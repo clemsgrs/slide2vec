@@ -187,6 +187,7 @@ def build_incremental_persist_callback(
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
     process_list_path: Path | None = None,
+    on_artifact: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
 ) -> tuple[
     Callable[[SlideSpec, Any, EmbeddedSlide], None] | None,
     list[TileEmbeddingArtifact] | list[HierarchicalEmbeddingArtifact],
@@ -250,6 +251,8 @@ def build_incremental_persist_callback(
         )
         if tile_artifact is not None:
             tile_artifacts.append(tile_artifact)
+            if on_artifact is not None:
+                on_artifact(tile_artifact)
         if slide_artifact is not None:
             slide_artifacts.append(slide_artifact)
         # Buffer this completion; a slide with no successful artifact is still

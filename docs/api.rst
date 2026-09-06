@@ -373,3 +373,28 @@ See :doc:`manifest` for the full manifest schema.
    :undoc-members:
 
 See :doc:`output-layout` for the full on-disk directory structure and file schemas.
+
+Per-slide completion callback
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Pipeline.run_with_coordinates(coordinates_dir, *, slides=None,
+on_slide_persisted=None)`` and ``Model.embed_tiles(slides, tiling_results, *,
+preprocessing=None, execution=None, on_slide_persisted=None)`` accept an
+optional ``on_slide_persisted`` callable. slide2vec calls it in the calling
+process, synchronously, once per persisted ``(sample_id, annotation)`` work
+unit with that unit's :class:`~slide2vec.TileEmbeddingArtifact` (or
+:class:`~slide2vec.HierarchicalEmbeddingArtifact` under hierarchical
+preprocessing), after the artifact file is complete on disk and before the
+entry point returns. With ``num_gpus > 1`` it fires as each rank reports a
+finished slide, not after the whole stage returns.
+
+.. code-block:: python
+
+   def commit(artifact):
+       print(artifact.sample_id, artifact.path)
+
+   result = pipeline.run_with_coordinates("outputs/demo", on_slide_persisted=commit)
+
+Zero-tile slides, slides skipped by ``resume``, and slides that fail do not
+fire the callback. An exception raised inside it propagates out of the entry
+point. The return value is unchanged and still lists every artifact.

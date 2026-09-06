@@ -591,6 +591,7 @@ def embed_tiles(
     *,
     execution: ExecutionOptions,
     preprocessing: PreprocessingConfig | None = None,
+    on_slide_persisted: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
 ) -> list[TileEmbeddingArtifact] | list[HierarchicalEmbeddingArtifact]:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist tile embeddings")
@@ -660,6 +661,8 @@ def embed_tiles(
                 annotation=embedding.tiling_result_annotation(tiling_result),
             )
         artifacts.append(artifact)
+        if on_slide_persisted is not None:
+            on_slide_persisted(artifact)
     return artifacts
 
 
@@ -932,6 +935,7 @@ def run_pipeline_with_coordinates(
     slides=None,
     preprocessing: PreprocessingConfig | None = None,
     execution: ExecutionOptions,
+    on_slide_persisted: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
 ) -> RunResult:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required for Pipeline.run_with_coordinates(...)")
@@ -991,6 +995,7 @@ def run_pipeline_with_coordinates(
                 execution=execution,
                 output_dir=output_dir,
                 tiling_input_dir=Path(coordinates_dir),
+                on_slide_persisted=on_slide_persisted,
             )
             return RunResult(
                 tile_artifacts=tile_artifacts,
@@ -1003,6 +1008,7 @@ def run_pipeline_with_coordinates(
             preprocessing=resolved_preprocessing,
             execution=execution,
             process_list_path=process_list_path,
+            on_artifact=on_slide_persisted,
         )
         embedding_pipeline.compute_embedded_slides(
             model,

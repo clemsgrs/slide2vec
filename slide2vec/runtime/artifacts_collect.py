@@ -1,7 +1,7 @@
 """Collect pipeline-level tile/slide/hierarchical artifacts (local + distributed paths)."""
 
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import pandas as pd
 from hs2p import SlideSpec
@@ -154,6 +154,7 @@ def collect_distributed_pipeline_artifacts(
     execution: ExecutionOptions,
     output_dir: Path,
     tiling_input_dir: Path | None = None,
+    on_slide_persisted: Callable[[TileEmbeddingArtifact | HierarchicalEmbeddingArtifact], None] | None = None,
 ) -> tuple[
     list[TileEmbeddingArtifact],
     list[HierarchicalEmbeddingArtifact],
@@ -256,6 +257,9 @@ def collect_distributed_pipeline_artifacts(
             slide_artifacts=slide_artifacts,
         )
         live_updated_sample_ids.add(sample_id)
+        if on_slide_persisted is not None:
+            for artifact in [*tile_artifacts, *hierarchical_artifacts]:
+                on_slide_persisted(artifact)
 
     run_distributed_embedding_stage(
         model=model,
