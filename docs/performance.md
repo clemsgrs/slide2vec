@@ -123,6 +123,92 @@ to CPU; `gpu_busy_fraction` is a derived wall-time ratio, **not measured GPU uti
 Worker timings overlap and should not be summed as independent wall-clock costs. Use a
 CUDA profiler when attribution to kernels or transfers is required.
 
+## Fixed-coordinate pretrained inference
+
+Use the same runtime entry point to separate encoder compute from the cost of feeding it.
+This requires a compatible CUDA device, accessible pretrained weights and a real WSI.
+The audit's local H&E inputs are not distributed with the repository. Existing prepared
+coordinates can be supplied as an NPZ containing equally sized integer `x` and `y` vectors
+in level-0 pixels; reads use `--tile-size` at level 0, with no spacing inference.
+
+For example, reproduce the 64-coordinate H&E_5 workload recorded in
+`output/gpu-performance-audit/workload.json` and `he-5.npz`:
+
+```bash
+python - <<'PYCODE'
+from pathlib import Path
+import numpy as np
+
+output = Path("output/gpu-performance-audit")
+output.mkdir(parents=True, exist_ok=True)
+anchors = [(17408, 9216), (33792, 9216), (17408, 21504), (33792, 21504)]
+xy = np.array([(x + i * 224, y + j * 224)
+               for x, y in anchors for i in range(4) for j in range(4)], dtype=np.int64)
+np.savez(output / "he-5.npz", x=xy[:, 0], y=xy[:, 1])
+PYCODE
+
+python scripts/benchmark_runtime.py --case inference --model lunit \
+  --slide 'data/histai/wsi/slide_H&E_5.tiff' \
+  --coordinates output/gpu-performance-audit/he-5.npz --tile-size 224 \
+  --batch-size 16 --workers 0 --backend openslide --precision fp32 \
+  --modes model-only cached wsi --cache-policy warm --warmup 1 --repeat 5 \
+  --output output/gpu-performance-audit/before.json
+```
+
+The four 4×4 grids span separated 4096×4096 source TIFF blocks. They have no tissue
+filtering; verify dimensions and choose appropriate coordinates when using another slide.
+A 64-tile run is a bounded diagnostic, not evidence of whole-slide throughput. Expand the
+fixed workload before drawing conclusions about longer runs or other tissue distributions.
+
+| Mode | Timed work |
+| --- | --- |
+| `model-only` | Production forward on preprocessed device tensors, including CPU output transfer |
+| `cached` | Production preprocessing, transfer and forward on pre-read host byte tensors |
+| `wsi` | Production DataLoader/reader, preprocessing, transfer and forward |
+
+All modes preserve coordinate order and batch boundaries, including when supertiles are
+enabled. `--no-use-supertiles` disables grouped reads; `--workers` controls DataLoader
+workers explicitly. This isolates reader behavior and does not reproduce adaptive
+batch-size scheduling. Precision defaults to fp32; changing it changes the experiment.
+Model loading and preloading are outside the timed samples. CUDA synchronizes at timing
+boundaries; preloaded tensors remain allocated across modes, so reported peak allocation
+includes those buffers. Fixed-coordinate measurements exclude tissue detection, tiling
+and feature persistence; use the full pipeline harness for those costs.
+
+`--cache-policy warm` retains readers between repetitions and performs no eviction.
+`fresh-reader` closes owned readers/workers and includes reopening/startup in each sample,
+while filesystem caches remain uncontrolled. `advised-client-drop` additionally issues
+per-file `POSIX_FADV_DONTNEED` after closing owned readers, outside the timer. It records
+advisory errors and `fincore` observations where available. Advice and zero reported
+residency do not prove eviction on CIFS, and neither establishes **server-cold** storage.
+Cache policies apply only to `wsi`; preloaded modes do not evict input files. `/tmp` on the
+audit host is **tmpfs**, so staging there measures RAM-backed storage; report staging
+cost separately from extraction.
+
+Repeat the same command against the candidate with a distinct output path and
+`--compare output/gpu-performance-audit/before.json`. Comparison requires identical
+parameters, modes and environment, and checks saved embeddings with `rtol=atol=1e-4`
+before reporting speedup. Keep baseline JSON and its companion `.pt` files at their recorded paths;
+do not overwrite them. Each report retains every sample, throughput, peak allocated
+CUDA memory, model/dependency metadata, source hashes and embedding differences.
+Each timed sample also records parent-process minor/major page-fault deltas and Linux
+host/mounted-cgroup memory-pressure stall counters (`sample_resources`), collected
+outside the timer. Missing counters are null. Parent faults exclude reader workers;
+pressure counters are shared and cannot by themselves attribute stalls to this process.
+Inspect these alongside the complete timing distribution before accepting a speedup.
+
+Add `--profile` to export a separate untimed CPU/CUDA Chrome trace per mode next to the
+report. These extra profiler runs do not enter the timing statistics. Existing progress
+`forward_ms` measures host forward submission plus waiting for the CPU result, excluding
+overlapped prefetch. It is not GPU compute duration; historical values are not directly
+comparable after scheduling changes. `gpu_busy_fraction` is a host-time ratio, not measured
+GPU utilization. Use synchronized total time for throughput and traces for attribution. CPU-only correctness
+checks need no weights or GPU:
+
+```bash
+python -m pytest tests/test_inference_benchmark.py --no-cov -q
+```
+
 ## September 2026 audit
 
 The audit examined existing benchmark scripts, progress timing, CI and regression/WSI
@@ -168,8 +254,96 @@ The three sweep interfaces serve distinct measurement scopes and remain separate
 Deferred opportunities: dense resume reads compatible sidecars twice, and shared-storage
 latency may make retaining parsed metadata worthwhile. This was traced but not optimized
 without a representative resume workload and filesystem baseline. Model startup, remote
-weight loading, multi-GPU transfers and cold storage need cached/authorized model weights,
-representative manifests, appropriate readers, and an otherwise idle GPU/storage setup.
+weight loading and multi-GPU transfers remain unmeasured. The follow-up below measures
+cached pretrained inference and client-cache advice; server-cold storage still requires
+control or telemetry from the storage server.
 The database/N+1 category does not apply to the traced runtime: its hot persistence path
 is CSV plus per-artifact files. Existing supertile grouping and checkpoint batching were
 reused rather than replaced with another scheduling or caching system.
+
+
+## Pretrained GPU and storage follow-up
+
+The follow-up used cached Lunit and Phikon-v2 weights on an idle RTX 2080 Ti (11 GiB),
+fp32, batch size 16, one CPU thread, OpenSlide, supertiles, and hs2p 4.4.3 loaded from an
+isolated dependency directory. Python 3.11.15, torch 2.7.1+cu128, transformers 4.57.6 and
+timm 1.0.29 were unchanged between paired runs. Each measurement used one warmup and five
+repetitions; tables report medians. The baseline is commit `e6efef8` (the CPU audit).
+
+The retained runtime change submits CUDA inference before fetching/preprocessing the next
+batch, overlapping that host work with model compute. CPU and unsupported itemwise
+transforms retain their execution order. Preprocessing stays on its original device,
+preserving its numerical behavior. Each unpinned transfer gets its own pinned allocation,
+and CUDA inputs record their consumer stream to prevent reuse during asynchronous work.
+
+All rows below use 64 fixed tiles. Final Lunit outputs matched the baseline exactly.
+
+| Workload | Before | Retained change | Throughput ratio |
+| --- | ---: | ---: | ---: |
+| Lunit H&E_5: model-only | 0.341 s | 0.342 s | 1.00× |
+| Lunit H&E_5: cached pixels | 0.478 s | 0.393 s | 1.21× |
+| Lunit H&E_5: warm WSI | 1.009 s | 0.773 s | 1.30× |
+| Lunit H&E_3: warm WSI | 0.976 s | 0.743 s | 1.31× |
+| Lunit H&E_5: client-drop advice | 1.144 s | 0.911 s | 1.26× |
+
+Raw samples, source hashes, cached-weight SHA256/revisions, geometry and limitations are
+retained in [gpu-performance-audit-results.json](gpu-performance-audit-results.json).
+Runs prefixed `retained-` measure the final runtime. Other candidate runs are explicitly
+experimental; their timings do not describe the shipped implementation. Local `.pt`
+embeddings and large traces remain under `output/gpu-performance-audit/`.
+
+Phikon-v2 uses an unsupported transform closure and remains on the itemwise path. Its
+64-tile WSI comparison was 1.336 s versus 1.373 s and does not support a throughput gain.
+No precision, weights, geometry or batch-size changes were used to obtain the Lunit gains.
+
+An experiment also moved supported preprocessing onto the GPU, reducing the 64-tile
+Lunit host-to-device traffic from 38,535,168 to 9,633,888 bytes and producing additional
+throughput gains. It was dropped: interpolation introduced small embedding differences
+(maximum absolute error 0.000145), and larger-read results were too variable to justify
+changing the preprocessing path. Scheduling alone produced useful gains with exact
+pretrained outputs and keeps the smaller implementation. Historical GPU-preprocessing results are retained as
+experimental evidence, including slow samples.
+
+Expanding H&E_5 to 256 tiles (8×8 grids at the same four anchors, with 1792px
+supertile reads) exposed severe intermittent stalls. The GPU-preprocessing prototype's
+CIFS samples ranged from 5.61 to 51.92 s. RAM staging and disabling overlap did not
+eliminate them. The original runtime also stalled on recheck (14.15 s and 11.81 s,
+followed by approximately 5.1 s). Native samples during a stalled run were predominantly
+in OpenSlide/Pillow reads; sampling lag limits quantitative attribution. In a subsequent
+instrumented prototype run, a 43.97 s sample coincided with 36.78 s of shared cgroup memory-stall time; low-pressure samples took
+3.70–3.80 s. These counters support memory-pressure investigation but cannot attribute
+all shared stalls to the benchmark or prove the exact allocator mechanism. Removing
+CPU float intermediates can alter allocator reuse; no global allocator settings were
+changed. Do not extrapolate the 64-tile ratios to full slides or discard slow samples.
+
+The final scheduling-only 256-tile run had a 3.97 s median versus
+5.28 s, but retained a 29.25 s outlier with 22.89 s of shared cgroup
+memory-stall time. Including every sample, the means were 5.30 s before and
+9.01 s after. This is **not a uniform large-workload improvement**; memory-pressure
+isolation and longer paired runs are required before making that claim. All 256 embeddings
+matched the baseline exactly. The raw report retains every sample and its counters.
+
+The existing full pipeline harness ran with real Lunit weights and the repository
+WSI/mask fixture. Baseline and final runtime both completed 474 tiles and saved exactly
+equal `(474, 384)` embeddings. This is an end-to-end correctness check; a single fixture
+run does not establish end-to-end speedup. The 124-case relevant suite and 12-case focused
+final rerun passed, including CUDA ordering/lifetime tests. Structured reviews of the
+runtime, telemetry and final simplification returned no actionable findings.
+
+The 287,303,418-byte H&E_5 TIFF is on CIFS and has 4096×4096 JPEG source blocks.
+Reopening readers does not empty filesystem/server caches. Per-file cache advice is
+outside the measurement, and CIFS `fincore` observations do not establish actual eviction.
+An exploratory RAM-staging comparison barely changed warmed read/inference time while
+copying the entire slide cost 2.16 s separately; automatic whole-slide staging was not
+added. Worker counts remain workload-specific: warmed persistent-worker measurements
+exclude worker startup, while fresh-reader policy includes it.
+
+The final 64-tile WSI configuration measured 0.773 s with zero workers and 0.537 s with
+two persistent reader workers. Embeddings matched exactly. This is a configuration result,
+not a changed default; extra reader processes also consume additional memory.
+
+These results cover bounded level-0 workloads and one GPU. Actual server-cold performance
+requires an uncached server-side dataset or storage-admin cache control plus server I/O
+telemetry. Network weight downloads, multi-GPU scaling and complete large-slide extraction
+remain separate investigations. The benchmark exposes fixed inputs, cache controls,
+traces, resource counters and paired output checks for the next investigation.
