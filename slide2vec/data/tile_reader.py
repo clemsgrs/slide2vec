@@ -510,14 +510,14 @@ def _unfold_region_tensor_uint8(region_tensor: torch.Tensor, tile_size: int) -> 
         return torch.empty((0, 0, 3, tile_size, tile_size), dtype=torch.uint8)
     if int(region_tensor.shape[-1]) % tile_size != 0 or int(region_tensor.shape[-2]) % tile_size != 0:
         raise ValueError("Region tensor dimensions must be divisible by the tile size")
-    unfolded = torch.nn.functional.unfold(
-        region_tensor.to(torch.float32),
-        kernel_size=tile_size,
-        stride=tile_size,
+    batch, channels, height, width = region_tensor.shape
+    # Disjoint tiles need only a layout change. Keep pixels as bytes instead of
+    # materializing float regions and im2col buffers, then converting them back.
+    return (
+        region_tensor.reshape(batch, channels, height // tile_size, tile_size, width // tile_size, tile_size)
+        .permute(0, 2, 4, 1, 3, 5)
+        .reshape(batch, -1, channels, tile_size, tile_size)
     )
-    unfolded = unfolded.transpose(1, 2)
-    reshaped = unfolded.reshape(region_tensor.shape[0], -1, region_tensor.shape[1], tile_size, tile_size)
-    return reshaped.round().clamp(0, 255).to(torch.uint8)
 
 
 def _area_resize_tile_batch(

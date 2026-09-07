@@ -1,0 +1,4024 @@
+{
+  "baseline_commit": "e6efef8f9a728839dd330ffe4bb00635f33051f5",
+  "candidate_runtime_commit": "1b5af9a",
+  "workload": [
+    {
+      "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_1.tiff",
+      "coordinates": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/he-1.npz",
+      "count": 64,
+      "anchors": [
+        [
+          9216,
+          25600
+        ],
+        [
+          17408,
+          25600
+        ],
+        [
+          9216,
+          54272
+        ],
+        [
+          17408,
+          54272
+        ]
+      ],
+      "size_bytes": 84956350,
+      "source_block_size": [
+        4096,
+        4096
+      ],
+      "read_level": 0,
+      "tile_size": 224,
+      "selection": "four 4x4 tile grids across separated source TIFF blocks; no tissue filtering"
+    },
+    {
+      "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+      "coordinates": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/he-5.npz",
+      "count": 64,
+      "anchors": [
+        [
+          17408,
+          9216
+        ],
+        [
+          33792,
+          9216
+        ],
+        [
+          17408,
+          21504
+        ],
+        [
+          33792,
+          21504
+        ]
+      ],
+      "size_bytes": 287303418,
+      "source_block_size": [
+        4096,
+        4096
+      ],
+      "read_level": 0,
+      "tile_size": 224,
+      "selection": "four 4x4 tile grids across separated source TIFF blocks; no tissue filtering"
+    },
+    {
+      "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_3.tiff",
+      "coordinates": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/he-3.npz",
+      "count": 64,
+      "anchors": [
+        [
+          13312,
+          29696
+        ],
+        [
+          29696,
+          29696
+        ],
+        [
+          13312,
+          58368
+        ],
+        [
+          29696,
+          58368
+        ]
+      ],
+      "size_bytes": 644879226,
+      "source_block_size": [
+        4096,
+        4096
+      ],
+      "read_level": 0,
+      "tile_size": 224,
+      "selection": "four 4x4 tile grids across separated source TIFF blocks; no tissue filtering"
+    }
+  ],
+  "staging": {
+    "source": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+    "destination": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+    "bytes": 287303418,
+    "seconds": 2.1555639379657805,
+    "storage": "tmpfs RAM"
+  },
+  "correctness": {
+    "full_pipeline_shape": [
+      474,
+      384
+    ],
+    "storage_outputs_exact": true,
+    "rtol": 0.0001,
+    "atol": 0.0001,
+    "expanded_max_abs_errors": {
+      "expanded-before": 0.0,
+      "expanded-after": 0.00014495849609375,
+      "expanded-ram-after": 0.00014495849609375,
+      "expanded-no-overlap": 0.00014495849609375,
+      "expanded-baseline-recheck": 0.0
+    },
+    "prototype_full_pipeline_max_abs_error": 6.29425048828125e-05,
+    "retained_full_pipeline_max_abs_error": 0.0,
+    "retained_full_pipeline_exact": true,
+    "retained_storage_outputs_exact": true
+  },
+  "runs": {
+    "lunit-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.595658992882818,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.3353297980502248,
+            0.33865594188682735,
+            0.3407795208040625,
+            0.3408910990692675,
+            0.34249340603128076
+          ],
+          "median_seconds": 0.3407795208040625,
+          "tiles_per_second": 187.80471270395967,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-before-model-only.pt",
+          "embeddings_sha256": "dd54cebd9337fc70dc713abf91081136aa5f2ecfa78a89d0a5bd4661a35bd63d",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/lunit-before-model-only-trace.json"
+        },
+        "cached": {
+          "samples_seconds": [
+            0.5018705090042204,
+            0.4848254898097366,
+            0.4776876431424171,
+            0.47169514116831124,
+            0.46691507706418633
+          ],
+          "median_seconds": 0.4776876431424171,
+          "tiles_per_second": 133.9787639868238,
+          "peak_allocated_bytes": [
+            385662976,
+            385662976,
+            385662976,
+            385662976,
+            385662976
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-before-cached.pt",
+          "embeddings_sha256": "2c57e468897914baf797b1e74ff0a90f9811ce57289944f6aff03e33b2bad551",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/lunit-before-cached-trace.json"
+        },
+        "wsi": {
+          "samples_seconds": [
+            1.0294036658015102,
+            1.016378456959501,
+            1.0092771919444203,
+            0.9871448820922524,
+            0.9901522900909185
+          ],
+          "median_seconds": 1.0092771919444203,
+          "tiles_per_second": 63.41171732683364,
+          "peak_allocated_bytes": [
+            385662976,
+            385662976,
+            385662976,
+            385662976,
+            385662976
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-before-wsi.pt",
+          "embeddings_sha256": "86c4557f82e39cd725f0eb28860edb34ffe83e51c3aa9a3b5f3aedf96d6a17a1",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/lunit-before-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "lunit-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "d02b70c737e84e1cf886b64e2d56358c681dfcd53d963f561424bc7e27048b46",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.2652621669694781,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.33902822504751384,
+            0.3403479198459536,
+            0.34470526478253305,
+            0.34435109701007605,
+            0.34356568404473364
+          ],
+          "median_seconds": 0.34356568404473364,
+          "tiles_per_second": 186.28170091535375,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-after-model-only.pt",
+          "embeddings_sha256": "85c2678fcf5b3fc8812f9c488dca436455fe0b91671a0ca5d99ad632d3d18fe0",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 0.9918904495703116,
+          "trace_path": "output/gpu-performance-audit/lunit-after-model-only-trace.json"
+        },
+        "cached": {
+          "samples_seconds": [
+            0.34936067182570696,
+            0.3498760152142495,
+            0.35676952195353806,
+            0.351674861041829,
+            0.3521293490193784
+          ],
+          "median_seconds": 0.351674861041829,
+          "tiles_per_second": 181.98628076627773,
+          "peak_allocated_bytes": [
+            385662976,
+            385662976,
+            385662976,
+            385662976,
+            385662976
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-after-cached.pt",
+          "embeddings_sha256": "ed5441917635e7ef1d2914a904a6d5365e7aa90a33c5228c97f3127114ddd16f",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.3583218366171468,
+          "trace_path": "output/gpu-performance-audit/lunit-after-cached-trace.json"
+        },
+        "wsi": {
+          "samples_seconds": [
+            0.8681483869440854,
+            0.9525006690528244,
+            0.9705271739512682,
+            0.9034039420075715,
+            0.8968644109554589
+          ],
+          "median_seconds": 0.9034039420075715,
+          "tiles_per_second": 70.84317106008777,
+          "peak_allocated_bytes": [
+            385662976,
+            385662976,
+            385662976,
+            385662976,
+            385662976
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-after-wsi.pt",
+          "embeddings_sha256": "40d54d64385eea132d85aeaccedc123a757cd7198f3bede8a06d597155905d6f",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.1171936993119314,
+          "trace_path": "output/gpu-performance-audit/lunit-after-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "lunit-overlap": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.364802457159385,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.33647919981740415,
+            0.338087857933715,
+            0.3397877309471369,
+            0.3419679249636829,
+            0.34290031995624304
+          ],
+          "median_seconds": 0.3397877309471369,
+          "tiles_per_second": 188.35288673197243,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-overlap-model-only.pt",
+          "embeddings_sha256": "d1079ad67860797e39dafee6f980d549f9a45f8f9e66f092e557837bb77c85ce",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.002918851290366,
+          "trace_path": "output/gpu-performance-audit/lunit-overlap-model-only-trace.json"
+        },
+        "cached": {
+          "samples_seconds": [
+            0.3465514681302011,
+            0.3474569588433951,
+            0.34760033898055553,
+            0.34652135404758155,
+            0.34922799398191273
+          ],
+          "median_seconds": 0.3474569588433951,
+          "tiles_per_second": 184.19547621967737,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-overlap-cached.pt",
+          "embeddings_sha256": "8d263dc368d4c294e7c3966e61fa59a1525f4a44e8c1e117d4c185289887649b",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.3748109830136377,
+          "trace_path": "output/gpu-performance-audit/lunit-overlap-cached-trace.json"
+        },
+        "wsi": {
+          "samples_seconds": [
+            0.6847651458811015,
+            0.6560167910065502,
+            0.6868594351690263,
+            0.6462201199028641,
+            0.6821248598862439
+          ],
+          "median_seconds": 0.6821248598862439,
+          "tiles_per_second": 93.8244649383884,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-overlap-wsi.pt",
+          "embeddings_sha256": "fb17545d7743ed81a9300a4e1cfb70b24ff4d15808ae2ffef8bf3d59ab1e6998",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.4796076954485058,
+          "trace_path": "output/gpu-performance-audit/lunit-overlap-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "lunit-final": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.7449610461480916,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.34151207003742456,
+            0.34382994496263564,
+            0.3459052359685302,
+            0.3463978301733732,
+            0.348128727870062
+          ],
+          "median_seconds": 0.3459052359685302,
+          "tiles_per_second": 185.02177285868723,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/lunit-final-model-only.pt",
+          "embeddings_sha256": "187699d9e02f63f537cfd0434a3598a5b661468fed952304fef62fbb2b5a57b5",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 0.9851817358297114
+        },
+        "cached": {
+          "samples_seconds": [
+            0.35082580195739865,
+            0.34992507682181895,
+            0.3504042981658131,
+            0.35021627484820783,
+            0.3506337769795209
+          ],
+          "median_seconds": 0.3504042981658131,
+          "tiles_per_second": 182.64616140557408,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/lunit-final-cached.pt",
+          "embeddings_sha256": "e370173f9cf667c5748df36b7c19c0ebe8f43f03fa0a38ffa88e21b7e0c45ce2",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.3632470995443464
+        },
+        "wsi": {
+          "samples_seconds": [
+            0.6756618320941925,
+            0.6527289301156998,
+            0.6396553399972618,
+            0.6440485899802297,
+            0.7091126709710807
+          ],
+          "median_seconds": 0.6527289301156998,
+          "tiles_per_second": 98.04989030998772,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/lunit-final-wsi.pt",
+          "embeddings_sha256": "74fdc53b4ab62e5cf4008bb16eb206064bbe6cde67b71beea67e6e508300c51c",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.5462424681644193
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "phikon-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "phikonv2",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": "2ae989a9c40cffaa27f0a6cb29cc94d1d6f9a5fd",
+        "weight_hub_id": "owkin/phikon-v2"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/phikon.py": "db13486f5ec77d635c3bb51e2f55601c6d41fcdb9e1b4d70da3614f981b95cda"
+      },
+      "model_load_seconds": 7.933326260885224,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.7648135269992054,
+            0.7672604240942746,
+            0.7712700399570167,
+            0.773348551010713,
+            0.774408747907728
+          ],
+          "median_seconds": 0.7712700399570167,
+          "tiles_per_second": 82.98001566813973,
+          "peak_allocated_bytes": [
+            1443831808,
+            1443831808,
+            1443831808,
+            1443831808,
+            1443831808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-before-model-only.pt",
+          "embeddings_sha256": "d814cabb091aa6333e44a83602aa78c939ae3317fa3e03328962c97ad3f9f543",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/phikon-before-model-only-trace.json"
+        },
+        "cached": {
+          "samples_seconds": [
+            0.816818559076637,
+            0.8204871260095388,
+            0.8179547169711441,
+            0.8189962450414896,
+            0.8195874991361052
+          ],
+          "median_seconds": 0.8189962450414896,
+          "tiles_per_second": 78.14443642138777,
+          "peak_allocated_bytes": [
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-before-cached.pt",
+          "embeddings_sha256": "de2a7765e2dcc6f65b699309554895e687b7933976d26a2245383b1e5eb4f862",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/phikon-before-cached-trace.json"
+        },
+        "wsi": {
+          "samples_seconds": [
+            1.354677168885246,
+            1.3358711160253733,
+            1.3340446730144322,
+            1.3795317029580474,
+            1.3282938529737294
+          ],
+          "median_seconds": 1.3358711160253733,
+          "tiles_per_second": 47.90881338195233,
+          "peak_allocated_bytes": [
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-before-wsi.pt",
+          "embeddings_sha256": "0ecb114837029619d2a161cc3ac6397922ae8ad486cd1fe7475a42d7964c59b4",
+          "cache_advice": [],
+          "trace_path": "output/gpu-performance-audit/phikon-before-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "phikon-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "phikonv2",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": "2ae989a9c40cffaa27f0a6cb29cc94d1d6f9a5fd",
+        "weight_hub_id": "owkin/phikon-v2"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/phikon.py": "db13486f5ec77d635c3bb51e2f55601c6d41fcdb9e1b4d70da3614f981b95cda"
+      },
+      "model_load_seconds": 15.070211412152275,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.767687011975795,
+            0.7721179809886962,
+            0.7733295070938766,
+            0.7769689899869263,
+            0.7795731369405985
+          ],
+          "median_seconds": 0.7733295070938766,
+          "tiles_per_second": 82.75903015844818,
+          "peak_allocated_bytes": [
+            1443831808,
+            1443831808,
+            1443831808,
+            1443831808,
+            1443831808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-after-model-only.pt",
+          "embeddings_sha256": "42ac34249cb7aa52247ce3b15ff7c80092f60b40f1160e41d7723bf543b096fd",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 0.9973368827673481
+        },
+        "cached": {
+          "samples_seconds": [
+            0.8192117030266672,
+            0.8341798409819603,
+            0.8291205589193851,
+            0.822437590919435,
+            0.8220768230967224
+          ],
+          "median_seconds": 0.822437590919435,
+          "tiles_per_second": 77.81745473045791,
+          "peak_allocated_bytes": [
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-after-cached.pt",
+          "embeddings_sha256": "a4509403718356c52ffe81c2498dd096badb06780f598cfc4cbfc8d537bec04f",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 0.995815675358299
+        },
+        "wsi": {
+          "samples_seconds": [
+            1.4101237158756703,
+            1.3448154160287231,
+            1.326561186928302,
+            1.3805247240234166,
+            1.3734536380507052
+          ],
+          "median_seconds": 1.3734536380507052,
+          "tiles_per_second": 46.59785975071788,
+          "peak_allocated_bytes": [
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824,
+            1463885824
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/phikon-after-wsi.pt",
+          "embeddings_sha256": "240c26d43569a6c46442353f05d48b9d8aea0fbfa2251a937a21a0ea1a4bb304",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 0.9726364829622707
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "storage-fresh": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "fresh-reader",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.2751454720273614,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.6586440629325807,
+            0.668549319030717,
+            0.643129751086235,
+            0.6589046958833933,
+            0.6506756490562111
+          ],
+          "median_seconds": 0.6586440629325807,
+          "tiles_per_second": 97.16932650245583,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/storage-fresh-wsi.pt",
+          "embeddings_sha256": "fd88607362c15aebea7a60e5dc66cdfe6af8b92c61a46579c3d642d2ba4e769f",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "storage-advised": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "advised-client-drop",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.8219775510951877,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.8080929168500006,
+            0.8744337521493435,
+            0.8494683799799532,
+            0.7902971028815955,
+            0.9439324128907174
+          ],
+          "median_seconds": 0.8494683799799532,
+          "tiles_per_second": 75.34123871863288,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/storage-advised-wsi.pt",
+          "embeddings_sha256": "d241e22927da1d835716ac3f54fefed4c9cacc7ab674f8e70b731bd06d225e0d",
+          "cache_advice": [
+            {
+              "before": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            }
+          ]
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "storage-ram": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.4546244009397924,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.641307728132233,
+            0.6735838330350816,
+            0.6291685928590596,
+            0.6255833809264004,
+            0.7162507819011807
+          ],
+          "median_seconds": 0.641307728132233,
+          "tiles_per_second": 99.79608414574362,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/storage-ram-wsi.pt",
+          "embeddings_sha256": "a3b874baa8701a904e4384eb6c1ef0e56632b1f2abaeb4f0c04b356b75ca9a5a",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "storage-workers2": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 2,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "62ca92828a09d6f743886366ee7a1558b4b5f502db13d731c0814cafe2b8ff25",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.4939677510410547,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.5123203240800649,
+            0.49919081199914217,
+            0.5019722369033843,
+            0.5038201950956136,
+            0.5026777680031955
+          ],
+          "median_seconds": 0.5026777680031955,
+          "tiles_per_second": 127.31814310035918,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/storage-workers2-wsi.pt",
+          "embeddings_sha256": "d5a5beb8eb6c989d275bd6a8f38adf94414547f54d097a03be19f7a78ee9a89f",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "expanded-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.6239124222192913,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            5.534224086906761,
+            5.1117948167957366,
+            5.311193337896839,
+            5.127756619127467,
+            5.305780082941055
+          ],
+          "median_seconds": 5.305780082941055,
+          "tiles_per_second": 48.24926702542414,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-before-wsi.pt",
+          "embeddings_sha256": "5d219e4addabdacb8970d0d3ec879fbfdbb167496a8fd52606f3481025f948cf",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "expanded-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.5058838890399784,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            25.37422814616002,
+            43.30292222183198,
+            9.621431984007359,
+            51.92229465814307,
+            5.609750916017219
+          ],
+          "median_seconds": 25.37422814616002,
+          "tiles_per_second": 10.088976836079306,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-after-wsi.pt",
+          "embeddings_sha256": "27fa28893a87fa48067a1165983996ff13239a5351411eda91be312e4b3dc9ff",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 0.2091011420082939
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "he3-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_3.tiff",
+        "slide_size_bytes": 644879226,
+        "slide_mtime_ns": 1773937680293422400,
+        "coordinates_sha256": "07a631339d1d9b58e05a24035fbc62003ef0ba9aba1389405da9e55113f89951",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.3300762069411576,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.9717488191090524,
+            0.9919911841861904,
+            0.976258005015552,
+            1.0230356028769165,
+            0.876217412063852
+          ],
+          "median_seconds": 0.976258005015552,
+          "tiles_per_second": 65.55644068596443,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/he3-before-wsi.pt",
+          "embeddings_sha256": "36beb52f27ff88f07026b08812bd01e1d9bd425bddf8d78e33b943717cd9d037",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "he3-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_3.tiff",
+        "slide_size_bytes": 644879226,
+        "slide_mtime_ns": 1773937680293422400,
+        "coordinates_sha256": "07a631339d1d9b58e05a24035fbc62003ef0ba9aba1389405da9e55113f89951",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.4105767558794469,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.6288426369428635,
+            0.6037307190708816,
+            0.598546130117029,
+            0.6261846059933305,
+            0.6462487529497594
+          ],
+          "median_seconds": 0.6261846059933305,
+          "tiles_per_second": 102.20628132254288,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/he3-after-wsi.pt",
+          "embeddings_sha256": "64e9896e6789077735174b4358e13fffbdea5d734415def6808b64d516f6ae8c",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00013887882232666016,
+          "speedup": 1.5590578172500622
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "expanded-ram-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.348903700010851,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            5.157192579936236,
+            5.256007255986333,
+            5.114414331968874,
+            5.044589962810278,
+            5.0661195169668645
+          ],
+          "median_seconds": 5.114414331968874,
+          "tiles_per_second": 50.05460711303943,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-ram-before-wsi.pt",
+          "embeddings_sha256": "b90eae467b40bca22bd77f375cf6ace8970e0b3481b13858522a6edb60c6978c",
+          "cache_advice": [],
+          "trace_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-ram-before-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "expanded-ram-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 2.2070600278675556,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            16.1516412650235,
+            9.594718493986875,
+            3.76928454102017,
+            4.537781602004543,
+            3.7665657070465386
+          ],
+          "median_seconds": 4.537781602004543,
+          "tiles_per_second": 56.415231593982675,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-ram-after-wsi.pt",
+          "embeddings_sha256": "87359eeeaab3aafb32006b5cbaa6dae22204b2cafab3cdb2b991fc94a6e049f2",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.127073707053157,
+          "trace_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-ram-after-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "expanded-no-overlap": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.027553060092032,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            24.760793576948345,
+            4.917415538104251,
+            12.93821953702718,
+            7.968108821893111,
+            4.906989936949685
+          ],
+          "median_seconds": 7.968108821893111,
+          "tiles_per_second": 32.12807527133872,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/expanded-no-overlap-wsi.pt",
+          "embeddings_sha256": "b72ff7e417661997d3beb1befcd9a6d4f1be2b431bca16d01636be439733d1b2",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "diagnostic_override": "Temporary wrapper disabled deferred preload; source hashes do not represent this runtime monkeypatch.",
+      "audit_role": "experiment, not the final runtime"
+    },
+    "expanded-baseline-recheck": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "65d45cabef9b1d1dcd8b6d5e76b333b05bde3cec96058532f5c91d4af86c0920",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.6474265588913113,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            14.151145898038521,
+            11.809649668168277,
+            5.04485734202899,
+            5.105565252015367,
+            5.12232364108786
+          ],
+          "median_seconds": 5.12232364108786,
+          "tiles_per_second": 49.97731848619227,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/expanded-baseline-recheck-wsi.pt",
+          "embeddings_sha256": "84bff3ab97ddfe6b43f6f7936f61388ec1f7e374533b159f787ae394a27c1aee",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."
+      ],
+      "audit_role": "baseline"
+    },
+    "expanded-telemetry-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 2.53713831002824,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            5.212460215901956,
+            5.451267518103123,
+            5.279726332984865,
+            5.378661367110908,
+            5.18878430291079
+          ],
+          "median_seconds": 5.279726332984865,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 300578,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 2027244,
+                "full": 2027244
+              },
+              "host_memory_psi_us": {
+                "some": 1331541,
+                "full": 1331508
+              }
+            },
+            {
+              "parent_minor_faults": 319504,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 2649807,
+                "full": 2649807
+              },
+              "host_memory_psi_us": {
+                "some": 1559509,
+                "full": 1559460
+              }
+            },
+            {
+              "parent_minor_faults": 289047,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 1141334,
+                "full": 1141334
+              },
+              "host_memory_psi_us": {
+                "some": 1228050,
+                "full": 1227904
+              }
+            },
+            {
+              "parent_minor_faults": 275472,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 273082,
+                "full": 273077
+              }
+            },
+            {
+              "parent_minor_faults": 267812,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 517069,
+                "full": 517059
+              }
+            }
+          ],
+          "tiles_per_second": 48.48736162718339,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-telemetry-before-wsi.pt",
+          "embeddings_sha256": "435852b5ca769e60b0566386ded63546ae51078b331bd4d9d987185d3f222876",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "baseline"
+    },
+    "expanded-telemetry-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.1601676321588457,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            43.96727145696059,
+            3.7959598819725215,
+            3.6983962210360914,
+            3.785355884116143,
+            14.245272099040449
+          ],
+          "median_seconds": 3.7959598819725215,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 392854,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 36784132,
+                "full": 36784132
+              },
+              "host_memory_psi_us": {
+                "some": 9026470,
+                "full": 9025666
+              }
+            },
+            {
+              "parent_minor_faults": 393262,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 25006,
+                "full": 25005
+              },
+              "host_memory_psi_us": {
+                "some": 23743,
+                "full": 23736
+              }
+            },
+            {
+              "parent_minor_faults": 392367,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 257971,
+                "full": 257958
+              }
+            },
+            {
+              "parent_minor_faults": 395244,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 14341,
+                "full": 14342
+              },
+              "host_memory_psi_us": {
+                "some": 1352815,
+                "full": 1352742
+              }
+            },
+            {
+              "parent_minor_faults": 406978,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 9588818,
+                "full": 9588818
+              },
+              "host_memory_psi_us": {
+                "some": 5023193,
+                "full": 5022653
+              }
+            }
+          ],
+          "tiles_per_second": 67.44012264612579,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/expanded-telemetry-after-wsi.pt",
+          "embeddings_sha256": "3ffff20ce06cf4927841a1c4644304493c6a1942894af69117b86e4bce54656e",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.3908804352909343
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "advised-paired-before": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "advised-client-drop",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "274ad5e354373fc29e1067c8c4cb0afcf23f1130469c29e4dd43b03cb1d6e59d",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.1722737839445472,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            1.1450463149230927,
+            1.0826430420856923,
+            1.3438390309456736,
+            1.1440667330753058,
+            1.1179767979774624
+          ],
+          "median_seconds": 1.1440667330753058,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 72122,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 293047,
+                "full": 293037
+              }
+            },
+            {
+              "parent_minor_faults": 72982,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 179086,
+                "full": 179058
+              }
+            },
+            {
+              "parent_minor_faults": 70520,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 317463,
+                "full": 317438
+              }
+            },
+            {
+              "parent_minor_faults": 90633,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 265572,
+                "full": 265546
+              }
+            },
+            {
+              "parent_minor_faults": 89389,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 249658,
+                "full": 249636
+              }
+            }
+          ],
+          "tiles_per_second": 55.940792743763254,
+          "peak_allocated_bytes": [
+            347127808,
+            347127808,
+            347127808,
+            347127808,
+            347127808
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/advised-paired-before-wsi.pt",
+          "embeddings_sha256": "ff8925f52fe28e1b85e286234142bb92c3f5e505b0b27423105545e4eff6d5fe",
+          "cache_advice": [
+            {
+              "before": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            }
+          ]
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "baseline"
+    },
+    "advised-paired-after": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "advised-client-drop",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.6435851040296257,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.9146360869053751,
+            0.7893110068980604,
+            0.7947489488869905,
+            0.8140610950067639,
+            0.9866939659696072
+          ],
+          "median_seconds": 0.8140610950067639,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 82471,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 82194,
+                "full": 82192
+              }
+            },
+            {
+              "parent_minor_faults": 82436,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 153139,
+                "full": 153134
+              }
+            },
+            {
+              "parent_minor_faults": 83607,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 178017,
+                "full": 178012
+              }
+            },
+            {
+              "parent_minor_faults": 82507,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 182184,
+                "full": 182177
+              }
+            },
+            {
+              "parent_minor_faults": 86295,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 197840,
+                "full": 197824
+              }
+            }
+          ],
+          "tiles_per_second": 78.61817791386804,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/advised-paired-after-wsi.pt",
+          "embeddings_sha256": "12fbd2b27a520495fc6c32ee1fe546c87f836bb70b17693740fd97546acf845f",
+          "cache_advice": [
+            {
+              "before": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            }
+          ],
+          "baseline_max_abs_error": 0.00014495849609375,
+          "speedup": 1.4053819057226902
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "experiment, not the final runtime"
+    },
+    "expanded-cpu-transforms": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.6630681499373168,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            7.306218969868496,
+            3.9711724231019616,
+            9.989085536915809,
+            5.260265500051901,
+            4.1157209780067205
+          ],
+          "median_seconds": 5.260265500051901,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 281423,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 3339887,
+                "full": 3339887
+              },
+              "host_memory_psi_us": {
+                "some": 3793076,
+                "full": 3792895
+              }
+            },
+            {
+              "parent_minor_faults": 284674,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 291827,
+                "full": 291801
+              }
+            },
+            {
+              "parent_minor_faults": 375186,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 5106661,
+                "full": 5106661
+              },
+              "host_memory_psi_us": {
+                "some": 2054484,
+                "full": 2054309
+              }
+            },
+            {
+              "parent_minor_faults": 348996,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 797807,
+                "full": 797807
+              },
+              "host_memory_psi_us": {
+                "some": 658013,
+                "full": 657969
+              }
+            },
+            {
+              "parent_minor_faults": 316485,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 86591,
+                "full": 86591
+              },
+              "host_memory_psi_us": {
+                "some": 133225,
+                "full": 133218
+              }
+            }
+          ],
+          "tiles_per_second": 48.66674505259747,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/expanded-cpu-transforms-wsi.pt",
+          "embeddings_sha256": "dfef0fd0bcf56927144b9471b0642b4170a05e87c18e03af76c045bae45c4e9b",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.0036995913861708
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "diagnostic_override": "Temporary wrapper restored original CPU preprocessing; runtime scheduling remained candidate. Source hashes do not represent this override.",
+      "audit_role": "experiment, not the final runtime"
+    },
+    "retained-he5": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "3cd78084d2db4697612f7d0779fb70be17c877a2b2c26fad14fb62ecb4c10d50",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 2.506665961118415,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.3363200491294265,
+            0.3386502838693559,
+            0.3420291349757463,
+            0.34178124205209315,
+            0.3421166518237442
+          ],
+          "median_seconds": 0.34178124205209315,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 67,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 102023,
+                "full": 102018
+              }
+            },
+            {
+              "parent_minor_faults": 0,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 86829,
+                "full": 86817
+              }
+            },
+            {
+              "parent_minor_faults": 0,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 78185,
+                "full": 78167
+              }
+            },
+            {
+              "parent_minor_faults": 436,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 95667,
+                "full": 95659
+              }
+            },
+            {
+              "parent_minor_faults": 412,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 86896,
+                "full": 86892
+              }
+            }
+          ],
+          "tiles_per_second": 187.254278835599,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-model-only.pt",
+          "embeddings_sha256": "31e8a861bb8855a8e4b0e6f78bd9a83da63175998eb36af27f9cb1a3aec40b34",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 0.9970691157829019,
+          "trace_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-model-only-trace.json"
+        },
+        "cached": {
+          "samples_seconds": [
+            0.3951533939689398,
+            0.4524159908760339,
+            0.3744018110446632,
+            0.3932650580536574,
+            0.38929152791388333
+          ],
+          "median_seconds": 0.3932650580536574,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 24490,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 31876,
+                "full": 31866
+              }
+            },
+            {
+              "parent_minor_faults": 32331,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 33524,
+                "full": 33519
+              }
+            },
+            {
+              "parent_minor_faults": 15364,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 30473,
+                "full": 30473
+              }
+            },
+            {
+              "parent_minor_faults": 17720,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 25558,
+                "full": 25557
+              }
+            },
+            {
+              "parent_minor_faults": 20070,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 33556,
+                "full": 33548
+              }
+            }
+          ],
+          "tiles_per_second": 162.74011303406414,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-cached.pt",
+          "embeddings_sha256": "ad61b326a58cd5c23177b95173aa316783a93a98d5b80431474d27a388ed828f",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.2146709537495726,
+          "trace_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-cached-trace.json"
+        },
+        "wsi": {
+          "samples_seconds": [
+            0.7997066481038928,
+            0.8150293971411884,
+            0.7395877270027995,
+            0.7734350650571287,
+            0.7472825499717146
+          ],
+          "median_seconds": 0.7734350650571287,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 76254,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 283633,
+                "full": 283613
+              }
+            },
+            {
+              "parent_minor_faults": 83313,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 314906,
+                "full": 314869
+              }
+            },
+            {
+              "parent_minor_faults": 76519,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 313256,
+                "full": 313245
+              }
+            },
+            {
+              "parent_minor_faults": 71004,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 324577,
+                "full": 324566
+              }
+            },
+            {
+              "parent_minor_faults": 70255,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 335395,
+                "full": 335382
+              }
+            }
+          ],
+          "tiles_per_second": 82.74773525463671,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-wsi.pt",
+          "embeddings_sha256": "1b582484204a5676c3c4ba83386bd3a5b5023344376289ef969d6d0b12e87aa1",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.3049281543368758,
+          "trace_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he5-wsi-trace.json"
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "retained runtime"
+    },
+    "retained-he3": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_3.tiff",
+        "slide_size_bytes": 644879226,
+        "slide_mtime_ns": 1773937680293422400,
+        "coordinates_sha256": "07a631339d1d9b58e05a24035fbc62003ef0ba9aba1389405da9e55113f89951",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "3cd78084d2db4697612f7d0779fb70be17c877a2b2c26fad14fb62ecb4c10d50",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.4074434489011765,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.74149533896707,
+            0.7731225159950554,
+            0.742897551972419,
+            0.7140554189682007,
+            0.789215117925778
+          ],
+          "median_seconds": 0.742897551972419,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 75357,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 138353,
+                "full": 138348
+              }
+            },
+            {
+              "parent_minor_faults": 70617,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 80416,
+                "full": 80410
+              }
+            },
+            {
+              "parent_minor_faults": 76243,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 85393,
+                "full": 85380
+              }
+            },
+            {
+              "parent_minor_faults": 76818,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 62618,
+                "full": 62613
+              }
+            },
+            {
+              "parent_minor_faults": 71098,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 93073,
+                "full": 93065
+              }
+            }
+          ],
+          "tiles_per_second": 86.14915990782008,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-he3-wsi.pt",
+          "embeddings_sha256": "943b60794081d635ca94b8e4f3a40f922d71d0b4ad4ba3bb6dd577bbfea47df3",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.314121984146472
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "retained runtime"
+    },
+    "retained-advised": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "advised-client-drop",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "3cd78084d2db4697612f7d0779fb70be17c877a2b2c26fad14fb62ecb4c10d50",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.7571627858560532,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.9194475910626352,
+            0.9105047900229692,
+            0.7347492680419236,
+            1.2427729340270162,
+            0.8928760769777
+          ],
+          "median_seconds": 0.9105047900229692,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 74001,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 115434,
+                "full": 115433
+              }
+            },
+            {
+              "parent_minor_faults": 67903,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 100101,
+                "full": 100093
+              }
+            },
+            {
+              "parent_minor_faults": 21648,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 71246,
+                "full": 71244
+              }
+            },
+            {
+              "parent_minor_faults": 75832,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 71278,
+                "full": 71260
+              }
+            },
+            {
+              "parent_minor_faults": 66370,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 89982,
+                "full": 89978
+              }
+            }
+          ],
+          "tiles_per_second": 70.29067908405564,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-advised-wsi.pt",
+          "embeddings_sha256": "0d22bc954bd6287f3ed80a693caf00c99cf0d47cca95b03ec7e6f0213434e206",
+          "cache_advice": [
+            {
+              "before": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            },
+            {
+              "before": {
+                "res": 32673792,
+                "pages": 7977,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              },
+              "advisory_only": true,
+              "error": null,
+              "after": {
+                "res": 0,
+                "pages": 0,
+                "size": 287303418,
+                "file": "data/histai/wsi/slide_H&E_5.tiff"
+              }
+            }
+          ],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.2565191810209417
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "retained runtime"
+    },
+    "retained-expanded": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/tmp/slide2vec-gpu-perf-slides/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1788791667658590806,
+        "coordinates_sha256": "fce08e9e2fd0a0874acc842dc80c8666c870ad5db051b206957df80f2ecd0edb",
+        "num_tiles": 256,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "3cd78084d2db4697612f7d0779fb70be17c877a2b2c26fad14fb62ecb4c10d50",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.2511038139928132,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            29.253737705061212,
+            3.9748765220865607,
+            3.990106913028285,
+            3.9109925490338355,
+            3.9331403409596533
+          ],
+          "median_seconds": 3.9748765220865607,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 363666,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 22892874,
+                "full": 22892875
+              },
+              "host_memory_psi_us": {
+                "some": 7696136,
+                "full": 7695608
+              }
+            },
+            {
+              "parent_minor_faults": 305449,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 43998,
+                "full": 43998
+              },
+              "host_memory_psi_us": {
+                "some": 240355,
+                "full": 240346
+              }
+            },
+            {
+              "parent_minor_faults": 307392,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 266946,
+                "full": 266931
+              }
+            },
+            {
+              "parent_minor_faults": 266073,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 69575,
+                "full": 69575
+              },
+              "host_memory_psi_us": {
+                "some": 446594,
+                "full": 446571
+              }
+            },
+            {
+              "parent_minor_faults": 299812,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 315353,
+                "full": 315328
+              }
+            }
+          ],
+          "tiles_per_second": 64.40451636108084,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-expanded-wsi.pt",
+          "embeddings_sha256": "a4f5bffe6bf7d1c899bb283cecfaac62b9bb8199129657832ee0176c3a4c32c9",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.328274300760754
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "retained runtime"
+    },
+    "retained-workers2": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 2,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "3cd78084d2db4697612f7d0779fb70be17c877a2b2c26fad14fb62ecb4c10d50",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.6501777058001608,
+      "modes": {
+        "wsi": {
+          "samples_seconds": [
+            0.5341331248637289,
+            0.5564586839172989,
+            0.5365108090918511,
+            0.5607734008226544,
+            0.5345520209521055
+          ],
+          "median_seconds": 0.5365108090918511,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 10611,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 23781,
+                "full": 23771
+              }
+            },
+            {
+              "parent_minor_faults": 5369,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 48657,
+                "full": 48656
+              }
+            },
+            {
+              "parent_minor_faults": 3999,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 37679,
+                "full": 37679
+              }
+            },
+            {
+              "parent_minor_faults": 8327,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 42618,
+                "full": 42619
+              }
+            },
+            {
+              "parent_minor_faults": 10331,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 34098,
+                "full": 34097
+              }
+            }
+          ],
+          "tiles_per_second": 119.28930212670356,
+          "peak_allocated_bytes": [
+            337494016,
+            337494016,
+            337494016,
+            337494016,
+            337494016
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "/data/pathology/projects/clement/code/slide2vec/output/gpu-performance-audit/retained-workers2-wsi.pt",
+          "embeddings_sha256": "f459a35a2708be7cd8ce0bac14ce816ed766116e6ef0f693e0f7f08449a4704d",
+          "cache_advice": []
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "retained runtime"
+    },
+    "lunit-cpu-transforms": {
+      "case": "inference",
+      "parameters": {
+        "model": "lunit",
+        "slide": "/data/pathology/projects/clement/code/slide2vec/data/histai/wsi/slide_H&E_5.tiff",
+        "slide_size_bytes": 287303418,
+        "slide_mtime_ns": 1773937659973389500,
+        "coordinates_sha256": "841848f671f4fad269742296e20a73a39c1be7831c39f1a0b209c7ae04281a0e",
+        "num_tiles": 64,
+        "tile_size": 224,
+        "batch_size": 16,
+        "workers": 0,
+        "backend": "openslide",
+        "use_supertiles": true,
+        "precision": "fp32",
+        "threads": 1,
+        "cache_policy": "warm",
+        "repeat": 5,
+        "warmup": 1
+      },
+      "environment": {
+        "python": "3.11.15",
+        "numpy": "1.26.4",
+        "hs2p": "4.4.3",
+        "transformers": "4.57.6",
+        "timm": "1.0.29",
+        "torch": "2.7.1+cu128",
+        "cuda": "12.8",
+        "device": "cuda",
+        "gpu": "NVIDIA GeForce RTX 2080 Ti",
+        "weight_revision": null,
+        "weight_hub_id": "1aurent/vit_small_patch8_224.lunit_dino"
+      },
+      "source_sha256": {
+        "scripts/benchmark_inference.py": "38f67d37c288169089b0da734c840337368010c00a606e5820d23106cc2da4c8",
+        "slide2vec/runtime/batching.py": "4dc47d46e0578d7844d06e0434914d1beb1be42db2f380ad7500413cba4d1aaa",
+        "slide2vec/runtime/preprocessing.py": "9a8f5e6a99733ae1454bffa1886645c491401825eaa6be5cd9adfe9e0af75af0",
+        "slide2vec/data/tile_reader.py": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "slide2vec/encoders/models/lunit.py": "7f1904e29185559fccf07491445e4529f8d76a468d1c463c280ac94c17aaf800"
+      },
+      "model_load_seconds": 1.8494079099036753,
+      "modes": {
+        "model-only": {
+          "samples_seconds": [
+            0.3401592089794576,
+            0.3397121769376099,
+            0.3439028700813651,
+            0.34356969385407865,
+            0.3456194601021707
+          ],
+          "median_seconds": 0.34356969385407865,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 899,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 111,
+                "full": 111
+              }
+            },
+            {
+              "parent_minor_faults": 18,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              }
+            },
+            {
+              "parent_minor_faults": 3,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              }
+            },
+            {
+              "parent_minor_faults": 5,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 2095,
+                "full": 2068
+              }
+            },
+            {
+              "parent_minor_faults": 5,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 4636,
+                "full": 4635
+              }
+            }
+          ],
+          "tiles_per_second": 186.2795268175841,
+          "peak_allocated_bytes": [
+            366395392,
+            366395392,
+            366395392,
+            366395392,
+            366395392
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-cpu-transforms-model-only.pt",
+          "embeddings_sha256": "ea6430b378b74617ebfa2a669f05014e29eeac9ef33b38aa5ba20e0488c13dcb",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 0.991878873195372
+        },
+        "cached": {
+          "samples_seconds": [
+            0.3777345730923116,
+            0.3753234068863094,
+            0.3831482019741088,
+            0.37878579716198146,
+            0.3948173529934138
+          ],
+          "median_seconds": 0.37878579716198146,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 33145,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 718,
+                "full": 712
+              }
+            },
+            {
+              "parent_minor_faults": 2922,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 4816,
+                "full": 4814
+              }
+            },
+            {
+              "parent_minor_faults": 20647,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 33988,
+                "full": 33987
+              }
+            },
+            {
+              "parent_minor_faults": 2613,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 88484,
+                "full": 88461
+              }
+            },
+            {
+              "parent_minor_faults": 6760,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 74102,
+                "full": 74100
+              }
+            }
+          ],
+          "tiles_per_second": 168.96092852349335,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-cpu-transforms-cached.pt",
+          "embeddings_sha256": "0ba138b0be37db5ad828821a970a4ce0758faaa41be03f38e65576b9592e0d96",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.2611023082740926
+        },
+        "wsi": {
+          "samples_seconds": [
+            0.7458464070223272,
+            0.7732273759320378,
+            0.7314755360130221,
+            0.733708273852244,
+            0.7509720488451421
+          ],
+          "median_seconds": 0.7458464070223272,
+          "sample_resources": [
+            {
+              "parent_minor_faults": 71348,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 246264,
+                "full": 246252
+              }
+            },
+            {
+              "parent_minor_faults": 70407,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 274907,
+                "full": 274899
+              }
+            },
+            {
+              "parent_minor_faults": 66166,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 242693,
+                "full": 242683
+              }
+            },
+            {
+              "parent_minor_faults": 65575,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 298370,
+                "full": 298366
+              }
+            },
+            {
+              "parent_minor_faults": 66646,
+              "parent_major_faults": 0,
+              "cgroup_memory_psi_us": {
+                "some": 0,
+                "full": 0
+              },
+              "host_memory_psi_us": {
+                "some": 346616,
+                "full": 346610
+              }
+            }
+          ],
+          "tiles_per_second": 85.8085517305229,
+          "peak_allocated_bytes": [
+            376029184,
+            376029184,
+            376029184,
+            376029184,
+            376029184
+          ],
+          "max_abs_error": 0.0,
+          "embeddings_path": "output/gpu-performance-audit/lunit-cpu-transforms-wsi.pt",
+          "embeddings_sha256": "c939081b567ddfe03945c0bf3834ec4a11c4672d50aa03c10075bd368670e5c1",
+          "cache_advice": [],
+          "baseline_max_abs_error": 0.0,
+          "speedup": 1.35319709586562
+        }
+      },
+      "limitations": [
+        "Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
+        "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
+        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. Unavailable counters are null."
+      ],
+      "audit_role": "experiment, not the final runtime",
+      "diagnostic_override": "Temporary wrapper restored original CPU preprocessing; source hashes do not represent this override."
+    }
+  },
+  "cached_weight_files": {
+    "lunit": {
+      "revision": "c23bc01cfbe022bc1f2a8a9306125a07818e4eb4",
+      "sha256": "0b7e0236ce430064b31485bbb6f85e661dc5eca0cde709e8f04d59f1c2b23e0b",
+      "size_bytes": 86694768
+    },
+    "phikonv2": {
+      "revision": "2ae989a9c40cffaa27f0a6cb29cc94d1d6f9a5fd",
+      "sha256": "261ae680fa699b3b951597fd57aa19c02ef735805acb104b93af69b36d928569",
+      "size_bytes": 1213455560
+    }
+  },
+  "diagnostic_limits": [
+    "Expanded candidate runs showed intermittent read-side stalls, including from RAM.",
+    "Native sample collection was stopped after 904 samples; 478 included the WSI reader, with sampling lag/errors.",
+    "Whole-run profiler diagnostic was terminated during an unusually long stall and is not a throughput measurement."
+  ],
+  "memory_pressure_observations": {
+    "cgroup_full_avg10_percent": 62.6,
+    "cgroup_full_avg60_percent": 43.4,
+    "host_full_avg10_percent": 31.02,
+    "note": "Read during anomalous runs; not per-sample attribution."
+  },
+  "retained_change": "CUDA scheduling overlap; original CPU preprocessing retained. GPU preprocessing prototype rejected.",
+  "qa_retained": {
+    "accounted_embedding_seconds": 9.3819,
+    "data_pipeline_fraction": 0.9607,
+    "data_pipeline_seconds": 9.0132,
+    "embedding_seconds": 11.2501,
+    "end_to_end_seconds": 16.9884,
+    "failed_slides": 0,
+    "forward_fraction": 0.0393,
+    "forward_seconds": 0.3687,
+    "gpu_busy_fraction": 0.0988,
+    "loader_wait_fraction": 0.9068,
+    "max_loader_wait_ms": 1226.718,
+    "mean_forward_ms": 12.2893,
+    "mean_loader_wait_ms": 283.4932,
+    "mean_preprocess_ms": 16.8516,
+    "mean_reader_open_ms": 8.219,
+    "mean_reader_read_ms": 274.4811,
+    "mean_ready_wait_ms": 0.0944,
+    "mean_worker_batch_ms": 282.7275,
+    "slide_artifacts": 0,
+    "slides_total": 1,
+    "slides_with_tiles": 1,
+    "success": true,
+    "tile_artifacts": 1,
+    "tiles_per_second": 27.9015,
+    "tiling_seconds": 5.5551,
+    "timed_batches": 30,
+    "total_tiles": 474
+  }
+}

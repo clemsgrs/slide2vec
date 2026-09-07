@@ -53,6 +53,7 @@ It ships with presets for the most widely used pathology foundation models.
    hierarchical
    output-layout
    glossary
+   performance
 
 .. toctree::
    :maxdepth: 1

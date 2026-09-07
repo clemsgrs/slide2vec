@@ -160,4 +160,5 @@ docker run --rm -it \
 - [API guide](https://clemsgrs.github.io/slide2vec/api.html)
 - [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html)
 - [Model zoo](https://clemsgrs.github.io/slide2vec/models.html)
+- [Performance benchmarks and QA](docs/performance.md)
 - [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API

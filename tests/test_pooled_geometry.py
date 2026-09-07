@@ -277,3 +277,36 @@ def test_slide_and_patient_models_inherit_tile_dependency_geometry():
         "spacing_um": 0.5,
         "source_encoder": "lunit",
     }
+
+
+def test_hierarchical_collator_preserves_reordered_subtiles_with_bounded_allocations(monkeypatch):
+    """Splitting byte pixels must not allocate full float copies of every region."""
+    from slide2vec.data import tile_reader
+
+    pixels = np.array([[0, 1, 2, 3], [4, 5, 6, 7],
+                       [8, 9, 10, 11], [12, 13, 14, 255]], dtype=np.uint8)
+    regions = [np.repeat(pixels[:, :, None], 3, axis=2),
+               np.full((4, 4, 3), 100, dtype=np.uint8)]
+
+    class Reader:
+        def read_region(self, location, level, size):
+            return regions[location[0]]
+
+    monkeypatch.setattr(tile_reader, '_open_wsi_backend', lambda *args: Reader())
+    collator = tile_reader.OnTheFlyHierarchicalBatchCollator(
+        image_path='slide.svs',
+        tiling_result=SimpleNamespace(read_level=0, x=np.array([0, 1]), y=np.array([0, 0])),
+        region_index=np.array([0, 0, 0, 0, 1, 1, 1, 1]),
+        subtile_index_within_region=np.array([0, 1, 2, 3, 0, 1, 2, 3]),
+        read_region_size_px=4, read_tile_size_px=2, requested_tile_size_px=2,
+        backend='openslide',
+    )
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU], profile_memory=True) as profile:
+        indices, tiles, _ = collator([7, 3, 0, 3])
+
+    assert indices.tolist() == [7, 3, 0, 3]
+    expected = torch.tensor([[[100, 100], [100, 100]], [[10, 11], [14, 255]],
+                             [[0, 1], [4, 5]], [[10, 11], [14, 255]]], dtype=torch.uint8)
+    assert torch.equal(tiles, expected[:, None].expand(-1, 3, -1, -1))
+    allocated = sum(max(0, event.self_cpu_memory_usage) for event in profile.key_averages())
+    assert allocated <= 8 * (2 * 3 * 4 * 4)
