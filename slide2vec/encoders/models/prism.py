@@ -46,5 +46,7 @@ class PrismSlideEncoder(SlideEncoder):
     ) -> torch.Tensor:
         if tile_features.ndim == 2:
             tile_features = tile_features.unsqueeze(0)
+        # Stored feature precision can differ from PRISM's weights; CPU has no autocast.
+        tile_features = tile_features.to(dtype=self._model.dtype)
         reprs = self._model.slide_representations(tile_features)
         return reprs["image_embedding"].squeeze(0)
