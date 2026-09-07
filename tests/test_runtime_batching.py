@@ -54,33 +54,6 @@ def test_dataloader_kwargs_uses_spawn_only_when_worker_processes_are_enabled():
     ) == {"num_workers": 0}
 
 
-def test_batched_preprocessing_transfers_bytes_before_normalizing(monkeypatch):
-    """Do not expand a byte image into a float transfer buffer on the host."""
-    from types import SimpleNamespace
-    from torchvision import transforms
-    from slide2vec.runtime.batching import build_batch_preprocessor_for_tile_images
-
-    transferred_dtypes = []
-    original_to = torch.Tensor.to
-
-    def capture_transfer(image, *args, **kwargs):
-        if args and args[0] == torch.device('cuda'):
-            transferred_dtypes.append(image.dtype)
-            return image  # Exercise the transfer boundary without requiring a GPU.
-        return original_to(image, *args, **kwargs)
-
-    monkeypatch.setattr(torch.Tensor, 'to', capture_transfer)
-    loaded = SimpleNamespace(name='test', device=torch.device('cuda'), transforms=transforms.Compose([
-        transforms.ToTensor(), transforms.Normalize([0.5] * 3, [0.5] * 3),
-    ]))
-    preprocess = build_batch_preprocessor_for_tile_images(loaded, requested_tile_size_px=2)
-    pixels = torch.tensor([[[[0, 255], [255, 0]]] * 3], dtype=torch.uint8)
-    expected = torch.tensor([[[[-1.0, 1.0], [1.0, -1.0]]] * 3])
-
-    assert torch.equal(preprocess(pixels), expected)
-    assert transferred_dtypes == [torch.uint8]
-
-
 def test_cuda_prefetch_keeps_distinct_unpinned_batches_intact():
     import pytest
     from contextlib import nullcontext

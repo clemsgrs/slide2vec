@@ -60,10 +60,6 @@ def build_batch_preprocessor_for_tile_images(
         return None
 
     def preprocess(batch):
-        # Transfer the pinned byte batch before expanding it to float and replay
-        # supported transforms on the encoder device.
-        if batch.device != loaded.device:
-            batch = batch.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
         image = prepare_batch_tensor(batch)
         if spec.resize_size is None:
             image = resize_image_batch(
@@ -71,6 +67,8 @@ def build_batch_preprocessor_for_tile_images(
                 (int(requested_tile_size_px), int(requested_tile_size_px)),
             )
         image = apply_batch_transform_spec(image, spec)
+        if image.device != loaded.device:
+            image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
         return image.contiguous()
 
     return preprocess
