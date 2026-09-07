@@ -20,6 +20,7 @@ def test_inference_benchmark_rejects_invalid_workloads(field, value, message):
 
 
 def test_inference_modes_preserve_coordinates_batches_and_embeddings(tmp_path, monkeypatch):
+    import itertools
     import json
     import numpy as np
     import torch
@@ -28,6 +29,15 @@ def test_inference_modes_preserve_coordinates_batches_and_embeddings(tmp_path, m
     import slide2vec.data.tile_reader
     from slide2vec.runtime.types import LoadedModel
     from scripts.benchmark_inference import run_inference_benchmark
+    import scripts.benchmark_inference as benchmark
+
+    snapshots = itertools.cycle([
+        {"parent_minor_faults": 10, "parent_major_faults": 1,
+         "cgroup_memory_psi_us": {"some": 100, "full": 50}, "host_memory_psi_us": None},
+        {"parent_minor_faults": 17, "parent_major_faults": 3,
+         "cgroup_memory_psi_us": {"some": 120, "full": 55}, "host_memory_psi_us": None},
+    ])
+    monkeypatch.setattr(benchmark, "_resource_snapshot", lambda: next(snapshots))
 
     class Encoder:
         def encode_tiles(self, images):
@@ -62,6 +72,10 @@ def test_inference_modes_preserve_coordinates_batches_and_embeddings(tmp_path, m
     for mode, measured in result["modes"].items():
         assert len(measured["samples_seconds"]) == 1
         assert measured["max_abs_error"] == 0
+        assert measured["sample_resources"] == [{
+            "parent_minor_faults": 7, "parent_major_faults": 2,
+            "cgroup_memory_psi_us": {"some": 20, "full": 5}, "host_memory_psi_us": None,
+        }]
         torch.testing.assert_close(torch.load(measured["embeddings_path"], weights_only=True), expected)
     assert json.loads(output.read_text())["parameters"]["num_tiles"] == 3
     args.compare = output
@@ -75,6 +89,35 @@ def test_inference_modes_preserve_coordinates_batches_and_embeddings(tmp_path, m
     with pytest.raises(ValueError, match="preserve the baseline embeddings"):
         run_inference_benchmark(args)
     assert (tmp_path / "result-cached.pt").read_bytes() == baseline_payload
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_resource_snapshot_reads_pressure_totals_or_reports_unavailable(monkeypatch, available):
+    import resource
+    from pathlib import Path
+    from scripts.benchmark_inference import _resource_snapshot
+
+    def usage(_):
+        if not available:
+            raise OSError("unavailable")
+        return SimpleNamespace(ru_minflt=13, ru_majflt=2)
+
+    def read(path):
+        if not available:
+            raise OSError("unavailable")
+        if str(path) == "/sys/fs/cgroup/memory.pressure":
+            return "some avg10=0.00 avg60=0.00 avg300=0.00 total=123\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=45\n"
+        assert str(path) == "/proc/pressure/memory"
+        return "some avg10=0.00 total=789\nfull avg10=0.00 total=67\n"
+
+    monkeypatch.setattr(resource, "getrusage", usage)
+    monkeypatch.setattr(Path, "read_text", read)
+    assert _resource_snapshot() == {
+        "parent_minor_faults": 13 if available else None,
+        "parent_major_faults": 2 if available else None,
+        "cgroup_memory_psi_us": {"some": 123, "full": 45} if available else None,
+        "host_memory_psi_us": {"some": 789, "full": 67} if available else None,
+    }
 
 
 def test_inference_comparison_rejects_different_coordinates_before_model_load(tmp_path):

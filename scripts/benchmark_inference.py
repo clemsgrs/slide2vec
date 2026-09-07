@@ -38,6 +38,46 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def _resource_snapshot():
+    """Parent-process faults and shared Linux memory-pressure counters, when available."""
+    try:
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        minor, major = usage.ru_minflt, usage.ru_majflt
+    except (ImportError, AttributeError, OSError):
+        minor = major = None
+
+    def pressure(path):
+        try:
+            totals = {}
+            for line in Path(path).read_text().splitlines():
+                kind, *fields = line.split()
+                if kind in {"some", "full"}:
+                    totals[kind] = int(dict(field.split("=", 1) for field in fields)["total"])
+            return {kind: totals[kind] for kind in ("some", "full")}
+        except (OSError, ValueError, KeyError):
+            return None
+
+    return {
+        "parent_minor_faults": minor, "parent_major_faults": major,
+        "cgroup_memory_psi_us": pressure("/sys/fs/cgroup/memory.pressure"),
+        "host_memory_psi_us": pressure("/proc/pressure/memory"),
+    }
+
+
+def _resource_delta(before, after):
+    delta = {}
+    for key, start in before.items():
+        end = after[key]
+        if start is None or end is None:
+            delta[key] = None
+        elif isinstance(start, dict):
+            delta[key] = _resource_delta(start, end)
+        else:
+            delta[key] = end - start if end >= start else None
+    return delta
+
+
 def _close_loader(loader):
     # DataLoader has no public close API; ensure our worker readers are gone before advice.
     iterator = getattr(loader, "_iterator", None)
@@ -215,14 +255,17 @@ def _measure(args):
         "model_load_seconds": model_load_seconds, "modes": {},
         "limitations": ["Fixed level-0 coordinates; excludes tissue detection, tiling and output persistence.",
                         "Model-only includes CPU output transfer; preloaded tensors remain allocated across modes.",
-                        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed."],
+                        "Cache advice is not proof of eviction or server-cold storage; tmpfs is RAM-backed.",
+                        "Resource snapshots bracket each timed sample outside its timer. Faults cover only the parent process; "
+                        "host/cgroup PSI microseconds are shared pressure, not necessarily caused by this process. "
+                        "Unavailable counters are null."],
     }
     if baseline is not None and baseline["environment"] != report["environment"]:
         raise ValueError("Cannot compare inference runs with different environments")
     reference = None
     for mode in args.modes:
         loader = make_loader() if mode == "wsi" else None
-        samples, peaks, cache_records = [], [], []
+        samples, peaks, cache_records, sample_resources = [], [], [], []
         max_error = 0.
         try:
             for repetition in range(-args.warmup, args.repeat):
@@ -236,6 +279,7 @@ def _measure(args):
                 synchronize()
                 if cuda:
                     torch.cuda.reset_peak_memory_stats(loaded.device)
+                resources_before = _resource_snapshot() if repetition >= 0 else None
                 started = time.perf_counter()
                 if mode == "wsi":
                     if loader is None:
@@ -248,6 +292,7 @@ def _measure(args):
                 synchronize()
                 elapsed = time.perf_counter() - started
                 if repetition >= 0:
+                    sample_resources.append(_resource_delta(resources_before, _resource_snapshot()))
                     samples.append(elapsed)
                     peaks.append(torch.cuda.max_memory_allocated(loaded.device) if cuda else 0)
                 torch.testing.assert_close(indices, torch.arange(len(x)), rtol=0, atol=0)
@@ -269,6 +314,7 @@ def _measure(args):
             torch.save(embeddings, embeddings_path)
             report["modes"][mode] = {
                 "samples_seconds": samples, "median_seconds": statistics.median(samples),
+                "sample_resources": sample_resources,
                 "tiles_per_second": len(x) / statistics.median(samples),
                 "peak_allocated_bytes": peaks, "max_abs_error": max_error,
                 "embeddings_path": str(embeddings_path), "embeddings_sha256": _sha256(embeddings_path),
