@@ -1,19 +1,26 @@
 Model Zoo
 =========
 
-To see all available presets:
+Choose a tile, slide, or patient encoder below. List installed presets without
+loading weights:
 
 .. code-block:: python
 
    from slide2vec import list_models
 
-   list_models()        # all presets
-   list_models("tile")  # tile-level only
-   list_models("slide") # slide-level only
+   list_models()           # all presets
+   list_models("tile")     # tile-level only
+   list_models("slide")    # slide-level only
+   list_models("patient")  # patient-level only
 
 
 Tile-level encoders
 -------------------
+
+Spacing values are supported scales, in microns per pixel. If a preset
+supports several scales and has no registered default, pass
+``PreprocessingConfig(requested_spacing_um=...)`` explicitly for slide
+extraction.
 
 .. list-table::
    :header-rows: 1
@@ -21,7 +28,7 @@ Tile-level encoders
    * - Preset
      - Model
      - Output dim
-     - Spacing (um)
+     - Spacing (µm/px)
    * - ``lunit``
      - `Lunit ViT-S/8 <https://huggingface.co/1aurent/vit_small_patch8_224.lunit_dino>`_
      - 384
@@ -136,6 +143,18 @@ Tile-level encoders
      - ``0.5``
 
 
+Slash-separated dimensions denote output variants. For example, Virchow2
+uses ``cls_patch_mean`` (2560 dimensions) by default; select its 1280-dimensional
+CLS vector with:
+
+.. code-block:: python
+
+   from slide2vec import Model
+
+   model = Model.from_preset("virchow2", output_variant="cls")
+
+
+
 Slide-level encoders
 --------------------
 
@@ -145,7 +164,7 @@ Slide-level encoders
    * - Preset
      - Model
      - Tile encoder
-     - Spacing (um)
+     - Spacing (µm/px)
      - Output dim
    * - ``gigapath-slide``
      - `GigaPath <https://huggingface.co/prov-gigapath/prov-gigapath>`_
@@ -188,7 +207,7 @@ when using the Python API).
    * - Preset
      - Model
      - Tile encoder
-     - Spacing (um)
+     - Spacing (µm/px)
      - Output dim
    * - ``moozy``
      - `MOOZY <https://huggingface.co/AtlasAnalyticsLab/MOOZY>`_
@@ -197,14 +216,43 @@ when using the Python API).
      - 768
 
 
+.. _model-installation:
+
 Installation extras
 -------------------
 
-Some presets need extra dependencies. Install them with the matching extra,
-for example ``pip install "slide2vec[prism2]"``. Some extras (``prism2``,
-``waiv``) have dependency pins that are incompatible with the others; install
-those in their own environment. Gated upstream repositories additionally
-require Hugging Face access approval and ``hf auth login``.
+Install ``slide2vec[fm]`` for the shared foundation-model dependencies, or use
+the model-specific extras declared in `pyproject.toml
+<https://github.com/clemsgrs/slide2vec/blob/main/pyproject.toml>`_. Extras with
+conflicting dependency pins need separate environments:
+
+- ``slide2vec[prism2]`` pins a different Transformers version from ``fm``,
+  ``prism``, and ``titan`` and requires FlashAttention.
+- ``slide2vec[waiv]`` supplies the Transformers 5 runtime for ``phaet`` and
+  ``mascaret``; it conflicts with the ``fm``, ``prism``, ``prism2``, and
+  ``titan`` extras.
+
+For example, install PRISM2 in its own environment with:
+
+.. code-block:: shell
+
+   pip install "slide2vec[prism2]"
+
+The ``musk``, ``conch``, and ``gigapath-slide`` presets also require upstream
+packages that are not included in the PyPI extras. The tile-only ``gigapath``
+preset uses timm and does not need the GigaPath package. Install the relevant
+package below:
+
+.. code-block:: shell
+
+   pip install git+https://github.com/lilab-stanford/MUSK.git
+   pip install git+https://github.com/Mahmoodlab/CONCH.git
+   pip install git+https://github.com/prov-gigapath/prov-gigapath.git
+
+Gated models require access approval on their linked Hugging Face page, plus
+``hf auth login`` or an ``HF_TOKEN`` environment variable. The base install
+also includes hs2p's ``sam2`` dependencies for AtlasPatch tissue segmentation;
+see :doc:`preprocessing` to enable it.
 
 
 Dense grids and attention maps

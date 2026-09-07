@@ -1,8 +1,7 @@
 Input Manifest
 ==============
 
-Both :class:`~slide2vec.Pipeline` and the CLI expect a csv manifest with
-the slides to process.
+Use a CSV manifest to pass slides to :class:`~slide2vec.Pipeline` or the CLI.
 
 Schema
 ------
@@ -19,11 +18,12 @@ Schema
      - Unique identifier for the slide; used as the output file stem
    * - ``image_path``
      - yes
-     - Absolute path to the slide file
+     - Path to the slide file; absolute paths are recommended
    * - ``mask_path``
      - no
-     - Path to a pre-computed binary tissue mask. When blank, slide2vec
-       generates the mask on the fly using the configured segmentation method
+     - Path to a binary tissue mask or a multilabel annotation mask; see
+       :ref:`annotation-aware-sampling`. For tissue-only sampling, a blank
+       value uses the configured segmentation method
    * - ``spacing_at_level_0``
      - no
      - Override for the slide's native level-0 spacing (µm/px). When blank,
@@ -41,7 +41,9 @@ Example
    slide-1,/data/slide-1.svs,/data/mask-1.png,0.25
    slide-2,/data/slide-2.svs,,
 
-``mask_path`` and ``spacing_at_level_0`` may be left blank for any row.
+Relative image and mask paths resolve from the working directory, not the
+manifest's directory. ``spacing_at_level_0`` may be left blank when the image
+metadata supplies its physical spacing.
 
 .. _patient-manifest-format:
 
@@ -58,8 +60,7 @@ to group slides that belong to the same patient:
    slide-1b,/data/slide-1b.svs,patient-1
    slide-2a,/data/slide-2a.svs,patient-2
 
-Slides sharing the same ``patient_id`` are aggregated into a single
-:class:`~slide2vec.EmbeddedPatient` by the model's patient encoder.
+Slides sharing the same ``patient_id`` contribute to one patient embedding.
 ``sample_id`` remains the unique slide identifier.
 Both identifier columns are read as text, so values such as ``0007`` retain
 their leading zeros. Every ``patient_id`` must be non-empty after surrounding
@@ -69,8 +70,12 @@ whitespace is ignored; invalid rows are rejected before tiling begins.
 Per-slide embeddings
 ~~~~~~~~~~~~~~~~~~~~
 
-| When running a patient-level model via ``Pipeline``, the intermediate per-slide
-  embeddings can be saved alongside the patient embeddings by setting
-  ``save_slide_embeddings: true`` in config (or
-  ``ExecutionOptions(save_slide_embeddings=True)`` in the Python API).
-| Slide embeddings are written to ``slide_embeddings/`` in the output directory.
+To also save intermediate slide embeddings under ``slide_embeddings/``, use
+this CLI configuration:
+
+.. code-block:: yaml
+
+   model:
+     save_slide_embeddings: true
+
+The Python equivalent is ``ExecutionOptions(save_slide_embeddings=True)``.

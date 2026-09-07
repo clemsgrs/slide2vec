@@ -26,6 +26,10 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = [
     "_build",
+    # Local engineering notes are not part of the published user guide.
+    "adr",
+    "agents",
+    "research",
     "Thumbs.db",
     ".DS_Store",
 ]
