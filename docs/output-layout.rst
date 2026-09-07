@@ -2,8 +2,8 @@ Output Layout
 =============
 
 When running :class:`~slide2vec.Pipeline` (via the Python API or the CLI),
-slide2vec writes artifacts under the directory specified by
-:attr:`~slide2vec.ExecutionOptions.output_dir`.
+slide2vec writes artifacts under :attr:`~slide2vec.ExecutionOptions.output_dir`.
+The CLI normally creates a timestamped run subdirectory; see :doc:`cli`.
 
 Directory Structure
 -------------------
@@ -11,30 +11,37 @@ Directory Structure
 .. code-block:: text
 
    <output_dir>/
-   ├── tile_embeddings/
+   ├── tile_embeddings/               ← flat tile features, when saved
    │   ├── <sample_id>.pt
    │   └── <sample_id>.meta.json
    ├── hierarchical_embeddings/       ← only when region_tile_multiple is set
    │   ├── <sample_id>.pt
    │   └── <sample_id>.meta.json
-   ├── slide_embeddings/              ← only for slide-level models
+   ├── slide_embeddings/              ← slide features, when saved
    │   ├── <sample_id>.pt
    │   └── <sample_id>.meta.json
-   ├── slide_latents/                 ← only when save_latents=True
+   ├── slide_latents/                 ← PRISM with save_latents=True
    │   └── <sample_id>.pt
    ├── patient_embeddings/            ← only for patient-level models
    │   ├── <patient_id>.pt
    │   └── <patient_id>.meta.json
    ├── tiles/
    │   ├── <sample_id>.coordinates.npz
-   │   └── <sample_id>.coordinates.meta.json
+   │   ├── <sample_id>.coordinates.meta.json
+   │   └── <sample_id>.tiles.tar       ← when extracting tiles to tar
    ├── preview/
    │   ├── mask/                      ← only when save_mask_preview=True
-   │   │   └── <sample_id>.png
+   │   │   └── <sample_id>.jpg
    │   └── tiling/                    ← only when save_tiling_preview=True
-   │       └── <sample_id>.png
+   │       └── <sample_id>.jpg
    ├── process_list.csv
-   └── config.yaml
+   └── config.yaml                    ← CLI configuration snapshot
+
+Tile-level models save tile features; slide- and patient-level models save
+them only with ``save_tile_embeddings=True``. Hierarchical preprocessing
+writes ``hierarchical_embeddings/`` instead of flat tile features. Slide-level
+models save slide embeddings; patient-level models also save them when
+``save_slide_embeddings=True``. In YAML, these save flags belong under ``model``.
 
 
 Per-Annotation Namespacing
@@ -42,8 +49,8 @@ Per-Annotation Namespacing
 
 The layout above is the tissue-only (default) case. When
 :ref:`annotation-aware sampling <annotation-aware-sampling>` is enabled, each
-sampled class gets its own ``<class>/`` subdirectory under every embedding
-directory, and the tiling artifacts are namespaced the same way:
+sampled class gets its own ``<class>/`` subdirectory for tile, hierarchical,
+slide, and latent artifacts. Tiling artifacts use the same namespace:
 
 .. code-block:: text
 
@@ -58,10 +65,10 @@ directory, and the tiling artifacts are namespaced the same way:
    │   ├── tumor/<sample_id>.coordinates.npz
    │   └── stroma/<sample_id>.coordinates.npz
    └── preview/
-       ├── mask/<sample_id>.png            ← one multi-label mask preview per slide
+       ├── mask/<sample_id>.jpg            ← one multilabel mask preview per slide
        └── tiling/
-           ├── tumor/<sample_id>.png
-           └── stroma/<sample_id>.png
+           ├── tumor/<sample_id>.jpg
+           └── stroma/<sample_id>.jpg
 
 The ``tissue`` class and the structural ``merged`` output collapse to the flat
 root shown earlier — there is no ``tissue/`` or ``merged/`` subdirectory.
@@ -72,16 +79,20 @@ pair, each recording that class's own ``feature_path``.
 Embedding Files
 ---------------
 
-All ``.pt`` files can be loaded with :func:`torch.load`:
+The CLI and Python API default to PyTorch ``.pt`` files:
 
 .. code-block:: python
 
    import torch
 
-   tile_embeddings = torch.load("outputs/run/tile_embeddings/slide-1.pt")
+   tile_embeddings = torch.load(
+       "outputs/run/tile_embeddings/slide-1.pt", map_location="cpu", weights_only=True
+   )
    # tile_embeddings: Tensor of shape (N, D)
 
-   slide_embedding = torch.load("outputs/run/slide_embeddings/slide-1.pt")
+   slide_embedding = torch.load(
+       "outputs/run/slide_embeddings/slide-1.pt", map_location="cpu", weights_only=True
+   )
    # slide_embedding: Tensor of shape (D,)
 
 Shapes by artifact type:
@@ -100,24 +111,36 @@ Shapes by artifact type:
    * - ``patient_embeddings``
      - ``(D,)``
 
-Dense grids are not written by :class:`~slide2vec.Pipeline` or the CLI. They
-are produced by :meth:`~slide2vec.Model.embed_regions_dense` (slide ROIs) and
+For pooled embeddings, the Python API also accepts
+``ExecutionOptions(output_format="npz")``. These compressed NumPy archives
+store the same arrays under ``features``; tile archives may also contain
+``tile_index``. Latent archives use ``latents`` instead:
+
+.. code-block:: python
+
+   import numpy as np
+
+   with np.load("outputs/run/tile_embeddings/slide-1.npz", allow_pickle=False) as data:
+       tile_embeddings = data["features"]
+
+Dense grids always use ``.pt`` and are produced by
+:meth:`~slide2vec.Model.embed_regions_dense` (slide ROIs) and
 :meth:`~slide2vec.Model.embed_images_dense` (pre-cropped images); see
-:doc:`api` for usage.
+:doc:`api`. :class:`~slide2vec.Pipeline` and the CLI do not write dense grids.
 
 
 Embedding Meta Files
 --------------------
 
-Each ``.pt`` embedding file has a companion ``.meta.json`` with provenance and
-shape information. The exact fields depend on the artifact type.
-``feature_dtype`` records the dtype the features were written in (``"fp16"`` or
+Each embedding payload has a companion ``.meta.json`` with provenance and
+shape information. The examples below show selected fields.
+For pooled embeddings, ``feature_dtype`` records the stored dtype (``"fp16"`` or
 ``"fp32"``), as resolved from ``ExecutionOptions.output_dtype`` (see
 :ref:`execution-options`).
 
 **tile_embeddings**
 
-.. code-block:: text
+.. code-block:: json
 
    {
       "sample_id": "slide-1",
@@ -137,30 +160,38 @@ shape information. The exact fields depend on the artifact type.
       "requested_tile_size_px": 224,
       "encoder_input_size_px": 224,
       "requested_spacing_um": 0.5,
-      "tile_size_lv0": 224,
+      "tile_size_lv0": 448
    }
 
 ``encoder_input_size_px`` is always present and is ``null`` for a zero-tile
-artifact, because no tensor reached the encoder. ``requested_spacing_um``
+artifact, because no tensor reached the encoder. A flat zero-tile result has
+only a metadata sidecar, with ``num_tiles: 0`` and ``feature_dim: null``;
+hierarchical results also write an empty tensor. ``requested_spacing_um``
 describes the canonical tile request; the encoder input size reports only the
 observed post-transform pixels.
 
 **hierarchical_embeddings**
 
-Same fields as ``tile_embeddings`` (except
-``"artifact_type": "hierarchical_embeddings"``), plus:
+Hierarchical metadata records region geometry and row-major subtile order.
+Selected fields:
 
-.. code-block:: text
+.. code-block:: json
 
    {
-     ...
+     "artifact_type": "hierarchical_embeddings",
      "num_regions": 512,
      "tiles_per_region": 36,
+     "region_tile_multiple": 6,
+     "requested_tile_size_px": 224,
+     "read_tile_size_px": 224,
+     "requested_region_size_px": 1344,
+     "read_region_size_px": 1344,
+     "subtile_order": "row_major"
    }
 
 **slide_embeddings**
 
-.. code-block:: text
+.. code-block:: json
 
    {
      "sample_id": "slide-1",
@@ -168,31 +199,32 @@ Same fields as ``tile_embeddings`` (except
      "encoder_level": "slide",
      "encoder_name": "prism",
      "feature_dim": 1280,
+     "feature_dtype": "fp32",
      "format": "pt",
-     "image_path": "/data/slide-1.tif",
+     "image_path": "/data/slide-1.tif"
    }
 
 **patient_embeddings**
 
-.. code-block:: text
+.. code-block:: json
 
    {
      "patient_id": "patient-1",
      "artifact_type": "patient_embeddings",
      "encoder_name": "moozy",
-     "encoder_level": "patient"
+     "encoder_level": "patient",
      "format": "pt",
      "feature_dim": 768,
-     "num_slides": 2,
+     "feature_dtype": "fp32",
+     "num_slides": 2
    }
 
 
 Image Embeddings
 ----------------
 
-:meth:`~slide2vec.Model.embed_images` (see :doc:`api`) writes one flat
-directory — one payload plus one sidecar per input image, named by the caller's
-``sample_id``:
+:meth:`~slide2vec.Model.embed_images` writes one payload and sidecar per image,
+named by the caller's ``sample_id``:
 
 .. code-block:: text
 
@@ -203,7 +235,7 @@ directory — one payload plus one sidecar per input image, named by the caller'
 
 **image_embeddings**
 
-.. code-block:: text
+.. code-block:: json
 
    {
      "sample_id": "bach-001",
@@ -215,7 +247,7 @@ directory — one payload plus one sidecar per input image, named by the caller'
      "feature_dim": 2560,
      "feature_dtype": "fp32",
      "format": "pt",
-     "image_path": "/data/bach/001.tif",
+     "image_path": "/data/bach/001.tif"
    }
 
 Dense Region Grids
@@ -253,8 +285,8 @@ whose ``compatibility`` object does not match the current call.
 Dense Image Grids
 -----------------
 
-:meth:`~slide2vec.Model.embed_images_dense` (see :doc:`api`) writes one flat
-directory — one grid payload plus one geometry sidecar per input image:
+:meth:`~slide2vec.Model.embed_images_dense` writes one grid and geometry sidecar
+per image:
 
 .. code-block:: text
 
@@ -265,7 +297,9 @@ directory — one grid payload plus one geometry sidecar per input image:
 
 **dense_image_embeddings**
 
-.. code-block:: text
+Selected fields; the nested ``compatibility`` object is omitted here:
+
+.. code-block:: json
 
    {
      "sample_id": "ocelot-001",
@@ -301,8 +335,7 @@ directory — one grid payload plus one geometry sidecar per input image:
      "overlap": 0.0,
      "feature_kind": "patch_features",
      "attention_blocks": [-1],
-     "attention_include_registers": false,
-     "compatibility": { ... }
+     "attention_include_registers": false
    }
 
 The nested ``compatibility`` object repeats the identity and recipe fields
@@ -315,16 +348,18 @@ excluded.
 Coordinate Files
 ----------------
 
-During tiling, slide2vec writes a pair of coordinate files for each slide
-under ``tiles/``:
+Tiling writes coordinate artifacts under ``tiles/`` (or a class subdirectory):
 
 - ``<sample_id>.coordinates.npz`` — numpy archive with tile coordinate arrays
 - ``<sample_id>.coordinates.meta.json`` — tiling provenance and parameters
 
+Zero-tile results have only the metadata sidecar.
+
 **Coordinate arrays**
 
 The ``.npz`` contains four arrays, each of length ``N`` (the number of tiles),
-in the same order as the rows of the corresponding embedding tensor:
+in the same order as the corresponding flat tile embeddings. Under hierarchical
+preprocessing, each coordinate identifies a parent region; see :doc:`hierarchical`.
 
 .. list-table::
    :header-rows: 1
@@ -343,7 +378,10 @@ in the same order as the rows of the corresponding embedding tensor:
      - Sequential index of each tile
    * - ``tissue_fractions``
      - ``float32``
-     - Fraction of pixels classified as tissue in each tile
+     - Tissue coverage; in annotation mode, coverage of the sampled class
+
+Merged annotation output stores the maximum contributing class coverage in
+``tissue_fractions``.
 
 .. code-block:: python
 
@@ -357,7 +395,8 @@ in the same order as the rows of the corresponding embedding tensor:
 **Coordinate meta files**
 
 The sidecar ``coordinates.meta.json`` records tiling provenance in several
-sections:
+sections. This excerpt omits fields and the contents of the segmentation and
+filtering sections:
 
 .. code-block:: text
 
@@ -377,8 +416,8 @@ sections:
      "tiling": {
        "requested_tile_size_px": 224,
        "requested_spacing_um": 0.5,
-       "effective_tile_size_px": 224,
-       "effective_spacing_um": 0.503,
+       "read_tile_size_px": 224,
+       "read_spacing_um": 0.503,
        "tile_size_lv0": 448,
        "n_tiles": 1024,
        ...
@@ -386,8 +425,8 @@ sections:
      "segmentation": { ... },
      "filtering": { ... },
      "artifact": {
-       "coordinate_space": "level_0",
-       "tile_order": "row_major",
+       "coordinate_space": "level0_px",
+       "tile_order": "x_then_y",
        ...
      }
    }
@@ -399,17 +438,23 @@ tiling when only the encoder changes.
 Process List
 ------------
 
-``process_list.csv`` tracks the status of every slide in the manifest:
+``process_list.csv`` records tiling and embedding separately. It contains one
+row per slide, or per ``(sample_id, annotation)`` in per-class mode. Selected
+columns from a tile-embedding run:
 
 .. code-block:: text
 
-   sample_id,status,error
-   slide-1,done,
-   slide-2,done,
-   slide-3,failed,RuntimeError: slide file not found
+   sample_id,tiling_status,feature_status,feature_path,error
+   slide-1,success,success,/outputs/run/tile_embeddings/slide-1.pt,
+   slide-2,failed,tbp,,RuntimeError: slide file not found
 
-Possible ``status`` values:
+The phase columns use different status values:
 
-- ``done`` — processed successfully
-- ``failed`` — an error occurred; details are in the ``error`` column
-- ``skipped`` — slide was already present in the output directory
+- ``tiling_status``: ``success`` or ``failed`` for completed tiling attempts.
+- ``feature_status``: ``tbp`` (to be processed), ``success``, or ``error``.
+- ``aggregation_status``: the same values as ``feature_status``; present when
+  slide aggregation is tracked.
+
+``feature_path`` points to the selected embedding artifact. ``error`` and
+``traceback`` retain tiling failure details. Resume reuses completed artifacts;
+it does not record a separate ``skipped`` status.

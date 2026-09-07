@@ -1,31 +1,36 @@
 API Guide
 =========
 
-Reference for the Python API. See :doc:`getting-started` for introductory
-examples.
+Use ``Model`` for in-memory slide and patient embeddings, image artifacts,
+or dense grids. Use ``Pipeline`` for manifest-driven slide processing. See
+:doc:`getting-started` for installation and a first slide.
 
-``slide2vec`` exposes two main workflows:
+.. list-table::
+   :header-rows: 1
 
-- direct in-memory embedding with :meth:`Model.embed_slide` /
-  :meth:`Model.embed_slides`
-- artifact generation with :meth:`Pipeline.run`
-
-Encoder provider diagnostics
-----------------------------
-
-.. autoclass:: slide2vec.EncoderProviderDiagnostic
-   :members:
-
-.. autofunction:: slide2vec.list_encoder_provider_diagnostics
-
-See :doc:`models` for provider packaging, transactional discovery, and trust
-guidance.
+   * - Input and outcome
+     - Entry point
+   * - Slides → in-memory tile or slide embeddings
+     - :meth:`~slide2vec.Model.embed_slide`, :meth:`~slide2vec.Model.embed_slides`
+   * - Manifest → saved slide artifacts
+     - :meth:`~slide2vec.Pipeline.run`
+   * - A patient's slides → patient embedding
+     - :meth:`~slide2vec.Model.embed_patient`, :meth:`~slide2vec.Model.embed_patients`
+   * - Image files → saved vectors
+     - :meth:`~slide2vec.Model.embed_images`
+   * - Slide coordinates or image files → saved dense grids
+     - :meth:`~slide2vec.Model.embed_regions_dense`, :meth:`~slide2vec.Model.embed_images_dense`
+   * - Augmented tensors → live dense grids
+     - :meth:`~slide2vec.Model.prepare_dense_encoder`
 
 EmbeddedSlide
 -------------
 
-:meth:`Model.embed_slide` and :meth:`Model.embed_slides` return
-:class:`~slide2vec.EmbeddedSlide` objects:
+``embed_slide`` returns one :class:`~slide2vec.EmbeddedSlide` when the run
+produces a single annotation bag. A string ``annotation`` selects one bag;
+a list selects several and returns them in the requested order.
+``embed_slides`` returns ``{sample_id: {annotation: EmbeddedSlide}}``.
+See :ref:`annotation-aware-sampling` for examples.
 
 .. autoclass:: slide2vec.EmbeddedSlide
    :members:
@@ -34,15 +39,8 @@ EmbeddedSlide
 PreprocessingConfig
 -------------------
 
-.. autoclass:: slide2vec.PreprocessingConfig
-   :members:
-   :undoc-members:
-   :no-index:
-   :exclude-members: from_config, with_backend, with_mask_backend
-
-For a full breakdown of backends, segmentation methods, and preview options,
-see :doc:`preprocessing`.
-
+See :doc:`preprocessing` for the :class:`~slide2vec.PreprocessingConfig`
+field reference, readers, segmentation, annotation sampling, and previews.
 
 ExecutionOptions
 -----------------
@@ -50,13 +48,91 @@ ExecutionOptions
 .. autoclass:: slide2vec.ExecutionOptions
    :members:
    :undoc-members:
-   :exclude-members: from_config, resolved_num_workers, with_output_dir
+   :exclude-members: from_config, resolved_num_workers_per_gpu, resolved_image_num_workers_per_gpu, with_output_dir
+
+Pipeline
+---------
+
+Use :class:`~slide2vec.Pipeline` for manifest-driven batch processing and disk
+outputs:
+
+.. code-block:: python
+
+   from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+
+   model = Model.from_preset("virchow2")
+   pipeline = Pipeline(
+       model=model,
+       preprocessing=PreprocessingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           masks={"min_coverage": {"tissue": 0.1}},
+       ),
+       execution=ExecutionOptions(output_dir="outputs/demo", num_gpus=2),
+   )
+
+   result = pipeline.run(manifest_path="/path/to/slides.csv")
+
+See :doc:`manifest` for the full manifest schema.
+
+``Pipeline.run(...)`` returns a :class:`~slide2vec.RunResult`:
+
+.. autoclass:: slide2vec.RunResult
+   :members:
+   :undoc-members:
+
+See :doc:`output-layout` for the full on-disk directory structure and file schemas.
+
+Per-slide completion callback
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Pipeline.run_with_coordinates(coordinates_dir, *, slides=None,
+on_slide_persisted=None)`` and ``Model.embed_tiles(slides, tiling_results, *,
+preprocessing=None, execution=None, on_slide_persisted=None)`` accept an
+optional ``on_slide_persisted`` callable. slide2vec calls it in the calling
+process, synchronously, once per persisted ``(sample_id, annotation)`` work
+unit with that unit's :class:`~slide2vec.TileEmbeddingArtifact` (or
+:class:`~slide2vec.HierarchicalEmbeddingArtifact` under hierarchical
+preprocessing), after the artifact file is complete on disk and before the
+entry point returns. With ``num_gpus > 1`` it fires as each rank reports a
+finished slide, not after the whole stage returns.
+
+.. code-block:: python
+
+   def commit(artifact):
+       print(artifact.sample_id, artifact.path)
+
+   result = pipeline.run_with_coordinates("outputs/demo", on_slide_persisted=commit)
+
+Zero-tile slides, slides skipped by ``resume``, and slides that fail do not
+fire the callback. An exception raised inside it propagates out of the entry
+point. The return value is unchanged and still lists every artifact.
+
+
+Hierarchical Feature Extraction
+---------------------------------
+
+Enable hierarchical mode by setting ``region_tile_multiple`` in
+:class:`~slide2vec.PreprocessingConfig`:
+
+.. code-block:: python
+
+   from slide2vec import PreprocessingConfig
+
+   preprocessing = PreprocessingConfig(
+       requested_spacing_um=0.5,
+       requested_tile_size_px=224,
+       region_tile_multiple=6,   # 6×6 = 36 tiles per region
+   )
+
+The tile embeddings tensor will have shape ``(R, T, D)`` instead of ``(N, D)``.
+See :doc:`hierarchical` for the full explanation.
 
 Patient-level embedding
 ------------------------
 
-For patient-level models, use :meth:`Model.embed_patient` for a single patient
-or :meth:`Model.embed_patients` for a batch.
+For patient-level models, use :meth:`~slide2vec.Model.embed_patient` for a single patient
+or :meth:`~slide2vec.Model.embed_patients` for a batch.
 
 Single patient
 ~~~~~~~~~~~~~~
@@ -103,7 +179,7 @@ Images to Embeddings
 
 When your images already exist as files — a patch benchmark (BACH, CRC,
 PCam, …) or an exported ROI set — there is no slide to tile.
-:meth:`Model.embed_images` encodes those images directly and writes one
+:meth:`~slide2vec.Model.embed_images` encodes those images directly and writes one
 embedding artifact per image:
 
 .. code-block:: python
@@ -122,11 +198,13 @@ embedding artifact per image:
    print(artifacts[0].path)         # outputs/bach/image_embeddings/bach-001.pt
    print(artifacts[0].feature_dim)  # 2560
 
-The run splits images across all visible GPUs and resumes automatically:
-re-issue the same call to restart an interrupted run. ``sample_id`` is the
+The run uses the GPUs selected by ``ExecutionOptions.num_gpus`` and resumes
+automatically when repeated with the same output directory. ``sample_id`` is the
 artifact's identity and must be unique within a run; slide2vec never derives
-it from the filename. Mixed-size inputs are fine — each image goes through the
-encoder's shipped transform before batching.
+it from the filename. Mixed-size inputs are supported: each image goes through
+the encoder's shipped transform before batching. ``spacing_at_level_0`` is
+not accepted by this pooled image API; use dense extraction when physical
+spacing is part of the request.
 
 .. autoclass:: slide2vec.ImageSpec
    :members:
@@ -136,27 +214,10 @@ encoder's shipped transform before batching.
    :members:
    :undoc-members:
 
-Hierarchical Feature Extraction
----------------------------------
-
-Enable hierarchical mode by setting ``region_tile_multiple`` in
-:class:`~slide2vec.PreprocessingConfig`:
-
-.. code-block:: python
-
-   preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
-       region_tile_multiple=6,   # 6×6 = 36 tiles per region
-   )
-
-The tile embeddings tensor will have shape ``(R, T, D)`` instead of ``(N, D)``.
-See :doc:`hierarchical` for the full explanation.
-
 Live Dense Encoding after Augmentation
 --------------------------------------
 
-Use :meth:`Model.prepare_dense_encoder` when your training or inference loop
+Use :meth:`~slide2vec.Model.prepare_dense_encoder` when your training or inference loop
 already owns image/mask reading and joint augmentation. You hand slide2vec one
 CPU RGB ``uint8`` tensor in ``(3, H, W)`` layout; slide2vec owns normalization,
 padding, device transfer, and the frozen no-grad encode.
@@ -224,13 +285,14 @@ with the same geometry.
 Persisted Region Grids
 ----------------------
 
-:meth:`Model.embed_regions_dense` accepts level-0 point coordinates and the
+:meth:`~slide2vec.Model.embed_regions_dense` accepts level-0 point coordinates and the
 same optional source-spacing declaration as dense images:
 
 .. code-block:: python
 
-   from slide2vec import DenseOptions, ExecutionOptions, SlideRegions
+   from slide2vec import DenseOptions, ExecutionOptions, Model, SlideRegions
 
+   model = Model.from_preset("virchow2")
    artifacts = model.embed_regions_dense(
        [SlideRegions(
            sample_id="slide-1",
@@ -252,7 +314,7 @@ Dense Grids from Images
 
 When the supervision arrives as image/mask pairs rather than slides —
 segmentation and detection datasets, exported ROI sets —
-:meth:`Model.embed_images_dense` is the image-sourced counterpart of
+:meth:`~slide2vec.Model.embed_images_dense` is the image-sourced counterpart of
 ``embed_regions_dense``: the image *is* the region, so there is no ROI
 coordinate plan.
 
@@ -277,12 +339,12 @@ coordinate plan.
    )
 
    print(artifacts[0].path)        # outputs/ocelot/dense_image_embeddings/ocelot-001.pt
-   print(artifacts[0].grid_shape)  # (74, 74) for a 1024px image on a 14px patch encoder
+   print(artifacts[0].grid_shape)  # (74, 74) after padding 1024 to 1036 pixels
 
-Everything after the pixels arrive is shared with the ROI path: the same
-geometry resolution, padding, whole-image-vs-sliding encode, and
-``feature_kind`` choice. The run splits images across all visible GPUs and
-resumes automatically: re-issue the same call to restart an interrupted run.
+The image and region APIs share padding, whole-image or sliding-window
+encoding, and the ``feature_kind`` choice. The run uses the GPUs selected by
+``ExecutionOptions.num_gpus`` and automatically reuses compatible artifacts
+when repeated with the same output directory.
 
 PNG/JPEG inputs require ``ImageSpec.spacing_at_level_0``, because they carry
 no embedded physical spacing. ``target_size`` is a declaration, not a resize:
@@ -341,60 +403,49 @@ so values are non-negative and a channel's spatial sum is ``<= 1`` (the
 prefix-token key columns carry the remaining mass). The input must be divisible
 by the encoder patch size.
 
-Pipeline
----------
 
-Use :class:`~slide2vec.Pipeline` for manifest-driven batch processing and disk
-outputs:
 
-.. code-block:: python
+Method and artifact reference
+-----------------------------
 
-   from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
-
-   model = Model.from_preset("virchow2")
-   pipeline = Pipeline(
-       model=model,
-       preprocessing=PreprocessingConfig(
-           requested_spacing_um=0.5,
-           requested_tile_size_px=224,
-           masks={"min_coverage": {"tissue": 0.1}},
-       ),
-       execution=ExecutionOptions(output_dir="outputs/demo", num_gpus=2),
-   )
-
-   result = pipeline.run(manifest_path="/path/to/slides.csv")
-
-See :doc:`manifest` for the full manifest schema.
-
-``Pipeline.run(...)`` returns a :class:`~slide2vec.RunResult`:
-
-.. autoclass:: slide2vec.RunResult
+.. autoclass:: slide2vec.Model
    :members:
    :undoc-members:
 
-See :doc:`output-layout` for the full on-disk directory structure and file schemas.
+.. autoclass:: slide2vec.Pipeline
+   :members:
+   :undoc-members:
 
-Per-slide completion callback
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autoclass:: slide2vec.DenseOptions
+   :members:
+   :undoc-members:
 
-``Pipeline.run_with_coordinates(coordinates_dir, *, slides=None,
-on_slide_persisted=None)`` and ``Model.embed_tiles(slides, tiling_results, *,
-preprocessing=None, execution=None, on_slide_persisted=None)`` accept an
-optional ``on_slide_persisted`` callable. slide2vec calls it in the calling
-process, synchronously, once per persisted ``(sample_id, annotation)`` work
-unit with that unit's :class:`~slide2vec.TileEmbeddingArtifact` (or
-:class:`~slide2vec.HierarchicalEmbeddingArtifact` under hierarchical
-preprocessing), after the artifact file is complete on disk and before the
-entry point returns. With ``num_gpus > 1`` it fires as each rank reports a
-finished slide, not after the whole stage returns.
+.. autoclass:: slide2vec.SlideRegions
+   :members:
+   :undoc-members:
 
-.. code-block:: python
+.. autoclass:: slide2vec.TileEmbeddingArtifact
+   :members:
+   :undoc-members:
 
-   def commit(artifact):
-       print(artifact.sample_id, artifact.path)
+.. autoclass:: slide2vec.HierarchicalEmbeddingArtifact
+   :members:
+   :undoc-members:
 
-   result = pipeline.run_with_coordinates("outputs/demo", on_slide_persisted=commit)
+.. autoclass:: slide2vec.SlideEmbeddingArtifact
+   :members:
+   :undoc-members:
 
-Zero-tile slides, slides skipped by ``resume``, and slides that fail do not
-fire the callback. An exception raised inside it propagates out of the entry
-point. The return value is unchanged and still lists every artifact.
+.. autoclass:: slide2vec.DenseRegionArtifact
+   :members:
+   :undoc-members:
+
+Encoder provider diagnostics
+----------------------------
+
+.. autoclass:: slide2vec.EncoderProviderDiagnostic
+   :members:
+
+.. autofunction:: slide2vec.list_encoder_provider_diagnostics
+
+See :doc:`models` for provider packaging and discovery behavior.

@@ -1,14 +1,8 @@
 Preprocessing
 =============
 
-This page covers the options available in :class:`~slide2vec.PreprocessingConfig`
-and how to configure them.
-
-.. autoclass:: slide2vec.PreprocessingConfig
-   :members:
-   :undoc-members:
-   :exclude-members: from_config, with_backend, with_mask_backend
-
+Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
+geometry, tissue segmentation, annotation sampling, and previews.
 
 Backends
 --------
@@ -17,7 +11,7 @@ The ``backend`` field controls which slide-reading library is used:
 
 - ``"auto"`` — tries cucim → vips → openslide → asap and picks the first backend
   that can open the path
-- ``"cucim"`` — NVIDIA cuCIM (fastest for SVS/TIFF on GPU-equipped machines)
+- ``"cucim"`` — NVIDIA cuCIM for supported slide formats, including SVS and TIFF
 - ``"openslide"`` — broad format support, CPU-only
 - ``"vips"`` — libvips, good for large TIFF files
 - ``"asap"`` — ASAP reader (requires separate installation)
@@ -38,8 +32,8 @@ must stay stable across upgrades.
 Pooled Tile Geometry
 --------------------
 
-Pooled extraction uses three distinct pixel sizes, recorded in every artifact
-sidecar:
+Pooled extraction uses three distinct pixel sizes, recorded in tile and
+hierarchical artifact sidecars:
 
 - ``read_tile_size_px`` — the raw square read from the selected WSI pyramid
   level.
@@ -67,7 +61,10 @@ The ``method`` key selects the algorithm:
 - ``hsv`` - heuristic based on the HSV colour space. Fast and robust for H&E slides.
 - ``otsu`` - thresholds the saturation channel using Otsu's method.
 - ``threshold`` - applies a fixed saturation threshold.
-- ``sam2`` - runs the `AtlasPatch <https://github.com/clemsgrs/atlaspatch>`_ SAM2 tissue segmentation model on an internal 8.0 µm/px thumbnail. Requires the ``atlaspatch`` package and a compatible GPU. Additional key: ``sam2_device`` — device string for SAM2 inference (e.g. ``"cuda:0"`` or ``"cpu"``).
+- ``sam2`` - runs the `AtlasPatch <https://github.com/clemsgrs/atlaspatch>`_
+  SAM2 tissue segmentation model on an internal 8.0 µm/px thumbnail. Requires
+  the ``atlaspatch`` package. ``sam2_device`` selects ``"cpu"`` (the default),
+  ``"cuda"``, or a CUDA device such as ``"cuda:0"``.
 
 Example:
 
@@ -77,6 +74,7 @@ Example:
 
    model = Model.from_preset("virchow2")
    preprocessing = PreprocessingConfig(
+       requested_spacing_um=0.5,
        segmentation={"method": "sam2", "sam2_device": "cuda"},
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
@@ -87,8 +85,8 @@ Or in a YAML config:
 
    tiling:
      seg_params:
-         method: "sam2"
-         sam2_device: "cuda"
+       method: "sam2"
+       sam2_device: "cuda"
 
 
 .. _annotation-aware-sampling:
@@ -97,8 +95,8 @@ Annotation-Aware Sampling
 -------------------------
 
 By default ``slide2vec`` tiles tissue: the ``masks`` vocabulary is the binary
-``{background: 0, tissue: 1}``, and embeddings cover every tissue tile. To
-restrict tiling and feature extraction to specific annotated classes
+``{background: 0, tissue: 1}``, and embeddings cover tiles that pass the
+sampling filters. To restrict extraction to specific annotated classes
 (tumor-only, stroma-only, …), customize the ``masks`` block. Any divergence
 from the default vocabulary opts the run into annotation-aware sampling; the
 plain tissue path is otherwise unchanged.
@@ -140,11 +138,12 @@ and disable tissue sampling with ``min_coverage.tissue: null``:
        },
    )
 
-   embedded = model.embed_slide(
-       "/path/to/slide.svs",
-       mask_path="/path/to/annotation_mask.tif",  # multi-label raster
-       preprocessing=preprocessing,
-   )
+   slide = {
+       "sample_id": "slide-1",
+       "image_path": "/path/to/slide.svs",
+       "mask_path": "/path/to/annotation_mask.tif",  # multi-label raster
+   }
+   embedded = model.embed_slide(slide, preprocessing=preprocessing)
 
    assert embedded.annotation == "tumor"  # every bag is stamped with its label
    tumor_bag = embedded.tile_embeddings   # shape (N_tumor, D) — tumor tiles only
@@ -159,18 +158,19 @@ use a :class:`~slide2vec.Pipeline` so per-class artifacts are persisted under a
 
 .. code-block:: python
 
-   from slide2vec import Model, Pipeline, PreprocessingConfig, ExecutionOptions
+   from slide2vec import ExecutionOptions, Pipeline
 
+   preprocessing = PreprocessingConfig(
+       requested_spacing_um=0.5,
+       requested_tile_size_px=224,
+       masks={
+           "pixel_mapping": {"tumor": 2, "stroma": 3},
+           "min_coverage": {"tissue": None, "tumor": 0.5, "stroma": 0.5},
+       },
+   )
    pipeline = Pipeline(
-       model=Model.from_preset("virchow2"),
-       preprocessing=PreprocessingConfig(
-           requested_spacing_um=0.5,
-           requested_tile_size_px=224,
-           masks={
-               "pixel_mapping": {"tumor": 2, "stroma": 3},
-               "min_coverage": {"tissue": None, "tumor": 0.5, "stroma": 0.5},
-           },
-       ),
+       model=model,
+       preprocessing=preprocessing,
        execution=ExecutionOptions(output_dir="outputs/run"),
    )
 
@@ -190,28 +190,30 @@ at the flat output root (``tile_embeddings/<sample_id>.pt``) with no
 
 .. code-block:: python
 
-   results = model.embed_slides(slides, ...)   # masks with output_mode "merged"
-   merged = results["slide-1"]["merged"]
-   assert merged.annotation == "merged"        # not "tumor"/"stroma"
+   from dataclasses import replace
 
-   # Single bag per slide, so embed_slide returns it directly:
-   merged = model.embed_slide(slide, ...)      # output_mode "merged"
+   merged_preprocessing = replace(
+       preprocessing,
+       masks={**preprocessing.masks, "output_mode": "merged"},
+   )
+   results = model.embed_slides([slide], preprocessing=merged_preprocessing)
+   merged = results["slide-1"]["merged"]
+
+   # A single bag is also available directly:
+   merged = model.embed_slide(slide, preprocessing=merged_preprocessing)
    assert merged.annotation == "merged"
 
-**Working with several classes in memory.** Call ``embed_slides`` (not
-``embed_slide``). It returns a nested mapping ``{sample_id: {label:
-EmbeddedSlide}}`` where the inner key is each bag's annotation label (a class
-name, ``"tissue"``, or ``"merged"``; never ``None``). Every
+**Working with several classes in memory.** ``embed_slides`` returns a nested
+mapping ``{sample_id: {label: EmbeddedSlide}}`` where the inner key is each
+bag's annotation label (a class name, ``"tissue"``, or ``"merged"``; never ``None``). Every
 :class:`~slide2vec.EmbeddedSlide` is also stamped with its
 :attr:`~slide2vec.EmbeddedSlide.annotation`:
 
 .. code-block:: python
 
    results = model.embed_slides(
-       [{"sample_id": "slide-1",
-         "image_path": "/path/to/slide.svs",
-         "mask_path": "/path/to/annotation_mask.tif"}],
-       preprocessing=preprocessing,   # masks with tumor + stroma, as above
+       [slide],
+       preprocessing=preprocessing,   # tumor + stroma configuration above
    )
 
    tumor_bag = results["slide-1"]["tumor"].tile_embeddings    # shape (N_tumor, D)
@@ -222,7 +224,9 @@ about; omit it to receive every bag the run produced:
 
 .. code-block:: python
 
-   results = model.embed_slides(slides, annotations=["tumor"])
+   results = model.embed_slides(
+       [slide], preprocessing=preprocessing, annotations=["tumor"],
+   )
    results["slide-1"].keys()  # dict_keys(['tumor']) — stroma is dropped
 
 **Selecting bags with** ``embed_slide``. ``embed_slide`` returns one bag (or a
@@ -231,10 +235,12 @@ list of bags) for a single slide via the ``annotation`` selector:
 .. code-block:: python
 
    # One class → one EmbeddedSlide.
-   tumor = model.embed_slide(slide, annotation="tumor")
+   tumor = model.embed_slide(slide, preprocessing=preprocessing, annotation="tumor")
 
    # A list of classes → a list of EmbeddedSlide in the requested order.
-   tumor, stroma = model.embed_slide(slide, annotation=["tumor", "stroma"])
+   tumor, stroma = model.embed_slide(
+       slide, preprocessing=preprocessing, annotation=["tumor", "stroma"],
+   )
 
 Bare ``embed_slide(slide)`` returns the single bag when the run produced
 exactly one; if the run fanned out into several bags it raises a ``ValueError``
@@ -259,10 +265,21 @@ preview:
    )
 
 Preview images are written to ``<output_dir>/preview/mask/<sample_id>.jpg``
-and ``<output_dir>/preview/tiling/<sample_id>.jpg``. Their paths are also
+and ``<output_dir>/preview/tiling/<sample_id>.jpg`` for tissue or merged
+output. Per-class tiling previews add a ``<class>/`` subdirectory below
+``preview/tiling/``; the mask preview is shared across classes. Paths are also
 recorded in ``process_list.csv`` and on the returned
 :class:`~slide2vec.EmbeddedSlide` (``mask_preview_path``,
 ``tiling_preview_path``).
 
 When resuming a run, existing preview paths are preserved in
 ``process_list.csv`` if the preview files still exist on disk.
+
+
+Field reference
+---------------
+
+.. autoclass:: slide2vec.PreprocessingConfig
+   :members:
+   :undoc-members:
+   :exclude-members: from_config, with_backend, with_mask_backend

@@ -3,162 +3,88 @@
 [![PyPI version](https://img.shields.io/pypi/v/slide2vec?label=pypi&logo=pypi&color=3776AB)](https://pypi.org/project/slide2vec/)
 [![Docs](https://img.shields.io/badge/docs-website-blue)](https://clemsgrs.github.io/slide2vec/)
 
-`slide2vec` is a Python package for efficient encoding of whole-slide images using publicly available foundation models. It builds on [`hs2p`](https://pypi.org/project/hs2p/) for fast preprocessing and exposes a focused surface around `Model`, `Pipeline`, and `ExecutionOptions`.
+`slide2vec` encodes whole-slide images with publicly available pathology foundation models. It uses [`hs2p`](https://pypi.org/project/hs2p/) for tissue detection and tiling, and handles batching, multi-GPU execution, and embedding storage.
 
-Documentation site: [https://clemsgrs.github.io/slide2vec/](https://clemsgrs.github.io/slide2vec/)
+## Install
 
-## Installation
+Python 3.10 or newer is required:
 
 ```shell
 pip install slide2vec
-pip install "slide2vec[fm]"
 ```
 
-`slide2vec` keeps the base install focused on the core package surface. Use `slide2vec[fm]` when you want the PyPI-hosted FM dependencies.
+Many models need additional dependencies available through `pip install "slide2vec[fm]"`. See the [model installation guide](https://clemsgrs.github.io/slide2vec/models.html#model-installation) for model-specific extras, separate environments, and upstream packages.
 
-Some model backends still rely on upstream Git repositories that PyPI will not accept as package metadata. Install those separately when needed:
+For gated models such as Virchow2, request access on the model's Hugging Face page and authenticate with `hf auth login` or an `HF_TOKEN` environment variable.
 
-```shell
-pip install git+https://github.com/lilab-stanford/MUSK.git
-pip install git+https://github.com/Mahmoodlab/CONCH.git
-pip install git+https://github.com/prov-gigapath/prov-gigapath.git
-```
-
-AtlasPatch-backed tissue segmentation is available through hs2p's `sam2` path in the bundled install.
-
-Waiv encoders use a separately tested Transformers 5 runtime. Install them in
-their own environment with `pip install "slide2vec[waiv]"`; the `waiv` extra is
-incompatible with the existing `fm`, `prism`, and `titan` dependency pins.
-
-## Python API
+## Embed a slide
 
 ```python
-from slide2vec import Model
-from slide2vec.utils.config import hf_login
-
-hf_login()
+from slide2vec import Model, PreprocessingConfig
 
 model = Model.from_preset("virchow2")
-embedded = model.embed_slide("/path/to/slide.svs")
+preprocessing = PreprocessingConfig(requested_spacing_um=0.5)
+embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
-tile_embeddings = embedded.tile_embeddings
-x = embedded.x
-y = embedded.y
+tile_embeddings = embedded.tile_embeddings  # (N, 2560)
+x, y = embedded.x, embedded.y               # level-0 tile coordinates
 ```
 
-Use `list_models()` when you want to inspect the shipped presets programmatically:
+The preset supplies tile size and precision defaults. Declare spacing explicitly for models such as Virchow2 that support several scales. Use `list_models()` to list presets, or filter with `list_models("tile")`, `list_models("slide")`, or `list_models("patient")`.
 
-```python
-from slide2vec import list_models
+See [getting started](https://clemsgrs.github.io/slide2vec/getting-started.html) for preprocessing and execution settings, and the [API guide](https://clemsgrs.github.io/slide2vec/api.html) for patient embeddings, image inputs, and dense grids.
 
-all_models = list_models()
-tile_models = list_models("tile")
-slide_models = list_models("slide")
-patient_models = list_models("patient")
+## Save a batch
+
+Create a CSV manifest:
+
+```csv
+sample_id,image_path
+slide-1,/data/slide-1.svs
+slide-2,/data/slide-2.svs
 ```
 
-Use `Pipeline(...)` for manifest-driven batch processing when you want artifacts written to disk instead of only in-memory outputs:
+Optional `mask_path` and `spacing_at_level_0` columns supply a mask or correct missing or incorrect level-0 spacing. Patient-level models also require `patient_id`; see the [manifest schema](https://clemsgrs.github.io/slide2vec/manifest.html).
 
 ```python
-from slide2vec import ExecutionOptions, Pipeline, PreprocessingConfig
+from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
 pipeline = Pipeline(
-    model=model,
-    preprocessing=PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks={"min_coverage": {"tissue": 0.1}},
-    ),
-    execution=ExecutionOptions(output_dir="outputs/demo"),
+    model=Model.from_preset("virchow2"),
+    preprocessing=PreprocessingConfig(requested_spacing_um=0.5),
+    execution=ExecutionOptions(output_dir="outputs/run"),
 )
 result = pipeline.run(manifest_path="/path/to/slides.csv")
 ```
 
-By default, `ExecutionOptions()` uses all available GPUs. Set `ExecutionOptions(num_gpus=4)` when you want to cap the sharding explicitly.
+Runs use all available GPUs by default; set `ExecutionOptions(num_gpus=2)` to limit them. Embeddings are saved as `.pt` tensors with metadata sidecars. Use `ExecutionOptions(output_format="npz")` for NumPy archives. The [output guide](https://clemsgrs.github.io/slide2vec/output-layout.html) describes directories, shapes, coordinates, and progress records.
 
-### Hierarchical Feature Extraction
+Add `region_tile_multiple=6` to the preprocessing config to group tiles into 6×6 regions. These produce `(num_regions, 36, feature_dim)` tensors in `hierarchical_embeddings/`; see [hierarchical features](https://clemsgrs.github.io/slide2vec/hierarchical.html).
 
-Tile embeddings can be spatially grouped into regions for downstream models that consume region-level structure. Enable it by setting `region_tile_multiple` on `PreprocessingConfig`:
-
-```python
-preprocessing = PreprocessingConfig(
-    requested_spacing_um=0.5,
-    requested_tile_size_px=224,
-    region_tile_multiple=6,  # 6x6 tiles per region
-)
-embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
-```
-
-Hierarchical outputs have shape `(num_regions, tiles_per_region, feature_dim)` and are written to `hierarchical_embeddings/` when persisted.
-
-See the [hierarchical features guide](https://clemsgrs.github.io/slide2vec/hierarchical.html) for details.
-
-### Input Manifest
-
-Manifest-driven runs use the schema below. `mask_path` and `spacing_at_level_0` are optional.
-
-```csv
-sample_id,image_path,mask_path,spacing_at_level_0
-slide-1,/path/to/slide-1.svs,/path/to/mask-1.png,0.25
-slide-2,/path/to/slide-2.svs,,
-...
-```
-
-Use `spacing_at_level_0` when the slide file reports a missing or incorrect level-0 spacing and you want to override it.
-
-
-### Outputs
-
-The package writes explicit artifact directories:
-
-- `tile_embeddings/<sample_id>.pt` or `.npz`
-- `tile_embeddings/<sample_id>.meta.json`
-- `hierarchical_embeddings/<sample_id>.pt` or `.npz` (when `region_tile_multiple` is set)
-- `hierarchical_embeddings/<sample_id>.meta.json`
-- `slide_embeddings/<sample_id>.pt` or `.npz`
-- `slide_embeddings/<sample_id>.meta.json`
-- optional `slide_latents/<sample_id>.pt` or `.npz`
-
-`.pt` remains the default format. `.npz` is available through `ExecutionOptions(output_format="npz")`.
-
-### Supported Models
-
-`slide2vec` currently ships presets for 28 tile-level models, 4 slide-level models,
-and 1 patient-level model.
-For the full catalog and preset names, see the [model zoo](https://clemsgrs.github.io/slide2vec/models.html).
-
-## CLI
-
-The CLI is a thin wrapper over the package API.  
-Bundled configs live under `slide2vec/configs/preprocessing/` and `slide2vec/configs/models/`.
+The same batch workflow is available from the terminal:
 
 ```shell
 slide2vec /path/to/config.yaml
 ```
 
-By default, manifest-driven CLI runs use all available GPUs. Set `speed.num_gpus=4` when you want to cap the sharding explicitly.
-
-New to the CLI or doing batch runs to disk? Start with the [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html) for the config-driven workflow and common run patterns.
+The [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html) provides a complete config example, overrides, and resume instructions.
 
 ## Docker
 
 [![Docker Version](https://img.shields.io/docker/v/waticlems/slide2vec?sort=semver&label=docker&logo=docker&color=2496ED)](https://hub.docker.com/r/waticlems/slide2vec)
 
-Docker remains available when you prefer a containerized runtime:
-
 ```shell
 docker pull waticlems/slide2vec:latest
 docker run --rm -it \
     -v /path/to/your/data:/data \
-    -e HF_TOKEN=<your-huggingface-api-token> \
+    -e HF_TOKEN \
     waticlems/slide2vec:latest
 ```
 
-## Documentation
+Set `HF_TOKEN` in your shell before starting the container.
 
-- [Documentation website](https://clemsgrs.github.io/slide2vec/)
-- [API guide](https://clemsgrs.github.io/slide2vec/api.html)
-- [CLI guide](https://clemsgrs.github.io/slide2vec/cli.html)
+## More documentation
+
 - [Model zoo](https://clemsgrs.github.io/slide2vec/models.html)
-- [Performance benchmarks and QA](docs/performance.md)
-- [`tutorials/api_walkthrough.ipynb`](tutorials/api_walkthrough.ipynb) for a notebook walkthrough of the API
+- [Performance benchmarks and QA](https://clemsgrs.github.io/slide2vec/performance.html)
+- [API walkthrough notebook](tutorials/api_walkthrough.ipynb)

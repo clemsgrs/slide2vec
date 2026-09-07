@@ -1,8 +1,9 @@
 Hierarchical Features
 =====================
 
-Hierarchical mode groups tiles into spatial regions before embedding, so the
-output carries both local (tile) and contextual (region) information.
+Hierarchical mode preserves the spatial grouping of tile embeddings in a
+region-by-tile tensor for downstream region-aware aggregators. The tile
+encoder embeds each tile independently.
 
 Concept
 -------
@@ -10,9 +11,8 @@ Concept
 In standard mode, slide2vec tiles a slide and returns a flat ``(N, D)`` tensor
 — one embedding per tile.
 
-In hierarchical mode, tiles are additionally grouped into non-overlapping
-rectangular *regions*. Each region contains exactly ``T = region_tile_multiple²``
-tiles arranged in a square grid. The output shape becomes
+In hierarchical mode, tiles are grouped into square *regions*. Each region
+contains exactly ``T = region_tile_multiple²`` tiles arranged in a square grid. The output shape becomes
 ``(R, T, D)`` where:
 
 - ``R`` — number of regions (depends on tissue area)
@@ -65,19 +65,19 @@ The tile embeddings tensor for a hierarchically processed slide has shape
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
    # embedded.tile_embeddings: Tensor of shape (R, T, D)
-   # e.g. (512, 36, 1280) for virchow2 with region_tile_multiple=6
+   # e.g. (512, 36, 2560) for virchow2 with region_tile_multiple=6
 
-Coordinates (``embedded.x``, ``embedded.y``) are also reshaped to ``(R, T)``
-so that ``x[r, t]`` / ``y[r, t]`` gives the level-0 pixel position of tile
-``t`` in region ``r``.
+Coordinates (``embedded.x``, ``embedded.y``) have shape ``(R,)`` and give
+the level-0 pixel origins of the parent regions. Within each region, tile
+embeddings follow row-major order (left to right, then top to bottom).
 
 When running :class:`~slide2vec.Pipeline`, hierarchical artifacts are written
-to ``hierarchical_embeddings/`` alongside the usual ``tile_embeddings/``
-directory. See :doc:`output-layout` for the full directory structure.
+to ``hierarchical_embeddings/``. Each artifact contains the ``(R, T, D)``
+tensor; no duplicate flat tile tensor is written. See :doc:`output-layout`
+for the directory structure.
 
 Compatibility
 -------------
 
 Hierarchical extraction is supported for all **tile-level** models.
-It is not compatible with slide-level or patient-level encoders (those operate
-on the slide as a whole, not on individual tiles).
+Slide-level and patient-level presets reject hierarchical preprocessing.

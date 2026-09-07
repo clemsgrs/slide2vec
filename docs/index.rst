@@ -1,15 +1,13 @@
 slide2vec
 ==========
 
-``slide2vec`` is a slide encoding library for computational pathology.
+``slide2vec`` encodes whole-slide images with pathology foundation models.
+It uses `hs2p <https://github.com/clemsgrs/hs2p>`_ for tissue detection and
+tiling, and handles batching, multi-GPU execution, and embedding storage.
 
-It provides a unified API to make whole-slide encoding with Foundation Models
-straightforward. Building on top of `hs2p <https://github.com/clemsgrs/hs2p>`_,
-it abstracts away the complexities of working with whole-slide images, handling tiling,
-batching, and multi-GPU distribution so you can go from a slide path to an
-embedding tensor in a few lines.
-
-It ships with presets for the most widely used pathology foundation models.
+Use ``Model`` for in-memory slide embeddings or ``Pipeline`` and the CLI to
+process a manifest and save artifacts. Start with installation and a first
+slide, then choose the workflow below.
 
 .. raw:: html
 
@@ -17,11 +15,11 @@ It ships with presets for the most widely used pathology foundation models.
      <div class="s2v-card-grid">
        <a class="s2v-card" href="getting-started.html">
          <h3>Getting started</h3>
-         <p>An overview of what slide2vec is and how to use it.</p>
+         <p>Install slide2vec and encode your first slide.</p>
        </a>
        <a class="s2v-card" href="api.html">
          <h3>API Guide</h3>
-         <p>Embed a slide directly from Python.</p>
+         <p>Work with slides, patients, images, and dense grids in Python.</p>
        </a>
        <a class="s2v-card" href="cli.html">
          <h3>CLI</h3>
