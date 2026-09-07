@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable CPU runtime benchmarks; see docs/performance.md for scope and comparison."""
+"""Repeatable runtime benchmarks; see docs/performance.md for scope and comparison."""
 
 import argparse
 import hashlib
@@ -109,7 +109,7 @@ def positive_int(value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--case', choices=['hierarchical', 'process-list'], required=True)
+    parser.add_argument('--case', choices=['hierarchical', 'process-list', 'inference'], required=True)
     parser.add_argument('--repeat', type=positive_int, default=5)
     parser.add_argument('--warmup', type=positive_int, default=1)
     parser.add_argument('--threads', type=positive_int, default=1)
@@ -120,8 +120,26 @@ def main():
     parser.add_argument('--completed', type=positive_int, default=1000)
     parser.add_argument('--slide', type=Path, help='Read real level-0 regions with OpenSlide instead of synthetic pixels')
     parser.add_argument('--compare', type=Path, help='Require matching workload/output and report speedup against this JSON')
+    parser.add_argument('--model', default='phikonv2', help='Pretrained encoder for inference measurements')
+    parser.add_argument('--coordinates', type=Path, help='NPZ of fixed level-0 x/y coordinates for inference')
+    parser.add_argument('--batch-size', type=positive_int, default=16)
+    parser.add_argument('--workers', type=int, default=0)
+    parser.add_argument('--backend', choices=['openslide', 'cucim', 'asap', 'vips'], default='openslide')
+    parser.add_argument('--modes', nargs='+', choices=['model-only', 'cached', 'wsi'], default=['model-only', 'cached', 'wsi'])
+    parser.add_argument('--use-supertiles', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--cache-policy', choices=['warm', 'fresh-reader', 'advised-client-drop'], default='warm')
+    parser.add_argument('--precision', choices=['fp32', 'fp16', 'bf16'], default='fp32')
+    parser.add_argument('--device', choices=['cuda', 'cpu'], default='cuda')
+    parser.add_argument('--profile', action='store_true', help='Export separate untimed inference CPU/CUDA profiler traces')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if args.case == 'inference':
+        if args.slide is None or args.coordinates is None:
+            parser.error('--case inference requires --slide and --coordinates')
+        from scripts.benchmark_inference import run_inference_benchmark
+
+        print(json.dumps(run_inference_benchmark(args), indent=2))
+        return
     if args.slide and args.case != 'hierarchical':
         parser.error('--slide is only supported for --case hierarchical')
     torch.set_num_threads(args.threads)
@@ -145,7 +163,8 @@ def main():
     report = {
         'case': args.case,
         'parameters': {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
-                       if k not in ('output', 'compare')},
+                       if k in ('case', 'repeat', 'warmup', 'threads', 'regions', 'region_size',
+                                'tile_size', 'rows', 'completed', 'slide')},
         'environment': {'python': platform.python_version(), 'platform': platform.platform(),
                         'torch': torch.__version__, 'numpy': np.__version__, 'pandas': pd.__version__,
                         'hs2p': version('hs2p')},

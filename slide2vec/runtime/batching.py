@@ -60,6 +60,10 @@ def build_batch_preprocessor_for_tile_images(
         return None
 
     def preprocess(batch):
+        # Transfer the pinned byte batch before expanding it to float and replay
+        # supported transforms on the encoder device.
+        if batch.device != loaded.device:
+            batch = batch.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
         image = prepare_batch_tensor(batch)
         if spec.resize_size is None:
             image = resize_image_batch(
@@ -67,8 +71,6 @@ def build_batch_preprocessor_for_tile_images(
                 (int(requested_tile_size_px), int(requested_tile_size_px)),
             )
         image = apply_batch_transform_spec(image, spec)
-        if image.device != loaded.device:
-            image = image.to(loaded.device, non_blocking=str(loaded.device).startswith("cuda"))
         return image.contiguous()
 
     return preprocess
@@ -110,7 +112,8 @@ class BatchPrefetcher:
         self.loaded = loaded
         self.batch_preprocessor = batch_preprocessor
         self.copy_stream = self._make_copy_stream()
-        self._pinned_host_buffer = None
+        self.defer_preload = self.copy_stream is not None and batch_preprocessor is not None
+        self._exhausted = False
         self._next_batch: PreparedBatch | None = None
         self._preload()
 
@@ -132,18 +135,10 @@ class BatchPrefetcher:
             return image
         if image.device.type != "cpu" or image.is_pinned():
             return image
-        if (
-            self._pinned_host_buffer is None
-            or tuple(self._pinned_host_buffer.shape) != tuple(image.shape)
-            or self._pinned_host_buffer.dtype != image.dtype
-        ):
-            self._pinned_host_buffer = torch.empty(
-                image.shape,
-                dtype=image.dtype,
-                pin_memory=True,
-            )
-        self._pinned_host_buffer.copy_(image)
-        return self._pinned_host_buffer
+        # A shared staging buffer could be overwritten by the next preload while
+        # its asynchronous H2D copy is still pending. PyTorch tracks the lifetime
+        # of each pinned allocation until the transfer completes.
+        return image.pin_memory()
 
     def _prepare_batch(self, image):
         preprocess_start = time.perf_counter()
@@ -160,10 +155,13 @@ class BatchPrefetcher:
         return prepared, preprocess_ms
 
     def _preload(self) -> None:
+        if self._exhausted or self._next_batch is not None:
+            return
         wait_start = time.perf_counter()
         try:
             batch = next(self.iterator)
         except StopIteration:
+            self._exhausted = True
             self._next_batch = None
             return
         loader_wait_ms = (time.perf_counter() - wait_start) * 1000.0
@@ -206,6 +204,7 @@ class BatchPrefetcher:
         return self
 
     def __next__(self) -> PreparedBatch:
+        self._preload()
         if self._next_batch is None:
             raise StopIteration
         current = self._next_batch
@@ -213,8 +212,12 @@ class BatchPrefetcher:
             ready_start = time.perf_counter()
             current_stream = torch.cuda.current_stream(device=self.loaded.device)
             current_stream.wait_stream(self.copy_stream)
+            if torch.is_tensor(current.image) and current.image.is_cuda:
+                current.image.record_stream(current_stream)
             current.ready_wait_ms = (time.perf_counter() - ready_start) * 1000.0
-        self._preload()
+        self._next_batch = None
+        if not self.defer_preload:
+            self._preload()
         return current
 
 
@@ -254,8 +257,16 @@ def iter_forward_batches(
             image = prepared_batch.image
             _record_encoder_input_size(loaded, image)
             forward_start = time.perf_counter()
-            embedding = loaded.model.encode_tiles(image).detach().cpu()
+            embedding = loaded.model.encode_tiles(image).detach()
             forward_ms = (time.perf_counter() - forward_start) * 1000.0
+            if prefetcher.defer_preload:
+                # Launch CUDA work before blocking on the next reader batch. CPU
+                # and itemwise transforms retain their original execution order.
+                prefetcher._preload()
+            result_start = time.perf_counter()
+            embedding = embedding.cpu()
+            # Residual host time excludes the overlapping preload, not GPU time.
+            forward_ms += (time.perf_counter() - result_start) * 1000.0
             current_indices = torch.as_tensor(prepared_batch.indices, dtype=torch.long).detach().cpu()
             processed += int(embedding.shape[0])
             batch_index += 1
