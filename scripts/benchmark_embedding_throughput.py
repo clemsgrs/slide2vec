@@ -5,7 +5,6 @@ import copy
 import csv
 import json
 import math
-import os
 import random
 import shutil
 import statistics
@@ -36,6 +35,15 @@ def _prepend_repo_root_to_sys_path(paths: list[str]) -> list[str]:
 
 
 sys.path[:] = _prepend_repo_root_to_sys_path(sys.path)
+
+from scripts.benchmark_common import (  # noqa: E402
+    build_pipeline,
+    parse_process_list,
+    validate_completed_work,
+    load_yaml as _load_yaml,
+    to_namespace as _to_namespace,
+    to_plain_data as _to_plain_data,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -305,30 +313,6 @@ def build_trial_plan(
     return plan
 
 
-def _to_namespace(value: Any) -> Any:
-    if isinstance(value, dict):
-        return SimpleNamespace(**{key: _to_namespace(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return [_to_namespace(item) for item in value]
-    return value
-
-
-def _to_plain_data(value: Any) -> Any:
-    if value.__class__.__module__.startswith("omegaconf"):
-        from omegaconf import OmegaConf
-
-        return OmegaConf.to_container(value, resolve=True)
-    if isinstance(value, SimpleNamespace):
-        return {key: _to_plain_data(item) for key, item in vars(value).items()}
-    if isinstance(value, dict):
-        return {key: _to_plain_data(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_to_plain_data(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    return value
-
-
 def build_trial_config(
     base_config: dict[str, Any] | SimpleNamespace,
     *,
@@ -353,16 +337,6 @@ def build_trial_config(
     config["speed"]["num_workers_embedding"] = int(embedding_workers)
     config["speed"]["num_gpus"] = int(num_gpus)
     return _to_namespace(config)
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    import yaml
-
-    with path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected mapping config in {path}")
-    return data
 
 
 def _load_cli_merged_config(path: Path) -> dict[str, Any]:
@@ -490,29 +464,6 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
         "mean_forward_ms": round(statistics.mean(forward_ms), 4),
         "loader_wait_fraction": round((sum(loader_wait_ms) + sum(ready_wait_ms)) / total_ms, 4) if total_ms > 0 else 0.0,
         "gpu_busy_fraction": round(statistics.mean(gpu_busy_fraction), 4),
-    }
-
-
-def parse_process_list(path: Path) -> dict[str, int]:
-    if not path.is_file():
-        return {
-            "slides_total": 0,
-            "slides_with_tiles": 0,
-            "failed_slides": 0,
-            "total_tiles": 0,
-        }
-
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-
-    total_tiles = sum(int(float(row.get("num_tiles") or 0)) for row in rows)
-    slides_with_tiles = sum(int(float(row.get("num_tiles") or 0)) > 0 for row in rows)
-    failed_slides = sum(row.get("tiling_status") == "failed" for row in rows)
-    return {
-        "slides_total": len(rows),
-        "slides_with_tiles": slides_with_tiles,
-        "failed_slides": failed_slides,
-        "total_tiles": total_tiles,
     }
 
 
@@ -779,62 +730,7 @@ def _resolve_gpu_label(value: str) -> str:
 
 
 def _build_model_pipeline_from_config(config: dict[str, Any]):
-    from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
-
-    model_cfg = config.get("model", {})
-    tiling_cfg = config.get("tiling", {})
-    params = tiling_cfg.get("params", {})
-    preview = dict(tiling_cfg.get("preview", {}))
-    preprocessing = PreprocessingConfig(
-        backend=str(tiling_cfg.get("backend", "asap")),
-        requested_spacing_um=float(params.get("requested_spacing_um", 0.5)),
-        requested_tile_size_px=int(params.get("requested_tile_size_px", 224)),
-        tolerance=float(params.get("tolerance", 0.05)),
-        overlap=float(params.get("overlap", 0.0)),
-        masks={"min_coverage": {"tissue": float(params.get("tissue_threshold", 0.01))}},
-        drop_holes=bool(params.get("drop_holes", False)),
-        use_padding=bool(params.get("use_padding", True)),
-        read_coordinates_from=(
-            Path(tiling_cfg["read_coordinates_from"])
-            if tiling_cfg.get("read_coordinates_from")
-            else Path(config["output_dir"]) / "coordinates"
-        ),
-        read_tiles_from=Path(tiling_cfg["read_tiles_from"]) if tiling_cfg.get("read_tiles_from") else None,
-        resume=bool(config.get("resume", False)),
-        segmentation=dict(tiling_cfg.get("seg_params", {})),
-        filtering=dict(tiling_cfg.get("filter_params", {})),
-        preview={
-            "save_mask_preview": bool(preview.get("save", False)),
-            "save_tiling_preview": bool(preview.get("save", False)),
-            "downsample": int(preview.get("downsample", 32)),
-        },
-    )
-    speed_cfg = config.get("speed", {})
-    execution = ExecutionOptions(
-        output_dir=Path(config["output_dir"]),
-        output_format=str(config.get("output_format", "pt")),
-        batch_size=int(model_cfg.get("batch_size", 1)),
-        num_workers=int(speed_cfg.get("num_workers_embedding", speed_cfg.get("num_workers", 0))),
-        num_gpus=int(speed_cfg["num_gpus"]) if speed_cfg.get("num_gpus") is not None else None,
-        precision=str(speed_cfg.get("precision", "fp32")),
-        prefetch_factor=int(speed_cfg.get("prefetch_factor_embedding", 4)),
-        persistent_workers=bool(speed_cfg.get("persistent_workers_embedding", True)),
-        save_tile_embeddings=bool(model_cfg.get("save_tile_embeddings", False)),
-        save_latents=bool(model_cfg.get("save_latents", False)),
-    )
-    model = Model.from_preset(
-        str(model_cfg["name"]),
-        level=model_cfg.get("level"),
-        mode=model_cfg.get("mode"),
-        arch=model_cfg.get("arch"),
-        pretrained_weights=model_cfg.get("pretrained_weights"),
-        input_size=model_cfg.get("input_size"),
-        patch_size=model_cfg.get("patch_size"),
-        token_size=model_cfg.get("token_size"),
-        normalize_embeddings=model_cfg.get("normalize_embeddings"),
-        device="auto",
-    )
-    return Pipeline(model=model, preprocessing=preprocessing, execution=execution)
+    return build_pipeline(config, reuse_coordinates=True, worker_key="num_workers_embedding")
 
 
 def _run_internal_harness(args: argparse.Namespace) -> int:
@@ -859,6 +755,7 @@ def _run_internal_harness(args: argparse.Namespace) -> int:
             result = pipeline.run(manifest_path=config["csv"])
         end_to_end_seconds = time.perf_counter() - t0
         process_stats = parse_process_list(output_dir / "process_list.csv")
+        validate_completed_work(process_stats, result)
         stage_seconds = extract_stage_seconds(progress_path)
         batch_timing = extract_batch_timing_metrics(progress_path)
         slides_total = int(process_stats["slides_total"])

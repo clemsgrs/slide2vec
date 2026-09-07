@@ -13,8 +13,6 @@ Compares five configurations in increasing order of optimization:
 import argparse
 import csv
 import json
-import math
-import os
 import shutil
 import statistics
 import subprocess
@@ -105,6 +103,13 @@ def _prepend_repo_root_to_sys_path(paths: list[str]) -> list[str]:
 
 
 sys.path[:] = _prepend_repo_root_to_sys_path(sys.path)
+
+from scripts.benchmark_common import (  # noqa: E402
+    build_pipeline,
+    parse_process_list,
+    validate_completed_work,
+    load_yaml as _load_yaml,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -230,16 +235,6 @@ def write_slides_csv(slides: list[dict[str, Any]], path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Config helpers
 # ---------------------------------------------------------------------------
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    import yaml
-
-    with path.open(encoding="utf-8") as handle:
-        data = yaml.safe_load(handle) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected mapping config in {path}")
-    return data
-
 
 def _write_yaml(data: dict[str, Any], path: Path) -> None:
     import yaml
@@ -469,22 +464,6 @@ def extract_batch_timing_metrics(progress_path: Path) -> dict[str, float | int]:
     }
 
 
-def parse_process_list(path: Path) -> dict[str, int]:
-    if not path.is_file():
-        return {"slides_total": 0, "slides_with_tiles": 0, "failed_slides": 0, "total_tiles": 0}
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    total_tiles = sum(int(float(row.get("num_tiles") or 0)) for row in rows)
-    slides_with_tiles = sum(int(float(row.get("num_tiles") or 0)) > 0 for row in rows)
-    failed_slides = sum(row.get("tiling_status") == "failed" for row in rows)
-    return {
-        "slides_total": len(rows),
-        "slides_with_tiles": slides_with_tiles,
-        "failed_slides": failed_slides,
-        "total_tiles": total_tiles,
-    }
-
-
 def save_csv(rows: list[dict[str, Any]], path: Path) -> None:
     if not rows:
         return
@@ -500,72 +479,7 @@ def save_csv(rows: list[dict[str, Any]], path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def _build_pipeline_from_config_dict(config: dict[str, Any]):
-    from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
-
-    model_cfg = config.get("model", {})
-    tiling_cfg = config.get("tiling", {})
-    params = tiling_cfg.get("params", {})
-    preview = dict(tiling_cfg.get("preview", {}))
-    speed_cfg = config.get("speed", {})
-
-    preprocessing = PreprocessingConfig(
-        backend=str(tiling_cfg.get("backend", "cucim")),
-        requested_spacing_um=float(params.get("requested_spacing_um", 0.5)),
-        requested_tile_size_px=int(params.get("requested_tile_size_px", 256)),
-        tolerance=float(params.get("tolerance", 0.05)),
-        overlap=float(params.get("overlap", 0.0)),
-        masks={"min_coverage": {"tissue": float(params.get("tissue_threshold", 0.01))}},
-        drop_holes=bool(params.get("drop_holes", False)),
-        use_padding=bool(params.get("use_padding", True)),
-        read_coordinates_from=(
-            Path(tiling_cfg["read_coordinates_from"])
-            if tiling_cfg.get("read_coordinates_from")
-            else Path(config["output_dir"]) / "coordinates"
-        ),
-        read_tiles_from=(
-            Path(tiling_cfg["read_tiles_from"])
-            if tiling_cfg.get("read_tiles_from")
-            else None
-        ),
-        on_the_fly=bool(tiling_cfg.get("on_the_fly", True)),
-        gpu_decode=bool(tiling_cfg.get("gpu_decode", False)),
-        adaptive_batching=bool(tiling_cfg.get("adaptive_batching", False)),
-        use_supertiles=bool(tiling_cfg.get("use_supertiles", True)),
-        jpeg_backend=str(tiling_cfg.get("jpeg_backend", "turbojpeg")),
-        num_cucim_workers=int(speed_cfg.get("num_cucim_workers", tiling_cfg.get("num_cucim_workers", 4))),
-        resume=bool(config.get("resume", False)),
-        segmentation=dict(tiling_cfg.get("seg_params", {})),
-        filtering=dict(tiling_cfg.get("filter_params", {})),
-        preview={
-            "save_mask_preview": bool(preview.get("save", False)),
-            "save_tiling_preview": bool(preview.get("save", False)),
-            "downsample": int(preview.get("downsample", 32)),
-        },
-    )
-    execution = ExecutionOptions(
-        output_dir=Path(config["output_dir"]),
-        batch_size=int(model_cfg.get("batch_size", 256)),
-        num_workers=int(speed_cfg.get("num_dataloader_workers", speed_cfg.get("num_workers_embedding", 32))),
-        num_preprocessing_workers=int(speed_cfg.get("num_preprocessing_workers", 8)),
-        precision=str(speed_cfg.get("precision", "fp32")),
-        prefetch_factor=int(speed_cfg.get("prefetch_factor_embedding", 4)),
-        persistent_workers=bool(speed_cfg.get("persistent_workers_embedding", True)),
-        save_tile_embeddings=bool(model_cfg.get("save_tile_embeddings", False)),
-        save_latents=bool(model_cfg.get("save_latents", False)),
-    )
-    model = Model.from_preset(
-        str(model_cfg["name"]),
-        level=model_cfg.get("level", "tile"),
-        mode=model_cfg.get("mode"),
-        arch=model_cfg.get("arch"),
-        pretrained_weights=model_cfg.get("pretrained_weights"),
-        input_size=model_cfg.get("input_size"),
-        patch_size=model_cfg.get("patch_size"),
-        token_size=model_cfg.get("token_size"),
-        normalize_embeddings=model_cfg.get("normalize_embeddings"),
-        device="auto",
-    )
-    return Pipeline(model=model, preprocessing=preprocessing, execution=execution)
+    return build_pipeline(config, reuse_coordinates=True)
 
 
 def _run_internal_harness(args: argparse.Namespace) -> int:
@@ -590,6 +504,7 @@ def _run_internal_harness(args: argparse.Namespace) -> int:
             result = pipeline.run(manifest_path=config["csv"])
         end_to_end_seconds = time.perf_counter() - t0
         process_stats = parse_process_list(output_dir / "process_list.csv")
+        validate_completed_work(process_stats, result)
         stage_seconds = extract_stage_seconds(progress_path)
         batch_timing = extract_batch_timing_metrics(progress_path)
         slides_total = int(process_stats["slides_total"])
@@ -1036,6 +951,7 @@ def _print_log_panel(console: "Any", log_path: Path, title: str = "Error log") -
         log = "(no output captured)"
     console.print(Panel(log, title=f"[red]{title}[/]", border_style="red", highlight=False))
 
+
 def _make_summary_table(summary_rows: list[dict[str, Any]], *, baseline_mode: str = "tar") -> "Any":
     from rich.table import Table
 
@@ -1260,9 +1176,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
     console.print(
         Panel(
             (
-                f"[dim]throughput_by_strategy.png[/]\n[dim]timing_breakdown.png[/]\n[dim]summary.csv[/]"
+                "[dim]throughput_by_strategy.png[/]\n[dim]timing_breakdown.png[/]\n[dim]summary.csv[/]"
                 if len(batch_sizes) == 1
-                else f"[dim]throughput_by_batch_size.png[/]\n[dim]throughput_by_strategy_bs*.png[/]\n[dim]timing_breakdown_bs*.png[/]\n[dim]summary.csv[/]"
+                else "[dim]throughput_by_batch_size.png[/]\n[dim]throughput_by_strategy_bs*.png[/]\n[dim]timing_breakdown_bs*.png[/]\n[dim]summary.csv[/]"
             ),
             title=f"[bold]Saved to[/] {output_dir}",
             expand=False,

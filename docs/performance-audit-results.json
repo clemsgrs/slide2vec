@@ -1,0 +1,410 @@
+{
+  "date": "2026-09-07",
+  "baseline_revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8",
+  "timing_environment_note": "All timings below used installed hs2p 4.4.2. The 197-case correctness and real-fixture QA suite also passed with hs2p 4.4.3 loaded from an isolated package target.",
+  "scope": "CPU collation and CSV persistence; no claim of full pretrained model throughput or peak RSS reduction.",
+  "cpu_cases": {
+    "hierarchical": {
+      "before": {
+        "case": "hierarchical",
+        "parameters": {
+          "case": "hierarchical",
+          "repeat": 5,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 1000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          0.08288466301746666,
+          0.07154374592937529,
+          0.0830684369429946,
+          0.08436419488862157,
+          0.0931343820411712
+        ],
+        "median_seconds": 0.0830684369429946,
+        "min_seconds": 0.07154374592937529,
+        "max_seconds": 0.0931343820411712,
+        "output_sha256": "e1c3f9ded0f1e38f63694966b29ed25db406ab55cb620ca769496a3c290b752a",
+        "source_sha256": "c55b7ad747a0fc99075020b68867d9025371f306d46e147eac82db46c04a385e",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8"
+      },
+      "after": {
+        "case": "hierarchical",
+        "parameters": {
+          "case": "hierarchical",
+          "repeat": 5,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 1000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          0.022813010029494762,
+          0.016784907085821033,
+          0.016790971159934998,
+          0.01639058208093047,
+          0.013656269060447812
+        ],
+        "median_seconds": 0.016784907085821033,
+        "min_seconds": 0.013656269060447812,
+        "max_seconds": 0.022813010029494762,
+        "output_sha256": "e1c3f9ded0f1e38f63694966b29ed25db406ab55cb620ca769496a3c290b752a",
+        "source_sha256": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8",
+        "speedup": 4.948995935352317
+      },
+      "speedup": 4.948995935352317
+    },
+    "process-list": {
+      "before": {
+        "case": "process-list",
+        "parameters": {
+          "case": "process-list",
+          "repeat": 5,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 1000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          1.6233368839602917,
+          1.5560297451447695,
+          1.5591882709413767,
+          1.5843179388903081,
+          1.5515629609581083
+        ],
+        "median_seconds": 1.5591882709413767,
+        "min_seconds": 1.5515629609581083,
+        "max_seconds": 1.6233368839602917,
+        "output_sha256": "b6163c0cae67544e9e1988743e31f1ad875a154b4ca7877e4ebb7a5a3ffad49c",
+        "source_sha256": "65ccbc118db449edf7014fa12b52a5c3d988e74531359b18f8bad91747f4400c",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8"
+      },
+      "after": {
+        "case": "process-list",
+        "parameters": {
+          "case": "process-list",
+          "repeat": 5,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 1000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          0.07384687010198832,
+          0.07003257097676396,
+          0.0705054251011461,
+          0.07157046999782324,
+          0.07399658602662385
+        ],
+        "median_seconds": 0.07157046999782324,
+        "min_seconds": 0.07003257097676396,
+        "max_seconds": 0.07399658602662385,
+        "output_sha256": "b6163c0cae67544e9e1988743e31f1ad875a154b4ca7877e4ebb7a5a3ffad49c",
+        "source_sha256": "2ba0be4be76f4f0f37ed6bbe74b40661f81709fa13d96a4009e705c06550e7b2",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8",
+        "speedup": 21.785357438463073
+      },
+      "speedup": 21.785357438463073
+    },
+    "reconcile": {
+      "before": {
+        "case": "process-list",
+        "parameters": {
+          "case": "process-list",
+          "repeat": 3,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 10000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          15.872406657086685,
+          16.01330602890812,
+          15.84019455080852
+        ],
+        "median_seconds": 15.872406657086685,
+        "min_seconds": 15.84019455080852,
+        "max_seconds": 16.01330602890812,
+        "output_sha256": "89bc31f0379bfbfcec04197c6ff290f55823a9647b4f131860c382b233ea1cdf",
+        "source_sha256": "65ccbc118db449edf7014fa12b52a5c3d988e74531359b18f8bad91747f4400c",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8"
+      },
+      "after": {
+        "case": "process-list",
+        "parameters": {
+          "case": "process-list",
+          "repeat": 3,
+          "warmup": 1,
+          "threads": 1,
+          "regions": 2,
+          "region_size": 1024,
+          "tile_size": 256,
+          "rows": 10000,
+          "completed": 10000,
+          "slide": null
+        },
+        "environment": {
+          "python": "3.11.15",
+          "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+          "torch": "2.7.1+cu128",
+          "numpy": "1.26.4",
+          "pandas": "3.0.5"
+        },
+        "seconds": [
+          0.31083457078784704,
+          0.3146528929937631,
+          0.3067456460557878
+        ],
+        "median_seconds": 0.31083457078784704,
+        "min_seconds": 0.3067456460557878,
+        "max_seconds": 0.3146528929937631,
+        "output_sha256": "89bc31f0379bfbfcec04197c6ff290f55823a9647b4f131860c382b233ea1cdf",
+        "source_sha256": "2ba0be4be76f4f0f37ed6bbe74b40661f81709fa13d96a4009e705c06550e7b2",
+        "revision": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8",
+        "speedup": 51.06383957503887
+      },
+      "speedup": 51.06383957503887
+    }
+  },
+  "real_slide": {
+    "methodology": {
+      "baseline": "ab8959521ff6aea2e9c6fe8462be3ea471eaa4f8",
+      "baseline_module": "git HEAD tile_reader.py compiled from temporary file",
+      "candidate_source_sha256": "ac4174f63fa09c831418554722d86c9e9ef37dce344ff070a29174204cd17f9a",
+      "fixture": "/data/pathology/projects/clement/code/slide2vec/tests/fixtures/input/test-wsi.tif",
+      "fixture_bytes": 26700580,
+      "backend": "hs2p OpenSlideReader",
+      "read_level": 0,
+      "region_coordinates": [
+        [
+          2048,
+          2048
+        ]
+      ],
+      "region_size_px": 1024,
+      "tile_size_px": 256,
+      "threads": 1,
+      "warmup_calls_per_implementation_per_case": 1,
+      "repeats": 5,
+      "order": "baseline,current on even repeat; current,baseline on odd repeat",
+      "timing_scope": "whole hierarchical collator: real reads, uint8 region packing, splitting, requested tile selection; no model",
+      "cache": "warm persistent reader handles and OS file cache; cold storage throughput not measured",
+      "python": "3.11.15 (main, Mar  3 2026, 09:26:23) [GCC 11.4.0]",
+      "torch": "2.7.1+cu128",
+      "platform": "Linux-5.15.0-187-generic-x86_64-with-glibc2.35",
+      "thread_environment": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1"
+      },
+      "limitations": "Shared host with concurrent workloads. Earlier 4-region 2048px attempt was interrupted during warmup after severe allocation/read delays; no throughput conclusion is drawn for that geometry. Complete model extraction and cold filesystem throughput are not measured."
+    },
+    "cases": {
+      "full": {
+        "requested_indices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "output_shape": [
+          16,
+          3,
+          256,
+          256
+        ],
+        "exact_indices_and_pixels": true,
+        "whole_collator_ms": {
+          "baseline": [
+            81.14918903447688,
+            70.81720908172429,
+            60.23765401914716,
+            81.8067688960582,
+            80.14103793539107
+          ],
+          "current": [
+            37.066994002088904,
+            36.72033315524459,
+            35.39293585345149,
+            37.20724582672119,
+            39.09206599928439
+          ]
+        },
+        "reader_read_ms": {
+          "baseline": [
+            33.73862197622657,
+            30.48769198358059,
+            30.55216697975993,
+            29.886229196563363,
+            30.540341045707464
+          ],
+          "current": [
+            31.60733706317842,
+            31.355180079117417,
+            30.40692093782127,
+            30.673285014927387,
+            32.17713418416679
+          ]
+        },
+        "median_ms": {
+          "baseline": 80.14103793539107,
+          "current": 37.066994002088904
+        },
+        "speedup": 2.162059268439052
+      },
+      "reordered_subset": {
+        "requested_indices": [
+          15,
+          0,
+          8,
+          3,
+          12,
+          4,
+          11,
+          7
+        ],
+        "output_shape": [
+          8,
+          3,
+          256,
+          256
+        ],
+        "exact_indices_and_pixels": true,
+        "whole_collator_ms": {
+          "baseline": [
+            78.21626798249781,
+            76.33628300391138,
+            54.26957900635898,
+            78.81325017660856,
+            54.545270977541804
+          ],
+          "current": [
+            35.201400984078646,
+            36.631711991503835,
+            35.51636706106365,
+            37.63795387931168,
+            35.319515969604254
+          ]
+        },
+        "reader_read_ms": {
+          "baseline": [
+            31.25333017669618,
+            30.48777114599943,
+            30.912655871361494,
+            32.12729305960238,
+            31.04234510101378
+          ],
+          "current": [
+            31.122887041419744,
+            32.77700603939593,
+            31.222200952470303,
+            33.36294600740075,
+            31.1684540938586
+          ]
+        },
+        "median_ms": {
+          "baseline": 76.33628300391138,
+          "current": 35.51636706106365
+        },
+        "speedup": 2.1493268968829393
+      }
+    },
+    "large_region_diagnostic": {
+      "shape": [
+        4,
+        3,
+        2048,
+        2048
+      ],
+      "open_seconds": 0.019230596022680402,
+      "read_seconds": 27.663633228978142,
+      "stack_seconds": 0.021312270080670714,
+      "contiguous_seconds": 0.05461251107044518,
+      "current_unfold_seconds": 0.0356422271579504,
+      "advanced_index_seconds": 0.06713819107972085,
+      "interpretation": "Single untimed-warmup diagnostic only; faulthandler caught hs2p make_white_canvas numpy.full during 20-second read stall. Host memory pressure full avg60 was about 18.75% before this probe."
+    }
+  },
+  "verification": {
+    "supported_hs2p": "4.4.3",
+    "tests_passed": 197,
+    "fixture_tiles": 474,
+    "fixture_feature_shape": [
+      474,
+      3
+    ],
+    "fixture_batches": 15,
+    "deterministic_csv_parity_cases": 32,
+    "additional_benchmark_checksum_test": "passed separately",
+    "pretrained_model_inference": "not run",
+    "multi_gpu_parity": "not run"
+  }
+}

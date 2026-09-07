@@ -230,44 +230,42 @@ def update_process_list_after_embedding(
         feature_success_ids = {slide.sample_id for slide in successful_slides}
     feature_success_keys = set(feature_path_by_key)
     annotation_aware = any(annotation is not None for _, annotation in feature_success_keys)
+    successful_ids = {slide.sample_id for slide in successful_slides}
     row_annotations = _row_annotation_series(df)
-    for slide in successful_slides:
-        mask = df["sample_id"].astype(str) == slide.sample_id
-        if annotation_aware:
-            # Resolve each (sample_id, annotation) row independently so per-class paths and
-            # statuses don't bleed across the slide's other annotation rows. An incremental
-            # update may contain only one finished annotation, so unmatched siblings stay
-            # untouched until their own artifact is available.
-            for annotation in _row_annotations(row_annotations, mask):
-                # ``== None`` is element-wise False in pandas, so match the flat None key
-                # via isna() and real classes via equality.
-                if annotation is None:
-                    row_mask = mask & row_annotations.isna()
-                else:
-                    row_mask = mask & (row_annotations == annotation)
-                key = (slide.sample_id, annotation)
-                mapped_feature_path = feature_path_by_key.get(key)
-                if mapped_feature_path is not None:
-                    df.loc[row_mask, "feature_status"] = "success"
-                    df.loc[row_mask, "feature_path"] = mapped_feature_path
-                    df.loc[row_mask, "encoder_name"] = encoder_name
-                    df.loc[row_mask, "output_variant"] = output_variant
-                    df.loc[row_mask, "feature_kind"] = feature_kind
-                if include_slide_embeddings and key in slide_success_keys:
-                    df.loc[row_mask, "aggregation_status"] = "success"
-        else:
-            feature_status = "success" if slide.sample_id in feature_success_ids else "error"
-            df.loc[mask, "feature_status"] = feature_status
-            mapped_feature_path = feature_path_by_key.get((slide.sample_id, None))
-            if mapped_feature_path is not None:
-                df.loc[mask, "feature_path"] = mapped_feature_path
-                df.loc[mask, "encoder_name"] = encoder_name
-                df.loc[mask, "output_variant"] = output_variant
-                df.loc[mask, "feature_kind"] = feature_kind
-            if include_slide_embeddings:
-                df.loc[mask, "aggregation_status"] = (
-                    "success" if slide.sample_id in slide_success_ids else "error"
-                )
+    status_rows, statuses = [], []
+    feature_rows, feature_paths = [], []
+    aggregation_rows, aggregation_statuses = [], []
+    # Visit each CSV row once, including duplicate rows. The old per-slide masks
+    # repeatedly converted/scanned the whole table during every checkpoint flush.
+    for index, sample_id, annotation in zip(df.index, df["sample_id"].astype(str), row_annotations):
+        if sample_id not in successful_ids:
+            continue
+        key = (sample_id, _normalized_annotation(annotation) if annotation_aware else None)
+        mapped_feature_path = feature_path_by_key.get(key)
+        if not annotation_aware or mapped_feature_path is not None:
+            status_rows.append(index)
+            statuses.append("success" if sample_id in feature_success_ids else "error")
+        if mapped_feature_path is not None:
+            feature_rows.append(index)
+            feature_paths.append(mapped_feature_path)
+        # An incremental annotation update leaves unfinished sibling classes alone.
+        if include_slide_embeddings and (not annotation_aware or key in slide_success_keys):
+            aggregation_rows.append(index)
+            aggregation_statuses.append("success" if sample_id in slide_success_ids else "error")
+
+    if status_rows:
+        df.loc[status_rows, "feature_status"] = statuses
+    if feature_rows:
+        # Empty CSV columns are inferred as floats. Explicit object columns also
+        # allow provenance to be filled on pandas versions that reject upcasting.
+        for column in ("feature_path", "encoder_name", "output_variant", "feature_kind"):
+            df[column] = df[column].astype(object)
+        df.loc[feature_rows, "feature_path"] = feature_paths
+        df.loc[feature_rows, "encoder_name"] = encoder_name
+        df.loc[feature_rows, "output_variant"] = output_variant
+        df.loc[feature_rows, "feature_kind"] = feature_kind
+    if aggregation_rows:
+        df.loc[aggregation_rows, "aggregation_status"] = aggregation_statuses
     atomic_write_dataframe_csv(df, process_list_path)
 
 
@@ -291,13 +289,3 @@ def _row_annotation_series(df: pd.DataFrame) -> pd.Series:
     if "annotation" not in df.columns:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=object)
     return df["annotation"].map(lambda value: _normalized_annotation(value) or np.nan)
-
-
-def _row_annotations(row_annotations: pd.Series, mask: pd.Series) -> list[str | None]:
-    """Distinct normalized annotations present in the masked rows (``None`` for flat rows)."""
-    seen: list[str | None] = []
-    for value in row_annotations[mask].tolist():
-        normalized = None if value is None or (isinstance(value, float) and pd.isna(value)) else value
-        if normalized not in seen:
-            seen.append(normalized)
-    return seen
