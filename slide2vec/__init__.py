@@ -27,7 +27,7 @@ from slide2vec.encoders import (
 )
 
 
-__version__ = "5.9.0"
+__version__ = "5.9.1"
 
 __all__ = [
     "Model",
