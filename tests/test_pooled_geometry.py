@@ -273,7 +273,7 @@ def test_slide_and_patient_models_inherit_tile_dependency_geometry():
         "source_encoder": "gigapath",
     }
     assert resolve_preprocessing_requirements("moozy") == {
-        "tile_size_px": 224,
+        "tile_size_px": 248,
         "spacing_um": 0.5,
         "source_encoder": "lunit",
     }
