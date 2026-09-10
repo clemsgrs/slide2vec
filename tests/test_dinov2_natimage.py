@@ -21,12 +21,12 @@ from slide2vec.encoders import encoder_registry  # noqa: E402
 def test_dinov2_natimage_metadata_contract():
     info = encoder_registry.info("dinov2-vitb14")
     assert info["level"] == "tile"
-    assert info["input_size"] == 224
+    assert info["input_size"] == 518
     assert info["patch_size"] == 14
     # Natural-image encoders have no intrinsic micron spacing, so they declare
     # supported_spacing_um=None (spacing-agnostic: no validation constraint) and
     # a separate default_spacing_um that matches the pathology encoders' task
-    # spacing, so the control runs at identical tile geometry when selected by name.
+    # spacing, while the default tile size follows the shipped 518px recipe.
     assert info["supported_spacing_um"] is None
     assert info["default_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp16"
@@ -44,7 +44,7 @@ def test_dinov2_natimage_resolves_tiling_default_from_default_spacing():
     from slide2vec.encoders.registry import resolve_preprocessing_defaults
 
     defaults = resolve_preprocessing_defaults("dinov2-vitb14")
-    assert defaults["tile_size_px"] == 224
+    assert defaults["tile_size_px"] == 518
     assert defaults["spacing_um"] == pytest.approx(0.5)
 
 

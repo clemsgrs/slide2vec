@@ -17,10 +17,11 @@ common checkpoint wrappers (``{"model": ...}`` / ``{"teacher": ...}`` /
 ``backbone.`` prefixes so a re-exported checkpoint keeps loading strictly.
 """
 
-from typing import Mapping
+from typing import Callable, Mapping
 
 import torch
 from huggingface_hub import hf_hub_download
+from torchvision import transforms
 
 from slide2vec.encoders.base import TimmTileEncoder
 from slide2vec.encoders.registry import register_encoder
@@ -88,3 +89,11 @@ class GPFM(TimmTileEncoder):
         state_dict = _unwrap_gpfm_state_dict(payload)
         self._model.load_state_dict(state_dict, strict=True)
         self._model.eval()
+
+    def get_transform(self) -> Callable:
+        """Apply GPFM's published square resize, independent of timm's 518px config."""
+        return transforms.Compose([
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ])

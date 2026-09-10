@@ -22,6 +22,31 @@ supports several scales and has no registered default, pass
 ``PreprocessingConfig(requested_spacing_um=...)`` explicitly for slide
 extraction.
 
+Registry ``input_size`` is the recommended tile size **before preprocessing**,
+which can differ from the final model tensor size. GPFM samples 224px and uses
+its published direct bicubic resize to 224×224. Lunit and mSTAR sample 248px,
+then center-crop to 224px without enlargement. GigaPath remains 256px → 224px.
+DINOv2 defaults to its shipped 518px sampling and preprocessing recipe.
+
+Changing the Lunit/mSTAR default from 224px to 248px and DINOv2 from 224px to
+518px changes the sampled field of view at fixed spacing; existing runs should
+account for this sampling change. For DINOv2 matched-resolution experiments:
+
+.. code-block:: python
+
+   model = Model.from_preset("dinov2-vitb14", allow_non_recommended_settings=True)
+   model.embed_slides(
+       slides,
+       preprocessing=PreprocessingConfig(
+           requested_spacing_um=0.5, requested_tile_size_px=224,
+       ),
+   )
+
+This declared pooled request uses normalization only and forwards exactly
+224×224 pixels. Without the permission flag, an off-preset request raises.
+Given pre-cropped tiles retain DINOv2's shipped 518px transform; dense extraction
+continues to use normalization only and preserves its declared geometry.
+
 .. list-table::
    :header-rows: 1
 

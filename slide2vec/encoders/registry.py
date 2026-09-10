@@ -361,7 +361,8 @@ def register_encoder(
         name: Unique encoder name (e.g. "uni2", "virchow2").
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
-        input_size: Recommended encoder input image size in pixels.
+        input_size: Recommended tile size in pixels before preprocessing; may differ
+            from the final model tensor size.
         supports_variable_input_size: Explicit end-to-end capability for accepting
             exact non-preset square inputs in pooled extraction. Required for tile
             encoders; slide and patient encoders inherit their tile dependency.

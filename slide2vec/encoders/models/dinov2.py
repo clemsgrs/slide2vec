@@ -26,8 +26,11 @@ and :func:`validate_encoder_config` never rejects a requested spacing for it
 (unlike the pathology encoders, which are validated at a specific spacing). It
 still needs *a* spacing to tile a slide, so ``default_spacing_um=0.5`` sets the
 tiling default: 0.5 µm/px is the task-spacing the pathology tile encoders
-declare, so selecting this encoder by name lands on identical tile geometry and
-it drops in as a matched control. Because it is agnostic, sweeping other
+declare. Default pooled sampling and preprocessing use the shipped 518px recipe.
+For matched-resolution experiments, request 224px tiles explicitly with
+``allow_non_recommended_settings=True``; pooled preprocessing then uses only
+normalization, preserving the exact 224px encoder input. Given pre-cropped tiles
+still use the shipped 518px transform. Because it is agnostic, sweeping other
 task-spacings (e.g. 0.25) needs no ``allow_non_recommended_settings`` escape
 hatch — any requested spacing is accepted as-is.
 """
@@ -40,7 +43,7 @@ from slide2vec.encoders.registry import register_encoder
     "dinov2-vitb14",
     output_variants={"default": {"encode_dim": 768}},
     default_output_variant="default",
-    input_size=224,
+    input_size=518,
     supports_variable_input_size=True,
     patch_size=14,
     supported_spacing_um=None,  # spacing-agnostic: no intrinsic µm/px, so no validation constraint

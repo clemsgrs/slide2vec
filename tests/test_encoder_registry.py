@@ -126,7 +126,7 @@ def test_prost40m_input_size_is_224_and_encode_dim_is_384():
 def test_mstar_metadata_contract():
     info = encoder_registry.info("mstar")
     assert info["level"] == "tile"
-    assert info["input_size"] == 224
+    assert info["input_size"] == 248
     assert info["patch_size"] == 16
     assert info["supported_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp32"
