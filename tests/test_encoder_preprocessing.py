@@ -17,6 +17,8 @@ def recipe_encoder(name):
     # Checkpoint data configs are supplied offline; no weights or gated access needed.
     if name in {"gpfm", "dinov2-vitb14"}:
         config = timm.get_pretrained_cfg("vit_base_patch14_dinov2.lvd142m").to_dict()
+    elif name == "dinov3-vitb16":
+        config = timm.get_pretrained_cfg("vit_base_patch16_dinov3.lvd1689m").to_dict()
     else:
         config = dict(input_size=(3, 224, 224), crop_pct=0.9,
                       interpolation="bicubic", mean=(0.485, 0.456, 0.406),
@@ -271,6 +273,7 @@ def test_dinov2_public_pooled_224_requires_permission(monkeypatch):
     ("lunit", [-2.117904, -2.0357143, -1.8044444]),
     ("mstar", [-1.0, -1.0, -1.0]),
     ("dinov2-vitb14", [-2.117904, -2.0357143, -1.8044444]),
+    ("dinov3-vitb16", [-2.117904, -2.0357143, -1.8044444]),
 ])
 def test_dense_contract_keeps_geometry_with_normalization_only(name, expected_black):
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
@@ -288,3 +291,78 @@ def test_dinov2_given_pixels_keep_shipped_518_recipe():
         Image.new("RGB", (224, 224)),
     )
     assert tuple(output.shape) == (3, 518, 518)
+
+
+def test_dinov3_given_pixels_keep_shipped_256_recipe():
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    output = EncoderInputContract.given().get_transform(recipe_encoder("dinov3-vitb16"))(
+        Image.new("RGB", (224, 224)),
+    )
+    assert tuple(output.shape) == (3, 256, 256)
+    torch.testing.assert_close(output[:, 0, 0], torch.tensor(IMAGENET_BLACK))
+
+
+@pytest.mark.parametrize(
+    "requested, permission, expected_size, requires_variable_model_input",
+    [(None, False, 256, False), (224, True, 224, True)],
+)
+def test_dinov3_public_pooled_recipe_reaches_encoding(
+    monkeypatch, requested, permission, expected_size, requires_variable_model_input,
+):
+    """Default 256 and permitted 224 both encode exactly the tile they read."""
+    import slide2vec.inference as inference
+    from slide2vec.api import Model, PreprocessingConfig
+    from slide2vec.runtime.types import LoadedModel
+
+    observed = []
+    encoder = recipe_encoder("dinov3-vitb16")
+
+    class RecordingBackbone:
+        pretrained_cfg = encoder._model.pretrained_cfg
+
+        def forward_features(self, batch):
+            observed.append(batch.clone())
+            return torch.zeros(1, 5 + (expected_size // 16) ** 2, 2)
+
+        def pool(self, tokens, pool_type):
+            assert pool_type == "avg"
+            return torch.tensor([[1.0, 2.0]])
+
+        def fc_norm(self, pooled):
+            return pooled
+
+    encoder._model = RecordingBackbone()
+    encoder._output_variant = "patch_mean"
+
+    def embed_slides(model, slides, *, preprocessing, execution):
+        contract = model._encoder_input
+        assert contract.regime == "declared"
+        assert contract.plan.requested_tile_size_px == expected_size
+        assert contract.plan.requires_variable_model_input is requires_variable_model_input
+        loaded = LoadedModel(name="dinov3-vitb16", level="tile", model=encoder,
+                             transforms=contract.get_transform(encoder),
+                             feature_dim=2, device=torch.device("cpu"))
+        encode_through_the_loop(loaded, bordered_image(expected_size), size=expected_size)
+        return []
+
+    monkeypatch.setattr(inference, "embed_slides", embed_slides)
+    model = Model.from_preset("dinov3-vitb16", device="cpu", allow_non_recommended_settings=permission)
+    assert model.embed_slides([], preprocessing=PreprocessingConfig(
+        requested_spacing_um=0.5, requested_tile_size_px=requested,
+    )) == {}
+    assert [tuple(batch.shape) for batch in observed] == [(1, 3, expected_size, expected_size)] * 2
+    assert_border_intact(observed[0][0], size=expected_size, red=IMAGENET_RED, black=IMAGENET_BLACK)
+    torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
+
+
+def test_dinov3_public_pooled_224_requires_permission(monkeypatch):
+    import slide2vec.inference as inference
+    from slide2vec.api import Model, PreprocessingConfig
+
+    monkeypatch.setattr(inference, "embed_slides", lambda *a, **k: pytest.fail("must reject before dispatch"))
+    model = Model.from_preset("dinov3-vitb16", device="cpu")
+    with pytest.raises(ValueError, match="allow_non_recommended_settings=True"):
+        model.embed_slides([], preprocessing=PreprocessingConfig(
+            requested_spacing_um=0.5, requested_tile_size_px=224,
+        ))

@@ -7,6 +7,7 @@ from typing import Callable
 import timm
 import torch
 from timm.data import create_transform, resolve_data_config
+from timm.layers import apply_rot_embed_cat
 from torch import Tensor
 from torchvision.transforms import v2
 
@@ -192,7 +193,7 @@ def prefix_attention_to_grid(
     return maps.reshape(batch_size, num_query * num_heads, grid_h, grid_w)
 
 
-def timm_self_attention_weights(attn_module, x: Tensor) -> Tensor:
+def timm_self_attention_weights(attn_module, x: Tensor, *, rope: Tensor | None = None) -> Tensor:
     """Recompute a timm ``Attention`` block's softmax weights ``(B, nh, N, N)``.
 
     timm's attention runs a *fused* SDPA kernel by default, which never
@@ -202,11 +203,22 @@ def timm_self_attention_weights(attn_module, x: Tensor) -> Tensor:
     / ``num_heads`` / ``head_dim`` / ``scale`` — i.e. exactly the non-fused branch of
     ``Attention.forward``, so the result is bit-equivalent to the weights the fused
     kernel applies internally. Dropout is omitted (extraction runs under ``eval``).
+
+    ``rope`` is the rotary embedding an ``EvaAttention`` block (DINOv3) receives
+    as its ``rope`` forward argument; when given, it is applied to the q/k rows
+    from ``attn_module.num_prefix_tokens`` onward (spatial tokens only, CLS and
+    registers untouched), exactly as ``EvaAttention.forward`` does. ``None`` for
+    plain ``Attention`` blocks leaves the recompute unchanged.
     """
-    if not hasattr(attn_module, "qkv"):
+    if getattr(attn_module, "qkv", None) is None:
         raise NotImplementedError(
             f"{type(attn_module).__name__} has no fused 'qkv' projection; attention "
             "extraction currently supports timm ViT Attention blocks only."
+        )
+    if getattr(attn_module, "q_bias", None) is not None:
+        raise NotImplementedError(
+            f"{type(attn_module).__name__} uses separate q/k/v biases; attention "
+            "extraction supports fused-qkv blocks only."
         )
     batch_size, num_tokens, _ = x.shape
     num_heads = int(attn_module.num_heads)
@@ -220,6 +232,11 @@ def timm_self_attention_weights(attn_module, x: Tensor) -> Tensor:
     # q_norm / k_norm are Identity unless the model uses QK-norm; apply them either way.
     q = attn_module.q_norm(q)
     k = attn_module.k_norm(k)
+    if rope is not None:
+        npt = int(attn_module.num_prefix_tokens)
+        half = getattr(attn_module, "rotate_half", False)
+        q = torch.cat([q[:, :, :npt], apply_rot_embed_cat(q[:, :, npt:], rope, half=half)], dim=2).type_as(x)
+        k = torch.cat([k[:, :, :npt], apply_rot_embed_cat(k[:, :, npt:], rope, half=half)], dim=2).type_as(x)
     q = q * attn_module.scale
     attn = q @ k.transpose(-2, -1)
     return attn.softmax(dim=-1)
@@ -291,16 +308,22 @@ def timm_trunk_attention(
     resolved = resolve_block_indices(blocks, len(block_list), encoder_name=encoder_name)
 
     captured: dict[int, Tensor] = {}
+    captured_rope: dict[int, Tensor | None] = {}
 
     def _make_hook(index: int):
-        def _hook(_module, inputs):
-            captured[index] = inputs[0]
+        def _hook(_module, args, kwargs):
+            captured[index] = args[0]
+            # EvaAttention (RoPE models) receives the rotary embedding as its
+            # second forward argument; plain Attention blocks receive none.
+            captured_rope[index] = kwargs.get("rope", args[1] if len(args) > 1 else None)
 
         return _hook
 
     handles = []
     for index in sorted(set(resolved)):
-        handles.append(block_list[index].attn.register_forward_pre_hook(_make_hook(index)))
+        handles.append(
+            block_list[index].attn.register_forward_pre_hook(_make_hook(index), with_kwargs=True)
+        )
     try:
         trunk.forward_features(batch)
     finally:
@@ -311,7 +334,9 @@ def timm_trunk_attention(
     num_prefix = int(getattr(trunk, "num_prefix_tokens", 1))
     grids = []
     for index in resolved:
-        attn_weights = timm_self_attention_weights(block_list[index].attn, captured[index])
+        attn_weights = timm_self_attention_weights(
+            block_list[index].attn, captured[index], rope=captured_rope[index]
+        )
         grids.append(
             prefix_attention_to_grid(
                 attn_weights,

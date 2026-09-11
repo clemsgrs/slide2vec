@@ -169,7 +169,7 @@ def reject_network(*args, **kwargs):
 socket.socket = reject_network
 
 expected_models = [
-    "conch", "conchv15", "dinov2-vitb14", "genbio-pathfm", "gigapath",
+    "conch", "conchv15", "dinov2-vitb14", "dinov3-vitb16", "genbio-pathfm", "gigapath",
     "gigapath-slide", "gpfm", "h-optimus-0", "h-optimus-1", "h0-mini",
     "hibou-b", "hibou-l", "isight", "lunit", "mascaret", "midnight",
     "moozy", "moozy-slide", "mstar", "musk", "phaet", "phikon", "phikonv2",

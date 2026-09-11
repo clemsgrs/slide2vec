@@ -27,8 +27,8 @@ extraction reads tiles at ``requested_tile_size_px`` (default: ``input_size``),
 applies only the encoder's photometric preprocessing (dtype, scaling,
 normalization), and encodes exactly that size. No encoder-side resize or
 center crop follows the read. Lunit, mSTAR, GigaPath and GPFM default to
-224px; DINOv2 to 518px. Slide and patient presets inherit the default of their
-tile encoder.
+224px; DINOv2 to 518px; DINOv3 to 256px. Slide and patient presets inherit the
+default of their tile encoder.
 
 This is slide2vec's declared extraction policy, not a reproduction of each
 model's published sampling protocol. Earlier releases read Lunit and mSTAR at
@@ -54,12 +54,14 @@ DINOv2 matched-resolution experiments:
    )
 
 This forwards exactly 224×224 pixels. Without the flag, an off-default request
-raises; 225px raises even with the flag (not a multiple of 14).
+raises; 225px raises even with the flag (not a multiple of 14). The same call
+with ``dinov3-vitb16`` forwards 224×224 pixels through its 16px patch grid.
 
 Pre-cropped images (``embed_images``, ``embed_tiles``) keep each encoder's
 shipped ``get_transform`` recipe: Lunit/mSTAR Resize 248 → CenterCrop 224,
-GigaPath Resize 256 → CenterCrop 224, DINOv2 Resize 518 → CenterCrop 518, GPFM
-direct 224 resize. Dense extraction is unchanged.
+GigaPath Resize 256 → CenterCrop 224, DINOv2 Resize 518 → CenterCrop 518, DINOv3
+Resize 256 → CenterCrop 256, GPFM direct 224 resize. Dense extraction is
+unchanged.
 
 .. list-table::
    :header-rows: 1
@@ -82,6 +84,10 @@ direct 224 resize. Dense extraction is unchanged.
      - ``0.5``
    * - ``dinov2-vitb14``
      - `DINOv2 ViT-B/14 <https://huggingface.co/timm/vit_base_patch14_dinov2.lvd142m>`_
+     - 768
+     - any (``0.5`` default)
+   * - ``dinov3-vitb16``
+     - `DINOv3 ViT-B/16 <https://huggingface.co/timm/vit_base_patch16_dinov3.lvd1689m>`_
      - 768
      - any (``0.5`` default)
    * - ``phikon``
@@ -191,6 +197,23 @@ CLS vector with:
    from slide2vec import Model
 
    model = Model.from_preset("virchow2", output_variant="cls")
+
+Natural-image baselines
+~~~~~~~~~~~~~~~~~~~~~~~
+
+``dinov2-vitb14`` and ``dinov3-vitb16`` are natural-image DINO ViTs with no
+intrinsic micron spacing: any requested spacing is accepted and ``0.5`` is the
+tiling default. ``dinov3-vitb16`` (patch 16, four register tokens, RoPE)
+defaults to 256px tiles. Its ``patch_mean`` output (default) is the mean of the
+spatial patch tokens after the final norm, excluding the CLS and register
+tokens, which is the pooled output the timm checkpoint ships; ``cls`` returns
+the CLS token. Both are 768-dimensional. Dense grids are ``H/16 × W/16``
+(``14 × 14`` at 224px, ``16 × 16`` at 256px) and attention maps apply the
+backbone's rotary embeddings. ``dinov3-vitb16`` requires ``timm>=1.0.20``
+(the ``fm`` extra floor); the ``titan`` extra pins ``timm==1.0.3`` and is
+incompatible. Weights are public under the `DINOv3 license
+<https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md>`_; see the
+`model card <https://github.com/facebookresearch/dinov3/blob/main/MODEL_CARD.md>`_.
 
 
 

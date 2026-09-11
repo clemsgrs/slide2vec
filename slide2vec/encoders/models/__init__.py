@@ -6,6 +6,7 @@ Importing this package registers all encoders in the encoder_registry.
 from . import (
     conch,
     dinov2,
+    dinov3,
     genbio,
     gigapath,
     gpfm,
@@ -31,6 +32,7 @@ from . import (
 __all__ = [
     "conch",
     "dinov2",
+    "dinov3",
     "genbio",
     "gigapath",
     "gpfm",

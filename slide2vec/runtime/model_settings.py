@@ -30,6 +30,8 @@ MODEL_NAME_ALIASES = {
     "dinov2": "dinov2-vitb14",
     "dinov2-base": "dinov2-vitb14",
     "dinov2-vitb": "dinov2-vitb14",
+    "dinov3": "dinov3-vitb16",
+    "dinov3-vitb": "dinov3-vitb16",
 }
 
 

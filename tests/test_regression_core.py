@@ -459,6 +459,7 @@ def test_list_models_can_filter_by_level():
         "conch",
         "conchv15",
         "dinov2-vitb14",
+        "dinov3-vitb16",
         "genbio-pathfm",
         "gigapath",
         "gpfm",
