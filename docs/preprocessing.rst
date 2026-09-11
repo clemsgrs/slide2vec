@@ -37,16 +37,17 @@ hierarchical artifact sidecars:
 
 - ``read_tile_size_px`` — the raw square read from the selected WSI pyramid
   level.
-- ``requested_tile_size_px`` — the canonical tile after geometry correction,
-  before model preprocessing.
-- ``encoder_input_size_px`` — the tensor side length the encoder receives.
+- ``requested_tile_size_px`` — the tile after geometry correction. This is
+  also the encoder input: declared runs apply only the encoder's photometric
+  preprocessing (no resize or center crop).
+- ``encoder_input_size_px`` — the tensor side length the encoder received.
+  Equals ``requested_tile_size_px`` for declared runs.
 
-When ``requested_tile_size_px`` equals the encoder's registered preset,
-slide2vec applies the encoder's shipped transform unchanged. A different
-requested size requires ``allow_non_recommended_settings=True``, an encoder
+The default ``requested_tile_size_px`` is the registry ``input_size``. A
+different size requires ``allow_non_recommended_settings=True``, an encoder
 that supports variable input, and a size divisible by the model's patch
-geometry; the exact requested square then reaches the encoder with
-normalization only.
+geometry. See :doc:`models` for the given-input recipes and the sampling
+change from earlier releases.
 
 
 Tissue Segmentation

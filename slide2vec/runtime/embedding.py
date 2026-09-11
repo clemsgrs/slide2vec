@@ -73,11 +73,14 @@ def build_tile_embedding_metadata(
     }
 
 
-def build_slide_embedding_metadata(model, *, image_path: Path | str) -> dict[str, Any]:
+def build_slide_embedding_metadata(
+    model, *, image_path: Path | str, tiling_result
+) -> dict[str, Any]:
     return {
         "encoder_name": model.name,
         "encoder_level": model.level,
         "image_path": str(image_path),
+        "requested_tile_size_px": _optional_int(tiling_result, "requested_tile_size_px"),
     }
 
 

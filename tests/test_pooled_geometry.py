@@ -4,6 +4,7 @@ import tarfile
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 from PIL import Image
 
@@ -115,6 +116,57 @@ def test_gigapath_given_256_tiles_record_the_actual_224_encoder_input(caplog):
 
     assert loaded.encoder_input_size_px == 224
     assert "non-recommended" not in caplog.text.lower()
+
+
+def test_declared_pooled_batch_that_disagrees_with_the_declared_size_raises():
+    """A declared pooled run encodes exactly the size it declared; a transform that
+    changed the geometry (or a reader that produced another size) must fail loudly
+    instead of silently recording the observed size."""
+    from slide2vec.runtime.batching import run_forward_pass
+    from slide2vec.runtime.types import LoadedModel
+
+    class Encoder:
+        def encode_tiles(self, image):
+            return torch.zeros((image.shape[0], 2), dtype=torch.float32)
+
+    loaded = LoadedModel(
+        name="lunit",
+        level="tile",
+        model=Encoder(),
+        transforms=lambda batch: batch.float(),
+        feature_dim=2,
+        device=torch.device("cpu"),
+        declared_encoder_input_size_px=224,
+    )
+    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 248, 248), dtype=torch.uint8))]
+
+    with pytest.raises(ValueError, match=r"declared 224px.*got 248px"):
+        run_forward_pass(dataloader, loaded, nullcontext())
+
+
+def test_declared_pooled_batch_at_the_declared_size_records_it():
+    from slide2vec.runtime.batching import run_forward_pass
+    from slide2vec.runtime.types import LoadedModel
+
+    class Encoder:
+        def encode_tiles(self, image):
+            assert tuple(image.shape[-2:]) == (224, 224)
+            return torch.zeros((image.shape[0], 2), dtype=torch.float32)
+
+    loaded = LoadedModel(
+        name="lunit",
+        level="tile",
+        model=Encoder(),
+        transforms=lambda batch: batch.float(),
+        feature_dim=2,
+        device=torch.device("cpu"),
+        declared_encoder_input_size_px=224,
+    )
+    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 224, 224), dtype=torch.uint8))]
+
+    run_forward_pass(dataloader, loaded, nullcontext())
+
+    assert loaded.encoder_input_size_px == 224
 
 
 def test_single_gpu_artifact_records_read_requested_final_geometry_and_spacing(tmp_path):

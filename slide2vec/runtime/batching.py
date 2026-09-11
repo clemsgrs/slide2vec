@@ -364,13 +364,23 @@ def run_forward_pass(
 
 
 def _record_encoder_input_size(loaded: LoadedModel, image) -> None:
-    """Record the factual square tensor geometry immediately before encoding."""
+    """Record the factual square tensor geometry immediately before encoding.
+
+    A declared pooled run also promised a size; the batch must be exactly that size.
+    """
     if not torch.is_tensor(image) or image.ndim != 4:
         raise ValueError("Model preprocessing must produce a (B, C, H, W) tensor")
     height, width = (int(image.shape[-2]), int(image.shape[-1]))
     if height != width:
         raise ValueError(
             f"Model preprocessing must produce square encoder inputs; got {height}x{width}"
+        )
+    declared = getattr(loaded, "declared_encoder_input_size_px", None)
+    if declared is not None and height != declared:
+        raise ValueError(
+            f"Model '{loaded.name}' declared {declared}px pooled encoder inputs but the "
+            f"batch reaching the encoder is {height}px; got {height}px after preprocessing. "
+            "Declared runs must read, prepare and encode the requested tile size."
         )
     previous = getattr(loaded, "encoder_input_size_px", None)
     if previous is not None and previous != height:

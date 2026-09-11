@@ -13,11 +13,12 @@ from slide2vec.encoders.base import (
 )
 from slide2vec.encoders.registry import register_encoder
 
-# Prov-GigaPath model card transform: resize the 256px tile to 256 (no-op),
+# Prov-GigaPath model card transform (given pre-cropped images only): resize to 256,
 # center-crop to the model's native 224, ImageNet normalization. timm's packaged
-# pretrained_cfg reports crop_pct=1.0 -> get_transform would instead Resize(224),
-# downscaling the whole tile to ~0.57 mpp; the paper feeds the center 224 at the
-# native 0.5 mpp. https://www.nature.com/articles/s41586-024-07441-w
+# pretrained_cfg reports crop_pct=1.0 -> the timm default would instead Resize(224),
+# downscaling a 256px image to ~0.57 mpp; the paper feeds the center 224 at the
+# native 0.5 mpp. Declared slide runs read 224px directly and only normalize.
+# https://www.nature.com/articles/s41586-024-07441-w
 _GIGAPATH_MEAN = (0.485, 0.456, 0.406)
 _GIGAPATH_STD = (0.229, 0.224, 0.225)
 

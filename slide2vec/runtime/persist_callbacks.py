@@ -148,14 +148,14 @@ def pending_local_embedding_records(
     include_slide_embeddings: bool,
     save_latents: bool,
     resume: bool,
-    requested_tile_size_px: int | None = None,
+    requested_tile_size_px: int,
 ) -> tuple[list[SlideSpec], list[Any]]:
     """Split the run into (pending, completed) for resume.
 
-    A completed key is skipped only when its persisted tile/hierarchical metadata records
-    the same ``requested_tile_size_px`` as this run (or records none: pre-metadata
-    artifacts cannot be checked). A mismatch raises rather than silently reusing
-    embeddings computed from a different tile geometry.
+    A completed key is skipped only when every persisted sidecar (tile, hierarchical or
+    slide) records the same ``requested_tile_size_px`` as this run, or records none
+    (pre-metadata artifacts cannot be checked). A mismatch raises rather than silently
+    reusing embeddings computed from a different tile geometry.
     """
     if not resume:
         return list(successful_slides), list(tiling_results)
@@ -179,8 +179,10 @@ def pending_local_embedding_records(
                 annotation=annotation,
                 output_dir=output_dir,
                 output_format=output_format,
+                persist_tile_embeddings=persist_tile_embeddings,
                 persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-                requested_tile_size_px=requested_tile_size_px,
+                include_slide_embeddings=include_slide_embeddings,
+                requested_tile_size_px=int(requested_tile_size_px),
             )
             continue
         pending_slides.append(slide)
@@ -194,31 +196,39 @@ def _refuse_stale_tile_size(
     annotation: str | None,
     output_dir: Path,
     output_format: str,
+    persist_tile_embeddings: bool,
     persist_hierarchical_embeddings: bool,
-    requested_tile_size_px: int | None,
+    include_slide_embeddings: bool,
+    requested_tile_size_px: int,
 ) -> None:
-    if requested_tile_size_px is None:
-        return
-    subdir = (
-        hierarchical_embeddings_subdir(annotation)
-        if persist_hierarchical_embeddings
-        else tile_embeddings_subdir(annotation)
-    )
-    metadata_path = output_dir / subdir / f"{sample_id}.meta.json"
-    if not metadata_path.is_file():
-        return
-    recorded = load_metadata(metadata_path).get("requested_tile_size_px")
-    if recorded is None or int(recorded) == int(requested_tile_size_px):
-        return
-    kind = "hierarchical" if persist_hierarchical_embeddings else "tile"
-    raise ValueError(
-        f"Cannot resume '{sample_id}': the existing {kind} embeddings at "
-        f"{output_dir / subdir / f'{sample_id}.{output_format}'} were computed with "
-        f"requested_tile_size_px={int(recorded)}, but this run requests "
-        f"{int(requested_tile_size_px)}px. Embeddings from a different tile size are not "
-        "comparable. Re-run into a new output_dir, or delete the stale artifacts, or "
-        "request the recorded tile size."
-    )
+    """Raise when any completed artifact sidecar records a different tile size.
+
+    Every sidecar this run would otherwise reuse is checked, so a slide-level run that
+    persisted only slide embeddings is covered too. A sidecar that records no tile size
+    (pre-metadata artifact) cannot be checked and is accepted.
+    """
+    sidecars: list[tuple[str, str]] = []
+    if persist_hierarchical_embeddings:
+        sidecars.append(("hierarchical", hierarchical_embeddings_subdir(annotation)))
+    elif persist_tile_embeddings:
+        sidecars.append(("tile", tile_embeddings_subdir(annotation)))
+    if include_slide_embeddings:
+        sidecars.append(("slide", slide_embeddings_subdir(annotation)))
+    for kind, subdir in sidecars:
+        metadata_path = output_dir / subdir / f"{sample_id}.meta.json"
+        if not metadata_path.is_file():
+            continue
+        recorded = load_metadata(metadata_path).get("requested_tile_size_px")
+        if recorded is None or int(recorded) == requested_tile_size_px:
+            continue
+        raise ValueError(
+            f"Cannot resume '{sample_id}': the existing {kind} embeddings at "
+            f"{output_dir / subdir / f'{sample_id}.{output_format}'} were computed with "
+            f"requested_tile_size_px={int(recorded)}, but this run requests "
+            f"{requested_tile_size_px}px. Embeddings from a different tile size are not "
+            "comparable. Re-run into a new output_dir, or delete the stale artifacts, or "
+            "request the recorded tile size."
+        )
 
 
 def _tiling_result_annotation(tiling_result) -> str | None:

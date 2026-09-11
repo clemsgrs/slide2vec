@@ -2135,6 +2135,96 @@ def test_run_pipeline_resume_refuses_stale_tile_size_before_embedding(monkeypatc
         )
 
 
+def _write_completed_slide_only_run(tmp_path: Path, *, recorded_tile_size_px: int) -> Path:
+    """A slide-level run that persisted only slide embeddings (no tile artifacts)."""
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,"
+        "spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,"
+        "coordinates_meta_path,feature_status,aggregation_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,success,,\n",
+        encoding="utf-8",
+    )
+    write_slide_embeddings(
+        "slide-a",
+        np.array([1.0, 2.0], dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={
+            "encoder_name": "moozy-slide",
+            "encoder_level": "slide",
+            "requested_tile_size_px": recorded_tile_size_px,
+        },
+    )
+    return process_list_path
+
+
+def test_resume_refuses_existing_slide_embeddings_from_a_different_tile_size(tmp_path: Path):
+    """With tile persistence off, the slide sidecar is the only record of the tile size."""
+    process_list_path = _write_completed_slide_only_run(tmp_path, recorded_tile_size_px=248)
+
+    with pytest.raises(ValueError) as error:
+        persist_callbacks.pending_local_embedding_records(
+            [make_slide("slide-a")],
+            [SimpleNamespace(annotation=None)],
+            process_list_path=process_list_path,
+            output_dir=tmp_path,
+            output_format="npz",
+            persist_tile_embeddings=False,
+            persist_hierarchical_embeddings=False,
+            include_slide_embeddings=True,
+            save_latents=False,
+            resume=True,
+            requested_tile_size_px=224,
+        )
+
+    assert str(error.value) == (
+        f"Cannot resume 'slide-a': the existing slide embeddings at "
+        f"{tmp_path / 'slide_embeddings' / 'slide-a.npz'} were computed with "
+        "requested_tile_size_px=248, but this run requests 224px. Embeddings from a "
+        "different tile size are not comparable. Re-run into a new output_dir, or delete "
+        "the stale artifacts, or request the recorded tile size."
+    )
+
+
+def test_resume_skips_existing_slide_embeddings_recorded_at_the_same_tile_size(tmp_path: Path):
+    process_list_path = _write_completed_slide_only_run(tmp_path, recorded_tile_size_px=224)
+
+    pending_slides, pending_results = persist_callbacks.pending_local_embedding_records(
+        [make_slide("slide-a")],
+        [SimpleNamespace(annotation=None)],
+        process_list_path=process_list_path,
+        output_dir=tmp_path,
+        output_format="npz",
+        persist_tile_embeddings=False,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=True,
+        save_latents=False,
+        resume=True,
+        requested_tile_size_px=224,
+    )
+
+    assert pending_slides == []
+    assert pending_results == []
+
+
+def test_slide_embedding_metadata_records_the_requested_tile_size():
+    from slide2vec.runtime.embedding import build_slide_embedding_metadata
+
+    metadata = build_slide_embedding_metadata(
+        SimpleNamespace(name="moozy-slide", level="slide"),
+        image_path="/tmp/slide-a.svs",
+        tiling_result=SimpleNamespace(requested_tile_size_px=224),
+    )
+
+    assert metadata == {
+        "encoder_name": "moozy-slide",
+        "encoder_level": "slide",
+        "image_path": "/tmp/slide-a.svs",
+        "requested_tile_size_px": 224,
+    }
+
+
 def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: Path):
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
@@ -2158,6 +2248,7 @@ def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: 
         include_slide_embeddings=False,
         save_latents=False,
         resume=True,
+        requested_tile_size_px=224,
     )
     tile_artifact = persistence.load_tile_artifact(
         "slide-a",
@@ -5782,6 +5873,7 @@ def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path:
         include_slide_embeddings=True,
         save_latents=False,
         resume=True,
+        requested_tile_size_px=224,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]
@@ -6275,6 +6367,7 @@ def test_resume_gate_keys_hierarchical_embeddings_by_sample_id_and_annotation(tm
         include_slide_embeddings=False,
         save_latents=False,
         resume=True,
+        requested_tile_size_px=224,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]

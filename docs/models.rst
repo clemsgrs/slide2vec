@@ -35,8 +35,8 @@ model's published sampling protocol. Earlier releases read Lunit and mSTAR at
 248px and GigaPath at 256px, then center-cropped to 224px, leaving unencoded margins
 between non-overlapping tiles. A 224px grid changes the tile count and
 coverage; embeddings from the two policies are not equivalent. ``resume``
-refuses to reuse tile embeddings whose metadata records a different
-``requested_tile_size_px``.
+refuses to reuse tile, hierarchical or slide embeddings whose metadata records
+a different ``requested_tile_size_px``.
 
 An off-default size requires ``allow_non_recommended_settings=True``, an
 encoder that supports variable input, and a multiple of the patch size. The

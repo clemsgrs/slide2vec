@@ -43,6 +43,7 @@ from slide2vec.encoders.registry import (
 from slide2vec.runtime.model_settings import canonicalize_model_name
 from slide2vec.runtime.types import LoadedModel
 from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 from slide2vec.progress import emit_progress
 
 from slide2vec.runtime.hierarchical import num_embedding_items
@@ -170,6 +171,7 @@ def load_model(
     if tile_encoder is not None:
         tile_encoder.to(target_device)
         encoder.tile_encoder = tile_encoder
+    plan = encoder_input.plan
     return LoadedModel(
         name=name,
         level=resolved_level,
@@ -178,6 +180,11 @@ def load_model(
         feature_dim=int(encoder.encode_dim),
         device=target_device,
         tile_feature_dim=int(tile_encoder.encode_dim) if tile_encoder is not None else None,
+        declared_encoder_input_size_px=(
+            int(plan.requested_tile_size_px)
+            if isinstance(plan, PooledEncoderInputPlan)
+            else None
+        ),
     )
 
 
@@ -704,7 +711,9 @@ def aggregate_tiles(
             artifact.sample_id,
             slide_embedding,
             execution=execution,
-            metadata=embedding.build_slide_embedding_metadata(model, image_path=metadata["image_path"]),
+            metadata=embedding.build_slide_embedding_metadata(
+                model, image_path=metadata["image_path"], tiling_result=tiling_result
+            ),
             latents=None,
         )
         outputs.append(slide_artifact)

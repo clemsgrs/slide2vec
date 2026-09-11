@@ -136,7 +136,9 @@ def persist_embedded_slide(
             embedded_slide.sample_id,
             embedded_slide.slide_embedding,
             execution=execution,
-            metadata=build_slide_embedding_metadata(model, image_path=embedded_slide.image_path),
+            metadata=build_slide_embedding_metadata(
+                model, image_path=embedded_slide.image_path, tiling_result=tiling_result
+            ),
             latents=embedded_slide.latents,
             annotation=annotation,
         )

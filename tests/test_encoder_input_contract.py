@@ -75,6 +75,34 @@ def test_load_model_rejects_an_absent_contract_rather_than_falling_back(stand_in
         inference.load_model(name="gigapath", device="cpu", encoder_input=None)
 
 
+def test_load_model_under_a_declared_pooled_contract_carries_the_declared_encoder_input_size(
+    stand_in_gigapath,
+):
+    import slide2vec.inference as inference
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    loaded = inference.load_model(
+        name="gigapath",
+        device="cpu",
+        encoder_input=EncoderInputContract.declared_pooled(
+            "gigapath", requested_tile_size_px=224, allow_non_recommended_settings=False
+        ),
+    )
+
+    assert loaded.declared_encoder_input_size_px == 224
+
+
+def test_load_model_under_a_given_contract_declares_no_encoder_input_size(stand_in_gigapath):
+    import slide2vec.inference as inference
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    loaded = inference.load_model(
+        name="gigapath", device="cpu", encoder_input=EncoderInputContract.given()
+    )
+
+    assert loaded.declared_encoder_input_size_px is None
+
+
 def test_declared_geometry_rejects_an_off_preset_request_without_permission():
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 

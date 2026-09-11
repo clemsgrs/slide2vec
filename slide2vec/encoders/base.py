@@ -480,10 +480,6 @@ class TileEncoder(Encoder):
             "declared runs can encode exactly the requested tile geometry."
         )
 
-    def get_dense_transform(self) -> Callable:
-        """Backward-compatible alias for the shared normalization primitive."""
-        return self.get_normalization_transform()
-
 
 class SlideEncoder(Encoder):
     """Base class for encoders that pool tile features into slide features."""
