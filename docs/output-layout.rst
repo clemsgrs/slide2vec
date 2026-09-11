@@ -457,4 +457,6 @@ The phase columns use different status values:
 
 ``feature_path`` points to the selected embedding artifact. ``error`` and
 ``traceback`` retain tiling failure details. Resume reuses completed artifacts;
-it does not record a separate ``skipped`` status.
+it does not record a separate ``skipped`` status. A completed tile or
+hierarchical artifact whose metadata records a different
+``requested_tile_size_px`` than the current run raises instead of being reused.

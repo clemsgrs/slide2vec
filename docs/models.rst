@@ -22,15 +22,26 @@ supports several scales and has no registered default, pass
 ``PreprocessingConfig(requested_spacing_um=...)`` explicitly for slide
 extraction.
 
-Registry ``input_size`` is the recommended tile size **before preprocessing**,
-which can differ from the final model tensor size. GPFM samples 224px and uses
-its published direct bicubic resize to 224×224. Lunit and mSTAR sample 248px,
-then center-crop to 224px without enlargement. GigaPath remains 256px → 224px.
-DINOv2 defaults to its shipped 518px sampling and preprocessing recipe.
+Registry ``input_size`` is the default **final** model input size. Slide
+extraction reads tiles at ``requested_tile_size_px`` (default: ``input_size``),
+applies only the encoder's photometric preprocessing (dtype, scaling,
+normalization), and encodes exactly that size. No encoder-side resize or
+center crop follows the read. Lunit, mSTAR and GigaPath default to 224px;
+DINOv2 to 518px; GPFM to 224px. Slide and patient presets inherit the default
+of their tile encoder.
 
-Changing the Lunit/mSTAR default from 224px to 248px and DINOv2 from 224px to
-518px changes the sampled field of view at fixed spacing; existing runs should
-account for this sampling change. For DINOv2 matched-resolution experiments:
+This is slide2vec's declared extraction policy, not a reproduction of each
+model's published sampling protocol. Earlier releases read Lunit and mSTAR at
+248px and GigaPath at 256px, then center-cropped to 224px, leaving unencoded margins
+between non-overlapping tiles. A 224px grid changes the tile count and
+coverage; embeddings from the two policies are not equivalent. ``resume``
+refuses to reuse tile embeddings whose metadata records a different
+``requested_tile_size_px``.
+
+An off-default size requires ``allow_non_recommended_settings=True``, an
+encoder that supports variable input, and a multiple of the patch size. The
+permission only allows the size; preprocessing stays geometry-preserving. For
+DINOv2 matched-resolution experiments:
 
 .. code-block:: python
 
@@ -42,10 +53,13 @@ account for this sampling change. For DINOv2 matched-resolution experiments:
        ),
    )
 
-This declared pooled request uses normalization only and forwards exactly
-224×224 pixels. Without the permission flag, an off-preset request raises.
-Given pre-cropped tiles retain DINOv2's shipped 518px transform; dense extraction
-continues to use normalization only and preserves its declared geometry.
+This forwards exactly 224×224 pixels. Without the flag, an off-default request
+raises; 225px raises even with the flag (not a multiple of 14).
+
+Pre-cropped images (``embed_images``, ``embed_tiles``) keep each encoder's
+shipped ``get_transform`` recipe: Lunit/mSTAR Resize 248 → CenterCrop 224,
+GigaPath Resize 256 → CenterCrop 224, DINOv2 Resize 518 → CenterCrop 518, GPFM
+direct 224 resize. Dense extraction is unchanged.
 
 .. list-table::
    :header-rows: 1
@@ -374,9 +388,19 @@ contract and registers its static preset metadata:
            self._model = torch.jit.load(CHECKPOINT, map_location="cpu").eval()
 
        def get_transform(self):
+           # Shipped recipe, applied to given (pre-cropped) images only.
            return v2.Compose([
                v2.ToImage(),
                v2.Resize((224, 224)),
+               v2.ToDtype(torch.float32, scale=True),
+               v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+           ])
+
+       def get_normalization_transform(self):
+           # Required. Photometrics only (dtype, scaling, normalization): declared
+           # slide runs read the requested tile size and encode exactly that size.
+           return v2.Compose([
+               v2.ToImage(),
                v2.ToDtype(torch.float32, scale=True),
                v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
            ])

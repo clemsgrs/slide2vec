@@ -108,24 +108,38 @@ def test_declared_geometry_rejects_a_non_multiple_of_the_patch_size():
         )
 
 
-def test_declared_geometry_keeps_normalization_only_preprocessing(stand_in_gigapath):
+@pytest.mark.parametrize(
+    "requested_tile_size_px, allow_non_recommended_settings, requires_variable_model_input",
+    [
+        pytest.param(224, False, False, id="preset"),
+        pytest.param(288, True, True, id="permitted-off-preset"),
+    ],
+)
+def test_declared_geometry_selects_geometry_preserving_preprocessing(
+    stand_in_gigapath,
+    requested_tile_size_px,
+    allow_non_recommended_settings,
+    requires_variable_model_input,
+):
+    """Every declared pooled run encodes the size it requested: preset or not."""
     import slide2vec.inference as inference
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
     contract = EncoderInputContract.declared_pooled(
         "gigapath",
-        requested_tile_size_px=288,
-        allow_non_recommended_settings=True,
+        requested_tile_size_px=requested_tile_size_px,
+        allow_non_recommended_settings=allow_non_recommended_settings,
     )
 
     assert contract.regime == "declared"
-    assert contract.plan.preprocessing_kind == "normalization_only"
-    assert contract.plan.expected_encoder_input_size_px == 288
+    assert contract.plan.requested_tile_size_px == requested_tile_size_px
+    assert contract.plan.requires_variable_model_input is requires_variable_model_input
+    assert contract.get_transform(_StandInEncoder()) is _StandInEncoder.normalization
 
     loaded = inference.load_model(
         name="gigapath",
         device="cpu",
-        allow_non_recommended_settings=True,
+        allow_non_recommended_settings=allow_non_recommended_settings,
         encoder_input=contract,
     )
 
@@ -153,7 +167,7 @@ def test_given_geometry_applies_the_shipped_transform(stand_in_gigapath):
 def test_given_geometry_records_the_observed_encoder_input_instead_of_vetoing_it(
     stand_in_gigapath,
 ):
-    """224px pixels handed to a 256px-preset encoder are recorded, never rejected."""
+    """Given pixels are recorded at their observed size, never vetoed against the preset."""
     import slide2vec.inference as inference
     from slide2vec.runtime.batching import run_forward_pass
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
@@ -301,7 +315,7 @@ def test_in_process_embed_patients_declares_the_requested_geometry(monkeypatch, 
 
     assert result == []
     assert model._encoder_input.regime == "declared"
-    assert model._encoder_input.plan.expected_encoder_input_size_px == 232
+    assert model._encoder_input.plan.requested_tile_size_px == 232
     assert model._load_backend().transforms is _StandInEncoder.normalization
 
 

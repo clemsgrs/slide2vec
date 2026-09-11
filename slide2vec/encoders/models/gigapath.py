@@ -26,7 +26,7 @@ _GIGAPATH_STD = (0.229, 0.224, 0.225)
     "gigapath",
     output_variants={"default": {"encode_dim": 1536}},
     default_output_variant="default",
-    input_size=256,
+    input_size=224,
     supports_variable_input_size=True,
     # 16, NOT 14, despite the timm architecture name `vit_giant_patch14_dinov2`
     # and the paper's "ViT-g/14": prov-gigapath's packaged model_args override
@@ -48,8 +48,9 @@ class GigaPath(TimmTileEncoder):
         )
 
     def get_transform(self) -> Callable:
-        # Pooled recipe: center 224px at native spacing. Dense extraction uses
-        # get_normalization_transform() to preserve the caller's tile geometry.
+        # Shipped recipe for given pre-cropped images: center 224px of a 256px tile.
+        # Declared slide runs (pooled and dense) use get_normalization_transform()
+        # and encode exactly the requested tile size (224px by default).
         return v2.Compose([
             v2.ToImage(),
             v2.Resize(256, interpolation=v2.InterpolationMode.BICUBIC, antialias=True),

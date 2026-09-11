@@ -463,20 +463,21 @@ class TileEncoder(Encoder):
         )
 
     def get_normalization_transform(self) -> Callable:
-        """Geometry-preserving photometric transform.
+        """Geometry-preserving photometric transform. Required for every tile encoder.
 
-        Returns a transform that applies ONLY this encoder's normalization
-        (per-channel mean/std) — **no Resize, no CenterCrop** — so callers can
-        preserve the full input geometry. This deliberately differs from
-        ``get_transform`` (the shipped pooled recipe):
-        some encoders resize-then-center-crop there (GigaPath ``Resize(256) ->
-        CenterCrop(224)``; Lunit ``crop_pct=0.9 -> Resize(248) -> CenterCrop(224)``),
-        which drops the tile margins. Geometry policy remains the caller's
-        responsibility. Default: unsupported, mirroring ``encode_tiles_dense``.
+        Returns a transform that applies ONLY this encoder's photometrics — dtype
+        conversion, intensity scaling, channel handling and per-channel mean/std
+        normalization — with **no Resize and no CenterCrop**. Every *declared* run
+        (pooled slide tiles and dense ROIs) encodes exactly the geometry it requested
+        through this transform; ``get_transform`` (the shipped recipe, which may
+        resize-then-center-crop) is applied only to *given* pre-cropped images.
+        ``register_encoder`` rejects a tile encoder that does not override it.
         """
         raise NotImplementedError(
             f"{type(self).__name__} does not provide a normalization transform. "
-            "The encoder cannot preserve caller-requested image geometry."
+            "Override get_normalization_transform with this encoder's photometric-only "
+            "preprocessing (dtype, scaling, normalization; no Resize/CenterCrop) so "
+            "declared runs can encode exactly the requested tile geometry."
         )
 
     def get_dense_transform(self) -> Callable:

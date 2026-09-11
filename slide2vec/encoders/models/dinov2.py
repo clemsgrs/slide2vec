@@ -26,13 +26,13 @@ and :func:`validate_encoder_config` never rejects a requested spacing for it
 (unlike the pathology encoders, which are validated at a specific spacing). It
 still needs *a* spacing to tile a slide, so ``default_spacing_um=0.5`` sets the
 tiling default: 0.5 µm/px is the task-spacing the pathology tile encoders
-declare. Default pooled sampling and preprocessing use the shipped 518px recipe.
-For matched-resolution experiments, request 224px tiles explicitly with
-``allow_non_recommended_settings=True``; pooled preprocessing then uses only
-normalization, preserving the exact 224px encoder input. Given pre-cropped tiles
-still use the shipped 518px transform. Because it is agnostic, sweeping other
-task-spacings (e.g. 0.25) needs no ``allow_non_recommended_settings`` escape
-hatch — any requested spacing is accepted as-is.
+declare. Declared pooled runs read and encode the requested tile size with
+normalization only: 518px by default, or 224px for matched-resolution
+experiments when requested explicitly with ``allow_non_recommended_settings=True``.
+Given pre-cropped tiles still use the shipped Resize 518 -> CenterCrop 518
+transform. Because it is agnostic, sweeping other task-spacings (e.g. 0.25)
+needs no ``allow_non_recommended_settings`` escape hatch — any requested spacing
+is accepted as-is.
 """
 
 from slide2vec.encoders.base import TimmTileEncoder

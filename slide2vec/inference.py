@@ -870,6 +870,7 @@ def run_pipeline(
             include_slide_embeddings=include_slide_embeddings,
             save_latents=execution.save_latents,
             resume=resolved_preprocessing.resume,
+            requested_tile_size_px=resolved_preprocessing.requested_tile_size_px,
         )
         skipped_slide_count = len(embeddable_slides) - len(pending_slides)
         if resolved_preprocessing.resume and skipped_slide_count > 0:

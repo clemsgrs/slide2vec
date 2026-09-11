@@ -106,10 +106,16 @@ class EncoderInputContract:
         return cls(regime="given", plan=None)
 
     def get_transform(self, encoder) -> Callable:
-        """Return the encoder-owned transform this contract selects."""
+        """Return the encoder-owned transform this regime selects.
+
+        ``given`` applies the encoder's shipped recipe (which may resize and crop).
+        ``declared`` — pooled and dense alike — applies only the geometry-preserving
+        ``get_normalization_transform``, so the tensor handed to the encoder is exactly the
+        geometry the plan declared.
+        """
         if self.plan is None:
             return encoder.get_transform()
-        return self.plan.get_transform(encoder)
+        return encoder.get_normalization_transform()
 
     def construction_kwargs_for(self, encoder_name: str) -> dict[str, bool]:
         """Return the constructor settings this contract imposes on *encoder_name*.

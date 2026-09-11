@@ -2,8 +2,9 @@
 
 The dense counterpart of the pooled coordinate path (``compute_tile_embeddings_for_slide``
 → ``run_forward_pass`` → ``encode_tiles``): instead of pooling each region to one vector,
-each sampled ROI is read from the slide, run through the encoder's normalization-only dense
-transform (``get_normalization_transform`` — NOT the pooled transform, which crops), padded
+each sampled ROI is read from the slide, run through the encoder's normalization-only
+transform (``get_normalization_transform`` — NOT the shipped given-input transform, which may
+crop), padded
 up to the encoder's patch multiple, and encoded via ``encode_tiles_dense`` into a
 ``(d, grid_h, grid_w)``
 token grid. ``iter_regions_dense`` **streams** these grids — yielding one per coordinate, in

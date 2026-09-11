@@ -96,7 +96,9 @@ def test_pipeline_run_uses_distributed_embedding_path_when_num_gpus_is_greater_t
     )
     captured = {}
 
-    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
+    monkeypatch.setattr(
+        tiling_pipeline,
+        "prepare_tiled_slides",
         lambda *args, **kwargs: ([slide], [tiling_result], tmp_path / "process_list.csv"),
     )
     monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage",
@@ -2027,6 +2029,110 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
     assert computed_sample_ids == ["slide-b"]
     assert [artifact.sample_id for artifact in result.tile_artifacts] == ["slide-a", "slide-b"]
     assert result.slide_artifacts == []
+
+
+def _write_completed_tile_run(tmp_path: Path, *, recorded_tile_size_px: int) -> Path:
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,"
+        "spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,"
+        "coordinates_meta_path,feature_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,,\n",
+        encoding="utf-8",
+    )
+    write_tile_embeddings(
+        "slide-a",
+        np.array([[1.0, 2.0]], dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={"requested_tile_size_px": recorded_tile_size_px, "encoder_input_size_px": 224},
+    )
+    return process_list_path
+
+
+def test_resume_refuses_existing_tile_embeddings_from_a_different_tile_size(tmp_path: Path):
+    """Artifacts read at 248px (the pre-#322 Lunit/mSTAR default) must not be reused at 224px."""
+    process_list_path = _write_completed_tile_run(tmp_path, recorded_tile_size_px=248)
+
+    with pytest.raises(ValueError) as error:
+        persist_callbacks.pending_local_embedding_records(
+            [make_slide("slide-a")],
+            [SimpleNamespace(annotation=None)],
+            process_list_path=process_list_path,
+            output_dir=tmp_path,
+            output_format="npz",
+            persist_tile_embeddings=True,
+            persist_hierarchical_embeddings=False,
+            include_slide_embeddings=False,
+            save_latents=False,
+            resume=True,
+            requested_tile_size_px=224,
+        )
+
+    assert str(error.value) == (
+        f"Cannot resume 'slide-a': the existing tile embeddings at "
+        f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with "
+        "requested_tile_size_px=248, but this run requests 224px. Embeddings from a "
+        "different tile size are not comparable. Re-run into a new output_dir, or delete "
+        "the stale artifacts, or request the recorded tile size."
+    )
+
+
+def test_resume_skips_existing_tile_embeddings_recorded_at_the_same_tile_size(tmp_path: Path):
+    process_list_path = _write_completed_tile_run(tmp_path, recorded_tile_size_px=224)
+
+    pending_slides, pending_results = persist_callbacks.pending_local_embedding_records(
+        [make_slide("slide-a")],
+        [SimpleNamespace(annotation=None)],
+        process_list_path=process_list_path,
+        output_dir=tmp_path,
+        output_format="npz",
+        persist_tile_embeddings=True,
+        persist_hierarchical_embeddings=False,
+        include_slide_embeddings=False,
+        save_latents=False,
+        resume=True,
+        requested_tile_size_px=224,
+    )
+
+    assert pending_slides == []
+    assert pending_results == []
+
+
+def test_run_pipeline_resume_refuses_stale_tile_size_before_embedding(monkeypatch, tmp_path: Path):
+    import slide2vec.inference as inference
+
+    process_list_path = _write_completed_tile_run(tmp_path, recorded_tile_size_px=248)
+    slides = [make_slide("slide-a")]
+    tiling_results = [
+        SimpleNamespace(
+            sample_id="slide-a", annotation=None, x=np.array([0]), y=np.array([0]),
+            tile_size_lv0=224, requested_tile_size_px=224, read_tile_size_px=224,
+        )
+    ]
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides",
+        lambda *args, **kwargs: (slides, tiling_results, process_list_path),
+    )
+    monkeypatch.setattr(
+        embedding_pipeline,
+        "compute_embedded_slides",
+        lambda *args, **kwargs: pytest.fail("embedding must not start on a stale resume"),
+    )
+    model = SimpleNamespace(
+        name="lunit",
+        level="tile",
+        _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
+    )
+
+    with pytest.raises(ValueError, match="requested_tile_size_px=248, but this run requests 224px"):
+        inference.run_pipeline(
+            model,
+            slides=slides,
+            preprocessing=replace(DEFAULT_PREPROCESSING, resume=True, requested_tile_size_px=224),
+            execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
+        )
 
 
 def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: Path):

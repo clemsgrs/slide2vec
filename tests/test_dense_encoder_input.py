@@ -129,11 +129,11 @@ def test_dense_sliding_window_is_clamped_to_the_encoded_extent():
 
 
 def test_dense_contract_selects_the_normalization_only_transform():
-    """Dense never uses the shipped pooled transform: it would resize/crop the ROI."""
+    """Dense never uses the shipped given-input transform: it would resize/crop the ROI."""
 
     class _Encoder:
         def get_transform(self):
-            raise AssertionError("dense must not select the shipped pooled transform")
+            raise AssertionError("dense must not select the shipped given-input transform")
 
         def get_normalization_transform(self):
             return "normalization"
@@ -232,7 +232,7 @@ class _StandInVirchow2:
         return (14, 14)
 
     def get_transform(self):
-        raise AssertionError("dense must not select the shipped pooled transform")
+        raise AssertionError("dense must not select the shipped given-input transform")
 
     def get_normalization_transform(self):
         return v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
