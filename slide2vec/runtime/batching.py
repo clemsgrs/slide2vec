@@ -378,9 +378,9 @@ def _record_encoder_input_size(loaded: LoadedModel, image) -> None:
     declared = getattr(loaded, "declared_encoder_input_size_px", None)
     if declared is not None and height != declared:
         raise ValueError(
-            f"Model '{loaded.name}' declared {declared}px pooled encoder inputs but the "
-            f"batch reaching the encoder is {height}px; got {height}px after preprocessing. "
-            "Declared runs must read, prepare and encode the requested tile size."
+            f"Model '{loaded.name}' declared {declared}px pooled encoder inputs but got "
+            f"{height}px after preprocessing. Declared runs must read, prepare and encode "
+            "the requested tile size."
         )
     previous = getattr(loaded, "encoder_input_size_px", None)
     if previous is not None and previous != height:

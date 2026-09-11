@@ -2225,6 +2225,46 @@ def test_slide_embedding_metadata_records_the_requested_tile_size():
     }
 
 
+def test_resume_warns_when_existing_slide_embeddings_record_no_tile_size(tmp_path: Path, caplog):
+    """A pre-metadata sidecar cannot be verified; it is reused, but not silently."""
+    process_list_path = tmp_path / "process_list.csv"
+    process_list_path.write_text(
+        "sample_id,annotation,image_path,mask_path,requested_backend,backend,"
+        "spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,"
+        "coordinates_meta_path,feature_status,aggregation_status,error,traceback\n"
+        "slide-a,tissue,/tmp/slide-a.svs,,auto,asap,,success,1,/tmp/slide-a.coordinates.npz,/tmp/slide-a.coordinates.meta.json,success,success,,\n",
+        encoding="utf-8",
+    )
+    write_slide_embeddings(
+        "slide-a",
+        np.array([1.0, 2.0], dtype=np.float32),
+        output_dir=tmp_path,
+        output_format="npz",
+        metadata={"encoder_name": "moozy-slide", "encoder_level": "slide"},
+    )
+
+    with caplog.at_level("WARNING", logger="slide2vec"):
+        pending_slides, _ = persist_callbacks.pending_local_embedding_records(
+            [make_slide("slide-a")],
+            [SimpleNamespace(annotation=None)],
+            process_list_path=process_list_path,
+            output_dir=tmp_path,
+            output_format="npz",
+            persist_tile_embeddings=False,
+            persist_hierarchical_embeddings=False,
+            include_slide_embeddings=True,
+            save_latents=False,
+            resume=True,
+            requested_tile_size_px=224,
+        )
+
+    assert pending_slides == []
+    assert (
+        "Resuming 'slide-a' from existing slide embeddings that record no "
+        "requested_tile_size_px; cannot verify they were computed at 224px."
+    ) in caplog.text
+
+
 def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: Path):
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"

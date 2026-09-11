@@ -26,9 +26,9 @@ Registry ``input_size`` is the default **final** model input size. Slide
 extraction reads tiles at ``requested_tile_size_px`` (default: ``input_size``),
 applies only the encoder's photometric preprocessing (dtype, scaling,
 normalization), and encodes exactly that size. No encoder-side resize or
-center crop follows the read. Lunit, mSTAR and GigaPath default to 224px;
-DINOv2 to 518px; GPFM to 224px. Slide and patient presets inherit the default
-of their tile encoder.
+center crop follows the read. Lunit, mSTAR, GigaPath and GPFM default to
+224px; DINOv2 to 518px. Slide and patient presets inherit the default of their
+tile encoder.
 
 This is slide2vec's declared extraction policy, not a reproduction of each
 model's published sampling protocol. Earlier releases read Lunit and mSTAR at

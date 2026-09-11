@@ -1,5 +1,6 @@
 """Incremental persist callback factory + resume-state queries."""
 
+import logging
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -25,6 +26,8 @@ from slide2vec.runtime.persistence import update_process_list_after_embedding
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
 from slide2vec.utils.tiling_io import load_embedding_process_df
 
+logger = logging.getLogger("slide2vec")
+
 # Number of completed tile-level samples to buffer before rewriting the
 # process_list CSV. Each rewrite re-reads and re-writes the *entire* CSV, so
 # doing it once per sample is O(N^2) in I/O when every tile is its own sample
@@ -47,27 +50,38 @@ def has_complete_local_embedding_outputs(
     save_latents: bool,
     annotation: str | None = None,
 ) -> bool:
-    tile_subdir = tile_embeddings_subdir(annotation)
-    if persist_hierarchical_embeddings:
-        hierarchical_subdir = hierarchical_embeddings_subdir(annotation)
-        hierarchical_artifact_path = output_dir / hierarchical_subdir / f"{sample_id}.{output_format}"
-        if not hierarchical_artifact_path.is_file():
+    for _kind, subdir in _embedding_sidecars(
+        annotation,
+        persist_tile_embeddings=persist_tile_embeddings,
+        persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+        include_slide_embeddings=include_slide_embeddings,
+    ):
+        if not (output_dir / subdir / f"{sample_id}.{output_format}").is_file():
             return False
-    elif persist_tile_embeddings:
-        tile_artifact_path = output_dir / tile_subdir / f"{sample_id}.{output_format}"
-        if not tile_artifact_path.is_file():
+    if include_slide_embeddings and save_latents:
+        latent_suffix = "pt" if output_format == "pt" else "npz"
+        latent_path = output_dir / slide_latents_subdir(annotation) / f"{sample_id}.{latent_suffix}"
+        if not latent_path.is_file():
             return False
-    if include_slide_embeddings:
-        slide_subdir = slide_embeddings_subdir(annotation)
-        slide_artifact_path = output_dir / slide_subdir / f"{sample_id}.{output_format}"
-        if not slide_artifact_path.is_file():
-            return False
-        if save_latents:
-            latent_suffix = "pt" if output_format == "pt" else "npz"
-            latent_path = output_dir / slide_latents_subdir(annotation) / f"{sample_id}.{latent_suffix}"
-            if not latent_path.is_file():
-                return False
     return True
+
+
+def _embedding_sidecars(
+    annotation: str | None,
+    *,
+    persist_tile_embeddings: bool,
+    persist_hierarchical_embeddings: bool,
+    include_slide_embeddings: bool,
+) -> list[tuple[str, str]]:
+    """``(kind, subdir)`` of every embedding artifact a run persists for one work unit."""
+    sidecars: list[tuple[str, str]] = []
+    if persist_hierarchical_embeddings:
+        sidecars.append(("hierarchical", hierarchical_embeddings_subdir(annotation)))
+    elif persist_tile_embeddings:
+        sidecars.append(("tile", tile_embeddings_subdir(annotation)))
+    if include_slide_embeddings:
+        sidecars.append(("slide", slide_embeddings_subdir(annotation)))
+    return sidecars
 
 
 def _normalized_resume_annotation(annotation) -> str | None:
@@ -205,21 +219,28 @@ def _refuse_stale_tile_size(
 
     Every sidecar this run would otherwise reuse is checked, so a slide-level run that
     persisted only slide embeddings is covered too. A sidecar that records no tile size
-    (pre-metadata artifact) cannot be checked and is accepted.
+    (pre-metadata artifact) cannot be checked; it is accepted with a warning.
     """
-    sidecars: list[tuple[str, str]] = []
-    if persist_hierarchical_embeddings:
-        sidecars.append(("hierarchical", hierarchical_embeddings_subdir(annotation)))
-    elif persist_tile_embeddings:
-        sidecars.append(("tile", tile_embeddings_subdir(annotation)))
-    if include_slide_embeddings:
-        sidecars.append(("slide", slide_embeddings_subdir(annotation)))
-    for kind, subdir in sidecars:
+    for kind, subdir in _embedding_sidecars(
+        annotation,
+        persist_tile_embeddings=persist_tile_embeddings,
+        persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+        include_slide_embeddings=include_slide_embeddings,
+    ):
         metadata_path = output_dir / subdir / f"{sample_id}.meta.json"
         if not metadata_path.is_file():
             continue
         recorded = load_metadata(metadata_path).get("requested_tile_size_px")
-        if recorded is None or int(recorded) == requested_tile_size_px:
+        if recorded is None:
+            logger.warning(
+                "Resuming '%s' from existing %s embeddings that record no "
+                "requested_tile_size_px; cannot verify they were computed at %dpx.",
+                sample_id,
+                kind,
+                requested_tile_size_px,
+            )
+            continue
+        if int(recorded) == requested_tile_size_px:
             continue
         raise ValueError(
             f"Cannot resume '{sample_id}': the existing {kind} embeddings at "
