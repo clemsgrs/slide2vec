@@ -18,10 +18,10 @@ from slide2vec.encoders.registry import register_encoder
     "mstar",
     output_variants={"default": {"encode_dim": 1024}},
     default_output_variant="default",
-    input_size=224,
+    input_size=248,
     supports_variable_input_size=True,
     patch_size=16,
-    supported_spacing_um=0.5,  # 256px @ 20x, resized to 224 (per paper)
+    supported_spacing_um=0.5,  # 20x; shipped extraction recipe crops 248px tiles to 224px
     precision="fp32",  # upstream runs plain fp32, no autocast
     source="Wangyh/mSTAR",
 )

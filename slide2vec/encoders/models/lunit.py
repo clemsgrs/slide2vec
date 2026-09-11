@@ -8,7 +8,7 @@ from slide2vec.encoders.registry import register_encoder
     "lunit",
     output_variants={"default": {"encode_dim": 384}},
     default_output_variant="default",
-    input_size=224,
+    input_size=248,
     supports_variable_input_size=True,
     patch_size=8,
     supported_spacing_um=0.5,
