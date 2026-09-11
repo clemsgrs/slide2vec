@@ -63,6 +63,9 @@ def test_encoder_class(encode_dim=3):
         def get_transform(self):
             return lambda image: image
 
+        def get_normalization_transform(self):
+            return lambda image: image
+
         def encode_tiles(self, batch):
             return batch[:, :encode_dim]
 

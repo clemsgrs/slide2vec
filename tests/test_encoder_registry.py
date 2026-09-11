@@ -126,7 +126,7 @@ def test_prost40m_input_size_is_224_and_encode_dim_is_384():
 def test_mstar_metadata_contract():
     info = encoder_registry.info("mstar")
     assert info["level"] == "tile"
-    assert info["input_size"] == 248
+    assert info["input_size"] == 224
     assert info["patch_size"] == 16
     assert info["supported_spacing_um"] == pytest.approx(0.5)
     assert info["precision"] == "fp32"
@@ -396,3 +396,75 @@ def test_encoder_not_in_registry_raises_key_error():
 def test_encoder_contains_check():
     assert "virchow2" in encoder_registry
     assert "nonexistent-model" not in encoder_registry
+
+
+@pytest.mark.parametrize(
+    "name, expected_input_size",
+    [("lunit", 224), ("mstar", 224), ("gigapath", 224), ("dinov2-vitb14", 518), ("gpfm", 224)],
+)
+def test_registry_input_size_is_the_final_encoder_input_size(name, expected_input_size):
+    """``input_size`` is the default *final* model input: no encoder-side crop follows it."""
+    from slide2vec.encoders.registry import resolve_preprocessing_defaults
+
+    assert encoder_registry.info(name)["input_size"] == expected_input_size
+    assert resolve_preprocessing_defaults(name)["tile_size_px"] == expected_input_size
+
+
+def test_tile_registration_requires_a_geometry_preserving_transform():
+    """Declared runs encode exactly the requested tile: a tile encoder must normalize without resizing."""
+    from slide2vec.encoders.base import TileEncoder
+    from slide2vec.encoders.registry import register_encoder
+
+    class ShippedOnly(TileEncoder):
+        def __init__(self, *, output_variant=None):
+            pass
+
+        def get_transform(self):
+            return lambda image: image
+
+        def encode_tiles(self, batch):
+            return batch
+
+        @property
+        def encode_dim(self):
+            return 1
+
+        @property
+        def device(self):
+            return "cpu"
+
+        def to(self, device):
+            return self
+
+    with pytest.raises(ValueError) as error:
+        register_encoder(
+            "shipped-only",
+            output_variants={"default": {"encode_dim": 1}},
+            default_output_variant="default",
+            input_size=224,
+            supports_variable_input_size=False,
+            supported_spacing_um=0.5,
+            precision="fp32",
+            source="local",
+        )(ShippedOnly)
+
+    assert str(error.value) == (
+        "Encoder 'shipped-only' must override get_normalization_transform: declared "
+        "pooled and dense runs encode exactly the requested tile geometry, so a tile "
+        "encoder needs a geometry-preserving (normalization-only) transform alongside "
+        "its shipped get_transform recipe."
+    )
+    assert "shipped-only" not in encoder_registry.names()
+
+
+def test_every_builtin_tile_encoder_provides_a_geometry_preserving_transform():
+    from slide2vec.encoders.base import TileEncoder
+
+    for name in encoder_registry.names():
+        if encoder_registry.info(name)["level"] != "tile":
+            continue
+        encoder_cls = encoder_registry.require(name)
+        assert (
+            encoder_cls.get_normalization_transform
+            is not TileEncoder.get_normalization_transform
+        ), name

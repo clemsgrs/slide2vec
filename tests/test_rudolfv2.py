@@ -411,7 +411,8 @@ def test_rudolfv2_runtime_pooled_plan_preserves_requested_size(name):
         requested_tile_size_px=232,
         allow_non_recommended_settings=True,
     )
-    assert pooled.plan.expected_encoder_input_size_px == 232
+    assert pooled.plan.requested_tile_size_px == 232
+    assert pooled.plan.requires_variable_model_input is True
 
 
 @pytest.mark.parametrize("name", [case.name for case in _PRESETS])

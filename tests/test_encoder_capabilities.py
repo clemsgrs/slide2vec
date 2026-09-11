@@ -27,6 +27,9 @@ class _PooledOnlyEncoder(TileEncoder):
     def get_transform(self):
         return lambda image: image
 
+    def get_normalization_transform(self):
+        return lambda image: image
+
     def encode_tiles(self, batch):
         return batch
 
@@ -53,9 +56,6 @@ class _DenseEncoder(_PooledOnlyEncoder):
     @property
     def patch_size(self):
         return (16, 16)
-
-    def get_normalization_transform(self):
-        return lambda image: image
 
 
 class _PartialDenseEncoder(_PooledOnlyEncoder):
@@ -226,7 +226,7 @@ def test_registration_rejects_static_patch_metadata_without_dense_class_contract
     assert str(exc_info.value) == (
         "Encoder 'synthetic-contradictory-dense' has an inconsistent dense contract: "
         "patch_size metadata is declared, but the class must also override "
-        "encode_tiles_dense, patch_size, and get_normalization_transform."
+        "encode_tiles_dense and patch_size."
     )
 
 
@@ -243,9 +243,9 @@ def test_registration_rejects_partial_dense_class_contract():
 
     assert str(exc_info.value) == (
         "Encoder 'synthetic-incomplete-dense' has an incomplete dense class contract: "
-        "encode_tiles_dense is overridden, but patch_size and "
-        "get_normalization_transform are inherited as unsupported. Override all three "
-        "dense members together and declare patch_size metadata."
+        "encode_tiles_dense is overridden, but patch_size is inherited as "
+        "unsupported. Override both dense members together and declare patch_size "
+        "metadata."
     )
 
 
@@ -281,8 +281,7 @@ def test_registration_rejects_attention_without_dense_contract():
     assert str(exc_info.value) == (
         "Encoder 'synthetic-attention-without-dense' overrides "
         "encode_tiles_attention without a complete dense contract. Attention maps "
-        "require encode_tiles_dense, patch_size, get_normalization_transform, and "
-        "static patch_size metadata."
+        "require encode_tiles_dense, patch_size, and static patch_size metadata."
     )
 
 

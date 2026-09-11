@@ -13,11 +13,12 @@ from slide2vec.encoders.base import (
 )
 from slide2vec.encoders.registry import register_encoder
 
-# Prov-GigaPath model card transform: resize the 256px tile to 256 (no-op),
+# Prov-GigaPath model card transform (given pre-cropped images only): resize to 256,
 # center-crop to the model's native 224, ImageNet normalization. timm's packaged
-# pretrained_cfg reports crop_pct=1.0 -> get_transform would instead Resize(224),
-# downscaling the whole tile to ~0.57 mpp; the paper feeds the center 224 at the
-# native 0.5 mpp. https://www.nature.com/articles/s41586-024-07441-w
+# pretrained_cfg reports crop_pct=1.0 -> the timm default would instead Resize(224),
+# downscaling a 256px image to ~0.57 mpp; the paper feeds the center 224 at the
+# native 0.5 mpp. Declared slide runs read 224px directly and only normalize.
+# https://www.nature.com/articles/s41586-024-07441-w
 _GIGAPATH_MEAN = (0.485, 0.456, 0.406)
 _GIGAPATH_STD = (0.229, 0.224, 0.225)
 
@@ -26,7 +27,7 @@ _GIGAPATH_STD = (0.229, 0.224, 0.225)
     "gigapath",
     output_variants={"default": {"encode_dim": 1536}},
     default_output_variant="default",
-    input_size=256,
+    input_size=224,
     supports_variable_input_size=True,
     # 16, NOT 14, despite the timm architecture name `vit_giant_patch14_dinov2`
     # and the paper's "ViT-g/14": prov-gigapath's packaged model_args override
@@ -48,8 +49,9 @@ class GigaPath(TimmTileEncoder):
         )
 
     def get_transform(self) -> Callable:
-        # Pooled recipe: center 224px at native spacing. Dense extraction uses
-        # get_normalization_transform() to preserve the caller's tile geometry.
+        # Shipped recipe for given pre-cropped images: center 224px of a 256px tile.
+        # Declared slide runs (pooled and dense) use get_normalization_transform()
+        # and encode exactly the requested tile size (224px by default).
         return v2.Compose([
             v2.ToImage(),
             v2.Resize(256, interpolation=v2.InterpolationMode.BICUBIC, antialias=True),

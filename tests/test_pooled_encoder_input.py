@@ -19,25 +19,27 @@ class _TransformStandIn:
         return self.normalization_transform
 
 
-def test_preset_plan_uses_shipped_pooled_transform():
-    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+def test_preset_plan_keeps_requested_geometry_without_variable_input():
+    """A preset request needs no capability, and is still encoded at the size it read."""
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
-    plan = PooledEncoderInputPlan.resolve(
+    contract = EncoderInputContract.declared_pooled(
         "gigapath",
-        requested_tile_size_px=256,
+        requested_tile_size_px=224,
         allow_non_recommended_settings=False,
     )
-    encoder = _TransformStandIn()
+    plan = contract.plan
 
-    transformed = plan.get_transform(encoder)(torch.zeros((3, 256, 256), dtype=torch.uint8))
+    transformed = contract.get_transform(_TransformStandIn())(
+        torch.zeros((3, 224, 224), dtype=torch.uint8)
+    )
 
     assert plan.tile_encoder_name == "gigapath"
-    assert plan.preset_input_size_px == 256
-    assert plan.requested_tile_size_px == 256
-    assert plan.preprocessing_kind == "shipped"
+    assert plan.preset_input_size_px == 224
+    assert plan.requested_tile_size_px == 224
     assert plan.requires_variable_model_input is False
-    assert plan.expected_encoder_input_size_px is None
-    assert tuple(transformed.shape) == (3, 3, 3)
+    assert plan.model_construction_kwargs == {}
+    assert tuple(transformed.shape) == (3, 224, 224)
 
 
 def test_non_preset_plan_requires_explicit_permission():
@@ -53,7 +55,7 @@ def test_non_preset_plan_requires_explicit_permission():
         )
 
     assert str(error.value) == (
-        "Encoder 'gigapath' was requested at 288px instead of its 256px preset. "
+        "Encoder 'gigapath' was requested at 288px instead of its 224px preset. "
         "Set allow_non_recommended_settings=True to request an exact non-preset "
         "encoder input."
     )
@@ -116,7 +118,7 @@ def test_verified_vit_encoder_plans_exact_non_preset_input_without_constructor_k
     )
 
     assert plan.requires_variable_model_input is True
-    assert plan.expected_encoder_input_size_px == requested_size
+    assert plan.requested_tile_size_px == requested_size
     assert plan.model_construction_kwargs == {}
 
 
@@ -130,9 +132,7 @@ def test_verified_vit_encoder_plans_exact_non_preset_input_without_constructor_k
         ("isight", 336),
     ],
 )
-def test_variable_vit_native_defaults_still_select_shipped_preprocessing(
-    name, default_size
-):
+def test_variable_vit_native_defaults_do_not_require_variable_input(name, default_size):
     from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
 
     plan = PooledEncoderInputPlan.resolve(
@@ -142,28 +142,28 @@ def test_variable_vit_native_defaults_still_select_shipped_preprocessing(
     )
 
     assert plan.preset_input_size_px == default_size
-    assert plan.preprocessing_kind == "shipped"
+    assert plan.requested_tile_size_px == default_size
     assert plan.requires_variable_model_input is False
     assert plan.model_construction_kwargs == {}
 
 
-def test_permitted_variable_plan_preserves_exact_geometry_with_normalization_only():
-    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+def test_permitted_variable_plan_preserves_exact_geometry():
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
-    plan = PooledEncoderInputPlan.resolve(
+    contract = EncoderInputContract.declared_pooled(
         "gigapath",
         requested_tile_size_px=288,
         allow_non_recommended_settings=True,
     )
-    encoder = _TransformStandIn()
+    plan = contract.plan
 
-    transformed = plan.get_transform(encoder)(torch.zeros((3, 288, 288), dtype=torch.uint8))
+    transformed = contract.get_transform(_TransformStandIn())(
+        torch.zeros((3, 288, 288), dtype=torch.uint8)
+    )
 
-    assert plan.preset_input_size_px == 256
+    assert plan.preset_input_size_px == 224
     assert plan.requested_tile_size_px == 288
-    assert plan.preprocessing_kind == "normalization_only"
     assert plan.requires_variable_model_input is True
-    assert plan.expected_encoder_input_size_px == 288
     assert plan.model_construction_kwargs == {}
     assert tuple(transformed.shape) == (3, 288, 288)
 
@@ -184,9 +184,7 @@ def test_mascaret_permitted_non_preset_plan_preserves_exact_geometry():
         "tile_encoder_name": "mascaret",
         "preset_input_size_px": 224,
         "requested_tile_size_px": 238,
-        "preprocessing_kind": "normalization_only",
         "requires_variable_model_input": True,
-        "expected_encoder_input_size_px": 238,
         "model_construction_kwargs": {},
     }
 
@@ -207,9 +205,7 @@ def test_phaet_permitted_non_preset_plan_preserves_exact_geometry():
         "tile_encoder_name": "phaet",
         "preset_input_size_px": 224,
         "requested_tile_size_px": 240,
-        "preprocessing_kind": "normalization_only",
         "requires_variable_model_input": True,
-        "expected_encoder_input_size_px": 240,
         "model_construction_kwargs": {},
     }
 
@@ -337,8 +333,31 @@ def test_pooled_model_loading_applies_plan_construction_and_transform(monkeypatc
     assert loaded.transforms(torch.zeros((3, 288, 288))).shape == (3, 288, 288)
 
 
-def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_advice(
-    monkeypatch, caplog
+@pytest.mark.parametrize(
+    "requested_tile_size_px, allow_non_recommended_settings, expected_message",
+    [
+        pytest.param(
+            224,
+            False,
+            "Pooled encoder input for 'gigapath': preset 224px, requested 224px; "
+            "encoding exactly 224px with geometry-preserving preprocessing.",
+            id="preset",
+        ),
+        pytest.param(
+            288,
+            True,
+            "Pooled encoder input for 'gigapath': preset 224px, requested 288px; "
+            "encoding exactly 288px with geometry-preserving preprocessing.",
+            id="permitted-off-preset",
+        ),
+    ],
+)
+def test_public_run_resolves_plan_once_and_reports_every_declared_run(
+    monkeypatch,
+    caplog,
+    requested_tile_size_px,
+    allow_non_recommended_settings,
+    expected_message,
 ):
     import slide2vec.inference as inference
     from slide2vec.api import ExecutionOptions, Model, PreprocessingConfig
@@ -354,7 +373,7 @@ def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_
     model = Model.from_preset(
         "gigapath",
         device="cpu",
-        allow_non_recommended_settings=True,
+        allow_non_recommended_settings=allow_non_recommended_settings,
     )
 
     with caplog.at_level("INFO"):
@@ -362,23 +381,20 @@ def test_public_run_resolves_exact_plan_once_without_changing_batch_or_resource_
             [],
             preprocessing=PreprocessingConfig(
                 requested_spacing_um=0.5,
-                requested_tile_size_px=288,
+                requested_tile_size_px=requested_tile_size_px,
             ),
             execution=ExecutionOptions(batch_size=7),
         )
 
     assert result == {}
-    assert captured["plan"].expected_encoder_input_size_px == 288
+    assert captured["plan"].requested_tile_size_px == requested_tile_size_px
     assert captured["batch_size"] == 7
     messages = [
         record.getMessage()
         for record in caplog.records
         if record.getMessage().startswith("Pooled encoder input")
     ]
-    assert messages == [
-        "Pooled encoder input for 'gigapath': preset 256px, requested 288px, "
-        "exact encoder input 288px; using normalization-only preprocessing."
-    ]
+    assert messages == [expected_message]
     assert not [record for record in caplog.records if record.levelname == "WARNING"]
     assert "oom" not in caplog.text.lower()
 
@@ -414,7 +430,7 @@ def test_exact_plan_reaches_encode_tiles_at_requested_shape():
         build_batch_preprocessor_for_tile_images,
         run_forward_pass,
     )
-    from slide2vec.runtime.pooled_encoder_input import PooledEncoderInputPlan
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
     from slide2vec.runtime.types import LoadedModel
 
     observed = []
@@ -424,12 +440,12 @@ def test_exact_plan_reaches_encode_tiles_at_requested_shape():
             observed.append(tuple(batch.shape))
             return torch.tensor([[1.0, 2.0]], dtype=torch.float32)
 
-    plan = PooledEncoderInputPlan.resolve(
+    contract = EncoderInputContract.declared_pooled(
         "gigapath",
         requested_tile_size_px=288,
         allow_non_recommended_settings=True,
     )
-    transforms = plan.get_transform(_TransformStandIn())
+    transforms = contract.get_transform(_TransformStandIn())
     loaded = LoadedModel(
         name="gigapath",
         level="tile",
@@ -529,7 +545,7 @@ def test_distributed_request_round_trip_resolves_same_exact_hierarchical_tar_pla
     )
 
     assert worker_contract == parent_contract
-    assert worker_contract.plan.expected_encoder_input_size_px == 288
+    assert worker_contract.plan.requested_tile_size_px == 288
     assert worker_preprocessing.region_tile_multiple == 2
     assert worker_preprocessing.on_the_fly is False
     assert worker_preprocessing.read_tiles_from == tmp_path
@@ -553,12 +569,12 @@ def test_slide_and_patient_plans_use_tile_dependency_exact_geometry():
 
     assert (
         slide_plan.tile_encoder_name,
-        slide_plan.expected_encoder_input_size_px,
+        slide_plan.requested_tile_size_px,
         slide_plan.model_construction_kwargs,
     ) == ("virchow", 252, {"dynamic_img_size": True})
     assert (
         patient_plan.tile_encoder_name,
-        patient_plan.expected_encoder_input_size_px,
+        patient_plan.requested_tile_size_px,
         patient_plan.model_construction_kwargs,
     ) == ("lunit", 232, {})
 

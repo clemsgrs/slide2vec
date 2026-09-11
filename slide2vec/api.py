@@ -1010,14 +1010,14 @@ class Model:
         )
         self._encoder_input = contract
         plan = contract.plan
-        if emit_run_info and plan.requires_variable_model_input:
+        if emit_run_info:
             logging.getLogger("slide2vec").info(
-                "Pooled encoder input for '%s': preset %dpx, requested %dpx, "
-                "exact encoder input %dpx; using normalization-only preprocessing.",
+                "Pooled encoder input for '%s': preset %dpx, requested %dpx; encoding "
+                "exactly %dpx with geometry-preserving preprocessing.",
                 self.name,
                 plan.preset_input_size_px,
                 plan.requested_tile_size_px,
-                plan.expected_encoder_input_size_px,
+                plan.requested_tile_size_px,
             )
         return contract
 

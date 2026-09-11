@@ -59,6 +59,9 @@ def register_presets():
         def get_transform(self):
             return lambda image: image
 
+        def get_normalization_transform(self):
+            return lambda image: image
+
         def encode_tiles(self, batch):
             return batch[:, :3]
 

@@ -46,4 +46,7 @@ class LoadedModel:
     feature_dim: int
     device: torch.device
     tile_feature_dim: int | None = None
+    #: Square size a declared pooled run promised to encode; ``None`` for given/dense.
+    declared_encoder_input_size_px: int | None = None
+    #: Square size observed on the batch just before encoding.
     encoder_input_size_px: int | None = None

@@ -222,10 +222,11 @@ def resolve_encoder_level(
     return level
 
 
+#: The dense class contract. ``get_normalization_transform`` is deliberately not part of
+#: it: every tile encoder must provide one (declared pooled runs use it too).
 _DENSE_CLASS_MEMBERS = (
     "encode_tiles_dense",
     "patch_size",
-    "get_normalization_transform",
 )
 
 
@@ -283,6 +284,16 @@ def _validate_encoder_capability_contract(
             metadata,
             "tile_encoder_output_variant",
         )
+    if level == "tile" and (
+        getattr(encoder_cls, "get_normalization_transform")
+        is TileEncoder.get_normalization_transform
+    ):
+        raise ValueError(
+            f"Encoder '{encoder_name}' must override get_normalization_transform: "
+            "declared pooled and dense runs encode exactly the requested tile geometry, "
+            "so a tile encoder needs a geometry-preserving (normalization-only) "
+            "transform alongside its shipped get_transform recipe."
+        )
     dense_members = _dense_class_contract(encoder_cls)
     has_static_patch_size = metadata.get("patch_size") is not None
     if any(dense_members) and not all(dense_members):
@@ -302,13 +313,13 @@ def _validate_encoder_capability_contract(
             f"{'is' if len(implemented) == 1 else 'are'} overridden, but "
             f"{_format_names(missing)} "
             f"{'is' if len(missing) == 1 else 'are'} inherited as unsupported. "
-            "Override all three dense members together and declare patch_size metadata."
+            "Override both dense members together and declare patch_size metadata."
         )
     if has_static_patch_size and not all(dense_members):
         raise ValueError(
             f"Encoder '{encoder_name}' has an inconsistent dense contract: "
             "patch_size metadata is declared, but the class must also override "
-            "encode_tiles_dense, patch_size, and get_normalization_transform."
+            "encode_tiles_dense and patch_size."
         )
     if all(dense_members) and not has_static_patch_size:
         raise ValueError(
@@ -334,7 +345,7 @@ def _validate_encoder_capability_contract(
         raise ValueError(
             f"Encoder '{encoder_name}' overrides encode_tiles_attention without a "
             "complete dense contract. Attention maps require encode_tiles_dense, "
-            "patch_size, get_normalization_transform, and static patch_size metadata."
+            "patch_size, and static patch_size metadata."
         )
 
 
@@ -361,8 +372,8 @@ def register_encoder(
         name: Unique encoder name (e.g. "uni2", "virchow2").
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
-        input_size: Recommended tile size in pixels before preprocessing; may differ
-            from the final model tensor size.
+        input_size: Default final square model input size in pixels. Declared
+            pooled runs read tiles at this size and encode exactly this size.
         supports_variable_input_size: Explicit end-to-end capability for accepting
             exact non-preset square inputs in pooled extraction. Required for tile
             encoders; slide and patient encoders inherit their tile dependency.

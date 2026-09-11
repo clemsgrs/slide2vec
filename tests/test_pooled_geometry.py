@@ -4,6 +4,7 @@ import tarfile
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 from PIL import Image
 
@@ -81,13 +82,13 @@ def test_hierarchical_reader_area_resizes_each_subtile_to_requested(monkeypatch)
     np.testing.assert_array_equal(tiles[0, 0].numpy(), expected_top_left)
 
 
-def test_gigapath_preset_records_actual_encoder_input_after_shipped_transform(caplog):
+def test_gigapath_given_256_tiles_record_the_actual_224_encoder_input(caplog):
+    """Given inputs keep the shipped Resize 256 -> CenterCrop 224 recipe; the runtime
+    records the observed 224px encoder input, and the 224px declared preset warns nothing."""
     from slide2vec.encoders.models.gigapath import GigaPath
     from slide2vec.encoders.validation import validate_encoder_config
-    from slide2vec.runtime.batching import (
-        build_batch_preprocessor_for_tile_images,
-        run_forward_pass,
-    )
+    from slide2vec.runtime.batching import run_forward_pass
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
     from slide2vec.runtime.types import LoadedModel
 
     class Encoder:
@@ -99,36 +100,73 @@ def test_gigapath_preset_records_actual_encoder_input_after_shipped_transform(ca
         name="gigapath",
         level="tile",
         model=Encoder(),
-        transforms=GigaPath.__new__(GigaPath).get_transform(),
+        transforms=EncoderInputContract.given().get_transform(GigaPath.__new__(GigaPath)),
         feature_dim=2,
         device=torch.device("cpu"),
     )
-    preprocessor = build_batch_preprocessor_for_tile_images(
-        loaded,
-        requested_tile_size_px=256,
-    )
-    dataloader = [
-        (
-            torch.tensor([0]),
-            torch.zeros((1, 3, 256, 256), dtype=torch.uint8),
-        )
-    ]
+    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 256, 256), dtype=torch.uint8))]
 
     with caplog.at_level("WARNING"):
         validate_encoder_config(
             "gigapath",
             requested_spacing_um=0.5,
-            requested_tile_size_px=256,
+            requested_tile_size_px=224,
         )
-        run_forward_pass(
-            dataloader,
-            loaded,
-            nullcontext(),
-            batch_preprocessor=preprocessor,
-        )
+        run_forward_pass(dataloader, loaded, nullcontext())
 
     assert loaded.encoder_input_size_px == 224
     assert "non-recommended" not in caplog.text.lower()
+
+
+def test_declared_pooled_batch_that_disagrees_with_the_declared_size_raises():
+    """A declared pooled run encodes exactly the size it declared; a transform that
+    changed the geometry (or a reader that produced another size) must fail loudly
+    instead of silently recording the observed size."""
+    from slide2vec.runtime.batching import run_forward_pass
+    from slide2vec.runtime.types import LoadedModel
+
+    class Encoder:
+        def encode_tiles(self, image):
+            return torch.zeros((image.shape[0], 2), dtype=torch.float32)
+
+    loaded = LoadedModel(
+        name="lunit",
+        level="tile",
+        model=Encoder(),
+        transforms=lambda batch: batch.float(),
+        feature_dim=2,
+        device=torch.device("cpu"),
+        declared_encoder_input_size_px=224,
+    )
+    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 248, 248), dtype=torch.uint8))]
+
+    with pytest.raises(ValueError, match=r"declared 224px.*got 248px"):
+        run_forward_pass(dataloader, loaded, nullcontext())
+
+
+def test_declared_pooled_batch_at_the_declared_size_records_it():
+    from slide2vec.runtime.batching import run_forward_pass
+    from slide2vec.runtime.types import LoadedModel
+
+    class Encoder:
+        def encode_tiles(self, image):
+            assert tuple(image.shape[-2:]) == (224, 224)
+            return torch.zeros((image.shape[0], 2), dtype=torch.float32)
+
+    loaded = LoadedModel(
+        name="lunit",
+        level="tile",
+        model=Encoder(),
+        transforms=lambda batch: batch.float(),
+        feature_dim=2,
+        device=torch.device("cpu"),
+        declared_encoder_input_size_px=224,
+    )
+    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 224, 224), dtype=torch.uint8))]
+
+    run_forward_pass(dataloader, loaded, nullcontext())
+
+    assert loaded.encoder_input_size_px == 224
 
 
 def test_single_gpu_artifact_records_read_requested_final_geometry_and_spacing(tmp_path):
@@ -268,12 +306,12 @@ def test_slide_and_patient_models_inherit_tile_dependency_geometry():
     from slide2vec.encoders.registry import resolve_preprocessing_requirements
 
     assert resolve_preprocessing_requirements("gigapath-slide") == {
-        "tile_size_px": 256,
+        "tile_size_px": 224,
         "spacing_um": 0.5,
         "source_encoder": "gigapath",
     }
     assert resolve_preprocessing_requirements("moozy") == {
-        "tile_size_px": 248,
+        "tile_size_px": 224,
         "spacing_um": 0.5,
         "source_encoder": "lunit",
     }

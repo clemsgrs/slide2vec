@@ -103,7 +103,9 @@ def run_patient_pipeline(
                 slide.sample_id,
                 slide_emb,
                 execution=execution,
-                metadata=build_slide_embedding_metadata(model, image_path=slide.image_path),
+                metadata=build_slide_embedding_metadata(
+                    model, image_path=slide.image_path, tiling_result=tiling_result
+                ),
             )
             slide_artifacts.append(slide_artifact)
 

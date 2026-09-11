@@ -364,7 +364,7 @@ Dense Attention Map Extraction
 
 Most ViT tile encoders can also return their per-head **prefix-token
 self-attention** as a dense spatial grid. This is the attention analog of
-``encode_tiles_dense`` and reuses the same ``get_dense_transform()``.
+``encode_tiles_dense`` and uses the same ``get_normalization_transform()``.
 
 - ``encode_tiles_attention(batch, *, blocks=(-1,), include_registers=False)``
   accepts a normalized ``(B, C, H, W)`` tensor and returns ``(B, K, h, w)``.
@@ -388,7 +388,7 @@ Example:
    from slide2vec.encoders import encoder_registry
 
    encoder = encoder_registry.require("lunit")().to("cuda")
-   transform = encoder.get_dense_transform()
+   transform = encoder.get_normalization_transform()
 
    tile = Image.open("/data/tile.png").convert("RGB")
    batch = transform(tile).unsqueeze(0).to(encoder.device)

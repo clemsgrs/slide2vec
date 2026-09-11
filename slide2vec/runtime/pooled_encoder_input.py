@@ -3,36 +3,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
 
 from slide2vec.encoders.registry import resolve_preprocessing_requirements
 from slide2vec.runtime.effective_encoder_input import EffectiveEncoderInput
 
-#: Closed vocabulary for which encoder-owned preprocessing a pooled run applies.
-PooledPreprocessingKind = Literal["shipped", "normalization_only"]
-
 
 @dataclass(frozen=True, kw_only=True)
 class PooledEncoderInputPlan:
-    """One pooled run's encoder-input and preprocessing contract.
+    """One pooled run's encoder-input contract.
 
-    The pooled **effective encoder input** is ``requested_tile_size_px``: the exact square
-    the normalization-only recipe hands to ``encode_tiles``. Whether the encoder can accept
-    it is not decided here — that question is shared with dense extraction and is answered
-    by :class:`~slide2vec.runtime.effective_encoder_input.EffectiveEncoderInput`.
-
-    ``expected_encoder_input_size_px`` is intentionally nullable for a shipped
-    preset recipe: the factual size is observed from the transformed batch just
-    before encoding. Exact non-preset recipes can guarantee their final size.
+    A declared pooled run reads, prepares and encodes exactly ``requested_tile_size_px``:
+    the tile is handed to ``encode_tiles`` through the encoder's geometry-preserving
+    ``get_normalization_transform`` whether or not the size is the registry preset. Whether
+    the encoder can accept it is not decided here — that question is shared with dense
+    extraction and is answered by
+    :class:`~slide2vec.runtime.effective_encoder_input.EffectiveEncoderInput`, and it only
+    describes backend capability/construction; it never selects a different recipe.
     """
 
     encoder_name: str
     tile_encoder_name: str
     preset_input_size_px: int
     requested_tile_size_px: int
-    preprocessing_kind: PooledPreprocessingKind
     requires_variable_model_input: bool
-    expected_encoder_input_size_px: int | None
     model_construction_kwargs: dict[str, bool]
 
     @classmethod
@@ -63,23 +56,11 @@ class PooledEncoderInputPlan:
             size_px=requested_size,
             origin=f"requested_tile_size_px={requested_size}",
         )
-        # An exact request is one the shipped recipe would not produce: it applies
-        # normalization only, and its final size is therefore known up front rather than
-        # observed from the transformed batch.
-        is_exact = effective.requires_variable_model_input
         return cls(
             encoder_name=encoder_name,
             tile_encoder_name=effective.tile_encoder_name,
             preset_input_size_px=effective.preset_input_size_px,
             requested_tile_size_px=requested_size,
-            preprocessing_kind="normalization_only" if is_exact else "shipped",
-            requires_variable_model_input=is_exact,
-            expected_encoder_input_size_px=requested_size if is_exact else None,
+            requires_variable_model_input=effective.requires_variable_model_input,
             model_construction_kwargs=effective.model_construction_kwargs,
         )
-
-    def get_transform(self, tile_encoder) -> Callable:
-        """Return the encoder-owned transform selected by this plan."""
-        if self.requires_variable_model_input:
-            return tile_encoder.get_normalization_transform()
-        return tile_encoder.get_transform()

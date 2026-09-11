@@ -529,7 +529,7 @@ def test_model_embed_slides_logs_exact_input_when_non_recommended_settings_are_a
 
     assert result == expected
     assert "virchow2" in caplog.text
-    assert "preset 224px, requested 252px, exact encoder input 252px" in caplog.text
+    assert "preset 224px, requested 252px; encoding exactly 252px" in caplog.text
 
 
 def test_model_embed_slides_rejects_non_recommended_precision_by_default():

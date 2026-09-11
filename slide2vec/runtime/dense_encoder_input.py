@@ -19,8 +19,6 @@ makes ``dynamic_img_size`` a derived fact rather than a knob a caller hand-passe
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
-
 from slide2vec.encoders.registry import (
     resolve_patch_size,
     resolve_preprocessing_requirements,
@@ -109,13 +107,3 @@ class DenseEncoderInputPlan:
             requires_variable_model_input=effective.requires_variable_model_input,
             model_construction_kwargs=effective.model_construction_kwargs,
         )
-
-    def get_transform(self, tile_encoder) -> Callable:
-        """Dense always encodes through the normalization-only transform.
-
-        Unconditionally, unlike the pooled plan: the shipped pooled transform resizes and
-        center-crops, which would destroy the ROI geometry the token grid registers to.
-        This is the same transform the dense read loop builds for itself, so a backend
-        loaded under a dense contract carries the transform dense actually uses.
-        """
-        return tile_encoder.get_normalization_transform()

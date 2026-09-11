@@ -193,6 +193,7 @@ def collect_distributed_pipeline_artifacts(
         include_slide_embeddings=include_slide_embeddings,
         save_latents=execution.save_latents,
         resume=preprocessing.resume,
+        requested_tile_size_px=preprocessing.requested_tile_size_px,
     )
     pending_annotations = [placeholder.annotation for placeholder in pending_placeholders]
     skipped_slide_count = len(successful_slides) - len(pending_slides)
