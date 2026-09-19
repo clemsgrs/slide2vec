@@ -158,18 +158,28 @@ def run_torchrun_worker(
     output_dir: Path,
     request_path: Path,
     failure_title: str,
+    pin_gpus: bool = False,
     progress_events_path: Path | None = None,
     progress_event_callback: Callable[[Any], None] | None = None,
     popen_factory=subprocess.Popen,
 ) -> None:
+    """Run ``module`` once per GPU under torchrun.
+
+    ``pin_gpus`` shows each rank only its own GPU (see :mod:`slide2vec.distributed.pin_gpu`).
+    Use it for workers that run no collectives.
+    """
+    if pin_gpus:
+        # By path, not ``-m``: the bootstrap must run before the slide2vec package is imported.
+        worker = [str(Path(__file__).resolve().parents[1] / "distributed" / "pin_gpu.py"), module]
+    else:
+        worker = ["-m", module]
     command = [
         sys.executable,
         "-m",
         "torch.distributed.run",
         "--standalone",
         f"--nproc_per_node={num_gpus}",
-        "-m",
-        module,
+        *worker,
         "--output-dir",
         str(output_dir),
         "--request-path",

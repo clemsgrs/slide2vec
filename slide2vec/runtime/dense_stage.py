@@ -297,6 +297,7 @@ def _run_dense_distributed(model, specs, *, dense, execution, out_dir) -> None:
         request_path.write_text(json.dumps(request, indent=2, sort_keys=True), encoding="utf-8")
         run_torchrun_worker(
             module="slide2vec.distributed.dense_worker",
+            pin_gpus=True,  # No collectives: each rank needs only its own GPU.
             num_gpus=execution.num_gpus,
             output_dir=out_dir,
             request_path=request_path,
