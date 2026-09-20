@@ -153,6 +153,7 @@ def run_distributed_embedding_stage(
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
+        pin_gpus=True,
         progress_events_path=progress_events_path,
         progress_event_callback=on_progress_event,
         popen_factory=Popen,
@@ -190,6 +191,7 @@ def run_distributed_direct_embedding_stage(
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed direct embedding failed",
+        pin_gpus=True,
         progress_events_path=progress_events_path,
         popen_factory=Popen,
     )

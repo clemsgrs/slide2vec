@@ -95,3 +95,51 @@ def test_launcher_runs_the_bootstrap_by_path_only_when_pinning(tmp_path, pin_gpu
         assert tail[1] == "slide2vec.distributed.dense_worker"
     else:
         assert tail[:2] == ["-m", "slide2vec.distributed.dense_worker"]
+
+
+@pytest.mark.parametrize("pinned, ordinal", [(True, 0), (False, 3)])
+def test_enable_binds_a_pinned_rank_to_cuda_0(monkeypatch, pinned, ordinal):
+    # pipeline_worker and direct_embed_worker go through distributed.enable(); once pinned,
+    # cuda:<local_rank> no longer exists for any rank but 0.
+    import torch
+
+    import slide2vec.distributed as distributed
+
+    for name in ("_RANK", "_WORLD_SIZE", "_LOCAL_RANK", "_LOCAL_WORLD_SIZE"):
+        monkeypatch.setattr(distributed, name, -1)
+    for key in ("RANK", "WORLD_SIZE", "LOCAL_RANK", "LOCAL_WORLD_SIZE"):
+        monkeypatch.setenv(key, "4" if "SIZE" in key else "3")
+    if pinned:
+        monkeypatch.setenv(worker_entry.PINNED_ENV, "1")
+    else:
+        monkeypatch.delenv(worker_entry.PINNED_ENV, raising=False)
+    monkeypatch.setattr(distributed, "_restrict_print_to_main_process", lambda: None)
+    bound = []
+    monkeypatch.setattr(torch.cuda, "set_device", bound.append)
+
+    distributed.enable(overwrite=True)
+
+    assert bound == [ordinal]
+    assert distributed.get_device_ordinal() == ordinal
+    assert distributed.get_local_rank() == 3
+
+
+@pytest.mark.parametrize("worker", ["pipeline_worker", "direct_embed_worker"])
+def test_enable_based_workers_build_the_model_on_the_device_ordinal(worker):
+    source = (Path(pin_gpu.__file__).parent / f"{worker}.py").read_text()
+    assert 'device=f"cuda:{distributed.get_device_ordinal()}"' in source
+    assert 'progress_label=f"cuda:{local_rank}"' in source
+
+
+def test_every_torchrun_stage_pins_its_workers():
+    runtime = Path(pin_gpu.__file__).resolve().parents[1] / "runtime"
+    launches = [
+        node
+        for path in runtime.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "run_torchrun_worker"
+    ]
+    assert len(launches) == 5
+    for call in launches:
+        (pin,) = [kw.value for kw in call.keywords if kw.arg == "pin_gpus"]
+        assert pin.value is True
