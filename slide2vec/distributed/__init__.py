@@ -2,6 +2,8 @@ import os
 
 import torch
 
+from slide2vec.distributed.worker_entry import PINNED_ENV
+
 _RANK = -1
 _WORLD_SIZE = -1
 _LOCAL_RANK = -1
@@ -41,6 +43,19 @@ def get_local_rank() -> int:
         return 0
     assert 0 <= _LOCAL_RANK < _LOCAL_WORLD_SIZE
     return _LOCAL_RANK
+
+
+def get_device_ordinal() -> int:
+    """
+    Returns:
+        The CUDA ordinal of this process's GPU: 0 once :mod:`slide2vec.distributed.pin_gpu`
+        has left it the only visible device, else the local rank.
+    """
+    return _device_ordinal(get_local_rank())
+
+
+def _device_ordinal(local_rank: int) -> int:
+    return 0 if os.environ.get(PINNED_ENV) == "1" else local_rank
 
 
 def get_local_size() -> int:
@@ -181,7 +196,7 @@ def enable(
 
     Args:
         set_cuda_current_device: If True, call torch.cuda.set_device() to set the
-            current PyTorch CUDA device to the one matching the local rank.
+            current PyTorch CUDA device to this rank's GPU (see get_device_ordinal()).
         overwrite: If True, overwrites already set variables. Else fails.
     """
 
@@ -192,7 +207,7 @@ def enable(
     torch_env.export(overwrite=overwrite)
 
     if set_cuda_current_device:
-        torch.cuda.set_device(torch_env.local_rank)
+        torch.cuda.set_device(_device_ordinal(torch_env.local_rank))
 
     _RANK = torch_env.rank
     _WORLD_SIZE = torch_env.world_size

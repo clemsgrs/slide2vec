@@ -36,7 +36,7 @@ def main(argv=None) -> int:
     model_spec = dict(request["model"])
     model = Model.from_preset(
         model_spec["name"],
-        device=f"cuda:{local_rank}",
+        device=f"cuda:{distributed.get_device_ordinal()}",
         output_variant=model_spec.get("output_variant"),
         allow_non_recommended_settings=bool(model_spec["allow_non_recommended_settings"]),
     )

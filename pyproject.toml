@@ -149,7 +149,7 @@ zip-safe = false
 include = ["slide2vec*"]
 
 [tool.setuptools.package-data]
-slide2vec = ["py.typed"]
+slide2vec = ["py.typed", "cufile.json"]
 "slide2vec.configs" = ["*.yaml", "models/*.yaml", "preprocessing/*.yaml"]
 
 [tool.pytest.ini_options]

@@ -1,3 +1,7 @@
+from slide2vec._cufile import disable_cufile_compat_mode
+
+disable_cufile_compat_mode()  # Before anything can import cucim.
+
 from slide2vec.api import (
     DenseImageOptions,
     DenseOptions,
