@@ -16,6 +16,15 @@ The ``backend`` field controls which slide-reading library is used:
 - ``"vips"`` — libvips, good for large TIFF files
 - ``"asap"`` — ASAP reader (requires separate installation)
 
+Importing cuCIM opens NVIDIA's cuFile (GPUDirect Storage) driver. Without the
+``nvidia-fs`` kernel module that driver falls back to a compatibility mode which
+holds an idle CUDA context of about 520 MiB on every visible GPU, although reads
+then go through ordinary file I/O. ``import slide2vec`` therefore points
+``CUFILE_ENV_PATH_JSON`` at a bundled config that disallows compatibility mode:
+cuCIM reads the same pixels and no context is created. Machines with
+``nvidia-fs`` loaded keep GPUDirect Storage. To use your own cuFile config, set
+``CUFILE_ENV_PATH_JSON`` before importing slide2vec; an existing value is kept.
+
 The ``mask_backend`` field controls the reader used for **source masks** —
 precomputed tissue masks and annotation masks — and accepts the same values. It
 is resolved independently from the mask path, so a mask can use a different
