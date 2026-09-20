@@ -35,9 +35,10 @@ def pin_to_own_gpu(environ) -> None:
 def main() -> None:
     pin_to_own_gpu(os.environ)
     module, *worker_args = sys.argv[1:]
-    # Running by path put this directory first on sys.path, where its modules would shadow
-    # top-level ones; ``python -m`` would have put the working directory there instead.
-    sys.path[0] = ""
+    # Prefer the package that supplied this bootstrap over a competing checkout in cwd.
+    # Keep cwd importable without changing how relative data and output paths resolve.
+    package_root = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    sys.path[:1] = [package_root, os.getcwd()]
     sys.argv = [module, *worker_args]
     runpy.run_module(module, run_name="__main__", alter_sys=True)
 
