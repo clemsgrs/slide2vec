@@ -35,8 +35,8 @@ def pin_to_own_gpu(environ) -> None:
 def main() -> None:
     pin_to_own_gpu(os.environ)
     module, *worker_args = sys.argv[1:]
-    # Running by path put this directory first on sys.path; ``python -m`` would have put the
-    # working directory there, which is what lets an uninstalled checkout import slide2vec.
+    # Running by path put this directory first on sys.path, where its modules would shadow
+    # top-level ones; ``python -m`` would have put the working directory there instead.
     sys.path[0] = ""
     sys.argv = [module, *worker_args]
     runpy.run_module(module, run_name="__main__", alter_sys=True)

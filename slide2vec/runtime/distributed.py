@@ -198,9 +198,15 @@ def run_torchrun_worker(
             previous_sigterm = signal.signal(signal.SIGTERM, _raise_on_sigterm)
         except (ValueError, OSError):
             previous_sigterm = None
+    # Workers keep the parent's working directory, so a relative output_dir (and every path
+    # derived from it: the request, the tiling artifacts, the progress log) means the same
+    # place in both. PYTHONPATH, not cwd, is what lets an uninstalled checkout be imported.
+    package_root = str(Path(__file__).resolve().parents[2])
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [package_root, env.get("PYTHONPATH")]))
     process = popen_factory(
         command,
-        cwd=str(Path(__file__).resolve().parents[2]),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

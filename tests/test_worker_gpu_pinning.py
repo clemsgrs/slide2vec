@@ -143,3 +143,39 @@ def test_every_torchrun_stage_pins_its_workers():
     for call in launches:
         (pin,) = [kw.value for kw in call.keywords if kw.arg == "pin_gpus"]
         assert pin.value is True
+
+
+def test_workers_keep_the_parents_working_directory(tmp_path, monkeypatch):
+    # A relative output_dir must mean the same place in the parent and in every rank, so the
+    # checkout is made importable through PYTHONPATH rather than by moving the workers' cwd.
+    import os
+
+    import slide2vec
+    from slide2vec.runtime.distributed import run_torchrun_worker
+
+    monkeypatch.setenv("PYTHONPATH", "/somewhere/else")
+    launches = []
+
+    class _Done:
+        pid = None
+        stdout = stderr = None
+
+        def __init__(self, command, **kwargs):
+            launches.append((command, kwargs))
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.chdir(tmp_path)
+    run_torchrun_worker(
+        module="slide2vec.distributed.dense_worker", num_gpus=2, output_dir=Path("out"),
+        request_path=Path("out") / "request.json", failure_title="failed", popen_factory=_Done,
+    )
+    ((command, kwargs),) = launches
+    assert kwargs.get("cwd") is None
+    assert command[command.index("--output-dir") + 1] == "out"
+    package_root = str(Path(slide2vec.__file__).resolve().parents[1])
+    assert kwargs["env"]["PYTHONPATH"].split(os.pathsep) == [package_root, "/somewhere/else"]
