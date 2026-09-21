@@ -117,7 +117,10 @@ distinct integer pixel value. The ``masks`` block maps that vocabulary and is
 deep-merged over the default, so you only state what you add:
 
 - ``pixel_mapping`` — ``{class_name: integer pixel value}``. Values must be
-  distinct integers in ``[0, 255]``; ``merged`` is a reserved name.
+  distinct integers in ``[0, 255]``; ``merged`` is a reserved name. A class may
+  list several raster values (``{"tumor": [1, 2]}``, hs2p >= 4.5.0): they are
+  sampled as one class whose coverage is their sum, and a value may appear
+  under one class only.
 - ``min_coverage`` — ``{class_name: float | null}``; the minimum fraction of a
   tile covered by that class to keep it. ``null`` means *don't sample that
   class*. The ``tissue`` entry is the single source of truth for the tissue

@@ -39,8 +39,8 @@ def test_dependency_declarations_require_hs2p_4_4_3_with_consistent_extras():
     ]
 
     assert hs2p_dependencies == [
-        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.3",
-        "hs2p[asap,cucim,openslide,sam2,vips]>=4.4.3",
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.5.0",
+        "hs2p[asap,cucim,openslide,sam2,vips]>=4.5.0",
     ]
 
 
