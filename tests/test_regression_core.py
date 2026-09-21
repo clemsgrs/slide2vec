@@ -1535,6 +1535,22 @@ def test_masks_boundary_accepts_distinct_integer_value_255():
     assert sampling.pixel_mapping["tumor"] == 255
 
 
+def test_masks_boundary_forwards_list_valued_pixel_mapping():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    preprocessing = _masks_preprocessing(
+        {
+            "pixel_mapping": {"tumor": [2, 3]},
+            "colors": {"tumor": [255, 0, 0]},
+            "min_coverage": {"tumor": 0.5},
+        }
+    )
+
+    sampling = build_hs2p_configs(preprocessing)[-3]
+
+    assert list(sampling.pixel_mapping["tumor"]) == [2, 3]
+
+
 @pytest.mark.parametrize(
     ("pixel_mapping", "message"),
     [
