@@ -3,18 +3,23 @@ Preprocessing
 
 Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
 geometry, tissue segmentation, annotation sampling, and previews.
+Preprocessing requires hs2p 5.0.0 or newer.
 
 Backends
 --------
 
 The ``backend`` field controls which slide-reading library is used:
 
-- ``"auto"`` — tries cucim → vips → openslide → asap and picks the first backend
-  that can open the path
+- ``"auto"`` — tries cucim → vips → openslide → asap for WSI inputs and picks
+  the first backend that can open the path
 - ``"cucim"`` — NVIDIA cuCIM for supported slide formats, including SVS and TIFF
 - ``"openslide"`` — broad format support, CPU-only
 - ``"vips"`` — libvips, good for large TIFF files
 - ``"asap"`` — ASAP reader (requires separate installation)
+
+Slides without resolution metadata require ``spacing_at_level_0``. This
+includes untagged TIFFs opened with VIPS: hs2p 5 raises an error instead of
+assuming a spacing of 1000 µm/px.
 
 Importing cuCIM opens NVIDIA's cuFile (GPUDirect Storage) driver. Without the
 ``nvidia-fs`` kernel module that driver falls back to a compatibility mode which
@@ -26,8 +31,9 @@ cuCIM reads the same pixels and no context is created. Machines with
 ``CUFILE_ENV_PATH_JSON`` before importing slide2vec; an existing value is kept.
 
 The ``mask_backend`` field controls the reader used for **source masks** —
-precomputed tissue masks and annotation masks — and accepts the same values. It
-is resolved independently from the mask path, so a mask can use a different
+precomputed tissue masks and annotation masks — and accepts the same values,
+plus ``"pil"`` for PNG/JPEG masks (selected directly by ``"auto"``). It is
+resolved independently from the mask path, so a mask can use a different
 decoder than its slide. hs2p never silently falls back to another reader, so
 set ``mask_backend`` explicitly (e.g. ``"openslide"``) when the slide backend
 cannot decode a mask — for example a deflate-compressed label TIFF that cuCIM
@@ -37,6 +43,32 @@ with no source mask.
 The ``auto`` priority can change when hs2p or the installed backend set
 changes. Set ``backend`` and ``mask_backend`` explicitly when decoder selection
 must stay stable across upgrades.
+
+Source masks
+------------
+
+Continue passing source masks through ``mask_path`` and selecting their reader
+with ``mask_backend``. hs2p 5 opens and aligns the mask internally; slide2vec
+callers do not need to construct ``hs2p.Mask`` objects.
+
+Masks may have a different resolution from their slide, but must cover the
+same field of view at one scale, within one mask pixel per axis. Flat PNG/JPEG
+and untagged TIFF masks need no spacing metadata: hs2p derives their spacing
+from the slide dimensions. An incompatible shape or a spacing tag more than
+5% from that derived spacing fails preprocessing. A tag differing by 1–5%
+emits a warning and the derived spacing is used.
+
+Tissue masks must contain only the declared background and tissue IDs
+(``0`` and ``1`` by default); undeclared values such as ``255`` now fail
+instead of being treated as background. Annotation masks must likewise match
+``masks.pixel_mapping``. Multi-channel masks are accepted only when all
+channels are identical. These checks also apply to previews, and failures are
+recorded in ``process_list.csv``.
+
+Coordinate artifacts retain their field names. ``mask_spacing_um`` now records
+the effective, dimension-derived spacing of the mask level read. Mask level
+selection uses a fixed 1% tolerance independently of the slide's ``tolerance``;
+``mask_level`` and ``mask_spacing_um`` can therefore differ from hs2p 4.x runs.
 
 Pooled Tile Geometry
 --------------------
@@ -118,7 +150,7 @@ deep-merged over the default, so you only state what you add:
 
 - ``pixel_mapping`` — ``{class_name: integer pixel value}``. Values must be
   distinct integers in ``[0, 255]``; ``merged`` is a reserved name. A class may
-  list several raster values (``{"tumor": [1, 2]}``, hs2p >= 4.5.0): they are
+  list several raster values (``{"tumor": [2, 3]}``): they are
   sampled as one class whose coverage is their sum, and a value may appear
   under one class only.
 - ``min_coverage`` — ``{class_name: float | null}``; the minimum fraction of a
@@ -287,6 +319,11 @@ recorded in ``process_list.csv`` and on the returned
 
 When resuming a run, existing preview paths are preserved in
 ``process_list.csv`` if the preview files still exist on disk.
+
+For flat PNG/JPEG slides, disable both ``save_mask_preview`` and
+``save_tiling_preview``: hs2p 5.0.0's preview renderers currently reopen the
+slide without forwarding ``spacing_at_level_0``. PNG/JPEG source masks on
+slides with native spacing work with previews enabled.
 
 
 Field reference

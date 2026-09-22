@@ -237,7 +237,7 @@ on a shared Linux host. Median wall times:
 Before/after raw results and limitations are in
 [performance-audit-results.json](performance-audit-results.json). These are CPU-path gains;
 no complete pretrained extraction speedup is claimed. The relevant 197-case correctness
-and real-fixture QA suite also passed with hs2p 4.4.3 (the minimum supported version)
+and real-fixture QA suite also passed with hs2p 4.4.3 (the minimum supported version at the time)
 loaded in isolation; the host installation was left unchanged.
 
 The real-slide experiment alternated implementations for five warmed repetitions at
