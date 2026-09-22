@@ -145,13 +145,18 @@ class PreprocessingConfig:
 
     #: Slide reading backend. ``"auto"`` tries cucim → vips → openslide → asap.
     #: Explicit choices: ``"cucim"``, ``"openslide"``, ``"vips"``, ``"asap"``.
+    #: Slides without spacing metadata require ``spacing_at_level_0``, including
+    #: untagged TIFFs read with VIPS.
     backend: str = "auto"
-    #: Source-mask reading backend, resolved independently from the *mask* path
-    #: (hs2p ≥ 4.3.0). ``"auto"`` probes openability just like :attr:`backend`. Set this
+    #: Source-mask reading backend, resolved independently from the *mask* path.
+    #: ``"auto"`` probes openability just like :attr:`backend`. Set this
     #: explicitly (e.g. ``"openslide"``) when a precomputed tissue or annotation mask needs
     #: a different decoder than its slide — hs2p no longer silently falls back to another
     #: reader, so a mask the slide backend cannot decode fails unless overridden here.
-    #: Accepts the same values as :attr:`backend`; ignored for slides with no source mask.
+    #: Accepts the same values as :attr:`backend` plus ``"pil"`` for PNG/JPEG masks;
+    #: ``"auto"`` selects PIL for these masks. Ignored for slides with no source mask.
+    #: Masks need no spacing metadata, but must align to the slide's field of view and
+    #: contain only declared label IDs. See :doc:`preprocessing` for hs2p 5 validation.
     mask_backend: str = "auto"
     #: Target spacing in µm/px. Resolved from the model preset when ``None``.
     requested_spacing_um: float | None = None

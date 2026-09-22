@@ -36,7 +36,7 @@ tiling:
     # where `mask_path` is read as a multi-label raster. The `tissue` min_coverage entry below is
     # the single source of truth for the tissue threshold.
     output_mode: per_annotation # how sampled tiles are grouped into artifacts. per_annotation: one flat artifact set per sampled class, namespaced under a `<class>/` subdir (the `tissue` class collapses to the flat root). merged: a single flat artifact set per slide over the union of tiles passing any active class threshold — it carries no class label, so it lands at the flat output root (no `<class>/` subdir).
-    pixel_mapping: # {class_name: integer pixel value in the mask raster}; a list (e.g. tumor: [1, 2]) merges several values into one class (hs2p >=4.5.0)
+    pixel_mapping: # {class_name: integer pixel value in the mask raster}; a list (e.g. tumor: [2, 3]) merges several values into one class; every mask value must be declared
       background: 0
       tissue: 1
     colors: # {class_name: [r, g, b] | null} used when rendering previews
