@@ -3,7 +3,7 @@ Preprocessing
 
 Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
 geometry, tissue segmentation, annotation sampling, and previews.
-Preprocessing requires hs2p 5.0.0 or newer.
+Preprocessing requires hs2p 5.0.2 or newer.
 
 Backends
 --------
@@ -321,7 +321,7 @@ When resuming a run, existing preview paths are preserved in
 ``process_list.csv`` if the preview files still exist on disk.
 
 For flat PNG/JPEG slides, disable both ``save_mask_preview`` and
-``save_tiling_preview``: hs2p 5.0.0's preview renderers currently reopen the
+``save_tiling_preview``: hs2p's preview renderers currently reopen the
 slide without forwarding ``spacing_at_level_0``. PNG/JPEG source masks on
 slides with native spacing work with previews enabled.
 

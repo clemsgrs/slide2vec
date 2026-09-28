@@ -1,5 +1,5 @@
 import numpy as np
-from hs2p.wsi.geometry import plan_spacing_read
+from hs2p.wsi.geometry import plan_spacing_read, tile_size_lv0_from_plan
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.utils.coordinates import coordinate_arrays
@@ -53,13 +53,9 @@ def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_res
         tolerance=float(preprocessing.tolerance),
         content_kind="image",
     )
-    read_spacing_um = float(read_plan.read_spacing_um)
     read_tile_size_px = int(read_plan.read_size_px[0])
     read_region_size_px = read_tile_size_px * multiple
-    # Use the actual read geometry that produced the tile crop. When the
-    # resolved spacing is considered equivalent to the requested spacing,
-    # this keeps the level-0 footprint aligned with the real crop size.
-    tile_size_lv0 = int(round(read_tile_size_px * read_spacing_um / base_spacing_um))
+    tile_size_lv0 = tile_size_lv0_from_plan(read_plan, level0_spacing_um=base_spacing_um)
     return {
         "region_tile_multiple": multiple,
         "tiles_per_region": multiple * multiple,
