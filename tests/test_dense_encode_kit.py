@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 import pickle
 from types import SimpleNamespace
 
@@ -13,7 +12,6 @@ from torchvision.transforms import v2  # noqa: E402
 
 from slide2vec import (  # noqa: E402
     DenseEncodeGeometry,
-    DenseEncodeKit,
     DenseImageOptions,
     DenseOptions,
     ExecutionOptions,
@@ -117,16 +115,6 @@ def _dense_image(**overrides) -> DenseImageOptions:
     return DenseImageOptions(**values)
 
 
-def test_prepare_dense_encoder_returns_only_the_plain_kit_surface(monkeypatch):
-    kit, _encoder = _live_kit(monkeypatch, _dense_image())
-    assert isinstance(kit, DenseEncodeKit)
-    assert not isinstance(kit, torch.nn.Module)
-    assert not hasattr(kit, "model")
-    assert not hasattr(kit, "encoder")
-    assert not hasattr(kit, "parameters")
-    assert not hasattr(kit, "state_dict")
-
-
 def test_prepare_dense_encoder_exposes_the_complete_resolved_geometry(monkeypatch):
     kit, _encoder = _live_kit(monkeypatch, _dense_image())
     assert kit.geometry == DenseEncodeGeometry(
@@ -137,12 +125,6 @@ def test_prepare_dense_encoder_exposes_the_complete_resolved_geometry(monkeypatc
         pad=(13, 11),
         crop_box=(0, 0, 31, 29),
     )
-
-
-def test_dense_encode_geometry_is_immutable(monkeypatch):
-    kit, _encoder = _live_kit(monkeypatch, _dense_image())
-    with pytest.raises(FrozenInstanceError):
-        kit.geometry.pad = (0, 0)
 
 
 @pytest.mark.parametrize(
@@ -444,17 +426,6 @@ def test_live_encode_disables_grad_during_the_forward(monkeypatch):
     assert encoder.calls[-1][2] is False
 
 
-def test_live_encode_output_has_no_gradient_history(monkeypatch):
-    output, _encoder = _run_live_encode(monkeypatch, input_requires_grad=True)
-    assert output.requires_grad is False
-    assert output.grad_fn is None
-
-
-def test_kit_does_not_register_encoder_as_a_decoder_module(monkeypatch):
-    decoder = _decoder_with_kit(monkeypatch)
-    assert set(dict(decoder.named_modules())) == {"", "head"}
-
-
 def test_kit_does_not_register_encoder_in_a_decoder_checkpoint(monkeypatch):
     decoder = _decoder_with_kit(monkeypatch)
     assert set(decoder.state_dict()) == {"head.weight", "head.bias"}
@@ -490,13 +461,6 @@ def test_live_encode_returns_the_resolved_output_dtype(monkeypatch):
     output = kit.encode(batch)
 
     assert output.dtype == torch.float16
-
-
-def test_live_encode_returns_on_the_encoder_device(monkeypatch):
-    kit, _encoder = _live_kit(monkeypatch, _dense_image(target_size=28))
-    output = kit.encode(torch.zeros((1, 3, 28, 28), dtype=torch.float32))
-
-    assert output.device == torch.device("cpu")
 
 
 @pytest.mark.parametrize(

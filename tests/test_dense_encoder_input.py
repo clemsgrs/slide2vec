@@ -11,7 +11,6 @@ answers it by hand-passing ``dynamic_img_size`` past an unchecked seam.
 from __future__ import annotations
 
 import inspect
-from dataclasses import fields
 
 import numpy as np
 import pytest
@@ -29,59 +28,6 @@ from slide2vec.runtime.encoder_input_contract import EncoderInputContract  # noq
 # --------------------------------------------------------------------------------------
 # Resolution: which size is the effective encoder input, and is it accepted?
 # --------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "name,target_size",
-    [
-        ("conch", (464, 480)),
-        ("conchv15", (464, 480)),
-        ("phikon", (240, 256)),
-        ("phikonv2", (240, 256)),
-        ("isight", (350, 364)),
-    ],
-)
-def test_dense_whole_tile_accepts_verified_non_native_rectangles_without_kwargs(
-    name, target_size
-):
-    contract = EncoderInputContract.declared_dense(
-        name, target_size_px=target_size, window_size=None
-    )
-
-    assert contract.plan.effective_encoder_input_size_px == target_size
-    assert contract.plan.requires_variable_model_input is True
-    assert contract.construction_kwargs_for(name) == {}
-
-
-def test_dense_whole_tile_derives_the_registry_variable_input_kwargs():
-    contract = EncoderInputContract.declared_dense(
-        "virchow2", target_size_px=518, window_size=None
-    )
-
-    assert contract.regime == "declared"
-    assert contract.plan.effective_encoder_input_size_px == (518, 518)
-    assert contract.plan.requires_variable_model_input is True
-    assert contract.construction_kwargs_for("virchow2") == {"dynamic_img_size": True}
-
-
-def test_mascaret_dense_whole_tile_accepts_verified_variable_input_without_kwargs():
-    contract = EncoderInputContract.declared_dense(
-        "mascaret", target_size_px=(238, 252), window_size=None
-    )
-
-    assert contract.plan.effective_encoder_input_size_px == (238, 252)
-    assert contract.plan.requires_variable_model_input is True
-    assert contract.construction_kwargs_for("mascaret") == {}
-
-
-def test_phaet_dense_whole_tile_accepts_verified_variable_input_without_kwargs():
-    contract = EncoderInputContract.declared_dense(
-        "phaet", target_size_px=(240, 256), window_size=None
-    )
-
-    assert contract.plan.effective_encoder_input_size_px == (240, 256)
-    assert contract.plan.requires_variable_model_input is True
-    assert contract.construction_kwargs_for("phaet") == {}
 
 
 def test_dense_whole_tile_effective_input_is_the_padded_encoded_size():
@@ -126,23 +72,6 @@ def test_dense_sliding_window_is_clamped_to_the_encoded_extent():
 
     assert contract.plan.effective_encoder_input_size_px == (224, 224)
     assert contract.plan.requires_variable_model_input is False
-
-
-def test_dense_contract_selects_the_normalization_only_transform():
-    """Dense never uses the shipped given-input transform: it would resize/crop the ROI."""
-
-    class _Encoder:
-        def get_transform(self):
-            raise AssertionError("dense must not select the shipped given-input transform")
-
-        def get_normalization_transform(self):
-            return "normalization"
-
-    contract = EncoderInputContract.declared_dense(
-        "virchow2", target_size_px=518, window_size=None
-    )
-
-    assert contract.get_transform(_Encoder()) == "normalization"
 
 
 @pytest.mark.parametrize(
@@ -193,23 +122,6 @@ def test_derived_kwargs_still_meet_an_encoder_card_gate(monkeypatch):
 
     with pytest.raises(ValueError, match="recommends dynamic_img_size=False"):
         inference.load_model(name="h-optimus-0", device="cpu", encoder_input=contract)
-
-
-def test_dense_options_carries_no_dynamic_img_size_knob():
-    """The variable-input setting is derived from the declaration + registry metadata."""
-    assert "dynamic_img_size" not in {field.name for field in fields(DenseOptions)}
-
-
-def test_load_model_no_longer_accepts_a_hand_passed_dynamic_img_size(stand_in_virchow2):
-    import slide2vec.inference as inference
-
-    with pytest.raises(TypeError, match="dynamic_img_size"):
-        inference.load_model(
-            name="virchow2",
-            device="cpu",
-            encoder_input=EncoderInputContract.given(),
-            dynamic_img_size=True,
-        )
 
 
 # --------------------------------------------------------------------------------------

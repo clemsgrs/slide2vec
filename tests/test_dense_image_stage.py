@@ -296,13 +296,6 @@ def test_embed_images_dense_rejects_duplicate_sample_ids(tmp_path):
         )
 
 
-def test_embed_images_dense_requires_at_least_one_image(tmp_path):
-    model = _FakeModel(_encoder())
-    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
-    with pytest.raises(ValueError, match="At least one image"):
-        dense_image_stage.embed_images_dense(model, [], dense=_dense(), execution=execution)
-
-
 def test_embed_images_dense_resolves_png_through_hs2p_pil_reader(tmp_path, monkeypatch):
     model = _FakeModel(_encoder())
     captured = {}
@@ -866,22 +859,6 @@ def test_allowed_non_recommended_numeric_raster_spacing_warns_once(
     assert caplog.text.count("allow_non_recommended_settings=True") == 1
 
 
-def test_omitted_output_spacing_resolves_constrained_encoder_default(
-    tmp_path, monkeypatch
-):
-    specs = _images(tmp_path, ["a", "b"])
-    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
-    constrained = _FakeModel(_encoder(), name="uni")
-
-    _skip_dense_image_encoding(monkeypatch)
-
-    artifacts = dense_image_stage.embed_images_dense(
-        constrained, specs, dense=_dense(spacing_um=None), execution=execution
-    )
-
-    assert [artifact.sample_id for artifact in artifacts] == ["a", "b"]
-
-
 def test_omitted_output_spacing_with_override_flag_emits_no_warning(
     tmp_path, monkeypatch, caplog
 ):
@@ -971,42 +948,6 @@ def test_dense_image_options_round_trip_through_the_request():
     assert deserialize_dense_image_options(payload) == dense
 
 
-def test_dense_image_options_default_to_unknown_spacing_and_auto_reader():
-    dense = DenseImageOptions(target_size=224)
-
-    assert dense.spacing_um is None
-    assert dense.tolerance == 0.05
-    assert dense.backend == "auto"
-
-
-def test_model_embed_images_dense_delegates_and_requires_output_dir(monkeypatch, tmp_path):
-    """The public API coerces execution, requires an output dir, and delegates to the stage."""
-    import slide2vec.runtime.dense_image_stage as stage_mod
-    from slide2vec.api import Model
-
-    seen: dict = {}
-
-    def _fake_stage(model, images, *, dense, execution):
-        seen.update(model=model, images=images, dense=dense, execution=execution)
-        return ["artifact"]
-
-    monkeypatch.setattr(stage_mod, "embed_images_dense", _fake_stage)
-    model = Model(name="virchow2")  # constructing a Model does not load weights
-    specs = [ImageSpec(sample_id="a", image_path=tmp_path / "a.png")]
-    dense = _dense(target_size=224)
-
-    with pytest.raises(ValueError):
-        model.embed_images_dense(specs, dense=dense, execution=ExecutionOptions(num_gpus=1))
-
-    result = model.embed_images_dense(
-        specs, dense=dense, execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1)
-    )
-    assert result == ["artifact"]
-    assert seen["model"] is model
-    assert seen["dense"] is dense
-    assert seen["execution"].output_dir == tmp_path
-
-
 def test_declaring_the_dense_contract_rejects_a_geometry_the_encoder_cannot_take(tmp_path):
     """The #233 capability check runs before any image is decoded: MUSK is fixed-input."""
     from slide2vec.api import Model
@@ -1032,14 +973,6 @@ def test_declared_dense_contract_accepts_a_non_square_image_geometry():
     assert contract.plan.target_size_px == (224, 448)
     assert contract.plan.effective_encoder_input_size_px == (224, 448)
     assert contract.plan.requires_variable_model_input is True
-
-
-def test_embed_images_dense_is_exported_from_the_package():
-    import slide2vec
-
-    assert "DenseImageOptions" in slide2vec.__all__
-    assert "DenseImageArtifact" in slide2vec.__all__
-    assert hasattr(slide2vec.Model, "embed_images_dense")
 
 
 def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):

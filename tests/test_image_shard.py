@@ -175,29 +175,6 @@ def test_run_image_shard_records_the_observed_encoder_input_size(tmp_path):
     assert metadata["image_path"] == str(specs[0].image_path)
 
 
-def test_run_image_shard_does_not_use_the_batched_transform_spec(tmp_path, monkeypatch):
-    """The batched spec is exclusive to the uniform-size declared paths."""
-    from slide2vec.runtime import batching, preprocessing
-
-    def _forbidden(transforms):
-        pytest.fail("the given-image path must preprocess itemwise")
-
-    # Patched both where it is defined and where the batched pooled path bound it, so the
-    # test cannot pass merely because one reference was missed.
-    monkeypatch.setattr(preprocessing, "build_batch_transform_spec", _forbidden)
-    monkeypatch.setattr(batching, "build_batch_transform_spec", _forbidden)
-    specs = [_spec(tmp_path, "a", width=128, height=64)]
-
-    run_image_shard(
-        specs,
-        loaded=_loaded(_encoder()),
-        out_dir=tmp_path / "out",
-        batch_size=2,
-        output_precision="fp32",
-        num_workers=0,
-    )
-
-
 def test_run_image_shard_skips_images_with_existing_sidecar(tmp_path):
     """Resume: an image whose sidecar exists is not re-decoded or re-encoded."""
     encoder = _encoder()

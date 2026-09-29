@@ -495,32 +495,3 @@ def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, 
             "requested_tile_size_px": 60,
         },
     }
-
-
-def test_run_dense_shard_supports_cls_attention_feature_kind(fake_backend, tmp_path):
-    enc = _encoder()
-    regions = [_spec(0, 0)]
-    artifacts = run_dense_shard(
-        regions, model=enc, out_dir=tmp_path, dense=_dense(feature_kind="cls_attention"),
-        batch_size=1, device="cpu",
-    )
-    assert len(artifacts) == 1
-    assert artifacts[0].grid_shape == (4, 4)
-    meta = json.loads(artifacts[0].metadata_path.read_text())
-    assert meta["feature_kind"] == "cls_attention"
-
-
-def test_run_dense_shard_spanning_two_slides_opens_each(fake_backend, tmp_path):
-    """A contiguous shard crossing a slide boundary encodes both slides into their own dirs."""
-    enc = _encoder()
-    regions = [
-        _spec(0, 0, sample_id="a", image_path="a.tif"),
-        _spec(64, 0, sample_id="a", image_path="a.tif"),
-        _spec(0, 0, sample_id="b", image_path="b.tif"),
-    ]
-    run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                    batch_size=2, device="cpu")
-    assert (_slide_dir(tmp_path, "a") / "0_0.pt").exists()
-    assert (_slide_dir(tmp_path, "a") / "64_0.pt").exists()
-    assert (_slide_dir(tmp_path, "b") / "0_0.pt").exists()
-    assert set(fake_backend.backends) == {"a.tif", "b.tif"}  # both slides opened

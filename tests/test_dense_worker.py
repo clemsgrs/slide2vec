@@ -9,7 +9,6 @@ that a rank only encodes its own contiguous shard — with the model load and WS
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np

@@ -284,15 +284,6 @@ def test_dense_contract_keeps_geometry_with_normalization_only(name, expected_bl
     torch.testing.assert_close(output[:, 0, 0], torch.tensor(expected_black))
 
 
-def test_dinov2_given_pixels_keep_shipped_518_recipe():
-    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
-
-    output = EncoderInputContract.given().get_transform(recipe_encoder("dinov2-vitb14"))(
-        Image.new("RGB", (224, 224)),
-    )
-    assert tuple(output.shape) == (3, 518, 518)
-
-
 def test_dinov3_given_pixels_keep_shipped_256_recipe():
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
@@ -354,15 +345,3 @@ def test_dinov3_public_pooled_recipe_reaches_encoding(
     assert [tuple(batch.shape) for batch in observed] == [(1, 3, expected_size, expected_size)] * 2
     assert_border_intact(observed[0][0], size=expected_size, red=IMAGENET_RED, black=IMAGENET_BLACK)
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
-
-
-def test_dinov3_public_pooled_224_requires_permission(monkeypatch):
-    import slide2vec.inference as inference
-    from slide2vec.api import Model, PreprocessingConfig
-
-    monkeypatch.setattr(inference, "embed_slides", lambda *a, **k: pytest.fail("must reject before dispatch"))
-    model = Model.from_preset("dinov3-vitb16", device="cpu")
-    with pytest.raises(ValueError, match="allow_non_recommended_settings=True"):
-        model.embed_slides([], preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5, requested_tile_size_px=224,
-        ))

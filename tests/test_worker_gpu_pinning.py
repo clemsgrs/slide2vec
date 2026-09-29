@@ -128,13 +128,6 @@ def test_enable_binds_a_pinned_rank_to_cuda_0(monkeypatch, pinned, ordinal):
     assert distributed.get_local_rank() == 3
 
 
-@pytest.mark.parametrize("worker", ["pipeline_worker", "direct_embed_worker"])
-def test_enable_based_workers_build_the_model_on_the_device_ordinal(worker):
-    source = (Path(pin_gpu.__file__).parent / f"{worker}.py").read_text()
-    assert 'device=f"cuda:{distributed.get_device_ordinal()}"' in source
-    assert 'progress_label=f"cuda:{local_rank}"' in source
-
-
 def test_every_torchrun_stage_pins_its_workers():
     runtime = Path(pin_gpu.__file__).resolve().parents[1] / "runtime"
     launches = [

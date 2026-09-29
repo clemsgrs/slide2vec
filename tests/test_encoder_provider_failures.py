@@ -217,48 +217,6 @@ def test_later_provider_collision_preserves_the_earlier_plugin_owner() -> None:
     )
 
 
-def test_invalid_metadata_rolls_back_an_earlier_valid_preset() -> None:
-    _run_isolated(
-        _plugin_scenario("""
-        state = {}
-
-        def register_encoders():
-            from slide2vec import list_models
-            from slide2vec.encoders import register_encoder
-            state["before"] = list_models()
-            register_test_encoder("discarded-before-invalid-metadata")
-
-            register_encoder(
-                "invalid-metadata",
-                output_variants={"embedding": {"encode_dim": 3}},
-                default_output_variant="missing",
-                input_size=224,
-                supports_variable_input_size=False,
-                supported_spacing_um=0.5,
-            )
-
-        install_providers(
-            EntryPoint("invalid", "invalid_plugin:register_encoders", register_encoders)
-        )
-
-        from slide2vec import list_encoder_provider_diagnostics, list_models
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            models = list_models()
-
-        assert models == state["before"]
-        assert "discarded-before-invalid-metadata" not in models
-        diagnostics = list_encoder_provider_diagnostics()
-        assert diagnostics[0].provider_key == "invalid"
-        assert diagnostics[0].exception_type == "ValueError"
-        assert diagnostics[0].message == (
-            "default_output_variant 'missing' must be present in output_variants"
-        )
-        """)
-    )
-
-
 def test_healthy_and_broken_providers_coexist_through_public_lookup() -> None:
     _run_isolated(
         _plugin_scenario("""

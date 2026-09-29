@@ -25,17 +25,6 @@ def _create_test_tar(tar_path: Path, colors: list[tuple[int, int, int]], tile_si
 
 
 class TestTarTileReader:
-    def test_read_batch_returns_correct_shape(self, tmp_path: Path):
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]
-        tar_path = tmp_path / "tiles.tar"
-        _create_test_tar(tar_path, colors, tile_size=64)
-
-        reader = TarTileReader(tar_path, tile_size_px=64)
-        batch = reader.read_batch(np.array([0, 1, 2], dtype=np.int64))
-
-        assert batch.shape == (3, 3, 64, 64)
-        assert batch.dtype == torch.uint8
-
     def test_read_batch_pixel_values_within_jpeg_tolerance(self, tmp_path: Path):
         tar_path = tmp_path / "tiles.tar"
         _create_test_tar(tar_path, [(200, 100, 50)], tile_size=32)

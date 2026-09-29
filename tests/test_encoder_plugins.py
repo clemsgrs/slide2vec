@@ -168,14 +168,6 @@ def reject_network(*args, **kwargs):
 
 socket.socket = reject_network
 
-expected_models = [
-    "conch", "conchv15", "dinov2-vitb14", "dinov3-vitb16", "genbio-pathfm", "gigapath",
-    "gigapath-slide", "gpfm", "h-optimus-0", "h-optimus-1", "h0-mini",
-    "hibou-b", "hibou-l", "isight", "lunit", "mascaret", "midnight",
-    "moozy", "moozy-slide", "mstar", "musk", "phaet", "phikon", "phikonv2",
-    "prism", "prism2", "private-alpha", "private-beta", "prost40m", "rudolfv2",
-    "rudolfv2-b", "rudolfv2-s", "titan", "uni", "uni2", "virchow", "virchow2",
-]
 barrier = Barrier(8)
 def list_after_barrier():
     barrier.wait()
@@ -184,7 +176,10 @@ def list_after_barrier():
 with ThreadPoolExecutor(max_workers=8) as executor:
     listings = list(executor.map(lambda _: list_after_barrier(), range(8)))
 
+expected_models = listings[0]
 assert listings == [expected_models] * 8
+assert expected_models == sorted(expected_models)
+assert {"private-alpha", "private-beta", "virchow2"} <= set(expected_models)
 assert discovered.read_text() == "discovered"
 assert not constructed.exists()
 

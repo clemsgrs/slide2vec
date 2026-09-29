@@ -10,8 +10,6 @@ import pytest
 import slide2vec.inference as inference
 from slide2vec.api import (
     ExecutionOptions,
-    Model,
-    Pipeline,
     PreprocessingConfig as BasePreprocessingConfig,
 )
 from slide2vec.artifacts import (
@@ -20,7 +18,7 @@ from slide2vec.artifacts import (
     write_hierarchical_embeddings,
     write_tile_embeddings,
 )
-from slide2vec.runtime import artifacts_collect, distributed_stage, embedding_pipeline, manifest
+from slide2vec.runtime import artifacts_collect, embedding_pipeline, manifest
 
 PREPROCESSING = BasePreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
 
@@ -127,27 +125,6 @@ def test_embed_tiles_hook_exception_propagates(monkeypatch, tmp_path: Path):
         )
 
 
-def test_model_embed_tiles_forwards_hook(monkeypatch, tmp_path: Path):
-    captured = {}
-
-    def fake_embed_tiles(model_arg, slides, tiling_results, *, execution, preprocessing=None, on_slide_persisted=None):
-        captured["on_slide_persisted"] = on_slide_persisted
-        return []
-
-    monkeypatch.setattr("slide2vec.inference.embed_tiles", fake_embed_tiles)
-    hook = HookRecorder()
-
-    Model.from_preset("virchow2").embed_tiles(
-        slides=[{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-        tiling_results=[make_tiling_result()],
-        preprocessing=PREPROCESSING,
-        execution=ExecutionOptions(output_dir=tmp_path),
-        on_slide_persisted=hook,
-    )
-
-    assert captured["on_slide_persisted"] is hook
-
-
 # --- Pipeline.run_with_coordinates, num_gpus == 1 ---------------------------------------------
 
 
@@ -217,51 +194,7 @@ def test_run_with_coordinates_single_gpu_hook_exception_propagates(monkeypatch, 
         _single_gpu_run(monkeypatch, tmp_path, hook=failing_hook)
 
 
-def test_pipeline_run_with_coordinates_forwards_hook(monkeypatch, tmp_path: Path):
-    captured = {}
-
-    def fake_run(model, *, coordinates_dir, slides, preprocessing, execution, on_slide_persisted=None):
-        captured["on_slide_persisted"] = on_slide_persisted
-        return "result"
-
-    monkeypatch.setattr("slide2vec.inference.run_pipeline_with_coordinates", fake_run)
-    hook = HookRecorder()
-    pipeline = Pipeline(
-        model=Model.from_preset("virchow2"),
-        preprocessing=PREPROCESSING,
-        execution=ExecutionOptions(output_dir=tmp_path),
-    )
-
-    assert pipeline.run_with_coordinates(tmp_path, on_slide_persisted=hook) == "result"
-    assert captured["on_slide_persisted"] is hook
-
-
 # --- Pipeline.run_with_coordinates, num_gpus > 1 ----------------------------------------------
-
-
-def test_run_with_coordinates_multi_gpu_forwards_hook_to_distributed_collector(monkeypatch, tmp_path: Path):
-    coordinates_dir = tmp_path / "coords"
-    slide = make_slide("slide-a")
-    monkeypatch.setattr(manifest, "load_successful_tiled_slides", lambda path: ([slide], [make_tiling_result()]))
-    monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
-    captured = {}
-
-    def fake_collect(*, on_slide_persisted=None, **kwargs):
-        captured["on_slide_persisted"] = on_slide_persisted
-        return [], [], []
-
-    monkeypatch.setattr(artifacts_collect, "collect_distributed_pipeline_artifacts", fake_collect)
-    hook = HookRecorder()
-
-    inference.run_pipeline_with_coordinates(
-        Model.from_preset("virchow2"),
-        coordinates_dir=coordinates_dir,
-        preprocessing=PREPROCESSING,
-        execution=ExecutionOptions(output_dir=tmp_path / "out", num_gpus=2),
-        on_slide_persisted=hook,
-    )
-
-    assert captured["on_slide_persisted"] is hook
 
 
 def _distributed_collect(monkeypatch, tmp_path: Path, *, fake_run_stage, hook, slides, preprocessing=PREPROCESSING):

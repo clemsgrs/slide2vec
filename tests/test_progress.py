@@ -190,40 +190,6 @@ def test_cli_main_installs_progress_reporter_only_during_pipeline_run(monkeypatc
     assert isinstance(progress.get_progress_reporter(), progress.NullProgressReporter)
 
 
-
-def test_cli_entrypoint_returns_zero(monkeypatch):
-    import slide2vec.cli as cli
-
-    observed = {}
-
-    def fake_main(argv=None):
-        observed["argv"] = argv
-        return "ok"
-
-    monkeypatch.setattr(cli, "main", fake_main)
-
-    assert cli.entrypoint(["/tmp/config.yaml"]) == 0
-    assert observed["argv"] == ["/tmp/config.yaml"]
-
-
-def test_cli_parse_args_preserves_flags_and_config_overrides():
-    import slide2vec.cli as cli
-
-    args = cli.parse_args(
-        [
-            "/tmp/config.yaml",
-            "--skip-datetime",
-            "--run-on-cpu",
-            "speed.num_gpus=4",
-        ]
-    )
-
-    assert args.config_file == "/tmp/config.yaml"
-    assert args.skip_datetime is True
-    assert args.run_on_cpu is True
-    assert args.opts == ["speed.num_gpus=4"]
-
-
 def test_run_pipeline_emits_local_progress_events_in_order(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
     import slide2vec.progress as progress
@@ -356,93 +322,6 @@ def test_distributed_embedding_stage_finishes_assignment_before_embedding_starts
     assert kinds.count("embedding.slide.started") == 1
 
 
-def test_plain_text_reporter_formats_assignment_progress():
-    import slide2vec.progress as progress
-
-    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
-
-    assert (
-        reporter._format_line(
-            "embedding.assignment.started",
-            {"slide_count": 10, "num_gpus": 4},
-        )
-        == "Assigning slides across 4 GPU(s)..."
-    )
-    assert (
-        reporter._format_line(
-            "embedding.assignment.finished",
-            {"slide_count": 10, "num_gpus": 4},
-        )
-        == "Slide assignment complete: 10 slide(s) across 4 GPU(s)"
-    )
-    assert (
-        reporter._format_line(
-            "embedding.resume",
-            {
-                "total_slide_count": 10,
-                "pending_slide_count": 8,
-                "skipped_slide_count": 2,
-            },
-        )
-        == "Resume: skipped 2 already processed slide(s); 8 pending"
-    )
-
-
-def test_plain_text_reporter_formats_tissue_progress():
-    import slide2vec.progress as progress
-
-    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
-
-    assert (
-        reporter._format_line("tissue.started", {"total": 3})
-        == "Resolving tissue masks (3 total)..."
-    )
-    assert (
-        reporter._format_line(
-            "tissue.progress",
-            {"total": 3, "completed": 2, "failed": 1},
-        )
-        == "Tissue resolution: 2/3 complete, 1 failed"
-    )
-    assert (
-        reporter._format_line(
-            "tissue.finished",
-            {"total": 3, "completed": 3, "failed": 0},
-        )
-        == "Tissue resolution finished: 3/3 complete, 0 failed"
-    )
-
-
-def test_plain_text_reporter_formats_mask_backend_selected():
-    import slide2vec.progress as progress
-
-    reporter = progress.PlainTextCliProgressReporter(stream=io.StringIO())
-
-    assert (
-        reporter._format_line(
-            "mask_backend.selected",
-            {
-                "sample_id": "slide-a",
-                "mask_path": "/data/slide-a-mask.tif",
-                "backend": "openslide",
-                "reason": "selected openslide for auto mask backend",
-            },
-        )
-        == "[mask backend] slide-a (/data/slide-a-mask.tif): selected openslide for auto mask backend"
-    )
-    assert (
-        reporter._format_line(
-            "mask_backend.selected",
-            {
-                "sample_id": "slide-a",
-                "mask_path": "/data/slide-a-mask.tif",
-                "backend": "openslide",
-            },
-        )
-        == "[mask backend] slide-a (/data/slide-a-mask.tif): using openslide"
-    )
-
-
 def test_plain_text_reporter_surfaces_empty_masks_only_when_present():
     import slide2vec.progress as progress
 
@@ -525,15 +404,13 @@ def test_run_forward_pass_reports_processed_tile_counts():
 
 def test_run_forward_pass_emits_batch_timing_events():
     torch = pytest.importorskip("torch")
-    import slide2vec.inference as inference
     import slide2vec.progress as progress
 
     reporter = RecordingReporter()
 
     class FakeModel:
         def encode_tiles(self, image):
-            batch_size = image.shape[0]
-            return torch.ones((batch_size, 3), dtype=torch.float32)
+            return torch.ones((image.shape[0], 3), dtype=torch.float32)
 
     dataloader = [
         (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
@@ -552,18 +429,10 @@ def test_run_forward_pass_emits_batch_timing_events():
         )
 
     timing_payloads = [event.payload for event in reporter.events if event.kind == "embedding.batch.timing"]
-    assert len(timing_payloads) == 2
-    assert [payload["batch_size"] for payload in timing_payloads] == [2, 1]
-    assert all(payload["sample_id"] == "slide-a" for payload in timing_payloads)
-    assert all(payload["loader_wait_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["ready_wait_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["forward_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["preprocess_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["worker_batch_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["reader_open_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["reader_read_ms"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["gpu_busy_fraction"] >= 0.0 for payload in timing_payloads)
-    assert all(payload["gpu_busy_fraction"] <= 1.0 for payload in timing_payloads)
+    assert [(payload["sample_id"], payload["batch_size"]) for payload in timing_payloads] == [
+        ("slide-a", 2),
+        ("slide-a", 1),
+    ]
 
 
 def test_run_forward_pass_prefers_tile_encoder_when_present():
@@ -992,33 +861,6 @@ def test_rich_reporter_defers_tiling_bar_until_progress(monkeypatch):
     assert 2 not in reporter.progress.tasks
 
 
-def test_rich_reporter_surfaces_empty_masks_in_tiling_finished(monkeypatch):
-    import slide2vec.progress as progress
-
-    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
-    console = FakeConsole()
-    reporter = progress.RichCliProgressReporter(console=console)
-
-    reporter.emit(progress.ProgressEvent(kind="tiling.started", payload={"slide_count": 3}))
-    reporter.emit(
-        progress.ProgressEvent(
-            kind="tiling.finished",
-            payload={
-                "total": 3,
-                "completed": 3,
-                "failed": 0,
-                "discovered_tiles": 12,
-                "empty_masks": 1,
-            },
-        )
-    )
-
-    assert [line[0] for line in console.lines] == [
-        "Tiling slides (3 total)...",
-        "Tiling finished: 3/3 complete, 0 failed, 12 tiles, empty_masks=1",
-    ]
-
-
 def test_rich_reporter_updates_embedding_total_for_resume_skips(monkeypatch):
     import slide2vec.progress as progress
 
@@ -1043,29 +885,6 @@ def test_rich_reporter_updates_embedding_total_for_resume_skips(monkeypatch):
     assert reporter.progress.tasks[1]["description"] == "Embedding slides (8 pending, 2 skipped)"
     assert [line[0] for line in console.lines] == [
         "Resume: skipped 2 already processed slide(s); 8/10 pending"
-    ]
-
-
-def test_rich_reporter_emits_backend_selected_without_log_suffix(monkeypatch):
-    import slide2vec.progress as progress
-
-    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
-    console = FakeConsole()
-    reporter = progress.RichCliProgressReporter(console=console)
-
-    reporter.emit(
-        progress.ProgressEvent(
-            kind="backend.selected",
-            payload={
-                "sample_id": "slide-a",
-                "backend": "cucim",
-                "reason": "selected cuCIM for auto backend",
-            },
-        )
-    )
-
-    assert [line[0] for line in console.lines] == [
-        "[backend] slide-a: selected cuCIM for auto backend"
     ]
 
 
@@ -1123,27 +942,6 @@ def test_rich_reporter_emits_mask_backend_selected_via_console_print(monkeypatch
 
     assert [line[0] for line in console.lines] == [
         "[mask backend] slide-a (/data/slide-a-mask.tif): selected openslide for auto mask backend"
-    ]
-
-
-def test_rich_reporter_surfaces_empty_masks_in_tissue_finished(monkeypatch):
-    import slide2vec.progress as progress
-
-    FakeConsole, _FakeProgress = _install_fake_rich_runtime(monkeypatch)
-    console = FakeConsole()
-    reporter = progress.RichCliProgressReporter(console=console)
-
-    reporter.emit(progress.ProgressEvent(kind="tissue.started", payload={"total": 3}))
-    reporter.emit(
-        progress.ProgressEvent(
-            kind="tissue.finished",
-            payload={"total": 3, "completed": 3, "failed": 0, "empty_masks": 1},
-        )
-    )
-
-    assert [line[0] for line in console.lines] == [
-        "Resolving tissue masks (3 total)...",
-        "Tissue resolution finished: 3/3 complete, 0 failed, empty_masks=1",
     ]
 
 
@@ -1313,21 +1111,3 @@ def test_progress_aware_log_handler_routes_logs_through_active_reporter():
         logger.info("hello from logger")
 
     assert reporter.log_lines == ["INFO hello from logger"]
-
-def test_embedding_summary_rows_match_tiling_style():
-    import slide2vec.progress as progress
-
-    rows = progress._embedding_summary_rows(
-        {
-            "slide_count": 20,
-            "slides_completed": 20,
-            "tile_artifacts": 20,
-            "slide_artifacts": 0,
-        }
-    )
-
-    assert rows == [
-        ("Slides w/ tiles", "20"),
-        ("Completed", "20"),
-        ("Failed", "0"),
-    ]

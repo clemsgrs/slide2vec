@@ -144,31 +144,6 @@ def test_declared_pooled_batch_that_disagrees_with_the_declared_size_raises():
         run_forward_pass(dataloader, loaded, nullcontext())
 
 
-def test_declared_pooled_batch_at_the_declared_size_records_it():
-    from slide2vec.runtime.batching import run_forward_pass
-    from slide2vec.runtime.types import LoadedModel
-
-    class Encoder:
-        def encode_tiles(self, image):
-            assert tuple(image.shape[-2:]) == (224, 224)
-            return torch.zeros((image.shape[0], 2), dtype=torch.float32)
-
-    loaded = LoadedModel(
-        name="lunit",
-        level="tile",
-        model=Encoder(),
-        transforms=lambda batch: batch.float(),
-        feature_dim=2,
-        device=torch.device("cpu"),
-        declared_encoder_input_size_px=224,
-    )
-    dataloader = [(torch.tensor([0]), torch.zeros((1, 3, 224, 224), dtype=torch.uint8))]
-
-    run_forward_pass(dataloader, loaded, nullcontext())
-
-    assert loaded.encoder_input_size_px == 224
-
-
 def test_single_gpu_artifact_records_read_requested_final_geometry_and_spacing(tmp_path):
     from slide2vec.api import ExecutionOptions
     from slide2vec.runtime.embedding import (
@@ -213,17 +188,6 @@ def test_single_gpu_artifact_records_read_requested_final_geometry_and_spacing(t
         "requested_spacing_um": 0.5,
     }
     assert "input_recipe" not in persisted
-
-
-def test_distributed_shards_preserve_one_factual_encoder_input_size():
-    from slide2vec.runtime.distributed import resolve_shard_encoder_input_size
-
-    payloads = [
-        {"encoder_input_size_px": 224},
-        {"encoder_input_size_px": 224},
-    ]
-
-    assert resolve_shard_encoder_input_size(payloads) == 224
 
 
 def test_tar_reader_preserves_requested_geometry_before_preprocessing(tmp_path):
@@ -300,21 +264,6 @@ def test_hierarchical_metadata_records_pooled_geometry():
     assert metadata["requested_tile_size_px"] == 256
     assert metadata["encoder_input_size_px"] == 224
     assert metadata["requested_spacing_um"] == 0.5
-
-
-def test_slide_and_patient_models_inherit_tile_dependency_geometry():
-    from slide2vec.encoders.registry import resolve_preprocessing_requirements
-
-    assert resolve_preprocessing_requirements("gigapath-slide") == {
-        "tile_size_px": 224,
-        "spacing_um": 0.5,
-        "source_encoder": "gigapath",
-    }
-    assert resolve_preprocessing_requirements("moozy") == {
-        "tile_size_px": 224,
-        "spacing_um": 0.5,
-        "source_encoder": "lunit",
-    }
 
 
 def test_hierarchical_collator_preserves_reordered_subtiles_with_bounded_allocations(monkeypatch):

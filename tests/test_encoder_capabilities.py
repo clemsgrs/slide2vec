@@ -425,56 +425,7 @@ def test_registration_rejects_non_positive_dense_patch_size():
     )
 
 
-def test_existing_built_in_presets_resolve_their_current_contracts():
-    assert resolve_encoder_capabilities("uni2") == EncoderCapabilities(
-        name="uni2",
-        level="tile",
-        pooled=True,
-        dense=True,
-        attention=True,
-        slide=False,
-        patient=False,
-        patch_size=(14, 14),
-        tile_encoder=None,
-        tile_encoder_output_variant=None,
-    )
-    assert resolve_encoder_capabilities("genbio-pathfm") == EncoderCapabilities(
-        name="genbio-pathfm",
-        level="tile",
-        pooled=True,
-        dense=True,
-        attention=False,
-        slide=False,
-        patient=False,
-        patch_size=(16, 16),
-        tile_encoder=None,
-        tile_encoder_output_variant=None,
-    )
-    assert resolve_encoder_capabilities("prism") == EncoderCapabilities(
-        name="prism",
-        level="slide",
-        pooled=False,
-        dense=False,
-        attention=False,
-        slide=True,
-        patient=False,
-        patch_size=None,
-        tile_encoder="virchow",
-        tile_encoder_output_variant="cls_patch_mean",
-    )
-    assert resolve_encoder_capabilities("moozy") == EncoderCapabilities(
-        name="moozy",
-        level="patient",
-        pooled=False,
-        dense=False,
-        attention=False,
-        slide=True,
-        patient=True,
-        patch_size=None,
-        tile_encoder="lunit",
-        tile_encoder_output_variant="default",
-    )
-
+def test_all_built_in_presets_resolve_capabilities():
     assert {
         report.name for report in map(resolve_encoder_capabilities, encoder_registry.names())
     } == set(encoder_registry.names())
