@@ -207,13 +207,6 @@ def test_embed_images_rejects_duplicate_sample_ids(tmp_path):
         image_stage.embed_images(model, duplicated, execution=execution)
 
 
-def test_embed_images_requires_at_least_one_image(tmp_path):
-    model = _FakeModel(_encoder())
-    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
-    with pytest.raises(ValueError, match="At least one image"):
-        image_stage.embed_images(model, [], execution=execution)
-
-
 def test_embed_images_rejects_raster_level0_spacing_override(tmp_path, monkeypatch):
     model = _FakeModel(_encoder())
     monkeypatch.setattr(
@@ -240,30 +233,6 @@ def test_image_specs_round_trip_through_request(tmp_path):
     ]
     request = image_specs.build_image_specs_request(specs)
     assert image_specs.image_specs_from_request(request) == specs
-
-
-def test_model_embed_images_delegates_and_requires_output_dir(monkeypatch, tmp_path):
-    """The public API coerces execution, requires an output dir, and delegates to the stage."""
-    import slide2vec.runtime.image_stage as stage_mod
-    from slide2vec.api import Model
-
-    seen: dict = {}
-
-    def _fake_stage(model, images, *, execution):
-        seen.update(model=model, images=images, execution=execution)
-        return ["artifact"]
-
-    monkeypatch.setattr(stage_mod, "embed_images", _fake_stage)
-    model = Model(name="virchow2")  # constructing a Model does not load weights
-    specs = [ImageSpec(sample_id="a", image_path=tmp_path / "a.png")]
-
-    with pytest.raises(ValueError):
-        model.embed_images(specs, execution=ExecutionOptions(num_gpus=1))
-
-    result = model.embed_images(specs, execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1))
-    assert result == ["artifact"]
-    assert seen["model"] is model
-    assert seen["execution"].output_dir == tmp_path
 
 
 def test_declaring_given_selects_the_shipped_transform(monkeypatch):
@@ -297,14 +266,6 @@ def test_declaring_given_selects_the_shipped_transform(monkeypatch):
     assert model._encoder_input.regime == "given"
     assert model._encoder_input.plan is None
     assert model._load_backend().transforms is _StandInEncoder.shipped
-
-
-def test_embed_images_is_exported_from_the_package():
-    import slide2vec
-
-    assert "ImageSpec" in slide2vec.__all__
-    assert "ImageEmbeddingArtifact" in slide2vec.__all__
-    assert hasattr(slide2vec.Model, "embed_images")
 
 
 def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):

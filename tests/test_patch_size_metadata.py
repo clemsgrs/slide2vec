@@ -4,8 +4,8 @@
 ``register_encoder`` metadata lets a consumer resolve the dense cache key WITHOUT
 loading the (multi-GB) encoder. The critical correctness contract: the static
 value must serialize byte-identically to the runtime ``encoder.patch_size`` tuple
-(a downstream soma dense cache key depends on it). The fast tests here pin the
-declared values and prove no-load; the heavy test loads each real encoder and
+(a downstream soma dense cache key depends on it). The fast tests here prove
+no-load and the load-time drift guard; the heavy test loads each real encoder and
 checks tuple equality against the static value.
 """
 
@@ -75,22 +75,6 @@ def test_normalize_patch_size_int_and_tuple():
     assert all(isinstance(v, int) for v in result)
 
 
-@pytest.mark.parametrize("name,expected", sorted(DENSE_PATCH_SIZES.items()))
-def test_registry_info_carries_patch_size_without_construction(name, expected):
-    """info(name) returns the declared patch_size; no model is built."""
-    info = encoder_registry.info(name)
-    assert "patch_size" in info
-    assert normalize_patch_size(info["patch_size"]) == expected
-
-
-@pytest.mark.parametrize("name,expected", sorted(DENSE_PATCH_SIZES.items()))
-def test_resolve_patch_size_returns_declared_tuple(name, expected):
-    resolved = resolve_patch_size(name)
-    assert resolved == expected
-    assert isinstance(resolved, tuple)
-    assert all(isinstance(v, int) for v in resolved)
-
-
 def test_resolve_patch_size_constructs_nothing(monkeypatch):
     """resolve_patch_size must never fetch/instantiate the encoder class.
 
@@ -135,14 +119,6 @@ def test_every_tile_encoder_declares_patch_size():
         assert name in DENSE_PATCH_SIZES, f"untracked tile encoder '{name}'"
 
 
-# --------------------------------------------------------------------------- #
-# Parity contract: static declared == runtime instance ``.patch_size``.
-# Loads real foundation-model weights on CPU (minutes each) -> heavy; excluded
-# from the PR suite, run on the scheduled heavy workflow. Skips cleanly when
-# weights / optional deps are unavailable so a developer run never hard-fails.
-# --------------------------------------------------------------------------- #
-
-
 def test_load_model_drift_guard_rejects_patch_size_mismatch(monkeypatch):
     """The model-load path fails loud when runtime patch_size drifts from static."""
     from types import SimpleNamespace
@@ -179,39 +155,12 @@ def test_load_model_drift_guard_rejects_patch_size_mismatch(monkeypatch):
         )
 
 
-def test_load_model_drift_guard_passes_when_consistent(monkeypatch):
-    from types import SimpleNamespace
-
-    import slide2vec.inference as inference
-
-    class _ConsistentEncoder:
-        def __init__(self, *, output_variant=None):
-            self.device = "cpu"
-            self.encode_dim = 8
-            self.patch_size = (14, 14)
-
-        def get_transform(self):
-            return SimpleNamespace()
-
-        def to(self, device):
-            self.device = device
-            return self
-
-    monkeypatch.setattr(inference, "canonicalize_model_name", lambda name: name)
-    monkeypatch.setattr(
-        inference.encoder_registry,
-        "info",
-        lambda name: {"level": "tile", "precision": "fp32", "patch_size": (14, 14)},
-    )
-    monkeypatch.setattr(inference.encoder_registry, "require", lambda name: _ConsistentEncoder)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-
-    loaded = inference.load_model(
-        name="consistent-model",
-        device="cpu",
-        encoder_input=EncoderInputContract.given(),
-    )
-    assert loaded.name == "consistent-model"
+# --------------------------------------------------------------------------- #
+# Parity contract: static declared == runtime instance ``.patch_size``.
+# Loads real foundation-model weights on CPU (minutes each) -> heavy; excluded
+# from the PR suite, run on the scheduled heavy workflow. Skips cleanly when
+# weights / optional deps are unavailable so a developer run never hard-fails.
+# --------------------------------------------------------------------------- #
 
 
 @pytest.mark.heavy

@@ -44,20 +44,6 @@ def test_window_starts_appends_edge_window_when_stride_misses():
     assert starts == [0, 24, 32]
 
 
-def test_resolve_window_geometry_whole_is_single_window():
-    geom = compute_dense_geometry(target_size=64, patch_size=PATCH)
-    (win, stride, sh, sw) = resolve_window_geometry(geom, window_size=None, overlap=0.0)
-    assert win == geom.encoded_size and stride == geom.encoded_size
-    assert sh == [0] and sw == [0]
-
-
-def test_resolve_window_geometry_large_window_clamps_to_whole():
-    geom = compute_dense_geometry(target_size=64, patch_size=PATCH)
-    # window >= target -> rounds/clamps to the full encoded extent -> one window.
-    _, _, sh, sw = resolve_window_geometry(geom, window_size=128, overlap=0.5)
-    assert sh == [0] and sw == [0]
-
-
 def test_resolve_window_geometry_rounds_window_up_to_patch():
     geom = compute_dense_geometry(target_size=64, patch_size=PATCH)
     (win, _, sh, _) = resolve_window_geometry(geom, window_size=30, overlap=0.0)

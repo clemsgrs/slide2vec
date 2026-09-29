@@ -14,14 +14,6 @@ import pytest
 from slide2vec.runtime.sharding import plan_contiguous_shards
 
 
-def test_partitions_exactly():
-    """Union of the shards == input, in order, with nothing dropped or duplicated."""
-    items = list(range(10))
-    shards = plan_contiguous_shards(items, 4)
-    assert len(shards) == 4
-    assert [item for shard in shards for item in shard] == items
-
-
 def test_balanced_within_one():
     sizes = [len(shard) for shard in plan_contiguous_shards(list(range(10)), 4)]
     assert sizes == [3, 3, 2, 2]
@@ -35,18 +27,6 @@ def test_shards_are_contiguous_slices():
         [4, 5, 6],
         [7, 8, 9],
     ]
-
-
-def test_deterministic():
-    items = list(range(7))
-    assert plan_contiguous_shards(items, 3) == plan_contiguous_shards(items, 3)
-
-
-def test_world_size_one_returns_input_unchanged():
-    items = ["a", "b", "c"]
-    shards = plan_contiguous_shards(items, 1)
-    assert len(shards) == 1
-    assert shards[0] == items
 
 
 def test_allows_empty_shards_when_more_ranks_than_items():

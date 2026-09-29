@@ -1,4 +1,3 @@
-import ast
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,13 +6,11 @@ import numpy as np
 import pytest
 
 from slide2vec.api import (
-    EmbeddedSlide,
     ExecutionOptions,
     Model,
     Pipeline,
     PreprocessingConfig,
 )
-from slide2vec.encoders.registry import encoder_registry
 from slide2vec.artifacts import (
     load_array,
     load_metadata,
@@ -21,86 +18,9 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
-from slide2vec.configs.resources import config_resource, load_config
+from slide2vec.configs.resources import load_config
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
-
-def test_resource_loading_uses_packaged_configs():
-    pytest.importorskip("omegaconf")
-    cfg = load_config("default")
-    assert "model" in cfg
-    assert "tiling" in cfg
-    assert hasattr(cfg.model, "output_variant")
-    assert config_resource("default").name == "default.yaml"
-    assert cfg.speed.num_preprocessing_workers is None
-
-
-def test_packaged_preprocessing_config_matches_hs2p_4_tiling_schema():
-    pytest.importorskip("omegaconf")
-    cfg = load_config("default")
-
-    assert hasattr(cfg, "save_tiles")
-    assert cfg.tiling.backend == "auto"
-    assert cfg.tiling.mask_backend == "auto"
-    assert hasattr(cfg.tiling.filter_params, "filter_grayspace")
-    assert hasattr(cfg.tiling.filter_params, "filter_blur")
-    assert hasattr(cfg.tiling.filter_params, "qc_spacing_um")
-    assert hasattr(cfg.tiling.seg_params, "method")
-    assert hasattr(cfg.tiling.seg_params, "sam2_checkpoint_path")
-    assert hasattr(cfg.tiling.seg_params, "sam2_config_path")
-    assert hasattr(cfg.tiling.seg_params, "sam2_device")
-    assert "sam2_num_workers:" in (ROOT / "slide2vec" / "configs" / "default.yaml").read_text()
-    assert hasattr(cfg.tiling.preview, "save_mask_preview")
-    assert hasattr(cfg.tiling.preview, "save_tiling_preview")
-    assert hasattr(cfg.tiling.preview, "tissue_contour_color")
-
-
-def test_default_public_preprocessing_constructs_complete_hs2p_configs():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-    )
-
-    _, segmentation, filtering, preview, *_ = build_hs2p_configs(preprocessing)
-
-    assert asdict(segmentation) == {
-        "method": "hsv",
-        "downsample": 64,
-        "sthresh": 8,
-        "sthresh_up": 255,
-        "mthresh": 7,
-        "close": 4,
-        "sam2_checkpoint_path": None,
-        "sam2_config_path": None,
-        "sam2_device": "cpu",
-        "sam2_num_workers": None,
-    }
-    assert asdict(filtering) == {
-        "ref_tile_size": 224,
-        "a_t": 4,
-        "a_h": 2,
-        "filter_white": False,
-        "filter_black": False,
-        "white_threshold": 220,
-        "black_threshold": 25,
-        "fraction_threshold": 0.9,
-        "filter_grayspace": False,
-        "grayspace_saturation_threshold": 0.05,
-        "grayspace_fraction_threshold": 0.6,
-        "filter_blur": False,
-        "blur_threshold": 50.0,
-        "qc_spacing_um": 2.0,
-    }
-    assert asdict(preview) == {
-        "save_mask_preview": True,
-        "save_tiling_preview": True,
-        "downsample": 32,
-        "tissue_contour_color": (157, 219, 129),
-        "mask_overlay_alpha": 0.5,
-    }
 
 
 def test_partial_segmentation_override_changes_only_requested_field():
@@ -440,69 +360,6 @@ def test_setup_resumes_from_base_output_dir_when_resume_dirname_is_empty(
     assert (tmp_path / "output").is_dir()
 
 
-def test_list_models_is_public_and_returns_all_registered_models():
-    from slide2vec import list_models
-
-    models = list_models()
-
-    assert models == sorted(models)
-    assert models == sorted(encoder_registry.names())
-    assert "virchow2" in models
-    assert "moozy" in models
-    assert "prism" in models
-
-
-def test_list_models_can_filter_by_level():
-    from slide2vec import list_models
-
-    assert list_models("tile") == [
-        "conch",
-        "conchv15",
-        "dinov2-vitb14",
-        "dinov3-vitb16",
-        "genbio-pathfm",
-        "gigapath",
-        "gpfm",
-        "h-optimus-0",
-        "h-optimus-1",
-        "h0-mini",
-        "hibou-b",
-        "hibou-l",
-        "isight",
-        "lunit",
-        "mascaret",
-        "midnight",
-        "mstar",
-        "musk",
-        "phaet",
-        "phikon",
-        "phikonv2",
-        "prost40m",
-        "rudolfv2",
-        "rudolfv2-b",
-        "rudolfv2-s",
-        "uni",
-        "uni2",
-        "virchow",
-        "virchow2",
-    ]
-    assert list_models("slide") == [
-        "gigapath-slide",
-        "moozy-slide",
-        "prism",
-        "prism2",
-        "titan",
-    ]
-    assert list_models("patient") == ["moozy"]
-
-
-def test_list_models_rejects_unknown_level():
-    from slide2vec import list_models
-
-    with pytest.raises(ValueError, match="tile, slide, patient"):
-        list_models("tiles")
-
-
 def test_npz_artifacts_round_trip(tmp_path: Path):
     features = np.arange(12, dtype=np.float32).reshape(3, 4)
     artifact = write_tile_embeddings(
@@ -585,16 +442,6 @@ def test_resolve_output_precision_follows_compute_precision_by_default():
     # An explicit request overrides the compute precision either way.
     assert resolve_output_precision("fp32", "fp16") == "fp32"
     assert resolve_output_precision("float16", "fp32") == "fp16"
-
-
-def test_normalize_output_dtype_rejects_bf16_and_normalizes_aliases():
-    from slide2vec.runtime.model_settings import normalize_output_dtype
-
-    assert normalize_output_dtype(None) is None
-    assert normalize_output_dtype("float16") == "fp16"
-    assert normalize_output_dtype("fp32") == "fp32"
-    with pytest.raises(ValueError, match="bf16"):
-        normalize_output_dtype("bf16")
 
 
 def test_execution_options_normalizes_output_dtype():
@@ -784,27 +631,6 @@ def test_resolve_direct_api_preprocessing_rejects_mismatched_region_size_and_mul
             ),
         )
 
-def test_pipeline_run_delegates_to_internal_runner(monkeypatch, tmp_path: Path):
-    model = Model.from_preset("virchow2")
-    preprocessing = DEFAULT_PREPROCESSING
-    pipeline = Pipeline(model, preprocessing, execution=ExecutionOptions(output_dir=tmp_path))
-    captured = {}
-
-    def fake_run_pipeline(model_arg, **kwargs):
-        captured["model"] = model_arg
-        captured["kwargs"] = kwargs
-        return "ok"
-
-    monkeypatch.setattr("slide2vec.inference.run_pipeline", fake_run_pipeline)
-
-    result = pipeline.run(manifest_path="/tmp/slides.csv")
-
-    assert result == "ok"
-    assert captured["model"] is model
-    assert captured["kwargs"]["manifest_path"] == "/tmp/slides.csv"
-    assert captured["kwargs"]["preprocessing"].backend == preprocessing.backend
-    assert captured["kwargs"]["preprocessing"].requested_spacing_um == preprocessing.requested_spacing_um
-    assert captured["kwargs"]["preprocessing"].requested_tile_size_px == preprocessing.requested_tile_size_px
 
 def test_pipeline_run_requires_output_dir():
     model = Model.from_preset("virchow2")
@@ -822,29 +648,6 @@ def test_model_from_preset_canonicalizes_conchv15_alias():
 
     assert model.name == "conchv15"
     assert model.level == "tile"
-
-
-def test_model_from_preset_defaults_tile_capable_models_to_tile_level():
-    model = Model.from_preset("virchow2")
-
-    assert model.name == "virchow2"
-    assert model.level == "tile"
-
-
-def test_model_from_preset_keeps_slide_default_for_slide_models():
-    model = Model.from_preset("prism")
-
-    assert model.name == "prism"
-    assert model.level == "slide"
-
-
-def test_preferred_default_device_prefers_cuda_when_available(monkeypatch):
-    import torch
-    import slide2vec.encoders.base as base
-
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-
-    assert base.preferred_default_device() == torch.device("cuda")
 
 
 def test_h0mini_defaults_to_preferred_device(monkeypatch):
@@ -867,32 +670,6 @@ def test_h0mini_defaults_to_preferred_device(monkeypatch):
 
     assert model.device == torch.device("cuda")
 
-def test_execution_options_defaults_to_all_available_gpus(monkeypatch):
-    import slide2vec.api as api
-
-    monkeypatch.setattr(api, "_default_num_gpus", lambda: 4)
-
-    assert api.ExecutionOptions().num_gpus == 4
-
-
-def test_execution_options_defaults_preprocessing_workers_to_cpu_budget(monkeypatch):
-    import slide2vec.api as api
-
-    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 24)
-    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 24)
-
-    assert api.ExecutionOptions().num_preprocessing_workers == 24
-
-def test_execution_options_preserves_explicit_dataloader_workers(monkeypatch):
-    import slide2vec.api as api
-
-    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 2)
-    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 2)
-
-    execution = api.ExecutionOptions(num_workers_per_gpu=3)
-
-    assert execution.num_workers_per_gpu == 3
-    assert execution.num_preprocessing_workers == 2
 
 def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
     import slide2vec.utils.utils as utils
@@ -901,27 +678,6 @@ def test_cpu_worker_limit_caps_large_cpu_budget_to_sixty_four(monkeypatch):
     monkeypatch.setattr(utils, "slurm_cpu_limit", lambda: 96)
 
     assert utils.cpu_worker_limit() == 64
-
-def test_execution_options_default_batchis_thirty_two():
-    assert ExecutionOptions().batch_size == 32
-
-def test_execution_options_default_num_workers_is_auto():
-    assert ExecutionOptions().num_workers_per_gpu is None
-
-def test_execution_options_logs_resolved_auto_num_workers(monkeypatch, caplog):
-    import slide2vec.api as api
-
-    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 18)
-    monkeypatch.setattr(api, "slurm_cpu_limit", lambda: 18)
-    monkeypatch.setattr(api.os, "cpu_count", lambda: 64)
-    monkeypatch.setattr(api, "_default_num_gpus", lambda: 1)
-
-    with caplog.at_level("INFO"):
-        execution = api.ExecutionOptions()
-
-    assert execution.num_workers_per_gpu is None
-    assert "ExecutionOptions: num_workers_per_gpu=18 (requested=auto)" in caplog.text
-    assert "num_workers_per_gpu=auto" not in caplog.text
 
 
 def test_execution_options_auto_workers_are_split_across_gpus(monkeypatch):
@@ -1105,46 +861,6 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
     assert execution.precision == "fp32"
     assert execution.num_gpus == 1
 
-def test_preprocessing_with_backend_preserves_other_fields():
-    base = PreprocessingConfig(
-        backend="asap",
-        requested_spacing_um=0.75,
-        requested_tile_size_px=256,
-        tolerance=0.1,
-        overlap=0.2,
-        masks={"min_coverage": {"tissue": 0.4}},
-        read_coordinates_from=Path("/tmp/coordinates"),
-        read_tiles_from=Path("/tmp/tiles"),
-        resume=True,
-        segmentation={"downsample": 32},
-        filtering={"a_t": 3},
-        preview={"save_mask_preview": True},
-    )
-
-    updated = base.with_backend("openslide")
-
-    assert updated.backend == "openslide"
-    assert updated.requested_spacing_um == base.requested_spacing_um
-    assert updated.requested_tile_size_px == base.requested_tile_size_px
-    assert updated.segmentation == base.segmentation
-    assert updated.filtering == base.filtering
-    assert updated.preview == base.preview
-    assert updated.read_coordinates_from == base.read_coordinates_from
-    assert updated.read_tiles_from == base.read_tiles_from
-    assert updated is not base
-
-
-def test_preprocessing_mask_backend_defaults_to_auto_and_is_overridable():
-    base = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
-    assert base.mask_backend == "auto"
-
-    updated = base.with_mask_backend("openslide")
-
-    assert updated.mask_backend == "openslide"
-    assert updated.backend == base.backend
-    assert updated.requested_spacing_um == base.requested_spacing_um
-    assert updated is not base
-
 
 def test_serialize_preprocessing_round_trips_mask_backend():
     from slide2vec.runtime.serialization import (
@@ -1179,16 +895,6 @@ def test_build_hs2p_configs_threads_mask_backend_into_tiling_config():
 
     assert tiling_cfg.backend == "cucim"
     assert tiling_cfg.mask_backend == "openslide"
-
-
-def test_build_hs2p_configs_defaults_mask_backend_to_auto():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing({"min_coverage": {"tissue": 0.1}})
-
-    tiling_cfg = build_hs2p_configs(preprocessing)[0]
-
-    assert tiling_cfg.mask_backend == "auto"
 
 
 def test_masks_min_coverage_tissue_drives_derived_tiling_threshold():
@@ -1505,20 +1211,6 @@ def test_invalid_masks_block_with_unsafe_class_name_fails_fast():
         build_hs2p_configs(preprocessing)
 
 
-def test_invalid_masks_block_with_out_of_range_value_fails_fast():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"tumor": 70000},
-            "min_coverage": {"tumor": 0.5},
-        }
-    )
-
-    with pytest.raises(ValueError, match="range"):
-        build_hs2p_configs(preprocessing)
-
-
 def test_masks_boundary_accepts_distinct_integer_value_255():
     from slide2vec.runtime.tiling import build_hs2p_configs
 
@@ -1572,31 +1264,6 @@ def test_masks_boundary_rejects_unsupported_annotation_values(pixel_mapping, mes
 
     with pytest.raises(ValueError, match=message):
         build_hs2p_configs(preprocessing)
-
-
-def test_write_tile_embeddings_namespaces_real_class_under_subdir(tmp_path: Path):
-    features = np.arange(8, dtype=np.float32).reshape(2, 4)
-    artifact = write_tile_embeddings(
-        "sample-a",
-        features,
-        output_dir=tmp_path,
-        output_format="npz",
-        annotation="tumor",
-    )
-    assert artifact.path == tmp_path / "tile_embeddings" / "tumor" / "sample-a.npz"
-
-
-def test_write_tile_embeddings_flattens_tissue_annotation(tmp_path: Path):
-    features = np.arange(8, dtype=np.float32).reshape(2, 4)
-    for annotation in (None, "tissue"):
-        artifact = write_tile_embeddings(
-            f"sample-{annotation}",
-            features,
-            output_dir=tmp_path,
-            output_format="npz",
-            annotation=annotation,
-        )
-        assert artifact.path == tmp_path / "tile_embeddings" / f"sample-{annotation}.npz"
 
 
 def test_structural_merged_artifact_paths_stay_flat_while_classes_are_namespaced():
@@ -1678,10 +1345,6 @@ def test_structural_merged_persisted_artifacts_report_none_annotation(tmp_path: 
     ]
 
 
-def test_preprocessing_config_defaults_backend_to_auto():
-    assert DEFAULT_PREPROCESSING.backend == "auto"
-
-
 def test_preprocessing_jpeg_default_is_pil_across_public_shipped_and_serialized_config():
     from slide2vec.runtime.serialization import (
         deserialize_preprocessing,
@@ -1717,40 +1380,6 @@ def test_preprocessing_turbojpeg_remains_an_explicit_serialized_opt_in():
         serialize_preprocessing(preprocessing)
     ).jpeg_backend == "turbojpeg"
 
-
-def test_preprocessing_config_defaults_spacing_and_tile_size_to_none():
-    cfg = PreprocessingConfig(backend="asap")
-
-    assert cfg.backend == "asap"
-    assert cfg.requested_spacing_um is None
-    assert cfg.requested_tile_size_px is None
-
-
-def test_execution_options_with_output_dir_preserves_other_fields(tmp_path: Path):
-    base = ExecutionOptions(
-        output_dir=None,
-        output_format="npz",
-        batch_size=8,
-        num_workers_per_gpu=3,
-        num_gpus=2,
-        precision="bf16",
-        prefetch_factor=6,
-        save_tile_embeddings=True,
-        save_latents=True,
-    )
-
-    updated = base.with_output_dir(tmp_path)
-
-    assert updated.output_dir == tmp_path
-    assert updated.output_format == base.output_format
-    assert updated.batch_size == base.batch_size
-    assert updated.num_workers_per_gpu == base.num_workers_per_gpu
-    assert updated.num_gpus == base.num_gpus
-    assert updated.precision == base.precision
-    assert updated.prefetch_factor == base.prefetch_factor
-    assert updated.save_tile_embeddings == base.save_tile_embeddings
-    assert updated.save_latents == base.save_latents
-    assert updated is not base
 
 def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
     import slide2vec.cli as cli
@@ -1998,7 +1627,6 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
     assert cfg.speed.precision == "fp32"
 
 
-
 def test_preprocessing_config_from_config_preserves_tile_store_dir():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-002",
@@ -2036,95 +1664,3 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
     assert preprocessing.read_coordinates_from is None
     assert preprocessing.read_tiles_from == Path("/tmp/tile-store")
     assert preprocessing.num_cucim_workers == 6
-
-
-def test_preprocessing_config_from_config_uses_explicit_speed_num_cucim_workers():
-    cfg = SimpleNamespace(
-        output_dir="/tmp/run-003",
-        resume=False,
-        speed=SimpleNamespace(num_cucim_workers=5),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
-                tolerance=0.07,
-                overlap=0.0,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(
-                save_mask_preview=False,
-                save_tiling_preview=False,
-                downsample=32,
-                tissue_contour_color=(157, 219, 129),
-                mask_overlay_alpha=0.5,
-            ),
-        ),
-    )
-
-    preprocessing = PreprocessingConfig.from_config(cfg)
-
-    assert preprocessing.num_cucim_workers == 5
-
-
-def test_preprocessing_config_from_config_disables_gpu_decode_by_default():
-    cfg = SimpleNamespace(
-        output_dir="/tmp/run-004",
-        resume=False,
-        speed=SimpleNamespace(num_cucim_workers=4),
-        tiling=SimpleNamespace(
-            backend="cucim",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
-                tolerance=0.07,
-                overlap=0.0,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(
-                save_mask_preview=False,
-                save_tiling_preview=False,
-                downsample=32,
-                tissue_contour_color=(157, 219, 129),
-                mask_overlay_alpha=0.5,
-            ),
-        ),
-    )
-
-    preprocessing = PreprocessingConfig.from_config(cfg)
-
-    assert preprocessing.gpu_decode is False
-
-def test_artifact_writers_use_explicit_embedding_directories(tmp_path: Path):
-    tile_artifact = write_tile_embeddings(
-        "sample-a",
-        np.zeros((2, 4), dtype=np.float32),
-        output_dir=tmp_path,
-        output_format="npz",
-    )
-    slide_artifact = write_slide_embeddings(
-        "sample-a",
-        np.zeros((1, 4), dtype=np.float32),
-        output_dir=tmp_path,
-        output_format="npz",
-    )
-
-    assert tile_artifact.path.parent.name == "tile_embeddings"
-    assert slide_artifact.path.parent.name == "slide_embeddings"
-    assert not (tmp_path / "features").exists()

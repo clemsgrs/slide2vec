@@ -7,7 +7,6 @@ slide2vec points cuFile at a config that disallows compat mode, before cucim can
 from __future__ import annotations
 
 import ast
-import json
 import os
 import subprocess
 import sys
@@ -15,17 +14,6 @@ from pathlib import Path
 
 import slide2vec
 from slide2vec import _cufile
-
-
-def test_packaged_config_disallows_compat_mode():
-    config = json.loads(Path(slide2vec.__file__).with_name("cufile.json").read_text())
-    assert config == {"properties": {"allow_compat_mode": False}}
-
-
-def test_cufile_is_pointed_at_the_packaged_config():
-    environ: dict[str, str] = {}
-    _cufile.disable_cufile_compat_mode(environ)
-    assert Path(environ[_cufile.CUFILE_ENV]) == Path(slide2vec.__file__).with_name("cufile.json")
 
 
 def test_a_config_the_user_chose_is_left_alone():

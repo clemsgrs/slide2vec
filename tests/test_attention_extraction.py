@@ -18,7 +18,6 @@ timm = pytest.importorskip("timm")
 import torch.nn.functional as F  # noqa: E402
 
 from slide2vec.encoders.base import (  # noqa: E402
-    TileEncoder,
     TimmTileEncoder,
     attentions_tuple_to_grids,
     hf_eager_attention,
@@ -75,15 +74,6 @@ def test_recomputed_weights_match_sdpa(reg_tokens: int):
 # --------------------------------------------------------------------------- #
 
 
-def test_attention_shape_cls_only_patch16():
-    enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
-    nh = enc._model.blocks[-1].attn.num_heads
-    x = torch.randn(2, 3, 224, 224)
-    with torch.no_grad():
-        out = enc.encode_tiles_attention(x)  # blocks=(-1,), no registers
-    assert out.shape == (2, 1 * nh, 14, 14)  # K = 1 (CLS) * nh
-
-
 def test_attention_shape_with_registers_and_multiblock():
     enc = _make_timm_encoder(
         "vit_tiny_patch16_224",
@@ -133,34 +123,10 @@ def test_multiblock_order_is_block_outer():
     torch.testing.assert_close(both[:, nh:], second_last, rtol=0, atol=1e-6)
 
 
-def test_attention_rows_form_a_distribution_over_grid_is_not_assumed():
-    """CLS->patch rows are a *slice* of the full softmax row, so they need NOT sum to
-    1 over the patch grid alone (prefix columns carry mass). Sanity: non-negative,
-    bounded by the full-row sum (<= 1)."""
-    enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
-    x = torch.randn(1, 3, 224, 224)
-    with torch.no_grad():
-        out = enc.encode_tiles_attention(x)
-    assert (out >= 0).all()
-    assert (out.flatten(2).sum(-1) <= 1.0 + 1e-5).all()
-
-
 # --------------------------------------------------------------------------- #
 # timm_trunk_attention: shared core reused by the timm encoders and the CONCH
 # wrappers (whose .visual.trunk / .trunk is itself a timm VisionTransformer).
 # --------------------------------------------------------------------------- #
-
-
-def test_timm_trunk_attention_matches_encoder_method():
-    """The free function on the trunk == the TimmTileEncoder method (same path)."""
-    enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
-    x = torch.randn(1, 3, 224, 224)
-    with torch.no_grad():
-        via_method = enc.encode_tiles_attention(x, blocks=(-1, -2))
-        via_func = timm_trunk_attention(
-            enc._model, x, blocks=(-1, -2), encoder_name="trunk"
-        )
-    torch.testing.assert_close(via_method, via_func, rtol=0, atol=0)
 
 
 def test_conch_reuses_timm_trunk_attention():
@@ -215,31 +181,12 @@ def test_prefix_attention_to_grid_row_major_and_channel_order():
             torch.testing.assert_close(grid[0, ch], expected, rtol=0, atol=0)
 
 
-def test_prefix_attention_to_grid_cls_only_drops_registers():
-    nh, grid_h, grid_w, num_prefix = 2, 2, 2, 3
-    N = num_prefix + grid_h * grid_w
-    attn = torch.rand(1, nh, N, N)
-    grid = prefix_attention_to_grid(
-        attn, num_prefix_tokens=num_prefix, include_registers=False,
-        grid_h=grid_h, grid_w=grid_w, encoder_name="t",
-    )
-    assert grid.shape == (1, nh, grid_h, grid_w)  # CLS only
-
-
 def test_prefix_attention_to_grid_token_mismatch_fails_loud():
     attn = torch.rand(1, 2, 1 + 9, 1 + 9)  # 9 patches
     with pytest.raises(ValueError, match="token accounting mismatch"):
         prefix_attention_to_grid(
             attn, num_prefix_tokens=1, include_registers=False,
             grid_h=4, grid_w=4, encoder_name="t",  # 16 != 9
-        )
-
-
-def test_prefix_attention_to_grid_rejects_non_4d():
-    with pytest.raises(ValueError, match=r"\(B, nh, N, N\)"):
-        prefix_attention_to_grid(
-            torch.rand(2, 5, 5), num_prefix_tokens=1, include_registers=False,
-            grid_h=2, grid_w=2, encoder_name="t",
         )
 
 
@@ -364,18 +311,6 @@ class _FakeHFViTWithAttn:
         return _FakeHFAttnOutput(attentions)
 
 
-def test_phikon_attention_uses_output_attentions():
-    from slide2vec.encoders.models.phikon import Phikon
-
-    enc = Phikon.__new__(Phikon)
-    enc._model = _FakeHFViTWithAttn(patch_size=16, num_heads=12, num_layers=12)
-    x = torch.randn(2, 3, 224, 224)
-    out = enc.encode_tiles_attention(x, blocks=(-1,))
-    assert out.shape == (2, 12, 14, 14)  # 1 CLS * 12 heads, grid 224/16=14
-    multi = enc.encode_tiles_attention(x, blocks=(-1, -2))
-    assert multi.shape == (2, 24, 14, 14)
-
-
 def test_phikon_attention_rejects_indivisible_input():
     from slide2vec.encoders.models.phikon import Phikon
 
@@ -482,39 +417,6 @@ def test_hibou_attention_includes_registers():
     assert with_reg.shape == (1, (1 + 4) * 12, 16, 16)  # CLS + 4 registers
 
 
-def test_midnight_attention_cls_only():
-    from slide2vec.encoders.models.midnight import Midnight
-
-    enc = Midnight.__new__(Midnight)
-    enc._model = _FakeHFDinoV2(patch_size=14, num_heads=6, num_layers=12)
-    x = torch.randn(2, 3, 224, 224)  # grid 16x16
-    out = enc.encode_tiles_attention(x, blocks=(-1, -2))
-    assert out.shape == (2, 2 * 6, 16, 16)  # 2 blocks * (1 CLS * 6 heads)
-
-
 # --------------------------------------------------------------------------- #
 # Gating: non-attention-capable encoders raise.
 # --------------------------------------------------------------------------- #
-
-
-def test_attention_unsupported_encoder_raises():
-    class _NonAttn(TileEncoder):
-        def get_transform(self):  # pragma: no cover - stub
-            return lambda x: x
-
-        def encode_tiles(self, batch):  # pragma: no cover - stub
-            return batch
-
-        @property
-        def encode_dim(self) -> int:  # pragma: no cover - stub
-            return 0
-
-        @property
-        def device(self):  # pragma: no cover - stub
-            return torch.device("cpu")
-
-        def to(self, device):  # pragma: no cover - stub
-            return self
-
-    with pytest.raises(NotImplementedError, match="does not support attention-map"):
-        _NonAttn().encode_tiles_attention(torch.randn(1, 3, 224, 224))

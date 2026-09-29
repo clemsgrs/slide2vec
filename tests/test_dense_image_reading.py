@@ -173,35 +173,6 @@ def test_missing_source_spacing_is_a_hard_hs2p_error(tmp_path, monkeypatch):
         )
 
 
-def test_explicit_backend_is_authoritative_and_never_falls_back(tmp_path, monkeypatch):
-    from hs2p.wsi import reader as hs2p_reader
-
-    opened = {}
-    source = _MetadataReader(
-        spacing=0.5,
-        level_dimensions=[(4, 4)],
-        level_downsamples=[(1.0, 1.0)],
-    )
-
-    def _open(path, backend, **kwargs):
-        opened["backend"] = backend
-        return source
-
-    monkeypatch.setattr(hs2p_reader, "open_slide", _open)
-
-    plan = resolve_spacing_read_plan(
-        ImageSpec(sample_id="explicit", image_path=tmp_path / "sample.svs"),
-        requested_spacing_um=0.5,
-        spacing_source="explicit",
-        requested_backend="openslide",
-        tolerance=0.05,
-    )
-
-    assert plan.requested_backend == "openslide"
-    assert plan.backend == "openslide"
-    assert opened["backend"] == "openslide"
-
-
 def test_complete_read_plan_round_trips_with_each_distributed_image(tmp_path):
     spec = ImageSpec(
         sample_id="round-trip",

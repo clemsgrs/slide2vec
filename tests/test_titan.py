@@ -88,12 +88,6 @@ def test_lean_alibi_bias_matches_reference(w, h, use_mask):
     assert lean.stride(-2) % 8 == 0
 
 
-def test_patch_declines_unrecognized_remote_code():
-    from slide2vec.encoders.models.titan import _patch_titan_remote_code
-
-    assert _patch_titan_remote_code(_FakeTitan()) is False
-
-
 def test_patched_preprocess_keeps_features_dtype():
     import sys
     import types

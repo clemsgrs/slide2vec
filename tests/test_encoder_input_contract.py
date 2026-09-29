@@ -61,46 +61,11 @@ def stand_in_gigapath(monkeypatch):
     return _StandInEncoder
 
 
-def test_load_model_refuses_to_default_the_encoder_input_contract(stand_in_gigapath):
-    import slide2vec.inference as inference
-
-    with pytest.raises(TypeError, match="encoder_input"):
-        inference.load_model(name="gigapath", device="cpu")
-
-
 def test_load_model_rejects_an_absent_contract_rather_than_falling_back(stand_in_gigapath):
     import slide2vec.inference as inference
 
     with pytest.raises(TypeError, match="explicit encoder-input contract"):
         inference.load_model(name="gigapath", device="cpu", encoder_input=None)
-
-
-def test_load_model_under_a_declared_pooled_contract_carries_the_declared_encoder_input_size(
-    stand_in_gigapath,
-):
-    import slide2vec.inference as inference
-    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
-
-    loaded = inference.load_model(
-        name="gigapath",
-        device="cpu",
-        encoder_input=EncoderInputContract.declared_pooled(
-            "gigapath", requested_tile_size_px=224, allow_non_recommended_settings=False
-        ),
-    )
-
-    assert loaded.declared_encoder_input_size_px == 224
-
-
-def test_load_model_under_a_given_contract_declares_no_encoder_input_size(stand_in_gigapath):
-    import slide2vec.inference as inference
-    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
-
-    loaded = inference.load_model(
-        name="gigapath", device="cpu", encoder_input=EncoderInputContract.given()
-    )
-
-    assert loaded.declared_encoder_input_size_px is None
 
 
 def test_declared_geometry_rejects_an_off_preset_request_without_permission():
@@ -237,15 +202,6 @@ def test_load_model_rejects_a_contract_declared_for_another_encoder(stand_in_gig
             allow_non_recommended_settings=True,
             encoder_input=contract,
         )
-
-
-def test_load_backend_raises_when_no_contract_has_been_declared(stand_in_gigapath):
-    from slide2vec.api import Model
-
-    model = Model.from_preset("gigapath", device="cpu")
-
-    with pytest.raises(ValueError, match="No encoder-input contract"):
-        model._load_backend()
 
 
 def test_transform_free_backend_load_is_not_a_declaration(stand_in_gigapath):

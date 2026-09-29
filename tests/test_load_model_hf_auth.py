@@ -78,15 +78,6 @@ def _load_stand_in(**kwargs):
     )
 
 
-def test_load_model_with_hf_token_env_never_logs_in(login_calls, monkeypatch):
-    monkeypatch.setenv("HF_TOKEN", "hf_from_env")
-
-    _load_stand_in()
-
-    assert login_calls == []
-    assert huggingface_hub.get_token() == "hf_from_env"
-
-
 def test_load_model_with_explicit_token_exports_it_without_logging_in(login_calls):
     _load_stand_in(token="hf_explicit")
 

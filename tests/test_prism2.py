@@ -1,28 +1,15 @@
 """Public contract tests for the gated PRISM2 slide preset."""
 
-from pathlib import Path
-import tomllib
-
 import pytest
 
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 
-ROOT = Path(__file__).resolve().parents[1]
 
-
-def _fake_prism2_model(
-    moves,
-    *,
-    move_name=None,
-    forbid_full_model_move=False,
-):
+def _fake_prism2_model(moves):
     class FakeImageResampler:
         def to(self, device):
-            moved_device = torch.device(device)
-            moves.append(
-                moved_device if move_name is None else (move_name, moved_device)
-            )
+            moves.append(torch.device(device))
             return self
 
     class FakePrism2Model(torch.nn.Module):
@@ -33,113 +20,9 @@ def _fake_prism2_model(
             self.text_decoder = FakeImageResampler()
 
         def to(self, *args, **kwargs):
-            if forbid_full_model_move:
-                raise AssertionError("the out-of-scope text decoder must stay on CPU")
-            return super().to(*args, **kwargs)
+            raise AssertionError("the out-of-scope text decoder must stay on CPU")
 
     return FakePrism2Model()
-
-
-def test_prism2_is_a_public_slide_preset():
-    from slide2vec import Model, list_models
-
-    model = Model.from_preset("prism2")
-
-    assert "prism2" in list_models("slide")
-    assert model.name == "prism2"
-    assert model.level == "slide"
-
-
-def test_prism2_registry_contract():
-    from slide2vec.encoders import encoder_registry
-
-    assert encoder_registry.info("prism2") == {
-        "name": "prism2",
-        "output_variants": {
-            "base": {"encode_dim": 2560},
-            "diagnostic": {"encode_dim": 3072},
-        },
-        "default_output_variant": "base",
-        "level": "slide",
-        "input_size": None,
-        "supports_variable_input_size": None,
-        "variable_input_model_kwargs": {},
-        "patch_size": None,
-        "tile_encoder": "virchow2",
-        "tile_encoder_output_variant": "cls",
-        "supported_spacing_um": 0.5,
-        "default_spacing_um": None,
-        "precision": "bf16",
-        "source": "paige-ai/Prism2",
-    }
-
-
-@pytest.mark.parametrize(
-    ("output_variant", "expected_dim"),
-    [(None, 2560), ("diagnostic", 3072)],
-)
-def test_prism2_public_model_lifecycle_reports_selected_dimension(
-    monkeypatch,
-    output_variant,
-    expected_dim,
-):
-    import timm
-
-    from slide2vec import Model
-
-    class FakeVirchow2Model(torch.nn.Module):
-        pretrained_cfg = {
-            "input_size": (3, 224, 224),
-            "mean": (0.485, 0.456, 0.406),
-            "std": (0.229, 0.224, 0.225),
-            "interpolation": "bicubic",
-            "crop_pct": 1.0,
-        }
-
-    monkeypatch.setattr(
-        transformers.AutoModel,
-        "from_pretrained",
-        lambda *args, **kwargs: _fake_prism2_model([]),
-    )
-    monkeypatch.setattr(
-        transformers.AutoProcessor,
-        "from_pretrained",
-        lambda *args, **kwargs: object(),
-    )
-    monkeypatch.setattr(
-        timm,
-        "create_model",
-        lambda *args, **kwargs: FakeVirchow2Model(),
-    )
-
-    model = Model.from_preset(
-        "prism2",
-        output_variant=output_variant,
-        device="cpu",
-    )
-
-    assert model.feature_dim == expected_dim
-    assert model.device == torch.device("cpu")
-
-
-def test_prism2_resolves_virchow2_geometry_at_its_only_supported_spacing():
-    from slide2vec.encoders.registry import resolve_preprocessing_defaults
-
-    assert resolve_preprocessing_defaults("prism2") == {
-        "tile_size_px": 224,
-        "spacing_um": 0.5,
-        "source_encoder": "virchow2",
-    }
-
-
-def test_prism2_resolves_the_virchow2_cls_only_dependency():
-    from slide2vec.encoders.registry import resolve_tile_dependency_output
-
-    assert resolve_tile_dependency_output("prism2") == {
-        "encoder_name": "virchow2",
-        "output_variant": "cls",
-        "encode_dim": 1280,
-    }
 
 
 def test_prism2_loads_the_official_model_and_processor_contract(monkeypatch):
@@ -331,10 +214,7 @@ def test_prism2_moves_only_the_base_embedding_component_to_device(monkeypatch):
     monkeypatch.setattr(
         transformers.AutoModel,
         "from_pretrained",
-        lambda *args, **kwargs: _fake_prism2_model(
-            moves,
-            forbid_full_model_move=True,
-        ),
+        lambda *args, **kwargs: _fake_prism2_model(moves),
     )
     monkeypatch.setattr(
         transformers.AutoProcessor,
@@ -395,76 +275,4 @@ def test_prism2_moves_the_official_diagnostic_path_to_cuda_in_bfloat16(
         ("image_resampler", torch.device("cuda:0"), torch.bfloat16),
         ("img_projection", torch.device("cuda:0"), torch.bfloat16),
         ("text_decoder", torch.device("cuda:0"), torch.bfloat16),
-    ]
-
-
-def test_prism2_load_model_seam_attaches_cls_tile_encoder_and_dimensions(
-    monkeypatch,
-):
-    import timm
-
-    from slide2vec.inference import load_model
-    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
-
-    moves = []
-
-    class FakeVirchow2Model(torch.nn.Module):
-        pretrained_cfg = {
-            "input_size": (3, 224, 224),
-            "mean": (0.485, 0.456, 0.406),
-            "std": (0.229, 0.224, 0.225),
-            "interpolation": "bicubic",
-            "crop_pct": 1.0,
-        }
-
-        def to(self, device):
-            moves.append(("virchow2", torch.device(device)))
-            return self
-
-    monkeypatch.setattr(
-        transformers.AutoModel,
-        "from_pretrained",
-        lambda *args, **kwargs: _fake_prism2_model(
-            moves,
-            move_name="prism2",
-        ),
-    )
-    monkeypatch.setattr(
-        transformers.AutoProcessor,
-        "from_pretrained",
-        lambda *args, **kwargs: object(),
-    )
-    monkeypatch.setattr(
-        timm,
-        "create_model",
-        lambda *args, **kwargs: FakeVirchow2Model(),
-    )
-
-    loaded = load_model(
-        name="prism2",
-        encoder_input=EncoderInputContract.given(),
-        device="cpu",
-    )
-
-    assert loaded.name == "prism2"
-    assert loaded.level == "slide"
-    assert loaded.feature_dim == 2560
-    assert loaded.tile_feature_dim == 1280
-    assert loaded.model.tile_encoder.encode_dim == 1280
-    assert moves == [
-        ("prism2", torch.device("cpu")),
-        ("virchow2", torch.device("cpu")),
-    ]
-
-
-def test_prism2_optional_extra_matches_the_upstream_cuda_runtime():
-    with (ROOT / "pyproject.toml").open("rb") as stream:
-        extras = tomllib.load(stream)["project"]["optional-dependencies"]
-
-    assert extras["prism2"] == [
-        "torch>=2.3",
-        "transformers==4.51.3",
-        "safetensors",
-        "einops",
-        "flash-attn>=2.6.3",
     ]

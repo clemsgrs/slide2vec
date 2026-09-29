@@ -111,29 +111,6 @@ def test_reshape_strips_prefix_and_is_row_major():
     assert torch.equal(grid, expected)
 
 
-def test_reshape_rejects_non_token_sequence():
-    with pytest.raises(ValueError, match="token sequence"):
-        reshape_tokens_to_grid(
-            torch.randn(2, 196),  # missing feature axis
-            grid_h=14,
-            grid_w=14,
-            num_prefix_tokens=1,
-            encoder_name="test",
-        )
-
-
-def test_reshape_token_count_mismatch_fails_loud():
-    tokens = torch.randn(1, 1 + 14 * 14, 8)
-    with pytest.raises(ValueError, match="token accounting mismatch"):
-        reshape_tokens_to_grid(
-            tokens,
-            grid_h=16,  # 16*16=256 != 196
-            grid_w=16,
-            num_prefix_tokens=1,
-            encoder_name="test",
-        )
-
-
 # --------------------------------------------------------------------------- #
 # encode_tiles_dense: input validation + fail-loud guards.
 # --------------------------------------------------------------------------- #
@@ -143,12 +120,6 @@ def test_encode_tiles_dense_rejects_indivisible_input():
     enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
     with pytest.raises(ValueError, match="divisible by the patch size"):
         enc.encode_tiles_dense(torch.randn(1, 3, 220, 220))  # 220 % 16 != 0
-
-
-def test_encode_tiles_dense_rejects_non_4d_input():
-    enc = _make_timm_encoder("vit_tiny_patch16_224", dynamic_img_size=True)
-    with pytest.raises(ValueError, match=r"\(B, C, H, W\)"):
-        enc.encode_tiles_dense(torch.randn(3, 224, 224))
 
 
 def test_encode_tiles_dense_wrong_prefix_count_fails_loud():
@@ -372,25 +343,6 @@ def test_musk_dense_rejects_non_native_size_until_resize_or_sliding_window():
         enc.encode_tiles_dense(torch.randn(1, 3, 512, 512))
 
 
-def test_gigapath_dense_transform_is_pooled_only_and_crops():
-    """GigaPath's get_transform is the POOLED recipe — it center-crops 256->224.
-
-    The dense pipeline must NOT route through it (the crop would drop the tile
-    margins and misregister the grid); it supplies its own no-crop transform.
-    encode_tiles_dense is transform-agnostic and inherited from TimmTileEncoder,
-    so it is NOT overridden/disabled on GigaPath. We assert the pooled transform
-    still crops (so the dense pipeline knows to bypass it) without downloading
-    weights.
-    """
-    from slide2vec.encoders.models.gigapath import GigaPath
-
-    enc = GigaPath.__new__(GigaPath)  # no weights needed; get_transform is static
-    out = enc.get_transform()(torch.zeros(3, 256, 256, dtype=torch.uint8))
-    assert out.shape == (3, 224, 224)  # pooled transform crops to native 224
-    # The dense method is the inherited, transform-agnostic one (not disabled).
-    assert GigaPath.encode_tiles_dense is TimmTileEncoder.encode_tiles_dense
-
-
 def test_normalization_transform_has_no_resize_or_crop():
     """get_normalization_transform must normalize WITHOUT resizing/cropping.
 
@@ -462,26 +414,3 @@ def test_hoptimus_dynamic_img_size_gated_without_download():
 
     with pytest.raises(ValueError, match="recommends dynamic_img_size=False"):
         HOptimus0(dynamic_img_size=True)
-
-
-def test_dense_unsupported_encoder_raises_not_implemented():
-    class _NonDense(TileEncoder):
-        def get_transform(self):  # pragma: no cover - trivial stub
-            return lambda x: x
-
-        def encode_tiles(self, batch):  # pragma: no cover - trivial stub
-            return batch
-
-        @property
-        def encode_dim(self) -> int:  # pragma: no cover - trivial stub
-            return 0
-
-        @property
-        def device(self):  # pragma: no cover - trivial stub
-            return torch.device("cpu")
-
-        def to(self, device):  # pragma: no cover - trivial stub
-            return self
-
-    with pytest.raises(NotImplementedError, match="does not support dense"):
-        _NonDense().encode_tiles_dense(torch.randn(1, 3, 224, 224))

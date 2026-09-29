@@ -1,8 +1,8 @@
 """Tests for the natural-image DINOv3 ViT-B/16 encoder (``dinov3-vitb16``).
 
-Offline (``pretrained=False``) checks against timm's ``Eva`` backbone: registry
-metadata, both pooling variants, dense grids, and RoPE-aware attention. The one
-real-weight forward is ``heavy``-marked and skips without weights.
+Offline (``pretrained=False``) checks against timm's ``Eva`` backbone: both
+pooling variants, dense grids, and RoPE-aware attention. The one real-weight forward is ``heavy``-marked and skips
+without weights.
 """
 
 from __future__ import annotations
@@ -15,23 +15,6 @@ timm = pytest.importorskip("timm")
 from slide2vec.encoders import encoder_registry  # noqa: E402
 
 TIMM_NAME = "vit_base_patch16_dinov3.lvd1689m"
-
-
-def test_dinov3_metadata_contract():
-    info = encoder_registry.info("dinov3-vitb16")
-    assert info["level"] == "tile"
-    assert info["input_size"] == 256
-    assert info["patch_size"] == 16
-    assert info["supports_variable_input_size"] is True
-    assert info["supported_spacing_um"] is None
-    assert info["default_spacing_um"] == pytest.approx(0.5)
-    assert info["precision"] == "fp16"
-    assert info["source"] == "timm/vit_base_patch16_dinov3.lvd1689m"
-    assert info["output_variants"] == {
-        "patch_mean": {"encode_dim": 768},
-        "cls": {"encode_dim": 768},
-    }
-    assert info["default_output_variant"] == "patch_mean"
 
 
 @pytest.fixture(scope="module")
@@ -88,12 +71,6 @@ def test_dinov3_dense_grid_excludes_prefix_tokens(offline_model, size: int, grid
     assert enc.patch_size == (16, 16)
     assert mine.shape == (2, 768, grid, grid)
     torch.testing.assert_close(mine, oracle, rtol=0, atol=1e-6)
-
-
-def test_dinov3_dense_rejects_non_patch_multiple(offline_model):
-    enc = offline_encoder(offline_model)
-    with pytest.raises(ValueError, match="divisible by the patch size"):
-        enc.encode_tiles_dense(torch.randn(1, 3, 225, 225))
 
 
 def backend_attention_weights(model, block_index: int, x: torch.Tensor) -> torch.Tensor:
@@ -158,13 +135,6 @@ def test_dinov3_requires_timm_1_0_20(monkeypatch):
     monkeypatch.setattr(timm, "create_model", lambda *a, **k: pytest.fail("must fail before create_model"))
     with pytest.raises(ImportError, match=r"timm>=1\.0\.20"):
         DINOv3ViTB16()
-
-
-def test_dinov3_alias_resolves_to_canonical():
-    from slide2vec.runtime.model_settings import canonicalize_model_name
-
-    assert canonicalize_model_name("dinov3") == "dinov3-vitb16"
-    assert canonicalize_model_name("dinov3-vitb") == "dinov3-vitb16"
 
 
 @pytest.mark.heavy

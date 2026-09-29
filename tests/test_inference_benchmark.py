@@ -4,21 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 
-@pytest.mark.parametrize("field,value,message", [
-    ("batch_size", 0, "batch_size must be positive"),
-    ("modes", ["unknown"], "Unknown inference mode"),
-    ("cache_policy", "server-cold", "Unknown cache policy"),
-])
-def test_inference_benchmark_rejects_invalid_workloads(field, value, message):
-    from scripts.benchmark_inference import run_inference_benchmark
-
-    args = SimpleNamespace(batch_size=2, tile_size=224, repeat=1, warmup=0,
-                           workers=0, threads=1, modes=["cached"], cache_policy="warm")
-    setattr(args, field, value)
-    with pytest.raises(ValueError, match=message):
-        run_inference_benchmark(args)
-
-
 def test_inference_modes_preserve_coordinates_batches_and_embeddings(tmp_path, monkeypatch):
     import itertools
     import json

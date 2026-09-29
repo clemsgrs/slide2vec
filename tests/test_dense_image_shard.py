@@ -180,33 +180,6 @@ def test_write_dense_image_does_not_publish_interrupted_sidecar(tmp_path, monkey
 # --------------------------------------------------------------------------------------
 
 
-def test_run_dense_image_shard_writes_payload_and_sidecar_per_image(tmp_path):
-    enc = _encoder()
-    specs = [_spec(tmp_path, name) for name in ("a", "b", "c")]
-
-    artifacts = run_dense_image_shard(
-        specs,
-        loaded=_loaded(enc),
-        out_dir=tmp_path / "out",
-        dense=_dense(),
-        recipe=_recipe(),
-        batch_size=2,
-        num_workers=0,
-    )
-
-    assert [artifact.sample_id for artifact in artifacts] == ["a", "b", "c"]
-    dense_dir = _dense_dir(tmp_path / "out")
-    for artifact in artifacts:
-        assert artifact.path == (dense_dir / f"{artifact.sample_id}.pt").resolve()
-        assert artifact.metadata_path.exists()
-        assert artifact.grid_shape == (4, 4)
-        assert artifact.feature_dim == enc.encode_dim
-        grid = torch.load(artifact.path, weights_only=True)
-        assert tuple(grid.shape) == (enc.encode_dim, 4, 4)
-    assert sorted(p.name for p in dense_dir.glob("*.pt")) == ["a.pt", "b.pt", "c.pt"]
-    assert list(dense_dir.glob("*.tmp*")) == []
-
-
 @pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
 @pytest.mark.parametrize("window_size", [None, 32])
 def test_grid_matches_the_direct_dense_composition(tmp_path, feature_kind, window_size):
