@@ -402,6 +402,39 @@ def test_run_forward_pass_reports_processed_tile_counts():
     assert all(payload["sample_id"] == "slide-a" for payload in payloads)
 
 
+def test_run_forward_pass_emits_batch_timing_events():
+    torch = pytest.importorskip("torch")
+    import slide2vec.progress as progress
+
+    reporter = RecordingReporter()
+
+    class FakeModel:
+        def encode_tiles(self, image):
+            return torch.ones((image.shape[0], 3), dtype=torch.float32)
+
+    dataloader = [
+        (torch.tensor([0, 1]), torch.ones((2, 3, 4, 4), dtype=torch.float32)),
+        (torch.tensor([2]), torch.ones((1, 3, 4, 4), dtype=torch.float32)),
+    ]
+    loaded = SimpleNamespace(device="cpu", feature_dim=3, model=FakeModel(), transforms=lambda image: image)
+
+    with progress.activate_progress_reporter(reporter):
+        batching.run_forward_pass(
+            dataloader,
+            loaded,
+            nullcontext(),
+            sample_id="slide-a",
+            total_items=3,
+            unit_label="tile",
+        )
+
+    timing_payloads = [event.payload for event in reporter.events if event.kind == "embedding.batch.timing"]
+    assert [(payload["sample_id"], payload["batch_size"]) for payload in timing_payloads] == [
+        ("slide-a", 2),
+        ("slide-a", 1),
+    ]
+
+
 def test_run_forward_pass_prefers_tile_encoder_when_present():
     torch = pytest.importorskip("torch")
     import slide2vec.inference as inference
