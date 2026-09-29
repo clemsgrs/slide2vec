@@ -25,7 +25,7 @@ def test_dinov2_natimage_resolves_tiling_default_from_default_spacing():
     from slide2vec.encoders.registry import resolve_preprocessing_defaults
 
     defaults = resolve_preprocessing_defaults("dinov2-vitb14")
-    assert defaults["tile_size_px"] == 518
+    assert defaults["tile_size_px"] == 224
     assert defaults["spacing_um"] == pytest.approx(0.5)
 
 

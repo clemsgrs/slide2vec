@@ -26,9 +26,9 @@ Registry ``input_size`` is the default **final** model input size. Slide
 extraction reads tiles at ``requested_tile_size_px`` (default: ``input_size``),
 applies only the encoder's photometric preprocessing (dtype, scaling,
 normalization), and encodes exactly that size. No encoder-side resize or
-center crop follows the read. Lunit, mSTAR, GigaPath and GPFM default to
-224px; DINOv2 to 518px; DINOv3 to 256px. Slide and patient presets inherit the
-default of their tile encoder.
+center crop follows the read. Lunit, mSTAR, GigaPath, GPFM and DINOv2 default
+to 224px; DINOv3 to 256px. Slide and patient presets inherit the default of
+their tile encoder.
 
 This is slide2vec's declared extraction policy, not a reproduction of each
 model's published sampling protocol. Earlier releases read Lunit and mSTAR at
@@ -41,7 +41,7 @@ a different ``requested_tile_size_px``.
 An off-default size requires ``allow_non_recommended_settings=True``, an
 encoder that supports variable input, and a multiple of the patch size. The
 permission only allows the size; preprocessing stays geometry-preserving. For
-DINOv2 matched-resolution experiments:
+DINOv2 at its native checkpoint resolution:
 
 .. code-block:: python
 
@@ -49,17 +49,18 @@ DINOv2 matched-resolution experiments:
    model.embed_slides(
        slides,
        preprocessing=PreprocessingConfig(
-           requested_spacing_um=0.5, requested_tile_size_px=224,
+           requested_spacing_um=0.5, requested_tile_size_px=518,
        ),
    )
 
-This forwards exactly 224×224 pixels. Without the flag, an off-default request
-raises; 225px raises even with the flag (not a multiple of 14). The same call
-with ``dinov3-vitb16`` forwards 224×224 pixels through its 16px patch grid.
+This forwards exactly 518×518 pixels. Without the flag, an off-default request
+raises; 525px raises even with the flag (not a multiple of 14). With
+``dinov3-vitb16``, ``requested_tile_size_px=224`` forwards 224×224 pixels
+through its 16px patch grid.
 
 Pre-cropped images (``embed_images``, ``embed_tiles``) keep each encoder's
 shipped ``get_transform`` recipe: Lunit/mSTAR Resize 248 → CenterCrop 224,
-GigaPath Resize 256 → CenterCrop 224, DINOv2 Resize 518 → CenterCrop 518, DINOv3
+GigaPath and DINOv2 Resize 256 → CenterCrop 224, DINOv3
 Resize 256 → CenterCrop 256, GPFM direct 224 resize. Dense extraction is
 unchanged.
 
