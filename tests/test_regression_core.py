@@ -185,6 +185,7 @@ def test_get_cfg_from_args_fills_null_spacing_from_model_default(tmp_path: Path)
     [
         ("virchow2", 224, "fp16"),
         ("midnight", 224, "fp16"),
+        ("mettle", 224, "fp16"),
         ("musk", 384, "fp16"),
     ],
 )

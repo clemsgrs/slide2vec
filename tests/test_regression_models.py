@@ -295,6 +295,7 @@ def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_prep
     [
         ("virchow2", 224, "fp16"),
         ("midnight", 224, "fp16"),
+        ("mettle", 224, "fp16"),
         ("musk", 384, "fp16"),
     ],
 )

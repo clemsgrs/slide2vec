@@ -163,6 +163,10 @@ unchanged.
      - `H-Optimus-1 <https://huggingface.co/bioptimus/H-optimus-1>`_
      - 1536
      - ``0.5``
+   * - ``mettle``
+     - `Mettle <https://huggingface.co/slideflow-labs/Mettle>`_
+     - 1536 / 3072
+     - ``0.5``
    * - ``rudolfv2``
      - `RudolfV 2 <https://huggingface.co/Aignostics/RudolfV-2>`_
      - 1536 / 3072
