@@ -59,9 +59,9 @@ raises; 525px raises even with the flag (not a multiple of 14). With
 through its 16px patch grid.
 
 Pre-cropped images (``embed_images``, ``embed_tiles``) keep each encoder's
-shipped ``get_transform`` recipe: Lunit/mSTAR Resize 248 → CenterCrop 224,
+shipped ``get_transform`` recipe: Lunit Resize 248 → CenterCrop 224,
 GigaPath and DINOv2 Resize 256 → CenterCrop 224, DINOv3
-Resize 256 → CenterCrop 256, GPFM direct 224 resize. Dense extraction is
+Resize 256 → CenterCrop 256, GPFM and mSTAR direct 224 resize. Dense extraction is
 unchanged.
 
 .. list-table::
