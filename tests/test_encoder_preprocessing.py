@@ -24,6 +24,7 @@ def recipe_encoder(name):
                       interpolation="bicubic", mean=(0.485, 0.456, 0.406),
                       std=(0.229, 0.224, 0.225))
     if name == "mstar":
+        # Wangyh/mSTAR hub config ships timm's stock 0.5/0.5, not the authors' recipe.
         config.update(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
     if name == "h-optimus-0":
         # bioptimus/H-optimus-0 pretrained_cfg (verified against the hub config).
@@ -34,6 +35,9 @@ def recipe_encoder(name):
 
 IMAGENET_RED = [2.2489083, -2.0357143, -1.8044444]
 IMAGENET_BLACK = [-2.117904, -2.0357143, -1.8044444]
+# Lunit ViT-S training stats (mean 0.70322989, 0.53606487, 0.66096631; std 0.21716536, 0.26081574, 0.20723464).
+LUNIT_RED = [1.3665628, -2.0553394, -3.1894586]
+LUNIT_BLACK = [-3.2382231, -2.0553394, -3.1894586]
 
 
 def bordered_image(size: int) -> Image.Image:
@@ -79,16 +83,17 @@ def assert_border_intact(output: torch.Tensor, *, size: int, red, black) -> None
     assert int(is_red.sum()) == 4 * size - 4
 
 
+@pytest.mark.parametrize("name", ["gpfm", "mstar"])
 @pytest.mark.parametrize("size", [(224, 224), (448, 224)])
-def test_gpfm_resizes_complete_image_to_224(size):
+def test_given_recipe_resizes_complete_image_to_224(name, size):
     image = Image.new("RGB", size, (255, 0, 0))
     image.paste((0, 0, 255), (size[0] // 2, 0, size[0], size[1]))
-    encoder = recipe_encoder("gpfm")
+    encoder = recipe_encoder(name)
     transform = encoder.get_transform()
 
     output = transform(image)
 
-    assert encoder_registry.info("gpfm")["input_size"] == 224
+    assert encoder_registry.info(name)["input_size"] == 224
     assert tuple(output.shape) == (3, 224, 224)
     assert isinstance(transform.transforms[0], transforms.Resize)
     assert transform.transforms[0].size == (224, 224)
@@ -99,8 +104,8 @@ def test_gpfm_resizes_complete_image_to_224(size):
 
 
 @pytest.mark.parametrize("name, expected_red, expected_black", [
-    ("lunit", IMAGENET_RED, IMAGENET_BLACK),
-    ("mstar", [1.0, -1.0, -1.0], [-1.0, -1.0, -1.0]),
+    ("lunit", LUNIT_RED, LUNIT_BLACK),
+    ("mstar", IMAGENET_RED, IMAGENET_BLACK),
     ("gigapath", IMAGENET_RED, IMAGENET_BLACK),
 ])
 def test_default_declared_pooled_encodes_the_224_it_read(
@@ -147,8 +152,7 @@ def test_default_declared_pooled_encodes_the_224_it_read(
 
 
 @pytest.mark.parametrize("name, sampled, expected_red", [
-    ("lunit", 248, IMAGENET_RED),
-    ("mstar", 248, [1.0, -1.0, -1.0]),
+    ("lunit", 248, LUNIT_RED),
     ("gigapath", 256, IMAGENET_RED),
     ("dinov2-vitb14", 256, IMAGENET_RED),
 ])
@@ -271,8 +275,8 @@ def test_dinov2_public_pooled_native_518_requires_permission(monkeypatch):
 
 @pytest.mark.parametrize("name, expected_black", [
     ("gpfm", [-2.117904, -2.0357143, -1.8044444]),
-    ("lunit", [-2.117904, -2.0357143, -1.8044444]),
-    ("mstar", [-1.0, -1.0, -1.0]),
+    ("lunit", LUNIT_BLACK),
+    ("mstar", [-2.117904, -2.0357143, -1.8044444]),
     ("dinov2-vitb14", [-2.117904, -2.0357143, -1.8044444]),
     ("dinov3-vitb16", [-2.117904, -2.0357143, -1.8044444]),
 ])
