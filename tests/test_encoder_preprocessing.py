@@ -157,8 +157,7 @@ def test_given_pixels_keep_shipped_resize_then_center_crop_recipe(name, sampled,
 
     transform = EncoderInputContract.given().get_transform(recipe_encoder(name))
     image = Image.new("RGB", (sampled, sampled), (255, 0, 0))
-    to_image_first = name in {"gigapath", "dinov2-vitb14"}
-    resize = transform.transforms[1] if to_image_first else transform.transforms[0]
+    resize = next(step for step in transform.transforms if type(step).__name__ == "Resize")
     assert resize(image).size == (sampled, sampled)
     assert resize.interpolation == transforms.InterpolationMode.BICUBIC
     output = transform(image)

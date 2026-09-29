@@ -19,16 +19,14 @@ base, so the control is dense-extraction- and attention-capable exactly like the
 pathology encoders. ``dynamic_img_size=True`` lets the natively 518px backbone
 run at other patch-aligned sizes via positional-embedding interpolation.
 
-Input size follows Meta's evaluation recipe, not timm's 518px checkpoint
-config: Meta evaluates DINOv2 at 224px (``make_classification_eval_transform``:
-bicubic Resize 256 -> CenterCrop 224 -> ImageNet normalization). The registry
-``input_size`` is therefore 224, the size the encoder sees (not 256: declared
-runs encode the registry size as-is, so 256 would encode 256px). Declared pooled runs
-read and encode 224px tiles with normalization only (112 µm at the default
-0.5 µm/px, 16x16 tokens, the same field of view as the 224px pathology tile
-encoders). Native 518px is an explicit request with
-``allow_non_recommended_settings=True``. Given pre-cropped tiles use Meta's
-Resize 256 -> CenterCrop 224 recipe.
+Input size follows Meta's DINOv2 evaluation recipe
+(``make_classification_eval_transform``: bicubic Resize 256 -> CenterCrop 224
+-> ImageNet normalization), not timm's 518px checkpoint config. The registry
+``input_size`` is 224, the size the encoder sees; 256 would make declared runs
+encode 256px. Declared pooled runs read and encode 224px tiles with
+normalization only (112 µm at the default 0.5 µm/px, 16x16 tokens). Native
+518px is an explicit request with ``allow_non_recommended_settings=True``.
+Given pre-cropped tiles use Meta's Resize 256 -> CenterCrop 224 recipe.
 
 Spacing note: a natural-image model has **no** intrinsic micron-per-pixel
 spacing, so it declares ``supported_spacing_um=None`` — it is *spacing-agnostic*
@@ -68,7 +66,7 @@ class DINOv2ViTB14(TimmTileEncoder):
         super().__init__(
             "vit_base_patch14_dinov2.lvd142m",
             output_variant=output_variant,
-            dynamic_img_size=True,  # enable dense extraction; no-op at native size
+            dynamic_img_size=True,  # 224 default, 518 opt-in and dense sizes; no-op at native 518
         )
 
     def get_transform(self) -> Callable:
