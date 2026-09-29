@@ -35,6 +35,7 @@ DENSE_PATCH_SIZES: dict[str, tuple[int, int]] = {
     "h-optimus-1": (14, 14),
     "h0-mini": (14, 14),
     "lunit": (8, 8),
+    "mettle": (14, 14),
     "prost40m": (14, 14),
     "conch": (16, 16),
     "conchv15": (16, 16),

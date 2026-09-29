@@ -350,3 +350,38 @@ def test_dinov3_public_pooled_recipe_reaches_encoding(
     assert [tuple(batch.shape) for batch in observed] == [(1, 3, expected_size, expected_size)] * 2
     assert_border_intact(observed[0][0], size=expected_size, red=IMAGENET_RED, black=IMAGENET_BLACK)
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
+
+
+# bioptimus/H-optimus-0 mean/std, which slideflow-labs/Mettle's preprocessor_config.json repeats.
+HOPTIMUS_RED = [1.381786, -2.514934, -3.96366]
+HOPTIMUS_BLACK = [-3.3378, -2.514934, -3.96366]
+
+
+@pytest.mark.parametrize("regime", ["pooled", "dense"])
+def test_mettle_declared_normalization_uses_hoptimus_photometrics_not_imagenet(regime):
+    """Mettle's generic timm arch carries an ImageNet pretrained_cfg; its card uses H-optimus mean/std."""
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    if regime == "pooled":
+        contract = EncoderInputContract.declared_pooled(
+            "mettle", requested_tile_size_px=224, allow_non_recommended_settings=False,
+        )
+    else:
+        contract = EncoderInputContract.declared_dense("mettle", target_size_px=224, window_size=None)
+    output = contract.get_transform(recipe_encoder("mettle"))(bordered_image(224))
+
+    assert_border_intact(output, size=224, red=HOPTIMUS_RED, black=HOPTIMUS_BLACK)
+
+
+def test_mettle_given_recipe_is_a_bicubic_224_resize_without_enlargement():
+    from torchvision.transforms import v2
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    transform = EncoderInputContract.given().get_transform(recipe_encoder("mettle"))
+
+    assert_border_intact(transform(bordered_image(224)), size=224, red=HOPTIMUS_RED, black=HOPTIMUS_BLACK)
+    downsized = transform(Image.new("RGB", (448, 448), (255, 0, 0)))
+    assert tuple(downsized.shape) == (3, 224, 224)
+    torch.testing.assert_close(downsized[:, 112, 112], torch.tensor(HOPTIMUS_RED))
+    resize = next(step for step in transform.transforms if isinstance(step, v2.Resize))
+    assert resize.interpolation == v2.InterpolationMode.BICUBIC

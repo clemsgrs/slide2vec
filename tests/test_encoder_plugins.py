@@ -179,7 +179,7 @@ with ThreadPoolExecutor(max_workers=8) as executor:
 expected_models = listings[0]
 assert listings == [expected_models] * 8
 assert expected_models == sorted(expected_models)
-assert {"private-alpha", "private-beta", "virchow2"} <= set(expected_models)
+assert {"private-alpha", "private-beta", "virchow2", "mettle"} <= set(expected_models)
 assert discovered.read_text() == "discovered"
 assert not constructed.exists()
 
