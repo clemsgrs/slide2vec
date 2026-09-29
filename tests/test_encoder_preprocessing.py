@@ -150,13 +150,15 @@ def test_default_declared_pooled_encodes_the_224_it_read(
     ("lunit", 248, IMAGENET_RED),
     ("mstar", 248, [1.0, -1.0, -1.0]),
     ("gigapath", 256, IMAGENET_RED),
+    ("dinov2-vitb14", 256, IMAGENET_RED),
 ])
 def test_given_pixels_keep_shipped_resize_then_center_crop_recipe(name, sampled, expected_red):
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
     transform = EncoderInputContract.given().get_transform(recipe_encoder(name))
     image = Image.new("RGB", (sampled, sampled), (255, 0, 0))
-    resize = transform.transforms[0] if name != "gigapath" else transform.transforms[1]
+    to_image_first = name in {"gigapath", "dinov2-vitb14"}
+    resize = transform.transforms[1] if to_image_first else transform.transforms[0]
     assert resize(image).size == (sampled, sampled)
     assert resize.interpolation == transforms.InterpolationMode.BICUBIC
     output = transform(image)
@@ -200,12 +202,12 @@ def test_musk_default_declared_pooled_keeps_fixed_384_input():
 
 @pytest.mark.parametrize(
     "requested, permission, expected_size, requires_variable_model_input",
-    [(None, False, 518, False), (224, True, 224, True)],
+    [(None, False, 224, False), (518, True, 518, True)],
 )
 def test_dinov2_public_pooled_recipe_reaches_encoding(
     monkeypatch, requested, permission, expected_size, requires_variable_model_input,
 ):
-    """Default 518 and permitted 224 both encode exactly the tile they read."""
+    """Default 224 and permitted native 518 both encode exactly the tile they read."""
     import slide2vec.inference as inference
     from slide2vec.api import Model, PreprocessingConfig
     from slide2vec.runtime.types import LoadedModel
@@ -256,7 +258,7 @@ def test_dinov2_public_pooled_225_raises_even_with_permission(monkeypatch):
         ))
 
 
-def test_dinov2_public_pooled_224_requires_permission(monkeypatch):
+def test_dinov2_public_pooled_native_518_requires_permission(monkeypatch):
     import slide2vec.inference as inference
     from slide2vec.api import Model, PreprocessingConfig
 
@@ -264,7 +266,7 @@ def test_dinov2_public_pooled_224_requires_permission(monkeypatch):
     model = Model.from_preset("dinov2-vitb14", device="cpu")
     with pytest.raises(ValueError, match="allow_non_recommended_settings=True"):
         model.embed_slides([], preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5, requested_tile_size_px=224,
+            requested_spacing_um=0.5, requested_tile_size_px=518,
         ))
 
 
