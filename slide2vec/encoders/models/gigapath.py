@@ -4,6 +4,7 @@ from typing import Callable
 
 import torch
 from huggingface_hub import hf_hub_download
+from huggingface_hub.errors import LocalEntryNotFoundError
 from torchvision.transforms import v2
 
 from slide2vec.encoders.base import (
@@ -16,6 +17,15 @@ from slide2vec.encoders.registry import register_encoder
 
 _HF_REPO_ID = "prov-gigapath/prov-gigapath"
 _HF_SLIDE_CHECKPOINT = "slide_encoder.pth"
+
+
+def _slide_checkpoint_path() -> str:
+    # A default hf_hub_download queries the Hub on every call, even when cached.
+    try:
+        return hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_SLIDE_CHECKPOINT, local_files_only=True)
+    except LocalEntryNotFoundError:
+        return hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_SLIDE_CHECKPOINT)
+
 
 # Prov-GigaPath model card transform (given pre-cropped images only): resize to 256,
 # center-crop to the model's native 224, ImageNet normalization. timm's packaged
@@ -82,7 +92,7 @@ class GigaPathSlideEncoder(SlideEncoder):
 
         # create_model given an "hf_hub:" name force-downloads into ~/.cache/ on every
         # load, ignoring HF_HOME; a local path skips that download.
-        checkpoint_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_SLIDE_CHECKPOINT)
+        checkpoint_path = _slide_checkpoint_path()
         self._model = create_model(checkpoint_path, "gigapath_slide_enc12l768d", 1536)
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
