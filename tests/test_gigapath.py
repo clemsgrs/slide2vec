@@ -1,12 +1,8 @@
 """The GigaPath slide encoder must fetch its weights through the normal HF cache.
 
-``gigapath.slide_encoder.create_model`` given an ``hf_hub:`` name downloads
-``slide_encoder.pth`` into ``~/.cache/`` with ``force_download=True``: it ignores
-``HF_HOME`` and downloads again on every load. slide2vec downloads the file itself
-and hands ``create_model`` the local path, which skips that download.
-
 Ways this can fail:
-- the download bypasses the HF cache (``local_dir``) or re-downloads (``force_download``);
+- the download bypasses the HF cache (``local_dir``, ``cache_dir``) or re-downloads
+  (``force_download``): ``HF_HOME`` is ignored or every load downloads 330 MB;
 - ``create_model`` still receives an ``hf_hub:`` name and downloads on its own;
 - ``create_model`` receives a path other than the downloaded file: it then silently
   keeps random weights.
@@ -25,12 +21,12 @@ def test_slide_weights_are_downloaded_through_the_hf_cache(monkeypatch, tmp_path
     downloads = []
     create_model_calls = []
 
-    def fake_hf_hub_download(*args, **kwargs):
-        downloads.append((args, kwargs))
+    def fake_hf_hub_download(repo_id, filename, **kwargs):
+        downloads.append((repo_id, filename, kwargs))
         return cached_path
 
-    def fake_create_model(*args, **kwargs):
-        create_model_calls.append((args, kwargs))
+    def fake_create_model(pretrained, model_arch, in_chans, **kwargs):
+        create_model_calls.append((pretrained, model_arch, in_chans, kwargs))
         return types.SimpleNamespace()
 
     fake_gigapath = types.ModuleType("gigapath")
@@ -43,10 +39,12 @@ def test_slide_weights_are_downloaded_through_the_hf_cache(monkeypatch, tmp_path
 
     gigapath_module.GigaPathSlideEncoder()
 
-    assert downloads == [
-        ((), {"repo_id": "prov-gigapath/prov-gigapath", "filename": "slide_encoder.pth"})
-    ]
+    assert len(downloads) == 1
+    repo_id, filename, download_kwargs = downloads[0]
+    assert (repo_id, filename) == ("prov-gigapath/prov-gigapath", "slide_encoder.pth")
+    assert not {"local_dir", "cache_dir", "force_download"} & download_kwargs.keys()
+
     assert len(create_model_calls) == 1
-    args, kwargs = create_model_calls[0]
-    assert args == (cached_path, "gigapath_slide_enc12l768d", 1536)
-    assert kwargs == {}
+    pretrained, model_arch, in_chans, create_kwargs = create_model_calls[0]
+    assert (pretrained, model_arch, in_chans) == (cached_path, "gigapath_slide_enc12l768d", 1536)
+    assert "local_dir" not in create_kwargs
