@@ -95,8 +95,20 @@ def _full_bias_fits(tiles, num_heads, dtype, device) -> bool:
     return bias_bytes <= _FULL_BIAS_MEMORY_SHARE * _available_bytes(device)
 
 
-# elements of one chunk's [heads, rows, N] bias: 1 GiB in fp16
+# elements of one chunk's [heads, rows, N] bias, at most: 1 GiB in fp16
 _CHUNK_ELEMENTS = 2**29
+
+
+def _chunk_elements(dtype, device) -> int:
+    """Chunk budget: the default, or less when the available memory is smaller.
+
+    Per bias element the chunk costs about the bias itself, two SDPA intermediates
+    of the same dtype (attention scores and their softmax) and the fp32 distances
+    (two [rows, N] temporaries, shared by the heads).
+    """
+    per_element = 3 * torch.finfo(dtype).bits // 8 + 8
+    budget = _FULL_BIAS_MEMORY_SHARE * _available_bytes(torch.device(device))
+    return min(_CHUNK_ELEMENTS, int(budget // per_element))
 
 
 class _ChunkedAlibiBias:
@@ -112,7 +124,8 @@ class _ChunkedAlibiBias:
         self.slopes = _head_slopes(module.num_heads, device)
         self.dtype = dtype
         self.length = self.points.shape[0] + 1  # +1 for the cls token
-        max_elements = _CHUNK_ELEMENTS if max_elements is None else max_elements
+        if max_elements is None:
+            max_elements = _chunk_elements(dtype, device)
         self.chunk_rows = max(1, max_elements // (module.num_heads * self.length))
 
     def rows(self, start, stop):
@@ -126,8 +139,8 @@ class _ChunkedAlibiBias:
         bias[..., 0] = 0
         bias[..., self.length :] = 0
         if first < stop:
-            # integer grid positions: the squared distance is exact in fp32, so the
-            # values are those of _lean_alibi_bias bit for bit
+            # integer grid positions: the squared distance is exact in fp32; the
+            # values are those of _lean_alibi_bias up to the rounding of sqrt
             x, y = self.points.unbind(1)
             dist = (x[first - 1 : stop - 1, None] - x[None, :]).square_()
             dist += (y[first - 1 : stop - 1, None] - y[None, :]).square_()

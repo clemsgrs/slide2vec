@@ -320,8 +320,12 @@ def test_full_bias_is_kept_only_where_it_fits(monkeypatch, tiles, fits):
     assert titan_mod._full_bias_fits(tiles, 12, torch.float16, torch.device("cpu")) is fits
 
 
-@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
-def test_chunk_bias_rows_are_the_rows_of_the_reference_bias(dtype):
+@pytest.mark.parametrize(
+    "dtype,atol", [(torch.float32, _FP32_ATOL), (torch.float16, _FP16_ATOL)]
+)
+def test_chunk_bias_rows_are_the_rows_of_the_reference_bias(dtype, atol):
+    # the reference takes sqrt in float64 and rounds once more to the dtype, so the
+    # rows agree within the stated tolerance, not bit for bit
     from slide2vec.encoders.models.titan import _ChunkedAlibiBias
 
     torch.manual_seed(0)
@@ -334,5 +338,26 @@ def test_chunk_bias_rows_are_the_rows_of_the_reference_bias(dtype):
 
     length = reference.shape[-1]
     # a chunk with the cls row and tile rows, then a chunk of tile rows only
-    assert torch.equal(bias.rows(0, 5), reference[:, :, 0:5])
-    assert torch.equal(bias.rows(5, length), reference[:, :, 5:length])
+    for start, stop in [(0, 5), (5, length)]:
+        actual, expected = bias.rows(start, stop), reference[:, :, start:stop]
+        assert actual.shape == expected.shape
+        assert torch.allclose(actual.float(), expected.float(), atol=atol, rtol=0)
+
+
+def test_chunk_budget_shrinks_with_available_memory(monkeypatch):
+    # 200 tiles, 12 heads, fp16: the full bias is 12 * 201 * 208 * 2 bytes (~1 MiB),
+    # under the default chunk budget but over the 256 KiB available here
+    import slide2vec.encoders.models.titan as titan_mod
+
+    available = 256 * 1024
+    monkeypatch.setattr(titan_mod, "_available_bytes", lambda device: available)
+    w, h, heads = 20, 10, 12
+    assert titan_mod._full_bias_fits(w * h, heads, torch.float16, torch.device("cpu")) is False
+
+    bias = titan_mod._ChunkedAlibiBias(
+        SimpleNamespace(num_heads=heads), w, h, None, device="cpu", dtype=torch.float16
+    )
+
+    assert 1 <= bias.chunk_rows < bias.length
+    chunk = bias.rows(0, bias.chunk_rows)
+    assert chunk.untyped_storage().nbytes() * 3 <= available
