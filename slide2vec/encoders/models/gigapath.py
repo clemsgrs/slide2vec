@@ -3,6 +3,7 @@
 from typing import Callable
 
 import torch
+from huggingface_hub import hf_hub_download
 from torchvision.transforms import v2
 
 from slide2vec.encoders.base import (
@@ -76,11 +77,12 @@ class GigaPathSlideEncoder(SlideEncoder):
     def __init__(self, *, output_variant: str | None = None):
         from gigapath.slide_encoder import create_model
 
-        self._model = create_model(
-            "hf_hub:prov-gigapath/prov-gigapath",
-            "gigapath_slide_enc12l768d",
-            1536,
+        # create_model given an "hf_hub:" name force-downloads into ~/.cache/ on every
+        # load, ignoring HF_HOME; a local path skips that download.
+        weights_path = hf_hub_download(
+            repo_id="prov-gigapath/prov-gigapath", filename="slide_encoder.pth"
         )
+        self._model = create_model(weights_path, "gigapath_slide_enc12l768d", 1536)
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
