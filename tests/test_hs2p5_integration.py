@@ -205,3 +205,56 @@ def test_wsi_annotation_previews_accept_spacingless_masks(tmp_path, output_mode)
         assert Path(row[field]) == path
         with Image.open(path) as preview:
             preview.verify()
+
+
+def test_tiling_only_run_keeps_numeric_and_na_sample_ids_verbatim(tmp_path):
+    """IDs pandas would coerce ("0007" -> 7, "NA" -> NaN) tile, match their
+    process-list rows, and name their artifacts unchanged, on a first run and a rerun."""
+    pytest.importorskip("openslide")
+    from slide2vec.api import ExecutionOptions, Model, Pipeline
+    from tests.output_consistency_config import (
+        TILING_FILTER_PARAMS,
+        TILING_MASKS,
+        TILING_PARAMS,
+        TILING_SEG_PARAMS,
+    )
+
+    fixtures = Path(__file__).parent / "fixtures" / "input"
+    sample_ids = ["0007", "7", "NA"]
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "sample_id,image_path,mask_path\n"
+        + "".join(
+            f"{sample_id},{fixtures / 'test-wsi.tif'},{fixtures / 'test-mask.tif'}\n"
+            for sample_id in sample_ids
+        )
+    )
+    pipeline = Pipeline(
+        Model(name="virchow2", device="cpu"),
+        PreprocessingConfig(
+            backend="openslide",
+            mask_backend="openslide",
+            masks=TILING_MASKS,
+            segmentation=TILING_SEG_PARAMS,
+            filtering=TILING_FILTER_PARAMS,
+            preview={"save_mask_preview": False, "save_tiling_preview": False},
+            resume=True,
+            **TILING_PARAMS,
+        ),
+        execution=ExecutionOptions(
+            output_dir=tmp_path / "out", num_gpus=1, num_preprocessing_workers=1
+        ),
+    )
+
+    for _ in range(2):
+        result = pipeline.run(manifest_path=manifest, tiling_only=True)
+
+        rows = pd.read_csv(result.process_list_path, dtype=str, keep_default_na=False)
+        assert rows["sample_id"].tolist() == sample_ids
+        assert rows["tiling_status"].tolist() == ["success"] * 3
+        assert [Path(path).name for path in rows["coordinates_npz_path"]] == [
+            "0007.coordinates.npz",
+            "7.coordinates.npz",
+            "NA.coordinates.npz",
+        ]
+        assert all(Path(path).is_file() for path in rows["coordinates_npz_path"])
