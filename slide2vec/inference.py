@@ -433,6 +433,7 @@ def embed_patients(
             f"embed_patients() requires a patient-level model, but '{model.name}' "
             f"has level='{model.level}'. Use embed_slides() for slide-level models."
         )
+    patient_pipeline.reject_per_annotation_sampling(model, preprocessing)
     slide_records = [manifest.coerce_slide_spec(slide) for slide in slides]
     if not slide_records:
         raise ValueError("At least one slide is required")
@@ -770,9 +771,11 @@ def run_pipeline(
     if not tiling_only and execution.num_gpus > 1:
         distributed_stage.validate_multi_gpu_execution(model, execution)
 
+    resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
+    if model.level == "patient" and not tiling_only:
+        patient_pipeline.reject_per_annotation_sampling(model, resolved_preprocessing)
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
     distributed_stage.write_embedding_request(model, resolved_preprocessing, execution, output_dir)
     emit_progress(
         "run.started",
