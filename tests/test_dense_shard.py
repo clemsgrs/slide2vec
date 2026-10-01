@@ -453,6 +453,23 @@ def test_run_dense_shard_reencodes_payload_missing_its_sidecar(fake_backend, tmp
     assert (slide_dir / "64_0.meta.json").exists()  # sidecar restored
 
 
+def test_run_dense_shard_reencodes_sidecar_missing_its_payload(fake_backend, tmp_path):
+    """A done-marker whose payload is gone is not a completed ROI."""
+    enc = _encoder()
+    regions = [_spec(x, y) for x, y in [(0, 0), (64, 0), (0, 64)]]
+    run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
+                    batch_size=2, device="cpu", identity=IDENTITY)
+
+    (_slide_dir(tmp_path) / "64_0.pt").unlink()
+    reads_before = len(fake_backend.locations_read)
+
+    artifacts = run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
+                                batch_size=2, device="cpu", identity=IDENTITY)
+
+    assert fake_backend.locations_read[reads_before:] == [(64, 0)]
+    assert all(artifact.path.exists() for artifact in artifacts)
+
+
 def test_run_dense_shard_namespaces_annotation_subdir(fake_backend, tmp_path):
     """A real annotation class lands under ``dense_embeddings/<class>/<sample_id>/`` (D5)."""
     enc = _encoder()
