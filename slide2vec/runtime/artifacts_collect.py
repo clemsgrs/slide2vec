@@ -16,6 +16,10 @@ from slide2vec.artifacts import (
 )
 from slide2vec.runtime.distributed_stage import run_distributed_embedding_stage
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
+from slide2vec.runtime.feature_identity import (
+    deferred_transform_record,
+    pooled_feature_identity,
+)
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.embedding import should_persist_tile_embeddings
 from slide2vec.runtime.persistence import (
@@ -194,7 +198,11 @@ def collect_distributed_pipeline_artifacts(
         include_slide_embeddings=include_slide_embeddings,
         save_latents=execution.save_latents,
         resume=preprocessing.resume,
-        requested_tile_size_px=preprocessing.requested_tile_size_px,
+        identity=pooled_feature_identity(model, execution=execution, preprocessing=preprocessing),
+        # This parent never encodes: verify the transform without taking GPU memory.
+        resolve_transform=deferred_transform_record(
+            model, on_cpu_copy=True, preprocessing=preprocessing
+        ),
     )
     pending_annotations = [placeholder.annotation for placeholder in pending_placeholders]
     skipped_slide_count = len(successful_slides) - len(pending_slides)

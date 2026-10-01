@@ -24,7 +24,7 @@ heterogeneous — here it is declared, uniform, and checked while stacking (see
 of large images is the bottleneck this path has and can be parallelized per item when
 explicitly configured.
 
-An exactly compatible sidecar is the done-marker; presence alone is insufficient. Before
+A compatible sidecar is the done-marker; presence alone is insufficient. Before
 replacing an incompatible pair this loop removes the old marker, then atomically replaces
 the payload, then publishes the new sidecar last (see
 :func:`~slide2vec.artifacts.write_dense_image`). Interruption at any boundary therefore
@@ -33,7 +33,7 @@ leaves no trusted marker paired with a changed payload.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
@@ -57,6 +57,7 @@ from slide2vec.runtime.dense_image_reading import (
     read_dense_image,
 )
 from slide2vec.runtime.dense_regions import DenseGridEncoder
+from slide2vec.runtime.feature_identity import differing_fields, transform_record
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
 
@@ -78,8 +79,15 @@ def dense_image_resume_decision(
     spec: "ImageSpec",
     recipe: DenseImageRecipe,
     read_plan: DenseImageReadPlan | None = None,
+    *,
+    resolve_transform: Callable[[], dict] | None = None,
 ) -> DenseImageResumeDecision:
-    """Classify one on-disk pair against the current image extraction identity."""
+    """Classify one on-disk pair against the current image extraction identity.
+
+    A field the sidecar does not record is accepted. ``resolve_transform`` supplies the
+    transform when ``recipe`` does not hold it yet; it loads the encoder, so it is called
+    only when the sidecar records one.
+    """
     payload_path, sidecar_path = dense_image_paths(out_dir, sample_id=spec.sample_id)
     missing = tuple(
         name
@@ -111,11 +119,7 @@ def dense_image_resume_decision(
         )
 
     differing = tuple(
-        sorted(
-            key
-            for key in set(recorded) | set(expected)
-            if key not in recorded or key not in expected or recorded[key] != expected[key]
-        )
+        sorted(differing_fields(recorded, expected, resolve_transform=resolve_transform))
     )
     return DenseImageResumeDecision(
         needs_encode=bool(differing), differing_fields=differing
@@ -235,8 +239,9 @@ def run_dense_image_shard(
 ) -> list[DenseImageArtifact]:
     """Encode + persist one shard's images, one grid payload + one sidecar per image.
 
-    Skips only images whose payload and sidecar exactly match ``recipe``, invalidates every
-    incompatible done-marker, encodes the rest through the shared dense kernel, and writes
+    Skips only images whose payload exists and whose sidecar matches ``recipe`` (completed
+    here with the transform this shard applies), invalidates every incompatible
+    done-marker, encodes the rest through the shared dense kernel, and writes
     each batch's grids before the next batch is encoded — which is what makes a killed rank
     resumable at image granularity rather than losing the whole shard. Returns one
     :class:`~slide2vec.artifacts.DenseImageArtifact` per input image in input order — freshly
@@ -244,6 +249,8 @@ def run_dense_image_shard(
     batch's image count for per-batch progress.
     """
     images = list(images)
+    dense_transform = loaded.model.get_normalization_transform()
+    recipe = replace(recipe, transform=transform_record(dense_transform))
     if read_plans is None:
         default_plan = raster_read_plan(
             spacing_source=recipe.spacing_source,
@@ -281,6 +288,7 @@ def run_dense_image_shard(
             attention_include_registers=dense.attention_include_registers,
             precision=precision,
             output_dtype=output_dtype,
+            dense_transform=dense_transform,
         )
         dataset = _ResolvedDenseImageDataset(
             pending,

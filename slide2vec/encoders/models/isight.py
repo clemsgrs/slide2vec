@@ -84,6 +84,7 @@ from torchvision.transforms import v2
 from transformers import AutoProcessor, CLIPConfig, CLIPModel
 
 from slide2vec.encoders.base import (
+    ProcessorTransform,
     TileEncoder,
     attentions_tuple_to_grids,
     hf_eager_attention,
@@ -190,12 +191,7 @@ class ISight(TileEncoder):
         bicubic resize to 336, a 336 center crop, and OpenAI CLIP
         mean/std — the resize and crop are no-ops on tiles already cut at 336.
         """
-        processor = AutoProcessor.from_pretrained(_BASE_MODEL)
-
-        def transform(image):
-            return processor(images=image, return_tensors="pt")["pixel_values"].squeeze(0)
-
-        return transform
+        return ProcessorTransform(AutoProcessor.from_pretrained(_BASE_MODEL))
 
     def get_normalization_transform(self) -> Callable:
         image_processor = AutoProcessor.from_pretrained(_BASE_MODEL).image_processor

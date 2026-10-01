@@ -97,7 +97,7 @@ def _skip_dense_image_encoding(monkeypatch) -> None:
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda normalized, out_dir, recipe, read_plans=None: ([], len(normalized)),
+        lambda normalized, out_dir, recipe, read_plans=None, **kwargs: ([], len(normalized)),
     )
     monkeypatch.setattr(
         dense_image_stage,
@@ -268,6 +268,34 @@ def test_embed_images_dense_resume_skips_existing_and_logs(tmp_path, caplog):
         assert (dense_dir / f"{sample_id}.pt").stat().st_mtime_ns == mtime  # untouched
 
 
+def test_embed_images_dense_resume_recomputes_images_from_a_different_transform(
+    tmp_path, monkeypatch
+):
+    from torchvision.transforms import v2
+
+    execution = ExecutionOptions(output_dir=tmp_path / "out", num_gpus=1, precision="fp32")
+    specs = _images(tmp_path, ["a"])
+    [first] = dense_image_stage.embed_images_dense(
+        _FakeModel(_encoder()), specs, dense=_dense(), execution=execution
+    )
+    written_at = first.path.stat().st_mtime_ns
+    encoder = _encoder()
+    monkeypatch.setattr(
+        encoder, "get_normalization_transform",
+        lambda: v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ]),
+    )
+
+    [second] = dense_image_stage.embed_images_dense(
+        _FakeModel(encoder), specs, dense=_dense(), execution=execution
+    )
+
+    assert second.path.stat().st_mtime_ns != written_at
+
+
 def test_embed_images_dense_all_present_does_not_dispatch(tmp_path, monkeypatch):
     """A fully-resumed run encodes nothing yet still returns every artifact."""
     model = _FakeModel(_encoder())
@@ -302,7 +330,7 @@ def test_embed_images_dense_resolves_png_through_hs2p_pil_reader(tmp_path, monke
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda specs, out_dir, recipe, read_plans=None: (
+        lambda specs, out_dir, recipe, read_plans=None, **kwargs: (
             captured.update(read_plans=read_plans) or [],
             len(specs),
         ),
@@ -353,7 +381,7 @@ def test_dense_image_raster_suffixes_are_exact_and_case_insensitive(tmp_path, mo
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda specs, out_dir, recipe, read_plans=None: ([], len(specs)),
+        lambda specs, out_dir, recipe, read_plans=None, **kwargs: ([], len(specs)),
     )
     monkeypatch.setattr(
         dense_image_stage,
@@ -592,7 +620,7 @@ def test_flat_and_wsi_sources_share_one_dense_read_contract(
     monkeypatch.setattr(
         dense_image_stage,
         "partition_dense_images_by_resume",
-        lambda specs, out_dir, recipe, read_plans=None: (
+        lambda specs, out_dir, recipe, read_plans=None, **kwargs: (
             captured.update(read_plans=read_plans) or [],
             len(specs),
         ),

@@ -7,8 +7,9 @@ ranks (slide2vec owns the dense write because it owns the dense distribution —
 1. **flatten** every ``SlideRegions`` into the slide-ordered flat ROI list;
 2. **resolve** each slide's source spacing and read plan once through public hs2p APIs into
    per-ROI :class:`~slide2vec.runtime.dense_shard.RegionSpec`;
-3. **resume-filter** it (D9) — drop ROIs whose sidecar records that same declaration and
-   resolved plan before sharding, so no rank draws an all-done shard and idles;
+3. **resume-filter** it (D9) — drop ROIs whose sidecar records that same declaration,
+   resolved plan and feature identity before sharding, so no rank draws an all-done shard
+   and idles;
 4. **dispatch**: ``num_gpus=1`` runs :func:`~slide2vec.runtime.dense_shard.run_dense_shard`
    fully in-process (no torchrun); ``num_gpus>1`` writes the coordinates to an npz + a JSON
    request and launches :mod:`slide2vec.distributed.dense_worker` under torchrun;
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from itertools import groupby
 from pathlib import Path
 from subprocess import Popen
-from typing import Sequence
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -46,6 +47,10 @@ from slide2vec.runtime.distributed import (
     run_torchrun_worker,
 )
 from slide2vec.runtime.distributed_stage import validate_multi_gpu_execution
+from slide2vec.runtime.feature_identity import (
+    deferred_transform_record,
+    dense_feature_identity,
+)
 from slide2vec.runtime.model_settings import output_torch_dtype
 from slide2vec.runtime.serialization import (
     serialize_dense_options,
@@ -98,10 +103,18 @@ def flatten_slide_regions(regions: Sequence) -> list[_FlatRegion]:
 
 
 def partition_regions_by_resume(
-    specs: Sequence[RegionSpec], out_dir
+    specs: Sequence[RegionSpec],
+    out_dir,
+    identity: dict,
+    *,
+    resolve_transform: Callable[[], dict] | None = None,
 ) -> tuple[list[RegionSpec], int]:
-    """Split specs by whether the sidecar matches the resolved read plan."""
-    remaining = [spec for spec in specs if region_needs_encode(out_dir, spec)]
+    """Split specs by whether the sidecar matches the read plan and feature identity."""
+    remaining = [
+        spec
+        for spec in specs
+        if region_needs_encode(out_dir, spec, identity, resolve_transform=resolve_transform)
+    ]
     return remaining, len(specs) - len(remaining)
 
 
@@ -188,7 +201,15 @@ def embed_regions_dense(
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
     flat = flatten_slide_regions(regions)
     specs = resolve_region_specs(flat, dense)
-    remaining, skipped = partition_regions_by_resume(specs, out_dir)
+    identity = dense_feature_identity(model, dense=dense, execution=execution)
+    remaining, skipped = partition_regions_by_resume(
+        specs,
+        out_dir,
+        identity,
+        resolve_transform=deferred_transform_record(
+            model, on_cpu_copy=execution.num_gpus > 1
+        ),
+    )
     if skipped:
         logger.info(
             "resume: %s/%s regions already on disk, encoding %s",
@@ -203,14 +224,17 @@ def embed_regions_dense(
     )
     if remaining:
         if execution.num_gpus == 1:
-            _run_dense_in_process(model, remaining, dense=dense, execution=execution, out_dir=out_dir)
+            _run_dense_in_process(
+                model, remaining, dense=dense, execution=execution, out_dir=out_dir,
+                identity=identity,
+            )
         else:
             _run_dense_distributed(model, remaining, dense=dense, execution=execution, out_dir=out_dir)
     emit_progress("dense.regions.finished", total=len(flat))
     return [dense_artifact_from_disk(out_dir, region) for region in flat]
 
 
-def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
+def _run_dense_in_process(model, specs, *, dense, execution, out_dir, identity) -> None:
     # Loaded under the dense contract declared by embed_regions_dense, which supplies the
     # variable-input constructor settings this geometry needs. Dense builds its own
     # normalization transform (see dense_regions) and never reads loaded.transforms — but
@@ -223,6 +247,7 @@ def _run_dense_in_process(model, specs, *, dense, execution, out_dir) -> None:
         dense=dense,
         batch_size=int(execution.batch_size),
         device=loaded.device,
+        identity=identity,
         precision=execution.precision,
         output_dtype=resolve_output_torch_dtype(execution),
         num_workers=execution.resolved_num_workers_per_gpu(),

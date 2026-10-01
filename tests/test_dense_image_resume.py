@@ -274,7 +274,6 @@ def test_resume_recomputes_when_parent_resolved_source_or_auto_backend_changes(
         ("missing-payload", "payload"),
         ("missing-sidecar", "sidecar"),
         ("legacy", "compatibility"),
-        ("incomplete", "patch_size"),
         ("mismatch", "overlap"),
     ],
 )
@@ -297,9 +296,7 @@ def test_noncompatible_pairs_recompute_and_log_fields(
                 encoding="utf-8",
             )
         else:
-            if condition == "incomplete":
-                recorded.pop("patch_size")
-            elif condition == "mismatch":
+            if condition == "mismatch":
                 recorded["overlap"] = 0.5
             _publish_pair(out_dir, spec, recorded)
             if condition == "missing-payload":
@@ -315,6 +312,73 @@ def test_noncompatible_pairs_recompute_and_log_fields(
     assert (
         f"'{condition}'; differing fields: {differing_fields}" in caplog.text
     )
+
+
+NORMALIZE_ONLY = {
+    "normalize": {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]},
+    "resize": None,
+    "center_crop": None,
+}
+
+
+def test_resume_accepts_a_pair_whose_sidecar_lacks_a_field(tmp_path):
+    """A sidecar written before a field existed cannot be checked on it: reuse the pair."""
+    spec = ImageSpec(sample_id="sample-1", image_path=str((tmp_path / "source.png").resolve()))
+    recipe = _resolved_recipe(tmp_path)
+    recorded = recipe.for_image(spec)
+    recorded.pop("patch_size")
+    _publish_pair(tmp_path / "out", spec, recorded)
+
+    remaining, skipped = partition_dense_images_by_resume(
+        [spec],
+        tmp_path / "out",
+        recipe,
+        resolve_transform=lambda: pytest.fail("no recorded transform, so no encoder to load"),
+    )
+
+    assert remaining == []
+    assert skipped == 1
+
+
+def test_dense_image_recipe_carries_the_transform_into_the_compatibility_record(tmp_path):
+    from dataclasses import replace
+
+    spec = ImageSpec(sample_id="sample-1", image_path=str((tmp_path / "source.png").resolve()))
+    recipe = replace(_resolved_recipe(tmp_path), transform=NORMALIZE_ONLY)
+
+    assert recipe.for_image(spec)["transform"] == NORMALIZE_ONLY
+    payload = json.loads(json.dumps(serialize_dense_image_recipe(recipe)))
+    assert deserialize_dense_image_recipe(payload) == recipe
+
+
+@pytest.mark.parametrize(
+    ("requested_mean", "recomputed"),
+    [([0.485, 0.456, 0.406], False), ([0.5, 0.5, 0.5], True)],
+    ids=["same-transform", "different-transform"],
+)
+def test_resume_verifies_a_recorded_transform_against_the_loaded_encoder(
+    tmp_path, caplog, requested_mean, recomputed
+):
+    """The parent resolves its recipe before the encoder loads; the transform comes later."""
+    from dataclasses import replace
+
+    spec = ImageSpec(sample_id="sample-1", image_path=str((tmp_path / "source.png").resolve()))
+    recipe = _resolved_recipe(tmp_path)
+    _publish_pair(
+        tmp_path / "out", spec, replace(recipe, transform=NORMALIZE_ONLY).for_image(spec)
+    )
+    requested = {
+        **NORMALIZE_ONLY,
+        "normalize": {"mean": requested_mean, "std": [0.229, 0.224, 0.225]},
+    }
+
+    with caplog.at_level("INFO", logger="slide2vec.runtime.dense_image_stage"):
+        remaining, _ = partition_dense_images_by_resume(
+            [spec], tmp_path / "out", recipe, resolve_transform=lambda: requested
+        )
+
+    assert remaining == ([spec] if recomputed else [])
+    assert ("'sample-1'; differing fields: transform" in caplog.text) is recomputed
 
 
 @pytest.mark.parametrize(
@@ -420,9 +484,11 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         )
         recorded = recipe.for_image(spec)
         value = recorded[field]
+        recomputed = value is not None
         if isinstance(value, bool):
             recorded[field] = not value
         elif value is None:
+            # A field the sidecar does not record is accepted, not recomputed.
             recorded.pop(field)
         elif isinstance(value, str):
             recorded[field] = f"{value}-different"
@@ -437,5 +503,5 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
             [spec], out_dir, recipe
         )
 
-        assert remaining == [spec], field
-        assert skipped == 0, field
+        assert remaining == ([spec] if recomputed else []), field
+        assert skipped == (0 if recomputed else 1), field

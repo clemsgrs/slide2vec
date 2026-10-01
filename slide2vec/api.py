@@ -628,6 +628,8 @@ class EmbeddedSlide:
     latents: Any | None = None
     #: Factual square tensor side length immediately before tile encoding.
     encoder_input_size_px: int | None = None
+    #: Record of the image transform applied before tile encoding (JSON data).
+    transform: dict[str, Any] | None = None
 
 
 class Model:
@@ -894,8 +896,8 @@ class Model:
         dense transform, and written to ``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``
         plus a geometry sidecar. The run splits its ROIs across all visible GPUs
         (``execution.num_gpus``); ``num_gpus=1`` encodes fully in-process. Resume is
-        automatic — only ROIs whose sidecar has the same source-spacing declaration and
-        resolved hs2p read plan are skipped. Returns one
+        automatic — only ROIs whose sidecar has the same source-spacing declaration,
+        resolved hs2p read plan and feature identity are skipped. Returns one
         :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI.
 
         The effective encoder input — the padded ROI for a whole-tile run, one
@@ -973,8 +975,9 @@ class Model:
         to ``image_embeddings/<sample_id>.pt`` plus a provenance sidecar. The run splits its
         images across all visible GPUs (``execution.num_gpus``); ``num_gpus=1`` encodes
         fully in-process. Resume is automatic — images whose sidecar already exists are
-        skipped. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
-        image, in input order.
+        skipped, and a sidecar that records a different feature identity raises. Returns
+        one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input image, in input
+        order.
 
         Unlike the pooled and dense paths there is no geometry to declare: the images are
         heterogeneously sized (2048x1536 beside 96x96) and were never requested, so the

@@ -199,7 +199,8 @@ embedding artifact per image:
    print(artifacts[0].feature_dim)  # 2560
 
 The run uses the GPUs selected by ``ExecutionOptions.num_gpus`` and resumes
-automatically when repeated with the same output directory. ``sample_id`` is the
+automatically when repeated with the same output directory. A resume with a
+different :ref:`feature identity <feature-identity>` raises. ``sample_id`` is the
 artifact's identity and must be unique within a run; slide2vec never derives
 it from the filename. Mixed-size inputs are supported: each image goes through
 the encoder's shipped transform before batching. ``spacing_at_level_0`` is

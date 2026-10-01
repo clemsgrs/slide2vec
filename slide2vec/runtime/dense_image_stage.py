@@ -10,8 +10,8 @@ because only the source of the pixels differs:
    invariants are fixed before anything is decoded or launched;
 2. **normalize** the images into resolved, uniquely-named specs;
 3. **resume-filter** them — drop only payload+sidecar pairs whose recorded image identity
-   and recipe exactly match, before sharding, so no rank draws an all-done shard and idles;
-   the skip count and every recomputation difference are logged;
+   and recipe match on every recorded field, before sharding, so no rank draws an all-done
+   shard and idles; the skip count and every recomputation difference are logged;
 4. **dispatch**: ``num_gpus=1`` runs
    :func:`~slide2vec.runtime.dense_image_shard.run_dense_image_shard` fully in-process (no
    torchrun); ``num_gpus>1`` writes a JSON request and launches
@@ -33,7 +33,7 @@ import math
 from dataclasses import replace
 from pathlib import Path
 from subprocess import Popen
-from typing import Sequence
+from typing import Callable, Sequence
 
 from slide2vec.api import DenseImageOptions, ImageSpec
 from slide2vec.artifacts import DenseImageArtifact
@@ -57,6 +57,7 @@ from slide2vec.runtime.distributed import (
     run_torchrun_worker,
 )
 from slide2vec.runtime.distributed_stage import validate_multi_gpu_execution
+from slide2vec.runtime.feature_identity import deferred_transform_record
 from slide2vec.runtime.image_specs import (
     build_image_specs_request,
     normalize_image_specs,
@@ -77,8 +78,10 @@ def partition_dense_images_by_resume(
     out_dir,
     recipe: DenseImageRecipe,
     read_plans: dict[str, DenseImageReadPlan] | None = None,
+    *,
+    resolve_transform: Callable[[], dict] | None = None,
 ) -> tuple[list[ImageSpec], int]:
-    """Split images by exact payload+sidecar compatibility with the current request."""
+    """Split images by payload+sidecar compatibility with the current request."""
     remaining: list[ImageSpec] = []
     for spec in specs:
         decision = dense_image_resume_decision(
@@ -86,6 +89,7 @@ def partition_dense_images_by_resume(
             spec,
             recipe,
             None if read_plans is None else read_plans[spec.sample_id],
+            resolve_transform=resolve_transform,
         )
         if decision.needs_encode:
             remaining.append(spec)
@@ -170,7 +174,13 @@ def embed_images_dense(
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
     remaining, skipped = partition_dense_images_by_resume(
-        specs, out_dir, recipe, read_plans=read_plans
+        specs,
+        out_dir,
+        recipe,
+        read_plans=read_plans,
+        resolve_transform=deferred_transform_record(
+            model, on_cpu_copy=execution.num_gpus > 1
+        ),
     )
     if skipped:
         logger.info(

@@ -112,10 +112,11 @@ class _FakeModel:
     input like every other route that reaches the encoder.
     """
 
-    def __init__(self, encoder, device="cpu") -> None:
+    def __init__(self, encoder, device="cpu", *, name="fake-encoder") -> None:
         self._encoder = encoder
         self._device = device
-        self.name = "fake-encoder"
+        self.name = name
+        self.loads = 0
         self._output_variant = None
         self._requested_device = device
         self.allow_non_recommended_settings = False
@@ -127,7 +128,12 @@ class _FakeModel:
 
     def _load_backend(self):
         assert self.declared_dense is not None, "dense must declare before it loads"
-        return SimpleNamespace(model=self._encoder, device=self._device)
+        self.loads += 1
+        return SimpleNamespace(
+            model=self._encoder,
+            device=self._device,
+            transforms=self._encoder.get_normalization_transform(),
+        )
 
     @property
     def device(self):
@@ -277,7 +283,8 @@ def test_embed_regions_dense_num_gpus_gt_one_launches_dense_worker(fake_backend,
         dense = deserialize_dense_options(request["dense"])
         for shard in plan_contiguous_shards(specs, num_gpus):
             run_dense_shard(shard, model=rank_encoder, out_dir=Path(output_dir), dense=dense,
-                            batch_size=2, device="cpu")
+                            batch_size=2, device="cpu",
+                            identity={"encoder_name": "fake-encoder"})
 
     monkeypatch.setattr(dense_stage, "run_torchrun_worker", _fake_run)
     monkeypatch.setattr(dense_stage, "validate_multi_gpu_execution", lambda *a, **k: None)
@@ -337,6 +344,113 @@ def test_embed_regions_dense_resume_skips_existing_and_logs(fake_backend, stub_r
     reads_after_second = sum(len(b.locations) for b in fake_backend.values())
     assert reads_after_second - reads_after_first == 1  # only the one new ROI is read
     assert "2/3 regions already on disk, encoding 1" in caplog.text
+
+
+def _reads(fake_backend) -> int:
+    return sum(len(backend.locations) for backend in fake_backend.values())
+
+
+def test_dense_region_sidecar_records_the_feature_identity(fake_backend, stub_read_plan, tmp_path):
+    execution = ExecutionOptions(
+        output_dir=tmp_path, num_gpus=1, precision="fp16", output_dtype="fp32"
+    )
+
+    [artifact] = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()),
+        [_regions(coords=((0, 0),))],
+        dense=_dense(pad_mode="constant", image_pad_value=1.0),
+        execution=execution,
+    )
+
+    compatibility = json.loads(artifact.metadata_path.read_text())["compatibility"]
+    identity = {
+        "encoder_name": "fake-encoder",
+        "output_variant": None,
+        "pad_mode": "constant",
+        "image_pad_value": 1.0,
+        "window_size": None,
+        "overlap": 0.0,
+        "feature_kind": "patch_features",
+        "attention_blocks": [-1],
+        "attention_include_registers": False,
+        "precision": "fp16",
+        "dtype": "float32",
+        "transform": {
+            "normalize": {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]},
+            "resize": None,
+            "center_crop": None,
+        },
+    }
+    assert {field: compatibility.get(field, "missing") for field in identity} == identity
+    assert compatibility["read_level"] == 0  # the read plan is still recorded alongside
+
+
+def test_embed_regions_dense_resume_recomputes_regions_from_a_different_encoder(
+    fake_backend, stub_read_plan, tmp_path
+):
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32")
+    dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()), [_regions()], dense=_dense(), execution=execution
+    )
+    reads_after_first = _reads(fake_backend)
+
+    [artifact, *_] = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder(), name="other-encoder"), [_regions()], dense=_dense(),
+        execution=execution,
+    )
+
+    assert _reads(fake_backend) - reads_after_first == 3
+    recorded = json.loads(artifact.metadata_path.read_text())["compatibility"]
+    assert recorded["encoder_name"] == "other-encoder"
+
+
+def test_embed_regions_dense_resume_recomputes_regions_from_a_different_transform(
+    fake_backend, stub_read_plan, tmp_path, monkeypatch
+):
+    from torchvision.transforms import v2
+
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32")
+    dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()), [_regions()], dense=_dense(), execution=execution
+    )
+    reads_after_first = _reads(fake_backend)
+    encoder = _encoder()
+    monkeypatch.setattr(
+        encoder, "get_normalization_transform",
+        lambda: v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ]),
+    )
+
+    dense_stage.embed_regions_dense(
+        _FakeModel(encoder), [_regions()], dense=_dense(), execution=execution
+    )
+
+    assert _reads(fake_backend) - reads_after_first == 3
+
+
+def test_embed_regions_dense_resume_accepts_sidecars_that_lack_identity_fields(
+    fake_backend, stub_read_plan, tmp_path
+):
+    """ROIs written before the identity existed are reused, and no encoder is loaded."""
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32")
+    artifacts = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder()), [_regions()], dense=_dense(), execution=execution
+    )
+    for artifact in artifacts:
+        legacy = json.loads(artifact.metadata_path.read_text())
+        for field in ("encoder_name", "output_variant", "precision", "dtype", "transform"):
+            del legacy["compatibility"][field]
+        artifact.metadata_path.write_text(json.dumps(legacy))
+    reads_after_first = _reads(fake_backend)
+    model = _FakeModel(_encoder(), name="other-encoder")
+
+    dense_stage.embed_regions_dense(model, [_regions()], dense=_dense(), execution=execution)
+
+    assert _reads(fake_backend) == reads_after_first
+    assert model.loads == 0
 
 
 def test_embed_regions_dense_all_present_does_not_dispatch(fake_backend, stub_read_plan, tmp_path, monkeypatch):

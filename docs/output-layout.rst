@@ -219,6 +219,48 @@ Selected fields:
      "num_slides": 2
    }
 
+.. _feature-identity:
+
+**compatibility**
+
+Tile, hierarchical, slide and image sidecars hold a ``compatibility`` object:
+the feature identity that ``resume`` compares.
+
+.. code-block:: json
+
+   {
+     "encoder_name": "prism",
+     "output_variant": "default",
+     "precision": "fp16",
+     "feature_dtype": "fp32",
+     "tile_encoder": "virchow",
+     "tile_encoder_output_variant": "cls_patch_mean",
+     "requested_tile_size_px": 224,
+     "encoder_input_size_px": 224,
+     "transform": {
+       "normalize": {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]},
+       "resize": null,
+       "center_crop": null
+     }
+   }
+
+- ``precision`` is the inference precision; ``feature_dtype`` is the stored
+  dtype.
+- ``tile_encoder`` and ``tile_encoder_output_variant`` are present for slide
+  and patient encoders.
+- ``requested_tile_size_px`` and ``encoder_input_size_px`` are present for
+  slide runs. Hierarchical runs add ``region_tile_multiple`` and
+  ``requested_region_size_px``.
+- ``transform`` records the image transform applied before encoding. A step
+  the transform does not have is ``null``. ``resize`` and ``center_crop`` hold
+  ``size`` (``[edge]`` for a shortest-edge resize, else ``[height, width]``);
+  ``resize`` also holds ``interpolation``. A zero-tile sidecar has no
+  ``transform``.
+
+A resume over a completed artifact that records a different value for a field
+raises and names the sample and the fields. A field that the sidecar does not
+record is accepted, with one warning per run.
+
 
 Image Embeddings
 ----------------
@@ -256,7 +298,8 @@ Dense Region Grids
 :meth:`~slide2vec.Model.embed_regions_dense` writes one payload and sidecar per
 level-0 point coordinate under
 ``dense_embeddings/[<annotation>/]<sample_id>/<x>_<y>``. The sidecar's
-``compatibility`` object records the source and read geometry:
+``compatibility`` object records the source and read geometry (selected
+fields):
 
 .. code-block:: json
 
@@ -278,8 +321,14 @@ level-0 point coordinate under
    }
 
 ``read_size`` and ``output_size`` use ``[height, width]``; see the
-:doc:`glossary` for the spacing vocabulary. Resume recomputes any artifact
-whose ``compatibility`` object does not match the current call.
+:doc:`glossary` for the spacing vocabulary. The object also records
+``encoder_name``, ``output_variant``, the dense options (``pad_mode``,
+``image_pad_value``, ``window_size``, ``overlap``, ``feature_kind``,
+``attention_blocks``, ``attention_include_registers``), the inference
+``precision``, the stored ``dtype`` and the ``transform`` record (see
+:ref:`compatibility <feature-identity>`). Resume recomputes any artifact whose
+``compatibility`` object records a different value for a field. A field that
+the object does not record is accepted.
 
 
 Dense Image Grids
@@ -339,10 +388,12 @@ Selected fields; the nested ``compatibility`` object is omitted here:
    }
 
 The nested ``compatibility`` object repeats the identity and recipe fields
-above, plus the inference ``precision`` and stored ``dtype``. Resume recomputes
-any artifact whose ``compatibility`` object does not match the current call;
-execution mechanics (GPU count, batch size, workers, output directory) are
-excluded.
+above, plus the inference ``precision``, the stored ``dtype`` and the
+``transform`` record (see :ref:`compatibility <feature-identity>`). Resume
+recomputes any artifact whose ``compatibility`` object records a different
+value for a field. A field that the object does not record is accepted. A
+sidecar with no ``compatibility`` object is recomputed. Execution mechanics
+(GPU count, batch size, workers, output directory) are excluded.
 
 
 Coordinate Files
@@ -461,6 +512,7 @@ The phase columns use different status values:
 
 ``feature_path`` points to the selected embedding artifact. ``error`` and
 ``traceback`` retain tiling failure details. Resume reuses completed artifacts;
-it does not record a separate ``skipped`` status. A completed tile or
-hierarchical artifact whose metadata records a different
-``requested_tile_size_px`` than the current run raises instead of being reused.
+it does not record a separate ``skipped`` status. A completed tile,
+hierarchical or slide artifact whose sidecar records a different
+:ref:`feature identity <feature-identity>` than the current run raises instead
+of being reused.

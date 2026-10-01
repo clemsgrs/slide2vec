@@ -19,7 +19,7 @@ What this module owns is the CPU-testable encode/write layer (D12):
 Writes are atomic and sidecar-last (D6): payload to a temp file → ``os.replace`` into place
 → then the sidecar. So a payload with no sidecar unambiguously means an incomplete ROI, and
 the sidecar proves write completion; resume additionally requires its compatibility metadata
-to match the current read plan. slide2vec owns the dense *write* because it
+to match the current read plan and feature identity. slide2vec owns the dense *write* because it
 owns the dense *distribution* (docs/adr/0001): ranks are separate OS processes and a grid is
 ~1000× a pooled embedding, so ranks persist final artifacts directly and nobody gathers.
 """
@@ -40,6 +40,7 @@ from slide2vec.artifacts import (
     write_dense_region,
 )
 from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
+from slide2vec.runtime.feature_identity import differing_fields, transform_record
 
 if TYPE_CHECKING:
     import torch
@@ -100,19 +101,35 @@ def region_read_compatibility(spec: RegionSpec) -> dict:
     }
 
 
-def region_needs_encode(out_dir, spec: RegionSpec) -> bool:
-    """Return whether the ROI lacks a sidecar with the current resolved read plan.
+def region_needs_encode(
+    out_dir,
+    spec: RegionSpec,
+    identity: dict,
+    *,
+    resolve_transform: Callable[[], dict] | None = None,
+) -> bool:
+    """Return whether the ROI lacks a sidecar matching the read plan and feature identity.
 
     The sidecar is written last (D6), so its presence is the done-marker; a ``.pt`` with no
-    sidecar is a crashed write and is re-encoded.
+    sidecar is a crashed write and is re-encoded. A field the sidecar does not record is
+    accepted. ``resolve_transform`` supplies the transform when ``identity`` does not hold
+    it yet; it loads the encoder, so it is called only when the sidecar records one.
     """
     _, sidecar_path = region_dense_paths(
         out_dir, sample_id=spec.sample_id, annotation=spec.annotation, x=spec.x, y=spec.y
     )
     if not sidecar_path.exists():
         return True
-    metadata = load_metadata(sidecar_path)
-    return metadata.get("compatibility") != region_read_compatibility(spec)
+    recorded = load_metadata(sidecar_path).get("compatibility")
+    if not isinstance(recorded, dict):
+        return True
+    return bool(
+        differing_fields(
+            recorded,
+            {**region_read_compatibility(spec), **identity},
+            resolve_transform=resolve_transform,
+        )
+    )
 
 
 def dense_artifact_from_disk(out_dir, spec) -> DenseRegionArtifact:
@@ -214,7 +231,7 @@ def _build_dense_tiling_result(specs: list[RegionSpec], dense: "DenseOptions"):
 
 
 def _region_metadata(
-    spec: RegionSpec, *, dense: "DenseOptions", geometry, grid
+    spec: RegionSpec, *, dense: "DenseOptions", geometry, grid, identity: dict
 ) -> dict:
     """Extraction-geometry sidecar (D5/D7): geometry + encode params slide2vec owns, nothing else."""
     grid_arr = np.asarray(grid)
@@ -241,7 +258,7 @@ def _region_metadata(
         "feature_kind": dense.feature_kind,
         "attention_blocks": [int(b) for b in dense.attention_blocks],
         "attention_include_registers": bool(dense.attention_include_registers),
-        "compatibility": compatibility,
+        "compatibility": {**compatibility, **identity},
     }
 
 
@@ -253,6 +270,7 @@ def run_dense_shard(
     dense: "DenseOptions",
     batch_size: int,
     device: "torch.device | str",
+    identity: dict,
     precision: str = "fp32",
     output_dtype: "torch.dtype | None" = None,
     num_workers: int = 4,
@@ -262,23 +280,27 @@ def run_dense_shard(
 
     Groups the shard's ROIs into contiguous per-slide runs (so each slide is opened once),
     skips any ROI whose completed sidecar has compatibility metadata matching the current
-    read plan (crash-safety / resume, D9), builds a minimal ``TilingResult`` for the ROIs
-    that remain, and streams their grids through
+    read plan and feature identity (crash-safety / resume, D9), builds a minimal
+    ``TilingResult`` for the ROIs that remain, and streams their grids through
     :func:`~slide2vec.runtime.dense_regions.iter_regions_dense` — writing each grid atomically
     and sidecar-last (D6). Device-agnostic and RANK-free: the identical loop runs in-process
     for ``num_gpus=1`` and on each rank under torchrun.
 
     Returns one :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI in input
     order — freshly written or (when skipped) reconstructed from the ROI already on disk.
-    ``on_batch`` is invoked with each encoded batch's ROI count (per-batch progress, D10c).
+    ``identity`` is the run's feature identity; the transform this shard applies is added
+    to it. ``on_batch`` is invoked with each encoded batch's ROI count (per-batch
+    progress, D10c).
     """
     from slide2vec.runtime.dense_regions import compute_dense_geometry, iter_regions_dense
 
     regions = list(regions)
+    dense_transform = model.get_normalization_transform()
+    identity = {**identity, "transform": transform_record(dense_transform)}
     artifacts: list[DenseRegionArtifact] = []
     for _key, group_iter in groupby(regions, key=RegionSpec.slide_group_key):
         group = list(group_iter)
-        pending = [spec for spec in group if region_needs_encode(out_dir, spec)]
+        pending = [spec for spec in group if region_needs_encode(out_dir, spec, identity)]
         written: dict[tuple[int, int], DenseRegionArtifact] = {}
         if pending:
             # Geometry from the slide's own read size — the exact size iter_regions_dense
@@ -305,6 +327,7 @@ def run_dense_shard(
                 batch_size=step,
                 precision=precision,
                 output_dtype=output_dtype,
+                dense_transform=dense_transform,
             )
             for spec, grid in zip(pending, grids):
                 artifact = write_dense_region(
@@ -314,7 +337,9 @@ def run_dense_shard(
                     annotation=spec.annotation,
                     x=spec.x,
                     y=spec.y,
-                    metadata=_region_metadata(spec, dense=dense, geometry=geometry, grid=grid),
+                    metadata=_region_metadata(
+                        spec, dense=dense, geometry=geometry, grid=grid, identity=identity
+                    ),
                 )
                 written[(int(spec.x), int(spec.y))] = artifact
                 if on_batch is not None:

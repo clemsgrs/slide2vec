@@ -21,6 +21,7 @@ from slide2vec.artifacts import (
 )
 from slide2vec.runtime.embedding import should_persist_tile_embeddings
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
+from slide2vec.runtime.feature_identity import PooledResumeCheck
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.persistence import update_process_list_after_embedding
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
@@ -162,14 +163,17 @@ def pending_local_embedding_records(
     include_slide_embeddings: bool,
     save_latents: bool,
     resume: bool,
-    requested_tile_size_px: int,
+    identity: dict[str, Any],
+    resolve_transform: Callable[[], dict[str, Any]],
 ) -> tuple[list[SlideSpec], list[Any]]:
     """Split the run into (pending, completed) for resume.
 
     A completed key is skipped only when every persisted sidecar (tile, hierarchical or
-    slide) records the same ``requested_tile_size_px`` as this run, or records none
-    (pre-metadata artifacts cannot be checked). A mismatch raises rather than silently
-    reusing embeddings computed from a different tile geometry.
+    slide) records the same feature identity as this run. A field a sidecar does not
+    record cannot be checked: it is accepted, with one warning per run. A mismatch raises
+    rather than silently reusing embeddings computed with a different recipe.
+    ``resolve_transform`` loads the encoder, so it is called only when a completed
+    sidecar records a transform.
     """
     if not resume:
         return list(successful_slides), list(tiling_results)
@@ -185,71 +189,43 @@ def pending_local_embedding_records(
     )
     pending_slides: list[SlideSpec] = []
     pending_tiling_results: list[Any] = []
+    check = PooledResumeCheck(identity, resolve_transform)
     for slide, tiling_result in zip(successful_slides, tiling_results):
         annotation = _tiling_result_annotation(tiling_result)
-        if (slide.sample_id, annotation) in completed_keys:
-            _refuse_stale_tile_size(
-                slide.sample_id,
-                annotation=annotation,
-                output_dir=output_dir,
-                output_format=output_format,
-                persist_tile_embeddings=persist_tile_embeddings,
-                persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-                include_slide_embeddings=include_slide_embeddings,
-                requested_tile_size_px=int(requested_tile_size_px),
-            )
+        if (slide.sample_id, annotation) not in completed_keys:
+            pending_slides.append(slide)
+            pending_tiling_results.append(tiling_result)
             continue
-        pending_slides.append(slide)
-        pending_tiling_results.append(tiling_result)
+        for kind, subdir in _embedding_sidecars(
+            annotation,
+            persist_tile_embeddings=persist_tile_embeddings,
+            persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+            include_slide_embeddings=include_slide_embeddings,
+        ):
+            metadata_path = output_dir / subdir / f"{slide.sample_id}.meta.json"
+            if not metadata_path.is_file():
+                continue
+            check.verify(
+                _recorded_identity(load_metadata(metadata_path)),
+                sample_id=slide.sample_id,
+                kind=kind,
+                path=output_dir / subdir / f"{slide.sample_id}.{output_format}",
+            )
+    check.warn_unrecorded(logger)
     return pending_slides, pending_tiling_results
 
 
-def _refuse_stale_tile_size(
-    sample_id: str,
-    *,
-    annotation: str | None,
-    output_dir: Path,
-    output_format: str,
-    persist_tile_embeddings: bool,
-    persist_hierarchical_embeddings: bool,
-    include_slide_embeddings: bool,
-    requested_tile_size_px: int,
-) -> None:
-    """Raise when any completed artifact sidecar records a different tile size.
+def _recorded_identity(metadata: dict[str, Any]) -> dict[str, Any]:
+    """The feature identity a pooled sidecar records.
 
-    Every sidecar this run would otherwise reuse is checked, so a slide-level run that
-    persisted only slide embeddings is covered too. A sidecar that records no tile size
-    (pre-metadata artifact) cannot be checked; it is accepted with a warning.
+    Sidecars written before ``compatibility`` existed record only the tile size, at the
+    top level.
     """
-    for kind, subdir in _embedding_sidecars(
-        annotation,
-        persist_tile_embeddings=persist_tile_embeddings,
-        persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-        include_slide_embeddings=include_slide_embeddings,
-    ):
-        metadata_path = output_dir / subdir / f"{sample_id}.meta.json"
-        if not metadata_path.is_file():
-            continue
-        recorded = load_metadata(metadata_path).get("requested_tile_size_px")
-        if recorded is None:
-            logger.warning(
-                "Resuming '%s' from existing %s embeddings that record no "
-                "requested_tile_size_px; cannot verify they were computed at %dpx.",
-                sample_id,
-                kind,
-                requested_tile_size_px,
-            )
-            continue
-        if int(recorded) == requested_tile_size_px:
-            continue
-        raise ValueError(
-            f"Cannot resume '{sample_id}': the existing {kind} embeddings at "
-            f"{output_dir / subdir / f'{sample_id}.{output_format}'} were computed with "
-            f"requested_tile_size_px={int(recorded)}, but this run requests "
-            f"{requested_tile_size_px}px. Embeddings from a different tile size are not "
-            "comparable. Re-run into a new output_dir, or delete the stale artifacts, or "
-            "request the recorded tile size."
-        )
+    recorded = dict(metadata.get("compatibility") or {})
+    tile_size = metadata.get("requested_tile_size_px")
+    if tile_size is not None:
+        recorded.setdefault("requested_tile_size_px", int(tile_size))
+    return recorded
 
 
 def _tiling_result_annotation(tiling_result) -> str | None:

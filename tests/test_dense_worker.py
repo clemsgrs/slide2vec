@@ -73,6 +73,7 @@ def test_dense_worker_encodes_only_its_rank_shard(monkeypatch, tmp_path):
     monkeypatch.setattr(
         api.Model, "from_preset",
         classmethod(lambda cls, name, **kwargs: SimpleNamespace(
+            name=name,
             _declare_dense_encoder_input=(
                 lambda dense, *, emit_run_info: declared.append(dense)
             ),

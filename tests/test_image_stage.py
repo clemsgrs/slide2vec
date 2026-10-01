@@ -49,9 +49,10 @@ class _FakeModel:
     has been declared, mirroring the real ``Model``.
     """
 
-    def __init__(self, encoder) -> None:
+    def __init__(self, encoder, *, name: str = "fake-encoder") -> None:
         self._loaded = _loaded(encoder)
-        self.name = "fake-encoder"
+        self.name = name
+        self.level = "tile"
         self._output_variant = None
         self._requested_device = "cpu"
         self.allow_non_recommended_settings = False
@@ -139,7 +140,8 @@ def test_embed_images_num_gpus_gt_one_launches_image_worker(tmp_path, monkeypatc
         specs = image_specs.image_specs_from_request(request)
         for shard in plan_contiguous_shards(specs, num_gpus):
             run_image_shard(shard, loaded=rank_loaded, out_dir=Path(output_dir), batch_size=2,
-                            output_precision="fp32", num_workers=0)
+                            output_precision="fp32", num_workers=0,
+                            identity={"encoder_name": "fake-encoder"})
 
     monkeypatch.setattr(image_stage, "run_torchrun_worker", _fake_run)
     monkeypatch.setattr(image_stage, "validate_multi_gpu_execution", lambda *a, **k: None)
@@ -194,6 +196,113 @@ def test_embed_images_all_present_does_not_dispatch(tmp_path, monkeypatch):
     monkeypatch.setattr(image_stage, "run_torchrun_worker",
                         lambda **k: pytest.fail("nothing to encode"))
     assert len(image_stage.embed_images(model, specs, execution=execution)) == 2
+
+
+SHIPPED_TRANSFORM = {
+    "normalize": {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]},
+    "resize": {"size": [248], "interpolation": "bicubic"},
+    "center_crop": {"size": [224, 224]},
+}
+
+
+def _sidecar(tmp_path, sample_id: str) -> dict:
+    path = tmp_path / "out" / "image_embeddings" / f"{sample_id}.meta.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_embed_images_sidecar_records_the_feature_identity(tmp_path):
+    """A given image declares no tile geometry: the identity is the encoder and its recipe."""
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp16", output_dtype="fp32",
+        num_workers_per_gpu=0,
+    )
+
+    image_stage.embed_images(_FakeModel(_encoder()), _images(tmp_path, ["a"]), execution=execution)
+
+    assert _sidecar(tmp_path, "a")["compatibility"] == {
+        "encoder_name": "fake-encoder",
+        "output_variant": None,
+        "precision": "fp16",
+        "feature_dtype": "fp32",
+        "transform": SHIPPED_TRANSFORM,
+    }
+
+
+def test_embed_images_resume_refuses_artifacts_from_a_different_encoder(tmp_path, monkeypatch):
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32", num_workers_per_gpu=0
+    )
+    specs = _images(tmp_path, ["a"])
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=execution)
+    monkeypatch.setattr(
+        image_stage, "_run_images_in_process",
+        lambda *a, **k: pytest.fail("encoding must not start on a stale resume"),
+    )
+
+    with pytest.raises(ValueError) as error:
+        image_stage.embed_images(
+            _FakeModel(_encoder(), name="other-encoder"), specs, execution=execution
+        )
+
+    assert str(error.value) == (
+        "Cannot resume 'a': the existing image embeddings at "
+        f"{tmp_path / 'out' / 'image_embeddings' / 'a.pt'} were computed with a different "
+        "feature identity: encoder_name (recorded 'fake-encoder', requested 'other-encoder'). "
+        "Re-run into a new output_dir, delete the stale artifacts, or request the recorded "
+        "values."
+    )
+
+
+def test_embed_images_resume_refuses_artifacts_from_a_different_transform(tmp_path):
+    from torchvision.transforms import v2
+
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32", num_workers_per_gpu=0
+    )
+    specs = _images(tmp_path, ["a"])
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=execution)
+    changed = _FakeModel(_encoder())
+    changed._loaded.transforms = v2.Compose([
+        v2.ToImage(),
+        v2.Resize((224, 224), antialias=True),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ])
+
+    with pytest.raises(ValueError) as error:
+        image_stage.embed_images(changed, specs, execution=execution)
+
+    assert (
+        "transform.center_crop (recorded {'size': [224, 224]}, requested None); "
+        "transform.resize.interpolation (recorded 'bicubic', requested 'bilinear'); "
+        "transform.resize.size (recorded [248], requested [224, 224])"
+    ) in str(error.value)
+
+
+def test_embed_images_resume_accepts_sidecars_that_lack_the_identity(tmp_path, caplog):
+    """Artifacts written before the identity existed are reused, with one warning per run."""
+    execution = ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=1, precision="fp32", num_workers_per_gpu=0
+    )
+    specs = _images(tmp_path, ["a", "b"])
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=execution)
+    for spec in specs:
+        path = tmp_path / "out" / "image_embeddings" / f"{spec.sample_id}.meta.json"
+        legacy = json.loads(path.read_text(encoding="utf-8"))
+        del legacy["compatibility"]
+        path.write_text(json.dumps(legacy), encoding="utf-8")
+    model = _FakeModel(_encoder(), name="other-encoder")
+    model._load_backend = lambda: pytest.fail("no recorded transform, so no encoder to load")
+
+    with caplog.at_level("WARNING", logger="slide2vec.runtime.image_stage"):
+        artifacts = image_stage.embed_images(model, specs, execution=execution)
+
+    assert [artifact.sample_id for artifact in artifacts] == ["a", "b"]
+    assert [record.getMessage() for record in caplog.records] == [
+        "Resuming over 2 completed sidecar(s) that do not record encoder_name, "
+        "feature_dtype, output_variant, precision, transform; cannot verify those fields "
+        "against this run."
+    ]
 
 
 def test_embed_images_rejects_duplicate_sample_ids(tmp_path):
@@ -281,6 +390,8 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
     monkeypatch.setattr(
         api.Model, "from_preset",
         classmethod(lambda cls, name, **kwargs: SimpleNamespace(
+            name=name,
+            level="tile",
             _declare_given_encoder_input=lambda *, emit_run_info: declared.append(True),
             _load_backend=lambda: (declared and loaded) or pytest.fail("must declare first"),
         )),

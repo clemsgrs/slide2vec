@@ -9,7 +9,8 @@ machinery, because the only thing that differs is the work unit:
    :class:`~slide2vec.runtime.encoder_input_contract.EncoderInputContract`);
 2. **normalize** the images into resolved, uniquely-named specs;
 3. **resume-filter** them — drop images whose sidecar already exists, before sharding, so
-   no rank draws an all-done shard and idles; the skip count is logged;
+   no rank draws an all-done shard and idles; a sidecar that records a different feature
+   identity raises; the skip count is logged;
 4. **dispatch**: ``num_gpus=1`` runs :func:`~slide2vec.runtime.image_shard.run_image_shard`
    fully in-process (no torchrun); ``num_gpus>1`` writes a JSON request and launches
    :mod:`slide2vec.distributed.image_worker` under torchrun, which splits the list with the
@@ -24,10 +25,10 @@ import json
 import logging
 from pathlib import Path
 from subprocess import Popen
-from typing import Sequence
+from typing import Any, Callable, Sequence
 
 from slide2vec.api import ImageSpec
-from slide2vec.artifacts import ImageEmbeddingArtifact
+from slide2vec.artifacts import ImageEmbeddingArtifact, image_embedding_paths, load_metadata
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.distributed import (
     distributed_coordination_dir,
@@ -35,6 +36,11 @@ from slide2vec.runtime.distributed import (
     run_torchrun_worker,
 )
 from slide2vec.runtime.distributed_stage import validate_multi_gpu_execution
+from slide2vec.runtime.feature_identity import (
+    PooledResumeCheck,
+    deferred_transform_record,
+    pooled_feature_identity,
+)
 from slide2vec.runtime.image_shard import (
     image_artifact_from_disk,
     image_needs_encode,
@@ -52,12 +58,36 @@ logger = logging.getLogger(__name__)
 
 
 def partition_images_by_resume(
-    specs: Sequence[ImageSpec], out_dir, *, output_format: str
+    specs: Sequence[ImageSpec],
+    out_dir,
+    *,
+    output_format: str,
+    identity: dict[str, Any],
+    resolve_transform: Callable[[], dict[str, Any]],
 ) -> tuple[list[ImageSpec], int]:
-    """Split the spec list into (needs-encode, already-on-disk-count) by sidecar existence."""
-    remaining = [
-        spec for spec in specs if image_needs_encode(out_dir, spec, output_format=output_format)
-    ]
+    """Split the spec list into (needs-encode, already-on-disk-count) by sidecar existence.
+
+    An image already on disk must record the same feature identity as this run: a
+    mismatch raises. A field its sidecar does not record is accepted, with one warning
+    per run. ``resolve_transform`` loads the encoder, so it is called only when a sidecar
+    records a transform.
+    """
+    remaining: list[ImageSpec] = []
+    check = PooledResumeCheck(identity, resolve_transform)
+    for spec in specs:
+        if image_needs_encode(out_dir, spec, output_format=output_format):
+            remaining.append(spec)
+            continue
+        payload_path, sidecar_path = image_embedding_paths(
+            out_dir, sample_id=spec.sample_id, output_format=output_format
+        )
+        check.verify(
+            load_metadata(sidecar_path).get("compatibility") or {},
+            sample_id=spec.sample_id,
+            kind="image",
+            path=payload_path,
+        )
+    check.warn_unrecorded(logger)
     return remaining, len(specs) - len(remaining)
 
 
@@ -77,8 +107,15 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
+    identity = pooled_feature_identity(model, execution=execution)
     remaining, skipped = partition_images_by_resume(
-        specs, out_dir, output_format=execution.output_format
+        specs,
+        out_dir,
+        output_format=execution.output_format,
+        identity=identity,
+        resolve_transform=deferred_transform_record(
+            model, on_cpu_copy=execution.num_gpus > 1
+        ),
     )
     if skipped:
         logger.info(
@@ -94,7 +131,9 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     )
     if remaining:
         if execution.num_gpus == 1:
-            _run_images_in_process(model, remaining, execution=execution, out_dir=out_dir)
+            _run_images_in_process(
+                model, remaining, execution=execution, out_dir=out_dir, identity=identity
+            )
         else:
             _run_images_distributed(model, remaining, execution=execution, out_dir=out_dir)
     emit_progress("images.finished", total=len(specs))
@@ -104,7 +143,7 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     ]
 
 
-def _run_images_in_process(model, specs, *, execution, out_dir) -> None:
+def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> None:
     # Loaded under the Given contract declared by embed_images, so the backend carries the
     # encoder's shipped transform — which the loader workers then apply itemwise.
     loaded = model._load_backend()
@@ -121,6 +160,7 @@ def _run_images_in_process(model, specs, *, execution, out_dir) -> None:
         out_dir=out_dir,
         batch_size=int(execution.batch_size),
         output_precision=resolve_output_precision(execution.output_dtype, execution.precision),
+        identity=identity,
         output_format=execution.output_format,
         precision=execution.precision,
         # The encoder/runtime is already initialized in this parent process. Forking
