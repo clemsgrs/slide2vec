@@ -231,12 +231,15 @@ def embed_single_slide_distributed(
             shard_payloads = load_tile_embedding_shards(coordination_dir, shard_stem)
             tile_embeddings = merge_tile_embedding_shards(shard_payloads)
         encoder_input_size_px = resolve_shard_encoder_input_size(shard_payloads)
+        # Every rank loads the same encoder, so any shard carries the run's transform.
+        transform = shard_payloads[0].get("transform")
         if model.level != "slide":
             return make_embedded_slide(
                 slide=slide,
                 tiling_result=tiling_result,
                 tile_embeddings=tile_embeddings,
                 encoder_input_size_px=encoder_input_size_px,
+                transform=transform,
             )
         # Aggregation only: the shards did the tile encoding, this parent-side load
         # feeds encode_slide and never selects a tile transform.
@@ -257,6 +260,7 @@ def embed_single_slide_distributed(
             slide_embedding=slide_embedding,
             latents=latents,
             encoder_input_size_px=encoder_input_size_px,
+            transform=transform,
         )
 
 
@@ -300,6 +304,7 @@ def embed_multi_slides_distributed(
                     slide_embedding=slide_embedding,
                     latents=latents,
                     encoder_input_size_px=payload.get("encoder_input_size_px"),
+                    transform=payload.get("transform"),
                 )
             )
         return results

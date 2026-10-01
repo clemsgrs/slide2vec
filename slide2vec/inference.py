@@ -13,6 +13,7 @@ from slide2vec.runtime import (
     embedding,
     embedding_persist,
     embedding_pipeline,
+    feature_identity,
     hierarchical,
     manifest,
     patient_pipeline,
@@ -302,8 +303,7 @@ def embed_slides(
                 zero_tile_pairs,
                 model=model,
                 preprocessing=preprocessing,
-                output_dir=execution.output_dir,
-                output_format=execution.output_format,
+                execution=execution,
             )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
             if execution.num_gpus > 1 and len(embeddable_slides) > 1:
@@ -611,6 +611,12 @@ def embed_tiles(
     # idempotent, so declaring in both places is intended.
     model._declare_encoder_input(resolved_preprocessing, emit_run_info=False)
     loaded = model._load_backend()
+    compatibility = feature_identity.pooled_feature_identity(
+        model,
+        execution=execution,
+        preprocessing=resolved_preprocessing,
+        transform=feature_identity.transform_record(getattr(loaded, "transforms", None)),
+    )
     hierarchical_mode = hierarchical.is_hierarchical_preprocessing(resolved_preprocessing)
     cpu_budget.log_on_the_fly_worker_override_once(
         resolved_preprocessing,
@@ -638,6 +644,7 @@ def embed_tiles(
                     mask_path=slide.mask_path,
                     backend=tiling.resolve_slide_backend(resolved_preprocessing.backend, tiling_result),
                     preprocessing=resolved_preprocessing,
+                    compatibility=compatibility,
                     encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
                 ),
                 annotation=embedding.tiling_result_annotation(tiling_result),
@@ -658,6 +665,7 @@ def embed_tiles(
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
                 backend=tiling.resolve_slide_backend(resolved_preprocessing.backend, tiling_result),
+                compatibility=compatibility,
                 encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
             )
             artifact = embedding.write_tile_embedding_artifact(
@@ -707,12 +715,26 @@ def aggregate_tiles(
             tiling_result,
             execution=execution,
         )
+        # Aggregation encodes no tile: the tile geometry and transform are the ones
+        # recorded with the tile artifact.
+        tile_identity = metadata.get("compatibility") or {}
+        compatibility = {
+            **feature_identity.pooled_feature_identity(model, execution=execution),
+            **{
+                field: tile_identity[field]
+                for field in ("requested_tile_size_px", "encoder_input_size_px", "transform")
+                if field in tile_identity
+            },
+        }
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,
             slide_embedding,
             execution=execution,
             metadata=embedding.build_slide_embedding_metadata(
-                model, image_path=metadata["image_path"], tiling_result=tiling_result
+                model,
+                image_path=metadata["image_path"],
+                tiling_result=tiling_result,
+                compatibility=compatibility,
             ),
             latents=None,
         )
@@ -801,8 +823,7 @@ def run_pipeline(
             zero_tile_pairs,
             model=model,
             preprocessing=resolved_preprocessing,
-            output_dir=output_dir,
-            output_format=execution.output_format,
+            execution=execution,
         )
         emit_progress("embedding.started", slide_count=len(embeddable_slides))
 
@@ -879,7 +900,12 @@ def run_pipeline(
             include_slide_embeddings=include_slide_embeddings,
             save_latents=execution.save_latents,
             resume=resolved_preprocessing.resume,
-            requested_tile_size_px=resolved_preprocessing.requested_tile_size_px,
+            identity=feature_identity.pooled_feature_identity(
+                model, execution=execution, preprocessing=resolved_preprocessing
+            ),
+            resolve_transform=feature_identity.deferred_transform_record(
+                model, on_cpu_copy=False, preprocessing=resolved_preprocessing
+            ),
         )
         skipped_slide_count = len(embeddable_slides) - len(pending_slides)
         if resolved_preprocessing.resume and skipped_slide_count > 0:
@@ -992,8 +1018,7 @@ def run_pipeline_with_coordinates(
             zero_tile_pairs,
             model=model,
             preprocessing=resolved_preprocessing,
-            output_dir=output_dir,
-            output_format=execution.output_format,
+            execution=execution,
         )
         emit_progress("embedding.started", slide_count=len(embeddable_slides))
         if execution.num_gpus > 1:

@@ -162,6 +162,7 @@ def test_single_gpu_artifact_records_read_requested_final_geometry_and_spacing(t
         mask_path=None,
         tile_size_lv0=415,
         backend="openslide",
+        compatibility={},
         encoder_input_size_px=224,
     )
 
@@ -228,6 +229,7 @@ def test_zero_tile_metadata_always_records_null_encoder_input_size():
         mask_path=None,
         tile_size_lv0=415,
         backend="openslide",
+        compatibility={},
     )
 
     assert "encoder_input_size_px" in metadata
@@ -256,6 +258,7 @@ def test_hierarchical_metadata_records_pooled_geometry():
         image_path="slide.svs",
         mask_path=None,
         backend="openslide",
+        compatibility={},
         preprocessing=preprocessing,
         encoder_input_size_px=224,
     )

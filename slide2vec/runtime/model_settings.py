@@ -94,6 +94,11 @@ def output_torch_dtype(precision: str):
     return mapping[precision]
 
 
+def output_dtype_name(precision: str) -> str:
+    """NumPy dtype name of an on-disk feature precision (``"fp16"`` -> ``"float16"``)."""
+    return {"fp16": "float16", "fp32": "float32"}[precision]
+
+
 def canonicalize_model_name(name: str) -> str:
     normalized = name.strip().lower()
     return MODEL_NAME_ALIASES.get(normalized, normalized)

@@ -22,6 +22,7 @@ from slide2vec.runtime.embedding import (
     write_tile_embedding_artifact,
 )
 from slide2vec.runtime.embedding_pipeline import compute_tile_embeddings_for_slide
+from slide2vec.runtime.feature_identity import pooled_feature_identity, transform_record
 from slide2vec.runtime.hierarchical import num_embedding_items
 from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.slide_encode import encode_slide_from_tiles
@@ -47,6 +48,12 @@ def run_patient_pipeline(
     # Encodes tiles below, so this layer declares its own geometry (idempotent).
     model._declare_encoder_input(preprocessing, emit_run_info=False)
     loaded = model._load_backend()
+    compatibility = pooled_feature_identity(
+        model,
+        execution=execution,
+        preprocessing=preprocessing,
+        transform=transform_record(getattr(loaded, "transforms", None)),
+    )
     tile_artifacts: list[TileEmbeddingArtifact] = []
     slide_artifacts: list[SlideEmbeddingArtifact] = []
 
@@ -80,6 +87,7 @@ def run_patient_pipeline(
                     mask_path=slide.mask_path,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
                     backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                    compatibility=compatibility,
                     encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
                 ),
             )
@@ -104,7 +112,10 @@ def run_patient_pipeline(
                 slide_emb,
                 execution=execution,
                 metadata=build_slide_embedding_metadata(
-                    model, image_path=slide.image_path, tiling_result=tiling_result
+                    model,
+                    image_path=slide.image_path,
+                    tiling_result=tiling_result,
+                    compatibility=compatibility,
                 ),
             )
             slide_artifacts.append(slide_artifact)

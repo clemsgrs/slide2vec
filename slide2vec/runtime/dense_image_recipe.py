@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from slide2vec.encoders.registry import resolve_encoder_output
-from slide2vec.runtime.model_settings import resolve_output_precision
+from slide2vec.runtime.model_settings import output_dtype_name, resolve_output_precision
 
 
 def _int_pair(value: Any, *, field: str) -> tuple[int, int]:
@@ -55,6 +55,8 @@ def malformed_dense_image_compatibility_fields(
                 valid = len(value) == len(reference)
         elif isinstance(reference, (int, float)):
             valid = isinstance(value, (int, float)) and not isinstance(value, bool)
+        elif isinstance(reference, dict):
+            valid = isinstance(value, dict)
         if not valid:
             malformed.append(field)
     return tuple(sorted(malformed))
@@ -91,9 +93,11 @@ class DenseImageRecipe:
     attention_include_registers: bool
     precision: str
     dtype: str
+    #: Record of the normalization-only transform; ``None`` until an encoder is loaded.
+    transform: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "encoder_name": self.encoder_name,
             "output_variant": self.output_variant,
             "reader_regime": self.reader_regime,
@@ -122,6 +126,9 @@ class DenseImageRecipe:
             "precision": self.precision,
             "dtype": self.dtype,
         }
+        if self.transform is not None:
+            payload["transform"] = self.transform
+        return payload
 
     def for_image(self, spec, read_plan=None) -> dict[str, Any]:
         """Add the normalized source identity to this request-wide recipe."""
@@ -207,6 +214,7 @@ class DenseImageRecipe:
             attention_include_registers=bool(payload["attention_include_registers"]),
             precision=str(payload["precision"]),
             dtype=str(payload["dtype"]),
+            transform=payload.get("transform"),
         )
 
 
@@ -219,7 +227,10 @@ def resolve_dense_image_recipe(
     reader_regime: str = "raster",
     spacing_source: str | None = None,
 ) -> DenseImageRecipe:
-    """Resolve the complete request-wide identity before loading the encoder."""
+    """Resolve the request-wide identity before loading the encoder.
+
+    The transform is the one field that needs the loaded encoder; the shard adds it.
+    """
     if execution.precision is None:
         raise ValueError(
             "Dense image inference precision must be resolved before building its recipe"
@@ -290,5 +301,5 @@ def resolve_dense_image_recipe(
         attention_blocks=tuple(int(block) for block in dense.attention_blocks),
         attention_include_registers=bool(dense.attention_include_registers),
         precision=execution.precision,
-        dtype={"fp16": "float16", "fp32": "float32"}[output_precision],
+        dtype=output_dtype_name(output_precision),
     )

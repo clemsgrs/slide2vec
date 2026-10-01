@@ -147,3 +147,24 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         )
     else:
         print(f"OK: tile embeddings within tolerance; mean cosine similarity={mean_tile_cos:.4f}")
+
+    # 7. Assert both sidecars record the feature identity that resume compares
+    for subdir in ("tile_embeddings", "slide_embeddings"):
+        sidecar = json.loads((tmp_path / subdir / "test-wsi.meta.json").read_text())
+        compatibility = dict(sidecar["compatibility"])
+        transform = compatibility.pop("transform")
+        assert compatibility == {
+            "encoder_name": "prism",
+            "output_variant": "default",
+            "precision": "fp32",  # --run-on-cpu
+            "feature_dtype": "fp32",
+            "tile_encoder": "virchow",
+            "tile_encoder_output_variant": "cls_patch_mean",
+            "requested_tile_size_px": 224,
+            "encoder_input_size_px": 224,
+        }, subdir
+        # A declared slide run normalizes only: it never resizes or crops the tile.
+        assert transform["resize"] is None, subdir
+        assert transform["center_crop"] is None, subdir
+        assert len(transform["normalize"]["mean"]) == 3, subdir
+        assert len(transform["normalize"]["std"]) == 3, subdir

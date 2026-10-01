@@ -322,8 +322,65 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "attention_include_registers": False,
             "precision": "fp32",
             "dtype": "float32",
+            "transform": {
+                "normalize": {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]},
+                "resize": None,
+                "center_crop": None,
+            },
         },
     }
+
+
+def test_run_dense_image_shard_reencodes_when_the_transform_changes(tmp_path, monkeypatch):
+    from torchvision.transforms import v2
+
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    [first] = run_dense_image_shard(
+        [spec], loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=1, num_workers=0
+    )
+    written_at = first.path.stat().st_mtime_ns
+    monkeypatch.setattr(
+        enc, "get_normalization_transform",
+        lambda: v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ]),
+    )
+
+    [second] = run_dense_image_shard(
+        [spec], loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=1, num_workers=0
+    )
+
+    assert second.path.stat().st_mtime_ns != written_at
+    meta = json.loads(second.metadata_path.read_text())
+    assert meta["compatibility"]["transform"]["normalize"]["mean"] == [0.485, 0.456, 0.406]
+
+
+def test_run_dense_image_shard_reuses_a_pair_whose_sidecar_lacks_the_transform(tmp_path):
+    """Grids written before the transform was recorded are not recomputed."""
+    enc = _encoder()
+    spec = _spec(tmp_path, "a")
+    out_dir = tmp_path / "out"
+    [first] = run_dense_image_shard(
+        [spec], loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=1, num_workers=0
+    )
+    legacy = json.loads(first.metadata_path.read_text())
+    del legacy["compatibility"]["transform"]
+    first.metadata_path.write_text(json.dumps(legacy))
+    written_at = first.path.stat().st_mtime_ns
+
+    [second] = run_dense_image_shard(
+        [spec], loaded=_loaded(enc), out_dir=out_dir, dense=_dense(),
+        recipe=_recipe(), batch_size=1, num_workers=0
+    )
+
+    assert second.path.stat().st_mtime_ns == written_at
 
 
 def test_spacing_readable_sidecar_records_the_complete_resolved_plan(

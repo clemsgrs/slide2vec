@@ -36,7 +36,8 @@ model's published sampling protocol. Earlier releases read Lunit and mSTAR at
 between non-overlapping tiles. A 224px grid changes the tile count and
 coverage; embeddings from the two policies are not equivalent. ``resume``
 refuses to reuse tile, hierarchical or slide embeddings whose metadata records
-a different ``requested_tile_size_px``.
+a different ``requested_tile_size_px`` (see
+:ref:`compatibility <feature-identity>`).
 
 An off-default size requires ``allow_non_recommended_settings=True``, an
 encoder that supports variable input, and a multiple of the patch size. The

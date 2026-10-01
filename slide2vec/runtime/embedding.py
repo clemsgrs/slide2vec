@@ -45,6 +45,7 @@ def build_tile_embedding_metadata(
     mask_path: Path | str | None,
     tile_size_lv0: int,
     backend: str,
+    compatibility: dict[str, Any],
     encoder_input_size_px: int | None = None,
 ) -> dict[str, Any]:
     coordinates_npz_path = (
@@ -70,17 +71,19 @@ def build_tile_embedding_metadata(
             int(encoder_input_size_px) if encoder_input_size_px is not None else None
         ),
         "requested_spacing_um": _optional_float(tiling_result, "requested_spacing_um"),
+        "compatibility": compatibility,
     }
 
 
 def build_slide_embedding_metadata(
-    model, *, image_path: Path | str, tiling_result
+    model, *, image_path: Path | str, tiling_result, compatibility: dict[str, Any]
 ) -> dict[str, Any]:
     return {
         "encoder_name": model.name,
         "encoder_level": model.level,
         "image_path": str(image_path),
         "requested_tile_size_px": _optional_int(tiling_result, "requested_tile_size_px"),
+        "compatibility": compatibility,
     }
 
 
@@ -92,6 +95,7 @@ def build_hierarchical_embedding_metadata(
     mask_path: Path | str | None,
     backend: str,
     preprocessing: PreprocessingConfig,
+    compatibility: dict[str, Any],
     encoder_input_size_px: int | None = None,
 ) -> dict[str, Any]:
     coordinates_npz_path = (
@@ -119,6 +123,7 @@ def build_hierarchical_embedding_metadata(
             int(encoder_input_size_px) if encoder_input_size_px is not None else None
         ),
         "subtile_order": "row_major",
+        "compatibility": compatibility,
     }
 
 

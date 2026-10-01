@@ -27,6 +27,7 @@ def get_args_parser(add_help: bool = True):
 def main(argv=None) -> int:
     from slide2vec.progress import emit_progress
     from slide2vec.runtime.dense_shard import run_dense_shard
+    from slide2vec.runtime.feature_identity import dense_feature_identity
     from slide2vec.runtime.dense_stage import (
         region_specs_from_request,
         resolve_output_torch_dtype,
@@ -68,6 +69,7 @@ def main(argv=None) -> int:
             dense=dense,
             batch_size=int(execution.batch_size),
             device=loaded.device,
+            identity=dense_feature_identity(model, dense=dense, execution=execution),
             precision=execution.precision,
             output_dtype=resolve_output_torch_dtype(execution),
             num_workers=execution.resolved_num_workers_per_gpu(),

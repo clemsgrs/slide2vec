@@ -57,6 +57,14 @@ def PreprocessingConfig(*args, **kwargs):
 DEFAULT_PREPROCESSING = PreprocessingConfig()
 
 
+#: The one identity field sidecars recorded before ``compatibility`` existed.
+TILE_SIZE_224 = {"requested_tile_size_px": 224}
+
+
+def _no_transform_to_resolve():
+    pytest.fail("no completed sidecar records a transform, so no encoder may be loaded")
+
+
 def _noop_declare_encoder_input(*args, **kwargs):
     """Stand-in models declare nothing: these tests stub ``_load_backend`` outright."""
     return None
@@ -1823,15 +1831,15 @@ def test_resume_refuses_existing_tile_embeddings_from_a_different_tile_size(tmp_
             include_slide_embeddings=False,
             save_latents=False,
             resume=True,
-            requested_tile_size_px=224,
+            identity=TILE_SIZE_224,
+            resolve_transform=_no_transform_to_resolve,
         )
 
     assert str(error.value) == (
         f"Cannot resume 'slide-a': the existing tile embeddings at "
-        f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with "
-        "requested_tile_size_px=248, but this run requests 224px. Embeddings from a "
-        "different tile size are not comparable. Re-run into a new output_dir, or delete "
-        "the stale artifacts, or request the recorded tile size."
+        f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with a different "
+        "feature identity: requested_tile_size_px (recorded 248, requested 224). Re-run "
+        "into a new output_dir, delete the stale artifacts, or request the recorded values."
     )
 
 
@@ -1849,7 +1857,8 @@ def test_resume_skips_existing_tile_embeddings_recorded_at_the_same_tile_size(tm
         include_slide_embeddings=False,
         save_latents=False,
         resume=True,
-        requested_tile_size_px=224,
+        identity=TILE_SIZE_224,
+        resolve_transform=_no_transform_to_resolve,
     )
 
     assert pending_slides == []
@@ -1883,7 +1892,9 @@ def test_run_pipeline_resume_refuses_stale_tile_size_before_embedding(monkeypatc
         _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
     )
 
-    with pytest.raises(ValueError, match="requested_tile_size_px=248, but this run requests 224px"):
+    with pytest.raises(
+        ValueError, match=r"requested_tile_size_px \(recorded 248, requested 224\)"
+    ):
         inference.run_pipeline(
             model,
             slides=slides,
@@ -1932,15 +1943,15 @@ def test_resume_refuses_existing_slide_embeddings_from_a_different_tile_size(tmp
             include_slide_embeddings=True,
             save_latents=False,
             resume=True,
-            requested_tile_size_px=224,
+            identity=TILE_SIZE_224,
+            resolve_transform=_no_transform_to_resolve,
         )
 
     assert str(error.value) == (
         f"Cannot resume 'slide-a': the existing slide embeddings at "
-        f"{tmp_path / 'slide_embeddings' / 'slide-a.npz'} were computed with "
-        "requested_tile_size_px=248, but this run requests 224px. Embeddings from a "
-        "different tile size are not comparable. Re-run into a new output_dir, or delete "
-        "the stale artifacts, or request the recorded tile size."
+        f"{tmp_path / 'slide_embeddings' / 'slide-a.npz'} were computed with a different "
+        "feature identity: requested_tile_size_px (recorded 248, requested 224). Re-run "
+        "into a new output_dir, delete the stale artifacts, or request the recorded values."
     )
 
 
@@ -1958,7 +1969,8 @@ def test_resume_skips_existing_slide_embeddings_recorded_at_the_same_tile_size(t
         include_slide_embeddings=True,
         save_latents=False,
         resume=True,
-        requested_tile_size_px=224,
+        identity=TILE_SIZE_224,
+        resolve_transform=_no_transform_to_resolve,
     )
 
     assert pending_slides == []
@@ -1972,6 +1984,7 @@ def test_slide_embedding_metadata_records_the_requested_tile_size():
         SimpleNamespace(name="moozy-slide", level="slide"),
         image_path="/tmp/slide-a.svs",
         tiling_result=SimpleNamespace(requested_tile_size_px=224),
+        compatibility=TILE_SIZE_224,
     )
 
     assert metadata == {
@@ -1979,6 +1992,7 @@ def test_slide_embedding_metadata_records_the_requested_tile_size():
         "encoder_level": "slide",
         "image_path": "/tmp/slide-a.svs",
         "requested_tile_size_px": 224,
+        "compatibility": {"requested_tile_size_px": 224},
     }
 
 
@@ -2012,13 +2026,14 @@ def test_resume_warns_when_existing_slide_embeddings_record_no_tile_size(tmp_pat
             include_slide_embeddings=True,
             save_latents=False,
             resume=True,
-            requested_tile_size_px=224,
+            identity=TILE_SIZE_224,
+            resolve_transform=_no_transform_to_resolve,
         )
 
     assert pending_slides == []
     assert (
-        "Resuming 'slide-a' from existing slide embeddings that record no "
-        "requested_tile_size_px; cannot verify they were computed at 224px."
+        "Resuming over 1 completed sidecar(s) that do not record requested_tile_size_px, "
+        "transform; cannot verify those fields against this run."
     ) in caplog.text
 
 
@@ -2045,7 +2060,8 @@ def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: 
         include_slide_embeddings=False,
         save_latents=False,
         resume=True,
-        requested_tile_size_px=224,
+        identity=TILE_SIZE_224,
+        resolve_transform=_no_transform_to_resolve,
     )
     tile_artifact = persistence.load_tile_artifact(
         "slide-a",
@@ -5042,7 +5058,8 @@ def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path:
         include_slide_embeddings=True,
         save_latents=False,
         resume=True,
-        requested_tile_size_px=224,
+        identity=TILE_SIZE_224,
+        resolve_transform=_no_transform_to_resolve,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]
@@ -5269,8 +5286,7 @@ def test_zero_tile_sidecar_namespaces_per_class(tmp_path: Path):
             [(slide, tiling_result)],
             model=model,
             preprocessing=DEFAULT_PREPROCESSING,
-            output_dir=tmp_path,
-            output_format="pt",
+            execution=ExecutionOptions(output_dir=tmp_path),
         )
 
     _sidecar("tumor")
@@ -5505,7 +5521,8 @@ def test_resume_gate_keys_hierarchical_embeddings_by_sample_id_and_annotation(tm
         include_slide_embeddings=False,
         save_latents=False,
         resume=True,
-        requested_tile_size_px=224,
+        identity=TILE_SIZE_224,
+        resolve_transform=_no_transform_to_resolve,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]
@@ -5578,8 +5595,7 @@ def test_zero_tile_hierarchical_sidecar_namespaces_per_class(monkeypatch, tmp_pa
             [(slide, tiling_result)],
             model=model,
             preprocessing=HIERARCHICAL_PREPROCESSING,
-            output_dir=tmp_path,
-            output_format="pt",
+            execution=ExecutionOptions(output_dir=tmp_path),
         )
 
     _sidecar("tumor")

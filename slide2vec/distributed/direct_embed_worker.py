@@ -55,6 +55,7 @@ def main(argv=None) -> int:
         work_unit_shard_stem,
     )
     from slide2vec.runtime.embedding import tiling_result_annotation
+    from slide2vec.runtime.feature_identity import transform_record
 
     load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
     if not callable(load_successful_tiled_slides_fn):
@@ -84,6 +85,8 @@ def main(argv=None) -> int:
             shard_stem = work_unit_shard_stem(*decode_work_unit(work_unit))
             slide, tiling_result = paired_by_unit[work_unit]
             loaded = model._load_backend()
+            # The parent writes the sidecar without loading the encoder; hand it the record.
+            transform = transform_record(getattr(loaded, "transforms", None))
             if is_hierarchical_preprocessing(preprocessing):
                 geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
                 index = build_hierarchical_index(
@@ -113,6 +116,7 @@ def main(argv=None) -> int:
                     "flat_index": torch.as_tensor(shard_indices, dtype=torch.long),
                     "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
                     "encoder_input_size_px": getattr(loaded, "encoder_input_size_px", None),
+                    "transform": transform,
                 }
                 torch.save(payload, coordination_dir / f"{shard_stem}.hier.rank{global_rank}.pt")
             else:
@@ -140,6 +144,7 @@ def main(argv=None) -> int:
                     "tile_index": torch.as_tensor(tile_indices, dtype=torch.long),
                     "tile_embeddings": tile_embeddings.detach().cpu() if torch.is_tensor(tile_embeddings) else torch.as_tensor(tile_embeddings),
                     "encoder_input_size_px": getattr(loaded, "encoder_input_size_px", None),
+                    "transform": transform,
                 }
                 torch.save(payload, coordination_dir / f"{shard_stem}.tiles.rank{global_rank}.pt")
             return 0
@@ -156,6 +161,7 @@ def main(argv=None) -> int:
                 "slide_embedding": _to_cpu_payload(embedded_slide.slide_embedding),
                 "latents": _to_cpu_payload(embedded_slide.latents),
                 "encoder_input_size_px": embedded_slide.encoder_input_size_px,
+                "transform": embedded_slide.transform,
             }
             # Stem by (sample_id, annotation) so two classes of one slide never overwrite each
             # other; flat units keep the bare-sample_id filename for backward compatibility.

@@ -10,6 +10,7 @@ from torch import Tensor
 from transformers import AutoImageProcessor, AutoModel
 
 from slide2vec.encoders.base import (
+    ProcessorTransform,
     TileEncoder,
     attentions_tuple_to_grids,
     hf_eager_attention,
@@ -33,13 +34,7 @@ class _PhikonBase(TileEncoder):
         self._output_variant = resolve_requested_output_variant(output_variant)
 
     def get_transform(self) -> Callable:
-        processor = self._processor
-
-        def _transform(img):
-            inputs = processor(images=img, return_tensors="pt")
-            return inputs["pixel_values"].squeeze(0)
-
-        return _transform
+        return ProcessorTransform(self._processor)
 
     def get_normalization_transform(self) -> Callable:
         # Normalization only — no resize/crop.

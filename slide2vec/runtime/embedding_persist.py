@@ -21,6 +21,7 @@ from slide2vec.runtime.embedding import (
     write_slide_embedding_artifact,
     write_tile_embedding_artifact,
 )
+from slide2vec.runtime.feature_identity import pooled_feature_identity
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.process_list import num_rows
 from slide2vec.runtime.tiling import resolve_slide_backend
@@ -35,6 +36,7 @@ def make_embedded_slide(
     slide_embedding=None,
     latents=None,
     encoder_input_size_px: int | None = None,
+    transform: dict | None = None,
 ) -> EmbeddedSlide:
     x_values, y_values = coordinate_arrays(tiling_result)
     if num_rows(tile_embeddings) != len(x_values):
@@ -63,6 +65,7 @@ def make_embedded_slide(
         tiling_preview_path=Path(tiling_preview_path) if tiling_preview_path is not None else None,
         latents=latents,
         encoder_input_size_px=encoder_input_size_px,
+        transform=transform,
     )
 
 
@@ -77,6 +80,12 @@ def persist_embedded_slide(
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required to persist embedded slides")
     annotation = tiling_result_annotation(tiling_result)
+    compatibility = pooled_feature_identity(
+        model,
+        execution=execution,
+        preprocessing=preprocessing,
+        transform=embedded_slide.transform,
+    )
     if num_rows(embedded_slide.tile_embeddings) == 0:
         write_tile_embedding_metadata(
             embedded_slide.sample_id,
@@ -92,6 +101,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                compatibility=compatibility,
                 encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
         )
@@ -108,6 +118,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                 preprocessing=preprocessing,
+                compatibility=compatibility,
                 encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
             annotation=annotation,
@@ -127,6 +138,7 @@ def persist_embedded_slide(
                 mask_path=embedded_slide.mask_path,
                 tile_size_lv0=embedded_slide.tile_size_lv0,
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                compatibility=compatibility,
                 encoder_input_size_px=embedded_slide.encoder_input_size_px,
             ),
         )
@@ -137,7 +149,10 @@ def persist_embedded_slide(
             embedded_slide.slide_embedding,
             execution=execution,
             metadata=build_slide_embedding_metadata(
-                model, image_path=embedded_slide.image_path, tiling_result=tiling_result
+                model,
+                image_path=embedded_slide.image_path,
+                tiling_result=tiling_result,
+                compatibility=compatibility,
             ),
             latents=embedded_slide.latents,
             annotation=annotation,

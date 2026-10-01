@@ -390,6 +390,20 @@ def attentions_tuple_to_grids(
     return torch.cat(grids, dim=1)
 
 
+class ProcessorTransform:
+    """Apply a Hugging Face processor to one image.
+
+    A class rather than a closure so the processor stays readable: the sidecar's
+    transform record is read from it.
+    """
+
+    def __init__(self, processor) -> None:
+        self.processor = processor
+
+    def __call__(self, image) -> Tensor:
+        return self.processor(images=image, return_tensors="pt")["pixel_values"].squeeze(0)
+
+
 class Encoder(ABC):
     """Shared lifecycle contract for all encoders."""
 

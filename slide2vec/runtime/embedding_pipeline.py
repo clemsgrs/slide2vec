@@ -23,6 +23,7 @@ from slide2vec.runtime.batching import (
 )
 from slide2vec.runtime.cpu_budget import resolve_on_the_fly_num_workers
 from slide2vec.runtime.embedding_persist import make_embedded_slide
+from slide2vec.runtime.feature_identity import transform_record
 from slide2vec.runtime.hierarchical import (
     build_hierarchical_index,
     is_hierarchical_preprocessing,
@@ -353,6 +354,7 @@ def compute_embedded_slides(
     # idempotent, so the layers above may (and do) declare as well.
     model._declare_encoder_input(preprocessing, emit_run_info=False)
     loaded = model._load_backend()
+    transform = transform_record(getattr(loaded, "transforms", None))
     embedded_slides: list[EmbeddedSlide] = []
     for slide, tiling_result in zip(slide_records, tiling_results):
         emit_progress(
@@ -405,6 +407,7 @@ def compute_embedded_slides(
             slide_embedding=slide_embedding,
             latents=latents,
             encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
+            transform=transform,
         )
         if collect_results:
             embedded_slides.append(embedded_slide)

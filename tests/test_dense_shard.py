@@ -224,6 +224,29 @@ def _dense(**kwargs) -> DenseOptions:
     return DenseOptions(spacing_um=0.5, **{"target_size": 64, **kwargs})
 
 
+#: The run's feature identity, as the stage resolves it before sharding.
+IDENTITY = {
+    "encoder_name": "fake-encoder",
+    "output_variant": "default",
+    "pad_mode": "reflect",
+    "image_pad_value": None,
+    "window_size": None,
+    "overlap": 0.0,
+    "feature_kind": "patch_features",
+    "attention_blocks": [-1],
+    "attention_include_registers": False,
+    "precision": "fp32",
+    "dtype": "float32",
+}
+
+#: Record of the random-weight encoder's normalization-only transform.
+NORMALIZE_ONLY = {
+    "normalize": {"mean": [0.5, 0.5, 0.5], "std": [0.5, 0.5, 0.5]},
+    "resize": None,
+    "center_crop": None,
+}
+
+
 def _slide_dir(out_dir, sample_id="s0", annotation=None):
     sub = "dense_embeddings" if annotation is None else f"dense_embeddings/{annotation}"
     return out_dir / sub / sample_id
@@ -236,7 +259,7 @@ def test_run_dense_shard_writes_payload_and_sidecar_per_region(fake_backend, tmp
     regions = [_spec(x, y) for x, y in coords]
 
     artifacts = run_dense_shard(
-        regions, model=enc, out_dir=tmp_path, dense=_dense(), batch_size=2, device="cpu",
+        regions, model=enc, out_dir=tmp_path, dense=_dense(), batch_size=2, device="cpu", identity=IDENTITY,
     )
 
     assert len(artifacts) == 3
@@ -278,13 +301,13 @@ def test_multi_rank_matches_single_rank(fake_backend, tmp_path):
 
     single_dir = tmp_path / "single"
     run_dense_shard(regions, model=enc, out_dir=single_dir, dense=_dense(),
-                    batch_size=3, device="cpu")
+                    batch_size=3, device="cpu", identity=IDENTITY)
 
     multi_dir = tmp_path / "multi"
     shards = plan_contiguous_shards(regions, 4)
     for shard in shards:  # ranks run the identical loop over their contiguous shard
         run_dense_shard(shard, model=enc, out_dir=multi_dir, dense=_dense(),
-                        batch_size=3, device="cpu")
+                        batch_size=3, device="cpu", identity=IDENTITY)
 
     # Same set of payloads + sidecars regardless of how ROIs were sharded.
     assert _dense_dir_files(single_dir) == _dense_dir_files(multi_dir)
@@ -304,12 +327,12 @@ def test_run_dense_shard_skips_regions_with_existing_sidecar(fake_backend, tmp_p
     regions = [_spec(x, y) for x, y in [(0, 0), (64, 0), (0, 64)]]
 
     first = run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                            batch_size=2, device="cpu")
+                            batch_size=2, device="cpu", identity=IDENTITY)
     reads_after_first = len(fake_backend.locations_read)
 
     # Re-running with every sidecar already on disk reads nothing and still returns all N.
     second = run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                             batch_size=2, device="cpu")
+                             batch_size=2, device="cpu", identity=IDENTITY)
     assert len(fake_backend.locations_read) == reads_after_first  # no new reads
     assert [(a.x, a.y) for a in second] == [(a.x, a.y) for a in first]
     assert [a.path for a in second] == [a.path for a in first]
@@ -340,7 +363,7 @@ def test_region_resume_reencodes_when_source_or_resolved_read_plan_changes(
         out_dir=tmp_path,
         dense=_dense(),
         batch_size=1,
-        device="cpu",
+        device="cpu", identity=IDENTITY,
     )
     reads_before = len(fake_backend.locations_read)
 
@@ -357,7 +380,7 @@ def test_region_resume_reencodes_when_source_or_resolved_read_plan_changes(
         out_dir=tmp_path,
         dense=_dense(),
         batch_size=1,
-        device="cpu",
+        device="cpu", identity=IDENTITY,
     )
 
     assert len(fake_backend.locations_read) == reads_before + 1
@@ -368,7 +391,7 @@ def test_run_dense_shard_reencodes_payload_missing_its_sidecar(fake_backend, tmp
     enc = _encoder()
     regions = [_spec(x, y) for x, y in [(0, 0), (64, 0), (0, 64)]]
     run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                    batch_size=2, device="cpu")
+                    batch_size=2, device="cpu", identity=IDENTITY)
 
     # Simulate a crash after the payload landed but before the sidecar: drop (64,0)'s sidecar.
     slide_dir = _slide_dir(tmp_path)
@@ -376,7 +399,7 @@ def test_run_dense_shard_reencodes_payload_missing_its_sidecar(fake_backend, tmp
     reads_before = len(fake_backend.locations_read)
 
     run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                    batch_size=2, device="cpu")
+                    batch_size=2, device="cpu", identity=IDENTITY)
 
     new_reads = fake_backend.locations_read[reads_before:]
     assert new_reads == [(64, 0)]  # only the incomplete ROI is re-read/re-encoded
@@ -388,7 +411,7 @@ def test_run_dense_shard_namespaces_annotation_subdir(fake_backend, tmp_path):
     enc = _encoder()
     regions = [_spec(0, 0, annotation="tumor"), _spec(64, 0, annotation="tumor")]
     run_dense_shard(regions, model=enc, out_dir=tmp_path, dense=_dense(),
-                    batch_size=2, device="cpu")
+                    batch_size=2, device="cpu", identity=IDENTITY)
     slide_dir = _slide_dir(tmp_path, annotation="tumor")
     assert (slide_dir / "0_0.pt").exists()
     assert (slide_dir / "64_0.meta.json").exists()
@@ -408,7 +431,7 @@ def test_run_dense_shard_keeps_merged_structural_identity_on_fresh_and_resume(
         out_dir=tmp_path,
         dense=_dense(),
         batch_size=1,
-        device="cpu",
+        device="cpu", identity=IDENTITY,
         num_workers=0,
     )
     resumed = run_dense_shard(
@@ -417,7 +440,7 @@ def test_run_dense_shard_keeps_merged_structural_identity_on_fresh_and_resume(
         out_dir=tmp_path,
         dense=_dense(),
         batch_size=1,
-        device="cpu",
+        device="cpu", identity=IDENTITY,
         num_workers=0,
     )
 
@@ -437,7 +460,7 @@ def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, 
     enc = _encoder()
     dense = _dense(target_size=60, window_size=32, overlap=0.25, pad_mode="reflect")
     run_dense_shard([_spec(128, 256, requested=60)], model=enc, out_dir=tmp_path,
-                    dense=dense, batch_size=1, device="cpu")
+                    dense=dense, batch_size=1, device="cpu", identity=IDENTITY)
     meta = json.loads((_slide_dir(tmp_path) / "128_256.meta.json").read_text())
     assert meta == {
         "artifact_type": "dense_embeddings",
@@ -493,5 +516,80 @@ def test_run_dense_shard_sidecar_records_extraction_geometry_only(fake_backend, 
             "output_size": [60, 60],
             "read_tile_size_px": 60,
             "requested_tile_size_px": 60,
+            **IDENTITY,
+            "transform": NORMALIZE_ONLY,
         },
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("encoder_name", "other-encoder"),
+        ("output_variant", "cls"),
+        ("pad_mode", "constant"),
+        ("image_pad_value", 0.0),
+        ("window_size", 32),
+        ("overlap", 0.5),
+        ("feature_kind", "attention_maps"),
+        ("attention_blocks", [-2]),
+        ("attention_include_registers", True),
+        ("precision", "fp16"),
+        ("dtype", "float16"),
+    ],
+)
+def test_region_resume_reencodes_when_a_recorded_identity_field_changes(
+    fake_backend, tmp_path, field, value
+):
+    encoder = _encoder()
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu", identity=IDENTITY)
+    reads_before = len(fake_backend.locations_read)
+
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu", identity={**IDENTITY, field: value})
+
+    assert len(fake_backend.locations_read) == reads_before + 1
+
+
+def test_region_resume_reencodes_when_the_transform_changes(fake_backend, tmp_path, monkeypatch):
+    from torchvision.transforms import v2
+
+    encoder = _encoder()
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu", identity=IDENTITY)
+    reads_before = len(fake_backend.locations_read)
+    monkeypatch.setattr(
+        encoder, "get_normalization_transform",
+        lambda: v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ]),
+    )
+
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu", identity=IDENTITY)
+
+    assert len(fake_backend.locations_read) == reads_before + 1
+    meta = json.loads((_slide_dir(tmp_path) / "0_0.meta.json").read_text())
+    assert meta["compatibility"]["transform"]["normalize"]["mean"] == [0.485, 0.456, 0.406]
+
+
+def test_region_resume_accepts_a_sidecar_that_lacks_identity_fields(fake_backend, tmp_path):
+    """A ROI written before the identity was recorded holds only its read plan: reuse it."""
+    encoder = _encoder()
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu", identity=IDENTITY)
+    sidecar_path = _slide_dir(tmp_path) / "0_0.meta.json"
+    legacy = json.loads(sidecar_path.read_text())
+    for field in (*IDENTITY, "transform"):
+        del legacy["compatibility"][field]
+    sidecar_path.write_text(json.dumps(legacy))
+    reads_before = len(fake_backend.locations_read)
+
+    run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
+                    batch_size=1, device="cpu",
+                    identity={**IDENTITY, "encoder_name": "other-encoder"})
+
+    assert len(fake_backend.locations_read) == reads_before

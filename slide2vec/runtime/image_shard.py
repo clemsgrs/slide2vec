@@ -52,6 +52,7 @@ from slide2vec.runtime.batching import (
     iter_forward_batches,
     uses_cuda_runtime,
 )
+from slide2vec.runtime.feature_identity import transform_record
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 
 if TYPE_CHECKING:
@@ -97,13 +98,15 @@ def image_embedding_metadata(
     loaded: "LoadedModel",
     output_precision: str,
     output_format: str,
+    compatibility: dict,
 ) -> dict:
     """The provenance sidecar: who encoded this image, and what geometry the encoder saw.
 
     ``encoder_input_size_px`` is the Given regime's obligation from the encoder-input
     contract — the factual square side length of the tensor handed to ``encode_tiles``,
     observed rather than declared, because the caller supplied pixels it never requested and
-    the encoder's shipped transform decided the geometry.
+    the encoder's shipped transform decided the geometry. ``compatibility`` is the feature
+    identity resume compares.
     """
     return {
         "artifact_type": "image_embeddings",
@@ -119,6 +122,7 @@ def image_embedding_metadata(
             else None
         ),
         "feature_dtype": output_precision,
+        "compatibility": compatibility,
     }
 
 
@@ -144,6 +148,7 @@ def run_image_shard(
     out_dir,
     batch_size: int,
     output_precision: str,
+    identity: dict,
     output_format: str = "pt",
     precision: str = "fp32",
     num_workers: int = 4,
@@ -156,7 +161,9 @@ def run_image_shard(
     rest through the shared forward loop, and writes each batch's embeddings before the
     next batch is encoded. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
     image in input order — freshly written or (when skipped) read back off disk.
-    ``on_batch`` is invoked with each encoded batch's image count for per-batch progress.
+    ``identity`` is the run's feature identity; the transform this shard applies is added
+    to it in every sidecar. ``on_batch`` is invoked with each encoded batch's image count
+    for per-batch progress.
     """
     images = list(images)
     pending = [
@@ -166,6 +173,7 @@ def run_image_shard(
     if pending:
         # The observed encoder input is a fact of this run, not of a previous one.
         loaded.encoder_input_size_px = None
+        compatibility = {**identity, "transform": transform_record(loaded.transforms)}
         dataset = ImageFileDataset(
             [spec.image_path for spec in pending],
             # partial, not a closure: the recipe is picklable by explicit spawned workers.
@@ -212,6 +220,7 @@ def run_image_shard(
                         loaded=loaded,
                         output_precision=output_precision,
                         output_format=output_format,
+                        compatibility=compatibility,
                     ),
                 )
             if on_batch is not None:

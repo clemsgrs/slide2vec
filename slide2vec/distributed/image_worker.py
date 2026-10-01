@@ -26,6 +26,7 @@ def get_args_parser(add_help: bool = True):
 
 def main(argv=None) -> int:
     from slide2vec.progress import emit_progress
+    from slide2vec.runtime.feature_identity import pooled_feature_identity
     from slide2vec.runtime.image_shard import run_image_shard
     from slide2vec.runtime.image_specs import image_specs_from_request
     from slide2vec.runtime.model_settings import resolve_output_precision
@@ -60,6 +61,7 @@ def main(argv=None) -> int:
             out_dir=output_dir,
             batch_size=int(execution.batch_size),
             output_precision=resolve_output_precision(execution.output_dtype, execution.precision),
+            identity=pooled_feature_identity(model, execution=execution),
             output_format=execution.output_format,
             precision=execution.precision,
             num_workers=execution.resolved_image_num_workers_per_gpu(),

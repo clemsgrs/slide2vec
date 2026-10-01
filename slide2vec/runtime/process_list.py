@@ -9,10 +9,11 @@ import pandas as pd
 from hs2p import SlideSpec
 from hs2p.fileops import read_csv_keyed_by_sample_id
 
-from slide2vec.api import PreprocessingConfig
+from slide2vec.api import ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import write_hierarchical_embeddings, write_tile_embedding_metadata
 from slide2vec.encoders.registry import encoder_registry, resolve_encoder_output
 from slide2vec.progress import emit_progress, read_tiling_progress_snapshot
+from slide2vec.runtime.feature_identity import pooled_feature_identity
 from slide2vec.runtime.hierarchical import (
     is_hierarchical_preprocessing,
     num_tiles,
@@ -54,19 +55,22 @@ def write_zero_tile_embedding_sidecars(
     *,
     model,
     preprocessing: PreprocessingConfig,
-    output_dir: Path | None,
-    output_format: str,
+    execution: ExecutionOptions,
 ) -> None:
-    if output_dir is None:
+    if execution.output_dir is None:
         return
+    # No tile is encoded for these slides, so the identity records no transform.
+    compatibility = pooled_feature_identity(
+        model, execution=execution, preprocessing=preprocessing
+    )
     for slide, tiling_result in zero_tile_pairs:
         if is_hierarchical_preprocessing(preprocessing):
             geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
             write_hierarchical_embeddings(
                 slide.sample_id,
                 np.empty((0, int(geometry["tiles_per_region"]), 0), dtype=np.float32),
-                output_dir=output_dir,
-                output_format=output_format,
+                output_dir=execution.output_dir,
+                output_format=execution.output_format,
                 metadata=build_hierarchical_embedding_metadata(
                     model,
                     tiling_result=tiling_result,
@@ -74,14 +78,15 @@ def write_zero_tile_embedding_sidecars(
                     mask_path=slide.mask_path,
                     backend=resolve_slide_backend(preprocessing.backend, tiling_result),
                     preprocessing=preprocessing,
+                    compatibility=compatibility,
                 ),
                 annotation=tiling_result_annotation(tiling_result),
             )
             continue
         write_tile_embedding_metadata(
             slide.sample_id,
-            output_dir=output_dir,
-            output_format=output_format,
+            output_dir=execution.output_dir,
+            output_format=execution.output_format,
             feature_dim=None,
             num_tiles=0,
             annotation=tiling_result_annotation(tiling_result),
@@ -92,6 +97,7 @@ def write_zero_tile_embedding_sidecars(
                 mask_path=slide.mask_path,
                 tile_size_lv0=int(tiling_result.tile_size_lv0),
                 backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                compatibility=compatibility,
             ),
         )
 
