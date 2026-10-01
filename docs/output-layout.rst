@@ -28,7 +28,7 @@ Directory Structure
    ├── tiles/
    │   ├── <sample_id>.coordinates.npz
    │   ├── <sample_id>.coordinates.meta.json
-   │   └── <sample_id>.tiles.tar       ← when extracting tiles to tar
+   │   └── <sample_id>.tiles.tar       ← with save_tiles=True or on_the_fly=False
    ├── preview/
    │   ├── mask/                      ← only when save_mask_preview=True
    │   │   └── <sample_id>.jpg
