@@ -5,6 +5,7 @@ from typing import Callable, Sequence
 
 import pandas as pd
 from hs2p import SlideSpec
+from hs2p.fileops import read_csv_keyed_by_sample_id
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
@@ -73,7 +74,7 @@ def _embeddable_annotation_groups(
     """
     if process_list_path is None or not Path(process_list_path).is_file():
         return {}
-    df = pd.read_csv(process_list_path)
+    df = read_csv_keyed_by_sample_id(process_list_path)
     if "sample_id" not in df.columns:
         return {}
     has_annotation = "annotation" in df.columns

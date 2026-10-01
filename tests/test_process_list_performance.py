@@ -52,3 +52,22 @@ def test_process_list_keeps_unfinished_annotation_rows_unchanged(tmp_path):
         ['success', '/features/flat.pt', 'success'], ['success', '/features/a.pt', 'success'],
         ['tbp', '', 'tbp'],
     ]
+
+
+def test_process_list_matches_sample_ids_verbatim(tmp_path):
+    """IDs pandas would coerce ("001" -> 1, "NA" -> NaN) still match their slides and are
+    written back unchanged."""
+    path = tmp_path / 'process_list.csv'
+    path.write_text('sample_id,feature_status\n001,tbp\nNA,tbp\n')
+    update_process_list_after_embedding(
+        path, successful_slides=[SimpleNamespace(sample_id='001'), SimpleNamespace(sample_id='NA')],
+        persist_tile_embeddings=True, persist_hierarchical_embeddings=False,
+        include_slide_embeddings=False, encoder_name='encoder', output_variant=None,
+        tile_artifacts=[SimpleNamespace(sample_id='001', annotation=None, path=Path('/features/001.pt')),
+                        SimpleNamespace(sample_id='NA', annotation=None, path=Path('/features/NA.pt'))],
+        hierarchical_artifacts=[], slide_artifacts=[],
+    )
+    result = pd.read_csv(path, dtype=str, keep_default_na=False)
+    assert result[['sample_id', 'feature_status', 'feature_path']].values.tolist() == [
+        ['001', 'success', '/features/001.pt'], ['NA', 'success', '/features/NA.pt'],
+    ]

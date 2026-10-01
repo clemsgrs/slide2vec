@@ -6,6 +6,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 from hs2p import SlideSpec
+from hs2p.fileops import read_csv_keyed_by_sample_id
 
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
@@ -186,7 +187,7 @@ def update_process_list_after_embedding(
             return None
         return str(Path(value).resolve())
 
-    df = pd.read_csv(process_list_path)
+    df = read_csv_keyed_by_sample_id(process_list_path)
     if "feature_status" not in df.columns:
         df["feature_status"] = ["tbp"] * len(df)
     if "feature_path" not in df.columns:

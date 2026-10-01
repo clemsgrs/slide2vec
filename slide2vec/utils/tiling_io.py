@@ -5,6 +5,7 @@ from typing import Any
 import pandas as pd
 
 from hs2p import SlideSpec, load_tiling_result
+from hs2p.fileops import read_csv_keyed_by_sample_id
 
 
 def atomic_write_dataframe_csv(df: pd.DataFrame, path: Path) -> None:
@@ -118,7 +119,7 @@ def _optional_float(value: Any) -> float | None:
 
 def load_slide_manifest(csv_path: str | Path) -> list[SlideSpec]:
     manifest_path = Path(csv_path).resolve()
-    df = pd.read_csv(manifest_path, converters={"sample_id": str})
+    df = read_csv_keyed_by_sample_id(manifest_path)
     legacy_mask_columns = sorted(
         column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
     )
@@ -190,7 +191,7 @@ def load_patient_id_mapping(csv_path: str | Path) -> dict[str, str]:
 
 def _load_base_process_df(process_list_path: str | Path) -> pd.DataFrame:
     process_list_path = Path(process_list_path)
-    df = pd.read_csv(process_list_path)
+    df = read_csv_keyed_by_sample_id(process_list_path)
     legacy_mask_columns = sorted(
         column for column in ("tissue_mask_path", "annotation_mask_path") if column in df.columns
     )
