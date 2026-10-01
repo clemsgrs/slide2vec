@@ -93,7 +93,8 @@ class GigaPathSlideEncoder(SlideEncoder):
         # create_model given an "hf_hub:" name force-downloads into ~/.cache/ on every
         # load, ignoring HF_HOME; a local path skips that download.
         checkpoint_path = _slide_checkpoint_path()
-        self._model = create_model(checkpoint_path, "gigapath_slide_enc12l768d", 1536)
+        # create_model returns the module in training mode (dropout and drop-path active).
+        self._model = create_model(checkpoint_path, "gigapath_slide_enc12l768d", 1536).eval()
         self._device = preferred_default_device()
         self._output_variant = resolve_requested_output_variant(output_variant)
 
