@@ -109,17 +109,18 @@ def region_needs_encode(
     *,
     resolve_transform: Callable[[], dict] | None = None,
 ) -> bool:
-    """Return whether the ROI lacks a sidecar matching the read plan and feature identity.
+    """Return whether the ROI lacks a payload and sidecar matching the read plan and identity.
 
     The sidecar is written last (D6), so its presence is the done-marker; a ``.pt`` with no
-    sidecar is a crashed write and is re-encoded. A field the sidecar does not record is
-    accepted. ``resolve_transform`` supplies the transform when ``identity`` does not hold
-    it yet; it loads the encoder, so it is called only when the sidecar records one.
+    sidecar is a crashed write and is re-encoded, and so is a sidecar whose ``.pt`` is gone.
+    A field the sidecar does not record is accepted. ``resolve_transform`` supplies the
+    transform when ``identity`` does not hold it yet; it loads the encoder, so it is called
+    only when the sidecar records one.
     """
-    _, sidecar_path = region_dense_paths(
+    payload_path, sidecar_path = region_dense_paths(
         out_dir, sample_id=spec.sample_id, annotation=spec.annotation, x=spec.x, y=spec.y
     )
-    if not sidecar_path.exists():
+    if not (sidecar_path.exists() and payload_path.exists()):
         return True
     recorded = load_metadata(sidecar_path).get("compatibility")
     if not isinstance(recorded, dict):
