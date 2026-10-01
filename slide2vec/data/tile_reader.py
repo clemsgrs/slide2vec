@@ -40,31 +40,20 @@ class SuperTileBatchSampler:
 
 
 def _open_wsi_backend(image_path: str, backend: str, gpu_decode: bool):
-    """Open a WSI file with the given backend and return the reader."""
-    if backend == "cucim":
-        from hs2p.wsi.backends.cucim import CuCIMReader
-        return CuCIMReader(image_path, gpu_decode=gpu_decode)
-    elif backend == "openslide":
-        from hs2p.wsi.backends.openslide import OpenSlideReader
-        return OpenSlideReader(image_path)
-    elif backend == "vips":
-        from hs2p.wsi.backends.vips import VIPSReader
-        return VIPSReader(image_path)
-    elif backend == "asap":
-        from hs2p.wsi.backends.asap import ASAPReader
-        with suppress_c_stderr():
-            return ASAPReader(image_path)
-    else:
-        raise ValueError(
-            f"Unknown backend: {backend!r}. "
-            "Choose from: cucim, openslide, vips, asap"
-        )
+    """Open a slide with the backend tiling resolved for it and return the reader.
+
+    hs2p's ``open_slide`` knows every backend tiling can resolve, ``pil`` for flat
+    PNG/JPEG slides included. Reads address pyramid levels and level-0 pixels only, so a
+    slide without spacing metadata opens without it.
+    """
+    from hs2p.wsi.reader import open_slide
+
+    with suppress_c_stderr() if backend == "asap" else nullcontext():
+        return open_slide(image_path, backend, gpu_decode=gpu_decode, require_spacing=False)
 
 
 class WSITileReader:
-    """Random-access tile reader for WSI files supporting four backends.
-
-    Backends: ``"cucim"`` (default), ``"openslide"``, ``"vips"``, ``"asap"``.
+    """Random-access tile reader over any slide backend hs2p can open.
 
     When ``use_supertiles=True``, tiles are grouped into 8×8/4×4/2×2 blocks so
     that one region read covers multiple tiles.  ``num_cucim_workers`` and
