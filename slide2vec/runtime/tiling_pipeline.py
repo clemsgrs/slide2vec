@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 import pandas as pd
 from hs2p import SlideSpec, tile_slides
+from hs2p.fileops import read_csv_keyed_by_sample_id
 from hs2p.utils.stderr import run_with_filtered_stderr
 
 from slide2vec.api import PreprocessingConfig, _resolve_hierarchical_preprocessing
@@ -126,7 +127,7 @@ def prepare_tiled_slides(
 ) -> tuple[list[SlideSpec], list[Any], Path]:
     process_list_path = output_dir / "process_list.csv"
     previous_process_df = (
-        pd.read_csv(process_list_path)
+        read_csv_keyed_by_sample_id(process_list_path)
         if preprocessing.resume and process_list_path.is_file()
         else None
     )

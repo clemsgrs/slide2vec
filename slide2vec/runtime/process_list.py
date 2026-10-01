@@ -7,6 +7,7 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 from hs2p import SlideSpec
+from hs2p.fileops import read_csv_keyed_by_sample_id
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.artifacts import write_hierarchical_embeddings, write_tile_embedding_metadata
@@ -182,7 +183,7 @@ def record_slide_metadata_in_process_list(
         if annotation is not None and (sample_id, annotation) in by_pair:
             return by_pair[(sample_id, annotation)]
         return by_sample_id.get(sample_id)
-    process_df = pd.read_csv(process_list_path)
+    process_df = read_csv_keyed_by_sample_id(process_list_path)
     if "requested_backend" not in process_df.columns:
         process_df["requested_backend"] = [None] * len(process_df)
     if "backend" not in process_df.columns:
@@ -305,7 +306,7 @@ def restore_resume_metadata_after_tiling(
         for row in previous_process_df.to_dict("records")
         if "sample_id" in row
     }
-    current_df = pd.read_csv(process_list_path)
+    current_df = read_csv_keyed_by_sample_id(process_list_path)
     changed = False
 
     for column in (*preserve_columns, *preview_columns):

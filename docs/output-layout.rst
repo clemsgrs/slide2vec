@@ -434,6 +434,10 @@ filtering sections:
 These files can be reused across runs via
 :attr:`~slide2vec.PreprocessingConfig.read_coordinates_from` to skip
 tiling when only the encoder changes.
+With ``overlap > 0`` and tiles read above level 0, hs2p 5.1 places tiles
+on a different stride than earlier versions. Reusing or resuming coordinates
+written by an earlier version then fails with ``precomputed tiles stride
+mismatch``; tile those slides again.
 
 Process List
 ------------

@@ -3,7 +3,7 @@ Preprocessing
 
 Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
 geometry, tissue segmentation, annotation sampling, and previews.
-Preprocessing requires hs2p 5.0.2 or newer.
+Preprocessing requires hs2p 5.1.0 or newer.
 
 Backends
 --------
@@ -32,7 +32,10 @@ cuCIM reads the same pixels and no context is created. Machines with
 
 The ``mask_backend`` field controls the reader used for **source masks** —
 precomputed tissue masks and annotation masks — and accepts the same values,
-plus ``"pil"`` for PNG/JPEG masks (selected directly by ``"auto"``). It is
+plus ``"pil"`` for PNG/JPEG masks (selected directly by ``"auto"``) and
+``"tifffile"`` for lossless label reads. ``"auto"`` selects ``"tifffile"`` for
+TIFF masks that store samples other than 8-bit unsigned (for example 16-bit
+labels), which the other readers would convert. It is
 resolved independently from the mask path, so a mask can use a different
 decoder than its slide. hs2p never silently falls back to another reader, so
 set ``mask_backend`` explicitly (e.g. ``"openslide"``) when the slide backend
@@ -319,11 +322,6 @@ recorded in ``process_list.csv`` and on the returned
 
 When resuming a run, existing preview paths are preserved in
 ``process_list.csv`` if the preview files still exist on disk.
-
-For flat PNG/JPEG slides, disable both ``save_mask_preview`` and
-``save_tiling_preview``: hs2p's preview renderers currently reopen the
-slide without forwarding ``spacing_at_level_0``. PNG/JPEG source masks on
-slides with native spacing work with previews enabled.
 
 
 Field reference

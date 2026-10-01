@@ -153,8 +153,10 @@ class PreprocessingConfig:
     #: explicitly (e.g. ``"openslide"``) when a precomputed tissue or annotation mask needs
     #: a different decoder than its slide — hs2p no longer silently falls back to another
     #: reader, so a mask the slide backend cannot decode fails unless overridden here.
-    #: Accepts the same values as :attr:`backend` plus ``"pil"`` for PNG/JPEG masks;
-    #: ``"auto"`` selects PIL for these masks. Ignored for slides with no source mask.
+    #: Accepts the same values as :attr:`backend` plus ``"pil"`` for PNG/JPEG masks and
+    #: ``"tifffile"`` for lossless label reads; ``"auto"`` selects PIL for PNG/JPEG masks
+    #: and ``"tifffile"`` for TIFF masks whose samples are not 8-bit unsigned.
+    #: Ignored for slides with no source mask.
     #: Masks need no spacing metadata, but must align to the slide's field of view and
     #: contain only declared label IDs. See :doc:`preprocessing` for hs2p 5 validation.
     mask_backend: str = "auto"
