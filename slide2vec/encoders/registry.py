@@ -247,6 +247,20 @@ def _supports_attention(encoder_cls: type) -> bool:
     )
 
 
+def supports_slide_latents(encoder_name: str) -> bool:
+    """Whether a registered encoder returns latents with its slide embedding.
+
+    Resolved from the class (an override of ``SlideEncoder.encode_slide_with_latents``),
+    so no model is constructed.
+    """
+    encoder_cls = encoder_registry.require(encoder_name)
+    return (
+        issubclass(encoder_cls, SlideEncoder)
+        and encoder_cls.encode_slide_with_latents
+        is not SlideEncoder.encode_slide_with_latents
+    )
+
+
 def _format_names(names: list[str]) -> str:
     if len(names) == 1:
         return names[0]

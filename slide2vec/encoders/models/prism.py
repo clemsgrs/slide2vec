@@ -44,9 +44,22 @@ class PrismSlideEncoder(SlideEncoder):
         *,
         tile_size_lv0: int | None = None,
     ) -> torch.Tensor:
+        return self._slide_representations(tile_features)["image_embedding"].squeeze(0)
+
+    def encode_slide_with_latents(
+        self,
+        tile_features: torch.Tensor,
+        coordinates: torch.Tensor | None = None,
+        *,
+        tile_size_lv0: int | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # image_latents: the Perceiver latents, [1, 512, 1280] for one slide.
+        reprs = self._slide_representations(tile_features)
+        return reprs["image_embedding"].squeeze(0), reprs["image_latents"].squeeze(0)
+
+    def _slide_representations(self, tile_features: torch.Tensor) -> dict[str, torch.Tensor]:
         if tile_features.ndim == 2:
             tile_features = tile_features.unsqueeze(0)
         # Stored feature precision can differ from PRISM's weights; CPU has no autocast.
         tile_features = tile_features.to(dtype=self._model.dtype)
-        reprs = self._model.slide_representations(tile_features)
-        return reprs["image_embedding"].squeeze(0)
+        return self._model.slide_representations(tile_features)

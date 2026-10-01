@@ -710,12 +710,21 @@ def aggregate_tiles(
         tile_features = load_array(artifact.path)
         if not torch.is_tensor(tile_features):
             tile_features = torch.as_tensor(tile_features)
-        slide_embedding = slide_encode.encode_slide_from_tiles(
-            loaded,
-            tile_features,
-            tiling_result,
-            execution=execution,
-        )
+        if execution.save_latents:
+            slide_embedding, latents = slide_encode.encode_slide_with_latents_from_tiles(
+                loaded,
+                tile_features,
+                tiling_result,
+                execution=execution,
+            )
+        else:
+            slide_embedding = slide_encode.encode_slide_from_tiles(
+                loaded,
+                tile_features,
+                tiling_result,
+                execution=execution,
+            )
+            latents = None
         # Aggregation encodes no tile: the tile geometry and transform are the ones
         # recorded with the tile artifact.
         tile_identity = metadata.get("compatibility") or {}
@@ -737,7 +746,7 @@ def aggregate_tiles(
                 tiling_result=tiling_result,
                 compatibility=compatibility,
             ),
-            latents=None,
+            latents=latents,
         )
         outputs.append(slide_artifact)
     return outputs
@@ -901,7 +910,7 @@ def run_pipeline(
             persist_tile_embeddings=persist_tile_embeddings,
             persist_hierarchical_embeddings=persist_hierarchical_embeddings,
             include_slide_embeddings=include_slide_embeddings,
-            save_latents=execution.save_latents,
+            save_latents=embedding.should_persist_latents(model, execution),
             resume=resolved_preprocessing.resume,
             identity=feature_identity.pooled_feature_identity(
                 model, execution=execution, preprocessing=resolved_preprocessing

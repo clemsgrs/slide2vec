@@ -21,7 +21,7 @@ from slide2vec.runtime.feature_identity import (
     pooled_feature_identity,
 )
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
-from slide2vec.runtime.embedding import should_persist_tile_embeddings
+from slide2vec.runtime.embedding import should_persist_latents, should_persist_tile_embeddings
 from slide2vec.runtime.persistence import (
     collect_pipeline_artifacts,
     update_process_list_after_embedding,
@@ -169,6 +169,7 @@ def collect_distributed_pipeline_artifacts(
     persist_hierarchical_embeddings = is_hierarchical_preprocessing(preprocessing)
     include_slide_embeddings = model.level == "slide"
     include_tile_embeddings = persist_tile_embeddings and not persist_hierarchical_embeddings
+    save_latents = should_persist_latents(model, execution)
     # Every persisted embedding kind can fan out per (sample_id, annotation); the process list
     # (one row per pair after hs2p tiling) is the source of truth for which classes exist.
     annotation_aware = (
@@ -196,7 +197,7 @@ def collect_distributed_pipeline_artifacts(
         persist_tile_embeddings=persist_tile_embeddings,
         persist_hierarchical_embeddings=persist_hierarchical_embeddings,
         include_slide_embeddings=include_slide_embeddings,
-        save_latents=execution.save_latents,
+        save_latents=save_latents,
         resume=preprocessing.resume,
         identity=pooled_feature_identity(model, execution=execution, preprocessing=preprocessing),
         # This parent never encodes: verify the transform without taking GPU memory.
@@ -237,7 +238,7 @@ def collect_distributed_pipeline_artifacts(
                 persist_tile_embeddings=persist_tile_embeddings,
                 persist_hierarchical_embeddings=persist_hierarchical_embeddings,
                 include_slide_embeddings=include_slide_embeddings,
-                save_latents=execution.save_latents,
+                save_latents=save_latents,
                 annotation=annotation,
             )
             for annotation in sample_annotations
