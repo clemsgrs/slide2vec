@@ -163,6 +163,8 @@ deep-merged over the default, so you only state what you add:
 - ``colors`` — ``{class_name: [r, g, b] | null}`` used when rendering previews.
 - ``output_mode`` — ``per_annotation`` (one artifact set per sampled class) or
   ``merged`` (one set per slide over the union of tiles passing any class).
+  Patient-level models accept only ``merged``; ``per_annotation`` raises a
+  ``ValueError`` before embedding.
 - ``independent_sampling`` (a top-level flag on
   :class:`~slide2vec.PreprocessingConfig`) — ``True`` samples each class
   against its own mask; ``False`` samples once over the union, then

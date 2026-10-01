@@ -26,7 +26,23 @@ from slide2vec.runtime.feature_identity import pooled_feature_identity, transfor
 from slide2vec.runtime.hierarchical import num_embedding_items
 from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.slide_encode import encode_slide_from_tiles
-from slide2vec.runtime.tiling import resolve_slide_backend
+from slide2vec.runtime.tiling import build_hs2p_configs, resolve_slide_backend
+
+
+def reject_per_annotation_sampling(model, preprocessing: PreprocessingConfig) -> None:
+    """Raise when a patient-level run would sample one tile bag per annotation class.
+
+    A patient encoder aggregates one embedding per slide. Per-annotation sampling yields
+    one bag per ``(slide, class)``, which would each count as a slide of the patient.
+    Merged output keeps one bag per slide and is supported.
+    """
+    output_mode = build_hs2p_configs(preprocessing)[-1]
+    if output_mode == "per_annotation":
+        raise ValueError(
+            f"Patient-level model '{model.name}' does not support per-annotation sampling: "
+            "it aggregates one tile bag per slide. Set masks.output_mode='merged' or keep "
+            "the default tissue-only masks."
+        )
 
 
 def run_patient_pipeline(
