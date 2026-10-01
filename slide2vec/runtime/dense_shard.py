@@ -16,10 +16,11 @@ What this module owns is the CPU-testable encode/write layer (D12):
   no torchrun/NCCL dependency, so it is exercised on CPU with a fake ``_open_wsi_backend``
   backend and a random-weight encoder — the same offline seam ``iter_regions_dense`` uses.
 
-Writes are atomic and sidecar-last (D6): payload to a temp file → ``os.replace`` into place
-→ then the sidecar. So a payload with no sidecar unambiguously means an incomplete ROI, and
-the sidecar proves write completion; resume additionally requires its compatibility metadata
-to match the current read plan and feature identity. slide2vec owns the dense *write* because it
+Writes are atomic and sidecar-last (D6): any existing sidecar is removed → payload to a temp
+file → ``os.replace`` into place → then the sidecar. So a payload with no sidecar unambiguously
+means an incomplete ROI, and the sidecar proves write completion; resume additionally requires
+its compatibility metadata to match the current read plan and feature identity. slide2vec owns
+the dense *write* because it
 owns the dense *distribution* (docs/adr/0001): ranks are separate OS processes and a grid is
 ~1000× a pooled embedding, so ranks persist final artifacts directly and nobody gathers.
 """

@@ -220,6 +220,30 @@ def test_write_dense_region_does_not_publish_interrupted_sidecar(tmp_path, monke
     assert not sidecar_path.exists()
 
 
+def _interrupted_metadata_write(path, text, *, encoding):
+    raise OSError("simulated interrupted metadata write")
+
+
+def test_write_dense_region_interrupted_rewrite_leaves_no_done_marker(tmp_path, monkeypatch):
+    """Replacing an artifact must not leave the old sidecar next to the new payload."""
+    region = {"output_dir": tmp_path, "sample_id": "slide-1", "annotation": None, "x": 0, "y": 0}
+    write_dense_region(
+        torch.zeros((2, 2, 2)), metadata={"feature_kind": "patch_features"}, **region
+    )
+    payload_path, sidecar_path = region_dense_paths(
+        tmp_path, sample_id="slide-1", annotation=None, x=0, y=0
+    )
+
+    monkeypatch.setattr(Path, "write_text", _interrupted_metadata_write)
+    with pytest.raises(OSError, match="interrupted metadata write"):
+        write_dense_region(
+            torch.ones((3, 2, 2)), metadata={"feature_kind": "cls_attention"}, **region
+        )
+
+    assert tuple(torch.load(payload_path, weights_only=True).shape) == (3, 2, 2)
+    assert not sidecar_path.exists()
+
+
 def _dense(**kwargs) -> DenseOptions:
     return DenseOptions(spacing_um=0.5, **{"target_size": 64, **kwargs})
 
@@ -384,6 +408,29 @@ def test_region_resume_reencodes_when_source_or_resolved_read_plan_changes(
     )
 
     assert len(fake_backend.locations_read) == reads_before + 1
+
+
+def test_interrupted_region_rewrite_is_not_resumed_with_the_old_settings(
+    fake_backend, tmp_path, monkeypatch
+):
+    """A rewrite killed between payload and sidecar must not leave the old sidecar to vouch
+    for the new payload when the old settings are requested again."""
+    enc = _encoder()  # vit_tiny: 192-d patch tokens, 3 attention heads
+    region = _spec(0, 0)
+    attention = _dense(feature_kind="cls_attention")
+    run_dense_shard([region], model=enc, out_dir=tmp_path, dense=_dense(), batch_size=1,
+                    device="cpu", identity=IDENTITY)
+
+    with monkeypatch.context() as interrupted:
+        interrupted.setattr(Path, "write_text", _interrupted_metadata_write)
+        with pytest.raises(OSError, match="interrupted metadata write"):
+            run_dense_shard([region], model=enc, out_dir=tmp_path, dense=attention, batch_size=1,
+                            device="cpu", identity={**IDENTITY, "feature_kind": "cls_attention"})
+
+    artifact, = run_dense_shard([region], model=enc, out_dir=tmp_path, dense=_dense(),
+                                batch_size=1, device="cpu", identity=IDENTITY)
+
+    assert tuple(torch.load(artifact.path, weights_only=True).shape) == (192, 4, 4)
 
 
 def test_run_dense_shard_reencodes_payload_missing_its_sidecar(fake_backend, tmp_path):
