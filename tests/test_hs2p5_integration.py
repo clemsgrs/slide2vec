@@ -90,6 +90,34 @@ def test_tile_archive_is_written_when_requested_or_not_reading_on_the_fly(
         assert Path(pd.read_csv(process_list).iloc[0]["tiles_tar_path"]) == archive_path
 
 
+@pytest.mark.parametrize("use_supertiles", [True, False], ids=["supertiles", "single-tiles"])
+def test_flat_slide_tiles_are_read_on_the_fly_with_the_backend_tiling_resolved(
+    tmp_path, use_supertiles
+):
+    from slide2vec.data.tile_reader import OnTheFlyBatchTileCollator
+
+    slide = _flat_slide(tmp_path, np.ones((32, 32), dtype=np.uint8))
+    pixels = np.random.default_rng(0).integers(0, 256, (128, 128, 3), dtype=np.uint8)
+    Image.fromarray(pixels).save(slide.image_path)
+
+    _, (result,), _ = prepare_tiled_slides(
+        [slide], _preprocessing(), output_dir=tmp_path / "out", num_workers=1
+    )
+    collator = OnTheFlyBatchTileCollator(
+        image_path=slide.image_path,
+        tiling_result=result,
+        backend=result.backend,
+        use_supertiles=use_supertiles,
+    )
+    indices, tiles, _ = collator(list(range(len(result.x))))
+
+    assert result.backend == "pil"
+    assert tiles.shape == (16, 3, 32, 32)
+    for index, tile in zip(indices.tolist(), tiles):
+        x, y = int(result.x[index]), int(result.y[index])
+        np.testing.assert_array_equal(tile.permute(1, 2, 0).numpy(), pixels[y : y + 32, x : x + 32])
+
+
 @pytest.mark.parametrize("output_mode", ["per_annotation", "merged"])
 def test_spacingless_annotation_mask_groups_values_and_preserves_bag_identity(tmp_path, output_mode):
     labels = np.full((32, 32), 2, dtype=np.uint8)
