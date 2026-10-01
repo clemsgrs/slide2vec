@@ -175,6 +175,32 @@ def test_write_dense_image_does_not_publish_interrupted_sidecar(tmp_path, monkey
     assert not sidecar_path.exists()
 
 
+def test_write_dense_image_interrupted_rewrite_leaves_no_done_marker(tmp_path, monkeypatch):
+    """The shared dense writer removes the old sidecar before it replaces the payload."""
+    write_dense_image(
+        torch.zeros((2, 2, 2)),
+        output_dir=tmp_path,
+        sample_id="image-1",
+        metadata={"feature_kind": "patch_features"},
+    )
+    payload_path, sidecar_path = dense_image_paths(tmp_path, sample_id="image-1")
+
+    def _interrupted_write(path, text, *, encoding):
+        raise OSError("simulated interrupted metadata write")
+
+    monkeypatch.setattr(Path, "write_text", _interrupted_write)
+    with pytest.raises(OSError, match="interrupted metadata write"):
+        write_dense_image(
+            torch.ones((3, 2, 2)),
+            output_dir=tmp_path,
+            sample_id="image-1",
+            metadata={"feature_kind": "cls_attention"},
+        )
+
+    assert tuple(torch.load(payload_path, weights_only=True).shape) == (3, 2, 2)
+    assert not sidecar_path.exists()
+
+
 # --------------------------------------------------------------------------------------
 # Layer 2: run_dense_image_shard (device-agnostic encode+write loop)
 # --------------------------------------------------------------------------------------

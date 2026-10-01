@@ -316,13 +316,15 @@ def _write_dense_grid(
 ) -> np.ndarray:
     """Publish one dense grid: payload atomically, then the sidecar. Returns the array.
 
-    The single write order every dense artifact follows (D6), whatever named it: payload to
-    a temp file in the destination directory → ``os.replace`` into place (atomic on the same
-    filesystem) → then the ``.meta.json`` sidecar. A payload present without its sidecar
-    therefore unambiguously means an incomplete unit, and resume treats the sidecar as the
-    done-marker.
+    The single write order every dense artifact follows (D6), whatever named it: remove any
+    existing sidecar → payload to a temp file in the destination directory → ``os.replace``
+    into place (atomic on the same filesystem) → then the ``.meta.json`` sidecar. A payload
+    present without its sidecar therefore unambiguously means an incomplete unit, and resume
+    treats the sidecar as the done-marker. Removing the old sidecar first keeps a rewrite
+    interrupted between the two writes from pairing it with the new payload.
     """
     grid_array = _ensure_array(grid)
+    metadata_path.unlink(missing_ok=True)
     write_atomically(payload_path, lambda tmp_path: torch.save(_ensure_tensor(grid), tmp_path))
     _write_metadata(metadata_path, metadata)
     return grid_array
