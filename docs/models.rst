@@ -485,22 +485,3 @@ Install and use it
 The same preset name works as ``model.name`` in YAML and in the CLI. For
 distributed extraction, install the plugin distribution — and make its weights
 and credentials reachable — in the same way on every worker and node.
-
-Provider diagnostics
-~~~~~~~~~~~~~~~~~~~~
-
-A provider that fails to load is skipped as a whole; built-ins and healthy
-providers stay available, and ``list_models()`` emits a ``RuntimeWarning``.
-For structured access to those failures:
-
-.. code-block:: python
-
-   from slide2vec import list_encoder_provider_diagnostics
-
-   for diagnostic in list_encoder_provider_diagnostics():
-       print(
-           diagnostic.provider_key,
-           diagnostic.provider,
-           diagnostic.exception_type,
-           diagnostic.message,
-       )
