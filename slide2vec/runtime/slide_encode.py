@@ -30,6 +30,40 @@ def encode_slide_from_tiles(
 
     Returns a CPU tensor of shape ``(D,)``.
     """
+    features, coordinate_tensor = _slide_encoder_inputs(loaded, tile_embeddings, tiling_result)
+    with slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
+        with torch.inference_mode():
+            return loaded.model.encode_slide(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            ).detach().cpu()
+
+
+def encode_slide_with_latents_from_tiles(
+    loaded: LoadedModel,
+    tile_embeddings: torch.Tensor,
+    tiling_result,
+    *,
+    execution: ExecutionOptions | None = None,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Like :func:`encode_slide_from_tiles`, plus the encoder's latents from the same pass.
+
+    Returns CPU tensors: the ``(D,)`` embedding and the latents, ``None`` for an encoder
+    that has none.
+    """
+    features, coordinate_tensor = _slide_encoder_inputs(loaded, tile_embeddings, tiling_result)
+    with slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
+        with torch.inference_mode():
+            embedding, latents = loaded.model.encode_slide_with_latents(
+                features,
+                coordinate_tensor,
+                tile_size_lv0=int(tiling_result.tile_size_lv0),
+            )
+    return embedding.detach().cpu(), None if latents is None else latents.detach().cpu()
+
+
+def _slide_encoder_inputs(loaded: LoadedModel, tile_embeddings: torch.Tensor, tiling_result):
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
@@ -38,14 +72,7 @@ def encode_slide_from_tiles(
         base_spacing_um=float(tiling_result.base_spacing_um),
         requested_spacing_um=float(tiling_result.requested_spacing_um),
     )
-    features = tile_embeddings.to(loaded.device)
-    with slide_encode_autocast_ctx(loaded.device, None if execution is None else execution.precision):
-        with torch.inference_mode():
-            return loaded.model.encode_slide(
-                features,
-                coordinate_tensor,
-                tile_size_lv0=int(tiling_result.tile_size_lv0),
-            ).detach().cpu()
+    return tile_embeddings.to(loaded.device), coordinate_tensor
 
 
 def describe_device_mode(model, execution: ExecutionOptions) -> str:

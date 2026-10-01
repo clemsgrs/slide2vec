@@ -541,6 +541,19 @@ class SlideEncoder(Encoder):
         """Pool tile-level features into a single slide-level embedding."""
         ...
 
+    def encode_slide_with_latents(
+        self,
+        tile_features: Tensor,
+        coordinates: Tensor | None = None,
+        *,
+        tile_size_lv0: int | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
+        """Return the slide embedding and the encoder's latent representations.
+
+        Encoders that have latents (PRISM) override this; the default returns ``None``.
+        """
+        return self.encode_slide(tile_features, coordinates, tile_size_lv0=tile_size_lv0), None
+
 
 class PatientEncoder(Encoder):
     """Base class for encoders that aggregate slide embeddings into patient embeddings."""

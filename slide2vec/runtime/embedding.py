@@ -15,6 +15,7 @@ from slide2vec.artifacts import (
     write_slide_embeddings,
     write_tile_embeddings,
 )
+from slide2vec.encoders.registry import encoder_registry, supports_slide_latents
 from slide2vec.runtime.hierarchical import resolve_hierarchical_geometry
 from slide2vec.runtime.model_settings import resolve_output_precision
 
@@ -35,6 +36,15 @@ def should_persist_tile_embeddings(model, execution: ExecutionOptions) -> bool:
     if model.level in {"slide", "patient"}:
         return bool(execution.save_tile_embeddings)
     return True
+
+
+def should_persist_latents(model, execution: ExecutionOptions) -> bool:
+    """Whether a completed slide has a latent file: requested, and the encoder has latents."""
+    return (
+        bool(execution.save_latents)
+        and model.name in encoder_registry
+        and supports_slide_latents(model.name)
+    )
 
 
 def build_tile_embedding_metadata(

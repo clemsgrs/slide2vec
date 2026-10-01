@@ -338,7 +338,8 @@ class ExecutionOptions:
     save_tile_embeddings: bool = False
     #: Persist slide embeddings to disk when running a patient-level model.
     save_slide_embeddings: bool = False
-    #: Persist encoder latent representations when available.
+    #: Return and persist the slide encoder's latent representations (PRISM). Encoders
+    #: without latents ignore it.
     save_latents: bool = False
 
     @classmethod
@@ -624,7 +625,8 @@ class EmbeddedSlide:
     mask_preview_path: Path | None = None
     #: Path to the tiling preview image, if generated.
     tiling_preview_path: Path | None = None
-    #: Encoder latent representations when available; ``None`` otherwise.
+    #: Slide encoder latent representations when ``ExecutionOptions.save_latents`` is set
+    #: and the encoder has them (PRISM: shape ``(512, 1280)``); ``None`` otherwise.
     latents: Any | None = None
     #: Factual square tensor side length immediately before tile encoding.
     encoder_input_size_px: int | None = None

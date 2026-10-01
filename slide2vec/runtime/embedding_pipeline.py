@@ -31,7 +31,10 @@ from slide2vec.runtime.hierarchical import (
     num_tiles,
     resolve_hierarchical_geometry,
 )
-from slide2vec.runtime.slide_encode import encode_slide_from_tiles
+from slide2vec.runtime.slide_encode import (
+    encode_slide_from_tiles,
+    encode_slide_with_latents_from_tiles,
+)
 from slide2vec.runtime.tiling import resolve_slide_backend, resolve_tile_store_archive_for_slide
 from slide2vec.runtime.types import LoadedModel
 from slide2vec.runtime.worker_io import configure_cucim_worker_stderr, uses_cuda_runtime
@@ -52,14 +55,20 @@ def aggregate_tile_embeddings_for_slide(
 
     if not torch.is_tensor(tile_embeddings):
         tile_embeddings = torch.as_tensor(tile_embeddings)
+    if execution.save_latents:
+        return encode_slide_with_latents_from_tiles(
+            loaded,
+            tile_embeddings,
+            tiling_result,
+            execution=execution,
+        )
     slide_embedding = encode_slide_from_tiles(
         loaded,
         tile_embeddings,
         tiling_result,
         execution=execution,
     )
-    latents = None
-    return slide_embedding, latents
+    return slide_embedding, None
 
 
 def compute_tile_embeddings_for_slide(
