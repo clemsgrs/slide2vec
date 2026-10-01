@@ -883,6 +883,32 @@ def test_serialize_preprocessing_round_trips_mask_backend():
     assert deserialize_preprocessing(legacy).mask_backend == "auto"
 
 
+def test_serialize_preprocessing_round_trips_save_tiles():
+    from slide2vec.runtime.serialization import (
+        deserialize_preprocessing,
+        serialize_preprocessing,
+    )
+
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        save_tiles=True,
+    )
+    payload = serialize_preprocessing(preprocessing)
+    assert payload["save_tiles"] is True
+    assert deserialize_preprocessing(payload).save_tiles is True
+
+
+def test_preprocessing_from_config_reads_the_top_level_save_tiles_key():
+    cfg = load_config("default")
+    cfg.tiling.params.requested_spacing_um = 0.5
+    cfg.tiling.params.requested_tile_size_px = 224
+
+    assert PreprocessingConfig.from_config(cfg).save_tiles is False
+    cfg.save_tiles = True
+    assert PreprocessingConfig.from_config(cfg).save_tiles is True
+
+
 def test_build_hs2p_configs_threads_mask_backend_into_tiling_config():
     from slide2vec.runtime.tiling import build_hs2p_configs
 
@@ -931,6 +957,7 @@ def test_preprocessing_from_config_reads_masks_block_and_independent_sampling():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-masks",
         resume=False,
+        save_tiles=False,
         speed=SimpleNamespace(num_cucim_workers=4),
         tiling=SimpleNamespace(
             backend="asap",
@@ -1390,6 +1417,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         csv="/tmp/slides.csv",
         output_dir=str(tmp_path),
         resume=False,
+        save_tiles=False,
         model=SimpleNamespace(
             name="virchow2",
             output_variant="cls",
@@ -1632,6 +1660,7 @@ def test_preprocessing_config_from_config_preserves_tile_store_dir():
     cfg = SimpleNamespace(
         output_dir="/tmp/run-002",
         resume=False,
+        save_tiles=False,
         speed=SimpleNamespace(num_cucim_workers=6),
         tiling=SimpleNamespace(
             backend="asap",

@@ -85,7 +85,9 @@ def tile_slides_call(
             num_workers=num_workers,
             read_coordinates_from=read_coordinates_from,
             resume=resume,
-            save_tiles=not preprocessing.on_the_fly and preprocessing.read_tiles_from is None,
+            # Requested, or needed: without on-the-fly reads embedding reads the archive.
+            save_tiles=preprocessing.save_tiles
+            or (not preprocessing.on_the_fly and preprocessing.read_tiles_from is None),
             jpeg_backend=preprocessing.jpeg_backend,
             sampling=sampling,
             selection_strategy=selection_strategy,

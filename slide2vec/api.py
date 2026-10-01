@@ -181,6 +181,10 @@ class PreprocessingConfig:
     read_tiles_from: Path | None = None
     #: Read and decode tiles on demand rather than pre-loading into memory.
     on_the_fly: bool = True
+    #: Write the extracted tiles to ``tiles/<sample_id>.tiles.tar`` next to the coordinate
+    #: artifacts. Tiles are also written when ``on_the_fly`` is ``False`` and
+    #: ``read_tiles_from`` is unset, because embedding then reads them from the archive.
+    save_tiles: bool = False
     #: Decode tiles on the GPU via CuCIM / nvImageCodec when ``True``.
     gpu_decode: bool = False
     #: Dynamically adjust batch size based on tile count.
@@ -287,6 +291,7 @@ class PreprocessingConfig:
                 Path(read_tiles_from) if read_tiles_from else None
             ),
             on_the_fly=on_the_fly,
+            save_tiles=bool(cfg.save_tiles),
             gpu_decode=gpu_decode,
             adaptive_batching=adaptive_batching,
             use_supertiles=bool(tiling.use_supertiles),

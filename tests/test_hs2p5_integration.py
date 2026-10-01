@@ -60,6 +60,36 @@ def test_spacingless_tissue_mask_aligns_and_round_trips(tmp_path):
     assert row["num_tiles"] == 16
 
 
+@pytest.mark.parametrize(
+    ("options", "expects_archive"),
+    [
+        ({"save_tiles": True}, True),  # on_the_fly defaults to True
+        ({}, False),
+        ({"on_the_fly": False}, True),
+        ({"save_tiles": True, "on_the_fly": False}, True),
+    ],
+    ids=["save-tiles", "default", "not-on-the-fly", "save-tiles-not-on-the-fly"],
+)
+def test_tile_archive_is_written_when_requested_or_not_reading_on_the_fly(
+    tmp_path, options, expects_archive
+):
+    import tarfile
+
+    slide = _flat_slide(tmp_path, np.ones((32, 32), dtype=np.uint8))
+
+    _, results, process_list = prepare_tiled_slides(
+        [slide], _preprocessing(**options), output_dir=tmp_path / "out", num_workers=1
+    )
+
+    archive_path = tmp_path / "out" / "tiles" / "slide.tiles.tar"
+    assert archive_path.is_file() is expects_archive
+    if expects_archive:
+        with tarfile.open(archive_path) as archive:
+            assert len(archive.getnames()) == 16
+        assert Path(results[0].tiles_tar_path) == archive_path
+        assert Path(pd.read_csv(process_list).iloc[0]["tiles_tar_path"]) == archive_path
+
+
 @pytest.mark.parametrize("output_mode", ["per_annotation", "merged"])
 def test_spacingless_annotation_mask_groups_values_and_preserves_bag_identity(tmp_path, output_mode):
     labels = np.full((32, 32), 2, dtype=np.uint8)
