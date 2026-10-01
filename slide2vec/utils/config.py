@@ -1,7 +1,6 @@
 import logging
 import os
 import datetime
-import getpass
 
 from pathlib import Path
 from typing import Any
@@ -180,19 +179,3 @@ def setup(args):
         wandb_run.save(cfg_path)
     return cfg, cfg_path
 
-
-def hf_login():
-    from huggingface_hub import login
-
-    token = os.environ.get("HF_TOKEN")
-    prompted = False
-    if token is None and is_main_process():
-        token = getpass.getpass(
-            "Enter your Hugging Face API token (input will not be visible): "
-        )
-        os.environ["HF_TOKEN"] = token
-        prompted = True
-    if token is None:
-        return
-    if is_main_process() and prompted:
-        login(token)

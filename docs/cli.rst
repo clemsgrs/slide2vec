@@ -37,9 +37,8 @@ Then run:
 The CLI builds a ``Model`` and ``Pipeline`` and writes artifacts to
 ``outputs/virchow2/<YYYY-MM-DD_HH_MM>/``. The directory includes the resolved
 ``config.yaml`` and ``process_list.csv``; see :doc:`output-layout` for the
-embedding and coordinate files. If ``HF_TOKEN`` is unset, the CLI prompts for
-a Hugging Face token, even when you have already logged in. Set it in the
-environment for unattended runs.
+embedding and coordinate files. The CLI never prompts for a Hugging Face
+token: gated models use ``HF_TOKEN`` or the login cached by ``hf auth login``.
 
 Configure a run
 ---------------

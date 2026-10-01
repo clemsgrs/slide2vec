@@ -707,24 +707,6 @@ def test_execution_options_resolve_safe_image_workers_without_losing_explicit_ov
     assert explicit.resolved_image_num_workers_per_gpu() == 2
 
 
-def test_hf_login_skips_hub_login_when_token_is_already_set(monkeypatch):
-    import slide2vec.utils.config as config
-
-    called = False
-
-    def _fake_login(*args, **kwargs):
-        del args, kwargs
-        nonlocal called
-        called = True
-
-    monkeypatch.setenv("HF_TOKEN", "token-from-env")
-    monkeypatch.setattr(config, "is_main_process", lambda: True)
-    monkeypatch.setattr("huggingface_hub.login", _fake_login)
-
-    config.hf_login()
-
-    assert called is False
-
 def test_execution_options_from_config_maps_cli_fields(tmp_path: Path):
     cfg = SimpleNamespace(
         output_dir=str(tmp_path),
@@ -1477,7 +1459,6 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
         return "MODEL"
 
     monkeypatch.setattr(cli, "setup", lambda parsed_args: (cfg, Path("/tmp/config.yaml")))
-    monkeypatch.setattr(cli, "hf_login", lambda: None)
     monkeypatch.setattr(cli.Model, "from_preset", staticmethod(fake_from_preset))
     monkeypatch.setattr(cli, "Pipeline", FakePipeline)
 
