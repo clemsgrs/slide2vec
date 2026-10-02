@@ -261,6 +261,10 @@ A resume over a completed artifact that records a different value for a field
 raises and names the sample and the fields. A field that the sidecar does not
 record is accepted, with one warning per run.
 
+Downstream caches can apply the same comparison through
+:meth:`~slide2vec.Model.pooled_identity_differences` before extracting missing
+samples. The method reports differences; the caller owns the cache policy.
+
 
 Image Embeddings
 ----------------

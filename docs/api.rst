@@ -215,6 +215,62 @@ spacing is part of the request.
    :members:
    :undoc-members:
 
+Checking pooled feature identity
+--------------------------------
+
+Use :meth:`~slide2vec.Model.pooled_identity_differences` to compare a saved
+sidecar's ``compatibility`` object with the current extraction recipe. This
+lets a downstream cache check features before deciding which samples to send
+to extraction.
+
+For pre-cropped images, explicitly pass ``preprocessing=None`` to compare the
+encoder's shipped transform:
+
+.. code-block:: python
+
+   import json
+   from pathlib import Path
+
+   from slide2vec import ExecutionOptions, Model, PreprocessingConfig
+
+   recorded = json.loads(Path("image_embeddings/sample.meta.json").read_text())["compatibility"]
+   model = Model.from_preset("virchow2")
+   execution = ExecutionOptions(precision="fp16", output_dtype="fp32")
+   differences = model.pooled_identity_differences(
+       recorded,
+       preprocessing=None,
+       execution=execution,
+   )
+   for field, (old, current) in differences.items():
+       print(field, old, current)
+
+For tile, hierarchical, slide, or patient features extracted from slides, pass
+the :class:`~slide2vec.PreprocessingConfig` used for extraction instead:
+
+.. code-block:: python
+
+   differences = model.pooled_identity_differences(
+       recorded,
+       preprocessing=PreprocessingConfig(
+           requested_tile_size_px=224,
+           requested_spacing_um=0.5,
+       ),
+       execution=execution,
+   )
+
+Unset preprocessing fields and execution precision use the same defaults as
+extraction. The result is ``{field: (recorded, current)}``, with the same
+:ref:`feature identity <feature-identity>` comparison as resume. Missing
+fields are accepted because they cannot be verified; an empty result therefore
+does not certify fields the saved identity never recorded. The caller decides
+whether to warn, reject, or extract again.
+
+Comparing metadata requires no encoder weights. A recorded ``transform`` loads
+one isolated CPU encoder to compare the recipe. Slide and patient models use
+their registered tile encoder and tile output variant without loading their
+aggregation weights. The method preserves the caller's model, does not encode
+pixels or write artifacts, and needs no output directory.
+
 Live Dense Encoding after Augmentation
 --------------------------------------
 
