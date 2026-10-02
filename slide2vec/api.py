@@ -688,6 +688,44 @@ class Model:
         # Construction fact, not an encode: see _load_backend_without_transform.
         return int(self._load_backend_without_transform().feature_dim)
 
+    def pooled_identity_differences(
+        self,
+        recorded: Mapping[str, Any],
+        *,
+        preprocessing: PreprocessingConfig | None,
+        execution: ExecutionOptions | None = None,
+    ) -> dict[str, tuple[Any, Any]]:
+        """Compare a pooled sidecar's ``compatibility`` block with the current recipe.
+
+        Returns ``{field: (recorded, current)}`` for differing fields held by both
+        identities. Missing fields retain the extraction resume semantics: they
+        cannot be verified and are accepted. The caller owns the policy for an
+        unrecorded identity or a difference.
+
+        Explicitly pass ``preprocessing=None`` for pre-cropped images, whose shipped
+        transform determines geometry. Pass a :class:`PreprocessingConfig` for
+        tiles read from slides; its unset fields resolve as in pooled extraction.
+        ``execution`` defaults to the model's recommended precision and needs no
+        output directory.
+
+        Only a recorded ``transform`` loads weights, on an isolated CPU model.
+        Slide and patient models load their registered tile encoder and tile output
+        variant, without loading aggregation weights. This method does not change
+        this model's input contract or loaded backend, encode pixels, or write files.
+        """
+        from slide2vec.runtime.feature_identity import pooled_identity_differences
+
+        resolved_execution = _coerce_execution_options(execution, model=self)
+        resolved_preprocessing = (
+            None if preprocessing is None else _resolve_direct_api_preprocessing(self, preprocessing)
+        )
+        return pooled_identity_differences(
+            self,
+            dict(recorded),
+            execution=resolved_execution,
+            preprocessing=resolved_preprocessing,
+        )
+
     def prepare_dense_encoder(
         self,
         *,

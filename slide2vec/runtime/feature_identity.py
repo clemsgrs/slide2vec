@@ -136,6 +136,42 @@ def differing_fields(
     }
 
 
+def pooled_identity_differences(
+    model,
+    recorded: dict[str, Any],
+    *,
+    execution,
+    preprocessing=None,
+) -> dict[str, tuple[Any, Any]]:
+    """Compare a recorded pooled identity with the resolved current request."""
+
+    def resolve_transform() -> dict[str, Any]:
+        from slide2vec.api import Model
+
+        encoder_name, output_variant = model.name, model._output_variant
+        if model.level != "tile":
+            info = encoder_registry.info(model.name)
+            encoder_name = info["tile_encoder"]
+            output_variant = info["tile_encoder_output_variant"]
+        source = Model.from_preset(
+            encoder_name,
+            device="cpu",
+            output_variant=output_variant,
+            allow_non_recommended_settings=model.allow_non_recommended_settings,
+        )
+        if preprocessing is None:
+            source._declare_given_encoder_input(emit_run_info=False)
+        else:
+            source._declare_encoder_input(preprocessing, emit_run_info=False)
+        return transform_record(source._load_backend().transforms)
+
+    return differing_fields(
+        recorded,
+        pooled_feature_identity(model, execution=execution, preprocessing=preprocessing),
+        resolve_transform=resolve_transform,
+    )
+
+
 class PooledResumeCheck:
     """Compare the completed pooled artifacts of one resume with the run's feature identity.
 
