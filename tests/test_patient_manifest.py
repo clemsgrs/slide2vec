@@ -60,7 +60,7 @@ def test_slide_manifest_preserves_leading_zero_sample_ids(tmp_path: Path):
     assert [slide.sample_id for slide in slides] == ["0007", "0008"]
 
 
-def test_patient_tiling_only_validates_ids_before_creating_output(tmp_path: Path):
+def test_patient_run_validates_ids_before_creating_output(tmp_path: Path):
     manifest = tmp_path / "manifest.csv"
     manifest.write_text(
         "sample_id,image_path,patient_id\n"
@@ -75,7 +75,6 @@ def test_patient_tiling_only_validates_ids_before_creating_output(tmp_path: Path
         run_pipeline(
             SimpleNamespace(level="patient"),
             manifest_path=manifest,
-            tiling_only=True,
             execution=SimpleNamespace(output_dir=output_dir, num_gpus=1),
         )
 

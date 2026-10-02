@@ -65,6 +65,8 @@ Slides sharing the same ``patient_id`` contribute to one patient embedding.
 Both identifier columns are read as text, so values such as ``0007`` retain
 their leading zeros. Every ``patient_id`` must be non-empty after surrounding
 whitespace is ignored; invalid rows are rejected before tiling begins.
+A tiling-only run (``--tiling-only`` or ``tiling_only=True``) does not use
+``patient_id``, so it does not need the column.
 
 
 Per-slide embeddings
