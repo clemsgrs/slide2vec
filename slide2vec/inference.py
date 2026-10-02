@@ -761,7 +761,10 @@ def run_pipeline(
     tiling_only: bool = False,
     execution: ExecutionOptions,
 ) -> RunResult:
-    if model.level == "patient":
+    # Tiling does not use patient ids or the patient pipeline: only a run that
+    # embeds patients needs them.
+    embeds_patients = model.level == "patient" and not tiling_only
+    if embeds_patients:
         patient_id_map = manifest.resolve_patient_id_map(slides=slides, manifest_path=manifest_path)
     else:
         patient_id_map = None
@@ -781,7 +784,7 @@ def run_pipeline(
         distributed_stage.validate_multi_gpu_execution(model, execution)
 
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
-    if model.level == "patient" and not tiling_only:
+    if embeds_patients:
         patient_pipeline.reject_per_annotation_sampling(model, resolved_preprocessing)
     output_dir = Path(execution.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
