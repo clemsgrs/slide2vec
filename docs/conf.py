@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 project = "slide2vec"
 author = "Clément Grisi"
 copyright = "2026, Clément Grisi"
-release = "6.3.3"
+release = "6.3.4"
 
 extensions = [
     "myst_parser",
