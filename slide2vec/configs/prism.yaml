@@ -1,0 +1,33 @@
+csv: "/data/pathology/projects/clement/croma/wsi/par-s2v.csv" # path to csv containing slide paths
+
+output_dir: "/data/pathology/projects/clement/croma/wsi/features" # output directory
+
+model:
+  name: "prism" # preset model name; see docs/models.md for supported request strings
+  batch_size: 32
+  allow_non_recommended_settings: false # when true, non-recommended spacing / tile size / precision combinations warn instead of erroring
+
+tiling:
+  backend: "openslide" # backend to use for slide reading; "auto" lets hs2p resolve the best backend per slide, preferring cuCIM when available
+  masks:
+    min_coverage: # {class_name: float | null}; minimum fraction of a tile that must be covered to keep it; tissue is the single source of truth for the tissue threshold
+      tissue: 0.1
+  params:
+    tolerance: 0.07 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)
+  preview:
+    save_mask_preview: true # save preview images of mask overlays
+    save_tiling_preview: true # save preview images of tile layouts
+
+speed:
+  num_dataloader_workers: 16 # number of DataLoader worker processes per GPU rank for reading tiles during embedding; defaults to auto (job CPU budget split across GPUs, except cuCIM on-the-fly uses per-GPU budget // speed.num_cucim_workers)
+  num_gpus: # number of GPUs to use for feature extraction; defaults to all available GPUs
+  num_preprocessing_workers: 16 # number of workers for hs2p tiling (WSI reading, JPEG encoding, tar writing); defaults to the runtime CPU budget capped at 64
+  prefetch_factor_embedding: 4 # prefetch factor for tile embedding dataloaders
+
+wandb:
+  enable: true
+  project: "discern" # wandb project name
+  username: "clemsg" # wandb username
+  exp_name: "features" # wandb experiment name
+  tags: ["features", "${model.name}", "${tiling.params.requested_tile_size_px}"] # wandb tags
+  dir: "/tmp"

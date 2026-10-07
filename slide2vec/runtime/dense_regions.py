@@ -51,6 +51,10 @@ from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
 from slide2vec.runtime.tiling import resolve_slide_backend
 
 
+#: Dense feature kinds a request may ask for, each backed by one ``TileEncoder`` method.
+DENSE_FEATURE_KINDS: tuple[str, ...] = ("patch_features", "patch_features_prenorm", "cls_attention")
+
+
 def _resolve_output_dtype(output_dtype: "torch.dtype | None", precision: str) -> "torch.dtype":
     """Resolve the dtype emitted grids are materialized in.
 
@@ -152,10 +156,10 @@ def validate_dense_request_settings(
                 f"dimension; target_size={geometry.target_size} requires bottom/right "
                 f"pad={geometry.pad}. Choose a larger target or another pad_mode."
             )
-    if feature_kind not in {"patch_features", "cls_attention"}:
+    if feature_kind not in DENSE_FEATURE_KINDS:
         raise ValueError(
-            f"unsupported feature_kind {feature_kind!r}; "
-            "expected 'patch_features' or 'cls_attention'"
+            f"unsupported feature_kind {feature_kind!r}; expected one of "
+            + ", ".join(repr(kind) for kind in DENSE_FEATURE_KINDS)
         )
     if window_size is not None:
         if int(window_size) <= 0:
@@ -210,6 +214,8 @@ def _resolve_encode_fn(
 ) -> Callable[[torch.Tensor], torch.Tensor]:
     if feature_kind == "patch_features":
         return model.encode_tiles_dense
+    if feature_kind == "patch_features_prenorm":
+        return model.encode_tiles_dense_prenorm
     if feature_kind == "cls_attention":
         blocks = tuple(int(b) for b in attention_blocks)
         include_registers = bool(attention_include_registers)
@@ -221,7 +227,8 @@ def _resolve_encode_fn(
 
         return encode_fn
     raise ValueError(
-        f"unsupported feature_kind {feature_kind!r}; expected 'patch_features' or 'cls_attention'"
+        f"unsupported feature_kind {feature_kind!r}; expected one of "
+        + ", ".join(repr(kind) for kind in DENSE_FEATURE_KINDS)
     )
 
 

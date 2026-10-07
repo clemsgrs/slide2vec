@@ -152,6 +152,7 @@ def test_pooled_only_preset_resolves_without_dense_or_attention_support():
         level="tile",
         pooled=True,
         dense=False,
+        dense_prenorm=False,
         attention=False,
         slide=False,
         patient=False,
@@ -177,6 +178,7 @@ def test_dense_preset_resolves_complete_class_and_static_metadata_contract():
         level="tile",
         pooled=True,
         dense=True,
+        dense_prenorm=False,
         attention=False,
         slide=False,
         patient=False,
@@ -202,6 +204,7 @@ def test_attention_preset_resolves_attention_from_class_behavior():
         level="tile",
         pooled=True,
         dense=True,
+        dense_prenorm=False,
         attention=True,
         slide=False,
         patient=False,
@@ -302,6 +305,7 @@ def test_slide_preset_resolves_level_and_tile_dependency():
         level="slide",
         pooled=False,
         dense=False,
+        dense_prenorm=False,
         attention=False,
         slide=True,
         patient=False,
@@ -328,6 +332,7 @@ def test_patient_preset_resolves_slide_patient_and_tile_dependency_contracts():
         level="patient",
         pooled=False,
         dense=False,
+        dense_prenorm=False,
         attention=False,
         slide=True,
         patient=True,
@@ -429,3 +434,32 @@ def test_all_built_in_presets_resolve_capabilities():
     assert {
         report.name for report in map(resolve_encoder_capabilities, encoder_registry.names())
     } == set(encoder_registry.names())
+
+
+class _PrenormDenseEncoder(_DenseEncoder):
+    def encode_tiles_dense_prenorm(self, batch):
+        return batch
+
+
+def test_prenorm_dense_resolves_from_class_behavior():
+    register_encoder(
+        "synthetic-prenorm",
+        output_variants={"default": {"encode_dim": 8}},
+        default_output_variant="default",
+        input_size=224,
+        supports_variable_input_size=True,
+        patch_size=16,
+        supported_spacing_um=0.5,
+    )(_PrenormDenseEncoder)
+
+    capabilities = resolve_encoder_capabilities("synthetic-prenorm")
+    assert capabilities.dense is True and capabilities.dense_prenorm is True
+
+
+@pytest.mark.parametrize(
+    ("encoder_name", "expected"),
+    [("uni2", True), ("virchow2", True), ("phikon", False), ("hibou-b", False)],
+)
+def test_prenorm_dense_tap_is_timm_vit_only(encoder_name, expected):
+    """timm ViT presets inherit the pre-norm tap; HF-backed encoders do not."""
+    assert resolve_encoder_capabilities(encoder_name).dense_prenorm is expected

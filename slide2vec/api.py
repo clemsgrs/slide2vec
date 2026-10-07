@@ -457,8 +457,10 @@ class DenseOptions:
     #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
     #: ``window_size is None``).
     overlap: float = 0.0
-    #: ``"patch_features"`` (the patch-token grid) or ``"cls_attention"`` (CLS/register
-    #: self-attention grid).
+    #: ``"patch_features"`` (the patch-token grid after the backbone's final norm),
+    #: ``"patch_features_prenorm"`` (the same grid tapped *before* the final norm, timm's
+    #: ``features_only`` tap; timm ViT encoders only) or ``"cls_attention"``
+    #: (CLS/register self-attention grid).
     feature_kind: str = "patch_features"
     #: Transformer blocks whose CLS attention is read (``cls_attention`` only).
     attention_blocks: tuple[int, ...] = (-1,)
@@ -508,8 +510,10 @@ class DenseImageOptions:
     #: Fractional window overlap in ``[0, 1)`` for the sliding path (ignored when
     #: ``window_size is None``).
     overlap: float = 0.0
-    #: ``"patch_features"`` (the patch-token grid) or ``"cls_attention"`` (CLS/register
-    #: self-attention grid).
+    #: ``"patch_features"`` (the patch-token grid after the backbone's final norm),
+    #: ``"patch_features_prenorm"`` (the same grid tapped *before* the final norm, timm's
+    #: ``features_only`` tap; timm ViT encoders only) or ``"cls_attention"``
+    #: (CLS/register self-attention grid).
     feature_kind: str = "patch_features"
     #: Transformer blocks whose CLS attention is read (``cls_attention`` only).
     attention_blocks: tuple[int, ...] = (-1,)

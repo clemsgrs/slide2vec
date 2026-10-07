@@ -247,6 +247,21 @@ def test_prepare_dense_encoder_rejects_unsupported_attention_before_loading(
     assert load_attempted is False
 
 
+@pytest.mark.parametrize(("model_name", "target_size"), [("phikon", 224), ("hibou-b", 224)])
+def test_prepare_dense_encoder_rejects_unsupported_prenorm_before_loading(
+    model_name, target_size, monkeypatch
+):
+    model = Model(name=model_name, device="cpu")
+    monkeypatch.setattr(
+        model, "_load_backend", lambda: (_ for _ in ()).throw(AssertionError("must not load"))
+    )
+    with pytest.raises(ValueError, match="does not support patch_features_prenorm"):
+        model.prepare_dense_encoder(
+            dense=_dense_image(target_size=target_size, feature_kind="patch_features_prenorm"),
+            execution=ExecutionOptions(num_gpus=1, precision="fp32"),
+        )
+
+
 def test_prepare_dense_encoder_rejects_non_tile_models_before_loading(monkeypatch):
     model = Model(name="gigapath-slide", device="cpu")
     load_attempted = False

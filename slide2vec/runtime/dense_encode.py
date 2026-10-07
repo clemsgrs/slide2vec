@@ -129,6 +129,7 @@ def _validate_registered_feature_capability(
     encoder_cls = encoder_registry.require(encoder_name)
     method_name = {
         "patch_features": "encode_tiles_dense",
+        "patch_features_prenorm": "encode_tiles_dense_prenorm",
         "cls_attention": "encode_tiles_attention",
     }[feature_kind]
     if getattr(encoder_cls, method_name) is getattr(TileEncoder, method_name):

@@ -462,6 +462,21 @@ class TileEncoder(Encoder):
             "tokens can be reshaped into a spatial grid."
         )
 
+    def encode_tiles_dense_prenorm(self, batch: Tensor) -> Tensor:
+        """Dense grid tapped before the backbone's final normalisation. (B, C, H, W) -> (B, d, h, w).
+
+        Same grid as :meth:`encode_tiles_dense` but from the last block's output,
+        *before* the final LayerNorm — the tap timm's ``features_only`` backbones
+        expose (``forward_intermediates(norm=False)``) and that kaiko-ai/eva's
+        segmentation decoders were trained on. Default: unsupported; the timm ViT
+        base overrides it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support pre-norm dense feature "
+            "extraction (feature_kind='patch_features_prenorm'). The tap is "
+            "available for timm ViT tile encoders only."
+        )
+
     def encode_tiles_attention(
         self,
         batch: Tensor,
@@ -634,15 +649,8 @@ class TimmTileEncoder(TileEncoder):
         """Number of leading non-patch tokens (CLS + register tokens)."""
         return int(self._model.num_prefix_tokens)
 
-    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
-        """Encode tiles into a dense spatial grid. (B, C, H, W) -> (B, d, h, w).
-
-        Runs the frozen backbone's ``forward_features`` and folds the patch-token
-        sequence back into its spatial grid (CLS/register tokens discarded). The
-        backbone must accept ``batch`` at its current spatial size (timm ViTs need
-        ``dynamic_img_size=True`` for sizes other than their native input), and
-        ``H, W`` must be divisible by the patch size.
-        """
+    def _check_dense_batch(self, batch: Tensor) -> tuple[int, int]:
+        """Validate a dense ``(B, C, H, W)`` batch; return ``(H, W)``."""
         if batch.ndim != 4:
             raise ValueError(
                 "encode_tiles_dense expects a (B, C, H, W) batch, got shape "
@@ -656,6 +664,19 @@ class TimmTileEncoder(TileEncoder):
                 f"divisible by the patch size: got {height}x{width}, patch "
                 f"{patch_h}x{patch_w}. Pad the tile up to a patch multiple first."
             )
+        return int(height), int(width)
+
+    def encode_tiles_dense(self, batch: Tensor) -> Tensor:
+        """Encode tiles into a dense spatial grid. (B, C, H, W) -> (B, d, h, w).
+
+        Runs the frozen backbone's ``forward_features`` and folds the patch-token
+        sequence back into its spatial grid (CLS/register tokens discarded). The
+        backbone must accept ``batch`` at its current spatial size (timm ViTs need
+        ``dynamic_img_size=True`` for sizes other than their native input), and
+        ``H, W`` must be divisible by the patch size.
+        """
+        height, width = self._check_dense_batch(batch)
+        patch_h, patch_w = self._dense_patch_size()
         tokens = self._model.forward_features(batch)
         return reshape_tokens_to_grid(
             tokens,
@@ -664,6 +685,25 @@ class TimmTileEncoder(TileEncoder):
             num_prefix_tokens=self._dense_num_prefix_tokens(),
             encoder_name=type(self).__name__,
         )
+
+    def encode_tiles_dense_prenorm(self, batch: Tensor) -> Tensor:
+        """Pre-norm dense grid via timm's ``forward_intermediates(norm=False)``.
+
+        ``indices=1`` selects the last block, ``output_fmt="NCHW"`` folds the patch
+        tokens into the grid (prefix tokens dropped), ``norm=False`` skips the final
+        LayerNorm — exactly timm's ``features_only=True, out_indices=1`` path.
+        """
+        self._check_dense_batch(batch)
+        forward_intermediates = getattr(self._model, "forward_intermediates", None)
+        if forward_intermediates is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} backbone has no forward_intermediates; the "
+                "pre-norm dense tap needs a timm ViT-family model."
+            )
+        grids = forward_intermediates(
+            batch, indices=1, norm=False, intermediates_only=True, output_fmt="NCHW"
+        )
+        return grids[-1]
 
     def encode_tiles_attention(
         self,

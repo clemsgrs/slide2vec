@@ -149,6 +149,7 @@ class EncoderCapabilities:
     level: str
     pooled: bool
     dense: bool
+    dense_prenorm: bool
     attention: bool
     slide: bool
     patient: bool
@@ -164,6 +165,7 @@ def resolve_encoder_capabilities(encoder_name: str) -> EncoderCapabilities:
     _validate_encoder_capability_contract(encoder_name, encoder_cls, metadata)
     level = resolve_encoder_level(encoder_name, metadata)
     dense = all(_dense_class_contract(encoder_cls))
+    dense_prenorm = dense and _supports_dense_prenorm(encoder_cls)
     attention = _supports_attention(encoder_cls)
     tile_encoder = None
     tile_encoder_output_variant = None
@@ -189,6 +191,7 @@ def resolve_encoder_capabilities(encoder_name: str) -> EncoderCapabilities:
         level=level,
         pooled=issubclass(encoder_cls, TileEncoder),
         dense=dense,
+        dense_prenorm=dense_prenorm,
         attention=attention,
         slide=issubclass(encoder_cls, (SlideEncoder, PatientEncoder)),
         patient=issubclass(encoder_cls, PatientEncoder),
@@ -236,6 +239,14 @@ def _dense_class_contract(encoder_cls: type) -> tuple[bool, ...]:
     return tuple(
         getattr(encoder_cls, member) is not getattr(TileEncoder, member)
         for member in _DENSE_CLASS_MEMBERS
+    )
+
+
+def _supports_dense_prenorm(encoder_cls: type) -> bool:
+    return (
+        issubclass(encoder_cls, TileEncoder)
+        and getattr(encoder_cls, "encode_tiles_dense_prenorm")
+        is not TileEncoder.encode_tiles_dense_prenorm
     )
 
 
