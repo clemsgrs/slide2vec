@@ -322,8 +322,11 @@ same grid one step earlier, from the last block's output before the final
 LayerNorm — timm's ``features_only`` / ``forward_intermediates(norm=False)``
 tap, which decoders trained on timm feature backbones (for example
 kaiko-ai/eva's segmentation decoders) expect. It is available for timm ViT
-encoders only (``EncoderCapabilities.dense_prenorm``) and is recorded in the
-feature identity, so the two taps never share an artifact.
+encoders only (``EncoderCapabilities.dense_prenorm``; the core dependency
+floor ``timm>=1.0.3`` is the first release with ``forward_intermediates``) and
+is recorded in the feature identity, so the two taps never share an artifact.
+Every dense route rejects an unsupported feature kind from registry metadata,
+before loading a backend or touching an existing artifact.
 
 The immutable ``kit.geometry`` is authoritative:
 

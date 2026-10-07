@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 
 import torch
 
-from slide2vec.encoders.base import TileEncoder
-from slide2vec.encoders.registry import encoder_registry, resolve_patch_size
+from slide2vec.encoders.registry import resolve_patch_size
 from slide2vec.runtime.dense_regions import (
     DenseGridGeometry,
     DenseGridEncoder,
@@ -94,10 +93,6 @@ class _DenseEncodePlan:
             attention_blocks=dense.attention_blocks,
             attention_include_registers=dense.attention_include_registers,
         )
-        _validate_registered_feature_capability(
-            contract_plan.tile_encoder_name,
-            feature_kind=str(dense.feature_kind),
-        )
         if execution.precision is None:
             raise ValueError("Live dense encoder precision must be resolved before loading")
         output_precision = resolve_output_precision(
@@ -121,22 +116,6 @@ class _DenseEncodePlan:
             output_dtype=output_torch_dtype(output_precision),
         )
 
-
-def _validate_registered_feature_capability(
-    encoder_name: str, *, feature_kind: str
-) -> None:
-    """Reject a feature method left at ``TileEncoder``'s unsupported default."""
-    encoder_cls = encoder_registry.require(encoder_name)
-    method_name = {
-        "patch_features": "encode_tiles_dense",
-        "patch_features_prenorm": "encode_tiles_dense_prenorm",
-        "cls_attention": "encode_tiles_attention",
-    }[feature_kind]
-    if getattr(encoder_cls, method_name) is getattr(TileEncoder, method_name):
-        raise ValueError(
-            f"Encoder {encoder_name!r} does not support {feature_kind}; choose a "
-            "registered dense feature kind implemented by this encoder."
-        )
 
 
 @dataclass(frozen=True, kw_only=True)

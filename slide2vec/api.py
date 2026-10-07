@@ -26,6 +26,7 @@ from slide2vec.encoders.registry import (
     encoder_registry,
     list_encoder_provider_diagnostics,
     resolve_preprocessing_fields,
+    validate_feature_kind_capability,
 )
 from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.runtime.model_settings import (
@@ -1095,14 +1096,20 @@ class Model:
         parent stage and every torchrun rank — declares for itself.
 
         *dense* is a :class:`DenseOptions` (ROIs on a slide) or a :class:`DenseImageOptions`
-        (pre-cropped images); only the supervision geometry is read here, and the two state
-        it the same way.
+        (pre-cropped images); only the supervision geometry and the requested feature kind
+        are read here, and the two state them the same way.
+
+        The feature kind is checked against the registered encoder class at the same
+        point, so a tap this encoder does not implement (``patch_features_prenorm`` on a
+        non-timm backbone, say) fails before any backend is loaded and before resume
+        inspects or invalidates an existing artifact.
         """
         contract = EncoderInputContract.declared_dense(
             self.name,
             target_size_px=dense.target_size,
             window_size=None if dense.window_size is None else int(dense.window_size),
         )
+        validate_feature_kind_capability(self.name, feature_kind=str(dense.feature_kind))
         self._encoder_input = contract
         plan = contract.plan
         if emit_run_info and plan.requires_variable_model_input:

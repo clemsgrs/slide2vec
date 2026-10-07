@@ -533,3 +533,34 @@ def test_region_specs_round_trip_through_request(tmp_path):
     )
     assert request["slides"][1]["read_plan"] == specs[2].read_plan.to_dict()
     assert dense_stage.region_specs_from_request(request) == specs
+
+
+def test_embed_regions_dense_rejects_unsupported_prenorm_before_loading_or_resume(
+    tmp_path, monkeypatch
+):
+    """The persisted ROI route rejects an unimplemented feature kind from registry metadata.
+
+    Nothing is read, loaded or partitioned for resume: an existing artifact directory is
+    left exactly as it was.
+    """
+    from slide2vec.api import Model
+
+    model = Model(name="phikon", device="cpu")
+    monkeypatch.setattr(
+        model, "_load_backend", lambda: (_ for _ in ()).throw(AssertionError("must not load"))
+    )
+    monkeypatch.setattr(
+        dense_stage,
+        "partition_regions_by_resume",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not resume")),
+    )
+    out_dir = tmp_path / "out"
+    (out_dir / "dense_embeddings" / "s0").mkdir(parents=True)
+    (out_dir / "dense_embeddings" / "s0" / "0_0.meta.json").write_text("{}")
+    with pytest.raises(ValueError, match="does not support patch_features_prenorm"):
+        model.embed_regions_dense(
+            [_regions()],
+            dense=_dense(feature_kind="patch_features_prenorm"),
+            execution=ExecutionOptions(num_gpus=1, precision="fp32", output_dir=out_dir),
+        )
+    assert (out_dir / "dense_embeddings" / "s0" / "0_0.meta.json").read_text() == "{}"

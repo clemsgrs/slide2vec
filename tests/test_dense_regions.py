@@ -461,7 +461,7 @@ def test_prenorm_dense_grid_is_the_last_block_output_before_the_final_norm(model
     """
     enc = TimmTileEncoder(model_name, pretrained=False, num_classes=0, dynamic_img_size=True)
     patch = enc.patch_size[0]
-    batch = torch.randn(2, 3, 4 * patch, 3 * patch)
+    batch = torch.randn(2, 3, 4 * patch, 3 * patch, generator=torch.Generator().manual_seed(0))
     with torch.inference_mode():
         post = enc.encode_tiles_dense(batch)
         pre = enc.encode_tiles_dense_prenorm(batch)
@@ -469,6 +469,30 @@ def test_prenorm_dense_grid_is_the_last_block_output_before_the_final_norm(model
     assert tuple(pre.shape) == tuple(post.shape) == (2, enc.encode_dim, 4, 3)
     assert not torch.allclose(pre, post)
     assert torch.allclose(normed, post, atol=1e-5)
+
+
+def test_prenorm_dense_grid_has_literal_values_for_a_fixed_backbone():
+    """Literal oracle: with every weight zeroed, each block adds only its MLP output bias.
+
+    Penultimate block bias 5, last block bias 3, final LayerNorm bias 2: the pre-norm grid
+    must be the last block's output ``5 + 3 = 8`` everywhere (not the penultimate block's
+    5, and not the normed 2), and the post-norm grid must be the LayerNorm bias 2 (a
+    constant input has zero variance, so only the bias survives).
+    """
+    enc = _encoder()
+    with torch.no_grad():
+        for parameter in enc._model.parameters():
+            parameter.zero_()
+        enc._model.blocks[-2].mlp.fc2.bias.fill_(5.0)
+        enc._model.blocks[-1].mlp.fc2.bias.fill_(3.0)
+        enc._model.norm.bias.fill_(2.0)
+    batch = torch.ones(2, 3, 32, 48)
+    with torch.inference_mode():
+        pre = enc.encode_tiles_dense_prenorm(batch)
+        post = enc.encode_tiles_dense(batch)
+    assert tuple(pre.shape) == tuple(post.shape) == (2, enc.encode_dim, 2, 3)
+    torch.testing.assert_close(pre, torch.full_like(pre, 8.0))
+    torch.testing.assert_close(post, torch.full_like(post, 2.0))
 
 
 def test_prenorm_dense_rejects_batches_not_divisible_by_the_patch_size():
