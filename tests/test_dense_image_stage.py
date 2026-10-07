@@ -22,7 +22,7 @@ PIL = pytest.importorskip("PIL")
 
 from PIL import Image  # noqa: E402
 
-from slide2vec.api import DenseImageOptions, ExecutionOptions, ImageSpec  # noqa: E402
+from slide2vec.api import DenseImageOptions, ExecutionOptions, ImageSpec, Model  # noqa: E402
 from slide2vec.encoders.base import TimmTileEncoder  # noqa: E402
 from slide2vec.runtime import dense_image_stage  # noqa: E402
 from slide2vec.runtime.types import LoadedModel  # noqa: E402
@@ -1085,3 +1085,32 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
     # World of 2 ranks: plan_contiguous_shards([a,b,c,d], 2) => rank 1 owns [c, d].
     dense_dir = tmp_path / "out" / "dense_image_embeddings"
     assert sorted(p.name for p in dense_dir.glob("*.pt")) == ["c.pt", "d.pt"]
+
+
+def test_embed_images_dense_rejects_unsupported_prenorm_before_loading_or_resume(
+    tmp_path, monkeypatch
+):
+    """An unsupported feature kind fails from registry metadata on the persisted image route.
+
+    Phikon is not a timm ViT, so ``patch_features_prenorm`` is rejected before the backend
+    loads and before resume inspects the output dir: an existing post-norm payload and its
+    sidecar are left untouched (the earlier behaviour deleted the sidecar first).
+    """
+    model = Model(name="phikon", device="cpu")
+    monkeypatch.setattr(
+        model, "_load_backend", lambda: (_ for _ in ()).throw(AssertionError("must not load"))
+    )
+    specs = _images(tmp_path, ["a"])
+    out_dir = tmp_path / "out"
+    existing = out_dir / "dense_image_embeddings"
+    existing.mkdir(parents=True)
+    (existing / "a.pt").write_bytes(b"payload")
+    (existing / "a.meta.json").write_text("{}")
+    with pytest.raises(ValueError, match="does not support patch_features_prenorm"):
+        model.embed_images_dense(
+            specs,
+            dense=_dense(feature_kind="patch_features_prenorm"),
+            execution=ExecutionOptions(num_gpus=1, precision="fp32", output_dir=out_dir),
+        )
+    assert (existing / "a.pt").read_bytes() == b"payload"
+    assert (existing / "a.meta.json").read_text() == "{}"

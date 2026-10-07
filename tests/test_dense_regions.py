@@ -161,7 +161,7 @@ def _make_tiling_result(
     )
 
 
-@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("feature_kind", ["patch_features", "patch_features_prenorm", "cls_attention"])
 @pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
 def test_iter_regions_dense_yields_grid_per_coordinate_in_order(fake_backend, window_size, feature_kind):
     enc = _encoder()
@@ -235,6 +235,8 @@ def _reference_grid(
     batch = padded.unsqueeze(0)
     if feature_kind == "patch_features":
         encode_fn = enc.encode_tiles_dense
+    elif feature_kind == "patch_features_prenorm":
+        encode_fn = enc.encode_tiles_dense_prenorm
     else:
         encode_fn = enc.encode_tiles_attention
     with torch.inference_mode():
@@ -248,7 +250,7 @@ def _reference_grid(
     return out.detach().float().cpu().numpy()[0]
 
 
-@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("feature_kind", ["patch_features", "patch_features_prenorm", "cls_attention"])
 @pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
 def test_iter_regions_dense_matches_direct_encode(fake_backend, window_size, feature_kind):
     """Each yielded grid is byte-identical to a hand-rolled transform+pad+encode.
@@ -276,7 +278,7 @@ def test_iter_regions_dense_matches_direct_encode(fake_backend, window_size, fea
         np.testing.assert_array_equal(grid, ref)
 
 
-@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("feature_kind", ["patch_features", "patch_features_prenorm", "cls_attention"])
 def test_iter_regions_dense_area_resizes_when_read_differs_from_requested(fake_backend, feature_kind):
     """When ``read_tile_size_px != requested_tile_size_px`` the region is area-resized.
 
@@ -333,7 +335,7 @@ def test_iter_regions_dense_empty_coordinates_yields_nothing(fake_backend):
     assert fake_backend.open_count == 0  # nothing read -> slide never opened
 
 
-@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("feature_kind", ["patch_features", "patch_features_prenorm", "cls_attention"])
 @pytest.mark.parametrize("window_size", [None, 32], ids=["whole", "window32"])
 def test_iter_regions_dense_streams_one_batch_at_a_time(fake_backend, window_size, feature_kind):
     """Reads advance one batch at a time; first grids land before all coords are read.
@@ -369,7 +371,7 @@ def test_iter_regions_dense_streams_one_batch_at_a_time(fake_backend, window_siz
     assert len(backend.locations_read) == len(coords)  # total reads never exceed the coordinate count
 
 
-@pytest.mark.parametrize("feature_kind", ["patch_features", "cls_attention"])
+@pytest.mark.parametrize("feature_kind", ["patch_features", "patch_features_prenorm", "cls_attention"])
 def test_iter_regions_dense_is_batch_invariant(fake_backend, feature_kind):
     """Composition is irrelevant: only ``B`` matters, not how coords are grouped (adr/0002).
 
@@ -448,3 +450,64 @@ def test_iter_regions_dense_rejects_bfloat16_output_eagerly(fake_backend):
         )
     assert fake_backend.backend.locations_read == []
     assert fake_backend.open_count == 0
+
+
+@pytest.mark.parametrize("model_name", ["vit_tiny_patch16_224", "vit_small_patch14_reg4_dinov2"])
+def test_prenorm_dense_grid_is_the_last_block_output_before_the_final_norm(model_name):
+    """``encode_tiles_dense_prenorm`` is ``encode_tiles_dense`` minus the backbone's final norm.
+
+    Applying the backbone's own ``norm`` to the pre-norm grid reproduces the post-norm grid
+    exactly (timm's ``features_only`` tap), for a plain ViT and a register-token ViT.
+    """
+    enc = TimmTileEncoder(model_name, pretrained=False, num_classes=0, dynamic_img_size=True)
+    patch = enc.patch_size[0]
+    batch = torch.randn(2, 3, 4 * patch, 3 * patch, generator=torch.Generator().manual_seed(0))
+    with torch.inference_mode():
+        post = enc.encode_tiles_dense(batch)
+        pre = enc.encode_tiles_dense_prenorm(batch)
+        normed = enc._model.norm(pre.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+    assert tuple(pre.shape) == tuple(post.shape) == (2, enc.encode_dim, 4, 3)
+    assert not torch.allclose(pre, post)
+    assert torch.allclose(normed, post, atol=1e-5)
+
+
+def test_prenorm_dense_grid_has_literal_values_for_a_fixed_backbone():
+    """Literal oracle: with every weight zeroed, each block adds only its MLP output bias.
+
+    Penultimate block bias 5, last block bias 3, final LayerNorm bias 2: the pre-norm grid
+    must be the last block's output ``5 + 3 = 8`` everywhere (not the penultimate block's
+    5, and not the normed 2), and the post-norm grid must be the LayerNorm bias 2 (a
+    constant input has zero variance, so only the bias survives).
+    """
+    enc = _encoder()
+    with torch.no_grad():
+        for parameter in enc._model.parameters():
+            parameter.zero_()
+        enc._model.blocks[-2].mlp.fc2.bias.fill_(5.0)
+        enc._model.blocks[-1].mlp.fc2.bias.fill_(3.0)
+        enc._model.norm.bias.fill_(2.0)
+    batch = torch.ones(2, 3, 32, 48)
+    with torch.inference_mode():
+        pre = enc.encode_tiles_dense_prenorm(batch)
+        post = enc.encode_tiles_dense(batch)
+    assert tuple(pre.shape) == tuple(post.shape) == (2, enc.encode_dim, 2, 3)
+    torch.testing.assert_close(pre, torch.full_like(pre, 8.0))
+    torch.testing.assert_close(post, torch.full_like(post, 2.0))
+
+
+def test_prenorm_dense_rejects_batches_not_divisible_by_the_patch_size():
+    enc = _encoder()
+    with pytest.raises(ValueError, match="divisible by the patch size"):
+        enc.encode_tiles_dense_prenorm(torch.randn(1, 3, 40, 32))
+
+
+def test_validate_dense_request_settings_rejects_unknown_feature_kind():
+    from slide2vec.runtime.dense_regions import validate_dense_request_settings
+
+    geometry = compute_dense_geometry(target_size=32, patch_size=(16, 16))
+    with pytest.raises(ValueError, match="unsupported feature_kind 'tokens'"):
+        validate_dense_request_settings(
+            geometry, pad_mode="reflect", window_size=None,
+            overlap=0.0, feature_kind="tokens", attention_blocks=(-1,),
+            attention_include_registers=False,
+        )

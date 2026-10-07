@@ -312,8 +312,21 @@ floating-point tensor ready for normal DataLoader collation.
 ``encode(batch)`` moves the collated batch to the model device and returns an
 on-device grid with no gradient history, in ``ExecutionOptions.output_dtype``
 (or the same precision-derived default as persisted dense extraction). ``D`` is
-the patch-feature dimension for ``feature_kind="patch_features"``; for
-``"cls_attention"`` it is the selected block/head/prefix-query channel count.
+the patch-feature dimension for ``feature_kind="patch_features"`` and
+``"patch_features_prenorm"``; for ``"cls_attention"`` it is the selected
+block/head/prefix-query channel count.
+
+``"patch_features"`` is the patch-token grid after the backbone's final
+normalisation (``forward_features``). ``"patch_features_prenorm"`` taps the
+same grid one step earlier, from the last block's output before the final
+LayerNorm — timm's ``features_only`` / ``forward_intermediates(norm=False)``
+tap, which decoders trained on timm feature backbones (for example
+kaiko-ai/eva's segmentation decoders) expect. It is available for timm ViT
+encoders only (``EncoderCapabilities.dense_prenorm``; the core dependency
+floor ``timm>=1.0.3`` is the first release with ``forward_intermediates``) and
+is recorded in the feature identity, so the two taps never share an artifact.
+Every dense route rejects an unsupported feature kind from registry metadata,
+before loading a backend or touching an existing artifact.
 
 The immutable ``kit.geometry`` is authoritative:
 

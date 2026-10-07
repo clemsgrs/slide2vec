@@ -341,6 +341,7 @@ Support varies by preset. Check it without loading weights:
    print(capabilities.level)       # "tile"
    print(capabilities.pooled)      # True
    print(capabilities.dense)       # True
+   print(capabilities.dense_prenorm)  # True (timm ViT presets only)
    print(capabilities.attention)   # True
    print(capabilities.patch_size)  # (14, 14)
 

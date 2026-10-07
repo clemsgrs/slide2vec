@@ -149,6 +149,7 @@ class EncoderCapabilities:
     level: str
     pooled: bool
     dense: bool
+    dense_prenorm: bool
     attention: bool
     slide: bool
     patient: bool
@@ -164,6 +165,7 @@ def resolve_encoder_capabilities(encoder_name: str) -> EncoderCapabilities:
     _validate_encoder_capability_contract(encoder_name, encoder_cls, metadata)
     level = resolve_encoder_level(encoder_name, metadata)
     dense = all(_dense_class_contract(encoder_cls))
+    dense_prenorm = dense and _supports_dense_prenorm(encoder_cls)
     attention = _supports_attention(encoder_cls)
     tile_encoder = None
     tile_encoder_output_variant = None
@@ -189,6 +191,7 @@ def resolve_encoder_capabilities(encoder_name: str) -> EncoderCapabilities:
         level=level,
         pooled=issubclass(encoder_cls, TileEncoder),
         dense=dense,
+        dense_prenorm=dense_prenorm,
         attention=attention,
         slide=issubclass(encoder_cls, (SlideEncoder, PatientEncoder)),
         patient=issubclass(encoder_cls, PatientEncoder),
@@ -237,6 +240,43 @@ def _dense_class_contract(encoder_cls: type) -> tuple[bool, ...]:
         getattr(encoder_cls, member) is not getattr(TileEncoder, member)
         for member in _DENSE_CLASS_MEMBERS
     )
+
+
+def _supports_dense_prenorm(encoder_cls: type) -> bool:
+    return (
+        issubclass(encoder_cls, TileEncoder)
+        and getattr(encoder_cls, "encode_tiles_dense_prenorm")
+        is not TileEncoder.encode_tiles_dense_prenorm
+    )
+
+
+#: Dense feature kind -> the ``TileEncoder`` method that produces it.
+_FEATURE_KIND_METHODS = {
+    "patch_features": "encode_tiles_dense",
+    "patch_features_prenorm": "encode_tiles_dense_prenorm",
+    "cls_attention": "encode_tiles_attention",
+}
+
+
+def validate_feature_kind_capability(encoder_name: str, *, feature_kind: str) -> None:
+    """Reject a dense feature kind whose method the encoder class leaves unimplemented.
+
+    Resolved from the registered class, so it runs before any backend is loaded and before
+    any on-disk artifact is inspected or invalidated. Every dense route (persisted ROI,
+    persisted image, and live kit) goes through it via the dense contract declaration.
+    """
+    encoder_cls = encoder_registry.require(encoder_name)
+    method_name = _FEATURE_KIND_METHODS.get(str(feature_kind))
+    if method_name is None:
+        raise ValueError(
+            f"unsupported feature_kind {feature_kind!r}; expected one of "
+            + ", ".join(repr(kind) for kind in _FEATURE_KIND_METHODS)
+        )
+    if getattr(encoder_cls, method_name) is getattr(TileEncoder, method_name):
+        raise ValueError(
+            f"Encoder {encoder_name!r} does not support {feature_kind}; choose a "
+            "registered dense feature kind implemented by this encoder."
+        )
 
 
 def _supports_attention(encoder_cls: type) -> bool:
