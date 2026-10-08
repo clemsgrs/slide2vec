@@ -763,7 +763,9 @@ def test_invalid_loader_settings_delete_no_earlier_artifact(tmp_path, num_gpus):
     assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
 
 
-@pytest.mark.parametrize("request_kind", ["format-switch", "reencode-to-missing-source"])
+@pytest.mark.parametrize(
+    "request_kind", ["format-switch", "reencode-to-missing-source", "reencode-to-directory-source"]
+)
 def test_a_missing_source_deletes_no_earlier_artifact(tmp_path, num_gpus, request_kind):
     """An image is never invalidated for a source that cannot be read to replace it."""
     image_a = _image(tmp_path, "a.png", seed=1)
@@ -779,8 +781,12 @@ def test_a_missing_source_deletes_no_earlier_artifact(tmp_path, num_gpus, reques
     if request_kind == "format-switch":
         image_a.unlink()  # e.g. a scratch copy cleaned up after extraction
         missing, options = image_a, {"output_format": "npz"}
-    else:
+    elif request_kind == "reencode-to-missing-source":
         missing, options = tmp_path / "images" / "b.png", {"on_image_mismatch": "reencode"}
+    else:
+        missing = tmp_path / "images" / "adir"  # exists, but PIL can never open it
+        missing.mkdir()
+        options = {"on_image_mismatch": "reencode"}
 
     with pytest.raises(FileNotFoundError) as error:
         image_stage.embed_images(

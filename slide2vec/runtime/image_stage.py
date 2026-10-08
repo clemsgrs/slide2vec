@@ -195,13 +195,18 @@ def _resume_decision(
 
 
 def _require_sources(specs: Sequence[ImageSpec]) -> None:
-    """Raise unless every image about to lose its artifacts has a source to re-encode."""
-    missing = [spec for spec in specs if not os.path.exists(spec.image_path)]
+    """Raise unless every image about to lose its artifacts has a source to re-encode.
+
+    Sources are only ever read with ``PIL.Image.open``, so a source must be a regular
+    file (or a symlink to one); a directory could never be re-encoded.
+    """
+    missing = [spec for spec in specs if not os.path.isfile(spec.image_path)]
     if missing:
         listed = ", ".join(f"'{spec.sample_id}' ({spec.image_path})" for spec in missing)
         raise FileNotFoundError(
             f"Cannot re-encode {len(missing)} image(s) whose existing embeddings would be "
-            f"replaced: source image not found for {listed}. No artifact was changed."
+            f"replaced: source image not found or not a regular file for {listed}. "
+            "No artifact was changed."
         )
 
 
