@@ -640,8 +640,8 @@ def test_region_resume_reencodes_when_the_transform_changes(fake_backend, tmp_pa
     assert meta["compatibility"]["transform"]["normalize"]["mean"] == [0.485, 0.456, 0.406]
 
 
-def test_region_resume_accepts_a_sidecar_that_lacks_identity_fields(fake_backend, tmp_path):
-    """A ROI written before the identity was recorded holds only its read plan: reuse it."""
+def test_region_resume_reencodes_a_sidecar_that_lacks_identity_fields(fake_backend, tmp_path):
+    """A ROI whose sidecar records only its read plan cannot be verified: re-encode it."""
     encoder = _encoder()
     run_dense_shard([_spec(0, 0)], model=encoder, out_dir=tmp_path, dense=_dense(),
                     batch_size=1, device="cpu", identity=IDENTITY)
@@ -656,4 +656,6 @@ def test_region_resume_accepts_a_sidecar_that_lacks_identity_fields(fake_backend
                     batch_size=1, device="cpu",
                     identity={**IDENTITY, "encoder_name": "other-encoder"})
 
-    assert len(fake_backend.locations_read) == reads_before
+    assert len(fake_backend.locations_read) == reads_before + 1
+    meta = json.loads(sidecar_path.read_text())
+    assert meta["compatibility"]["encoder_name"] == "other-encoder"

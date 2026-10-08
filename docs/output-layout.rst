@@ -257,13 +257,16 @@ the feature identity that ``resume`` compares.
   ``resize`` also holds ``interpolation``. A zero-tile sidecar has no
   ``transform``.
 
-A resume over a completed artifact that records a different value for a field
-raises and names the sample and the fields. A field that the sidecar does not
-record is accepted, with one warning per run.
+Every field above that applies to the run is required, and so is
+``transform`` unless the artifact encoded no pixels (a zero-tile slide). A
+resume over a completed artifact that records a different value for a field
+raises and names the sample and the fields. An artifact with no
+``compatibility`` object or a missing required field is recomputed.
 
 Downstream caches can apply the same comparison through
 :meth:`~slide2vec.Model.pooled_identity_differences` before extracting missing
-samples. The method reports differences; the caller owns the cache policy.
+samples. The method reports differences and missing fields; the caller owns
+the cache policy.
 
 
 Image Embeddings
@@ -293,8 +296,16 @@ named by the caller's ``sample_id``:
      "feature_dim": 2560,
      "feature_dtype": "fp32",
      "format": "pt",
-     "image_path": "/data/bach/001.tif"
+     "image_path": "/data/bach/001.tif",
+     "compatibility": {"encoder_name": "virchow2", "...": "..."}
    }
+
+An image is complete only when its sidecar and the requested payload both
+exist, the sidecar's ``format`` is the requested format, and the sidecar
+records the requested ``image_path`` and the full :ref:`feature identity
+<feature-identity>`. The ``.pt`` and ``.npz`` payloads share one sidecar, which
+certifies only the format it records. Before an image is replaced, its sidecar
+is deleted; the new sidecar is written last.
 
 Dense Region Grids
 ------------------
@@ -331,8 +342,8 @@ fields):
 ``attention_blocks``, ``attention_include_registers``), the inference
 ``precision``, the stored ``dtype`` and the ``transform`` record (see
 :ref:`compatibility <feature-identity>`). Resume recomputes any artifact whose
-``compatibility`` object records a different value for a field. A field that
-the object does not record is accepted.
+``compatibility`` object records a different value for a field or does not
+record a field.
 
 
 Dense Image Grids
@@ -395,8 +406,8 @@ The nested ``compatibility`` object repeats the identity and recipe fields
 above, plus the inference ``precision``, the stored ``dtype`` and the
 ``transform`` record (see :ref:`compatibility <feature-identity>`). Resume
 recomputes any artifact whose ``compatibility`` object records a different
-value for a field. A field that the object does not record is accepted. A
-sidecar with no ``compatibility`` object is recomputed. Execution mechanics
+value for a field or does not record a field. A sidecar with no
+``compatibility`` object is recomputed. Execution mechanics
 (GPU count, batch size, workers, output directory) are excluded.
 
 

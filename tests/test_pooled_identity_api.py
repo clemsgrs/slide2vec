@@ -10,7 +10,7 @@ import torch
 from PIL import Image
 from torchvision.transforms import v2
 
-from slide2vec import ExecutionOptions, ImageSpec, Model, PreprocessingConfig
+from slide2vec import MISSING_FIELD, ExecutionOptions, ImageSpec, Model, PreprocessingConfig
 from slide2vec.encoders import PatientEncoder, SlideEncoder, TileEncoder, encoder_registry, register_encoder
 
 TILE_ENCODER = "identity-api-tile"
@@ -34,6 +34,11 @@ ALTERNATE_NORMALIZATION = {
     "resize": None,
     "center_crop": None,
 }
+
+
+def _recorded_differences(differences):
+    """The differences of fields the record holds; missing ones have their own tests."""
+    return {field: values for field, values in differences.items() if values[0] is not MISSING_FIELD}
 
 
 @pytest.fixture
@@ -153,6 +158,7 @@ def test_pooled_identity_comparison_reports_recorded_and_current_metadata():
         recorded,
         preprocessing=None,
         execution=ExecutionOptions(precision="fp32", output_dtype="fp32", num_gpus=1),
+        encoded_pixels=False,  # compare the encoder fields without loading weights
     )
 
     assert differences == {
@@ -172,7 +178,7 @@ def test_pooled_identity_comparison_reads_the_shipped_transform_on_cpu(tile_enco
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
-    assert differences == {"transform": (OLD_TRANSFORM, SHIPPED_TRANSFORM)}
+    assert _recorded_differences(differences) == {"transform": (OLD_TRANSFORM, SHIPPED_TRANSFORM)}
     assert tile_encoder.devices == ["cpu"]
     assert tile_encoder.encoded_images == 0
 
@@ -184,7 +190,9 @@ def test_pooled_identity_comparison_reads_the_declared_transform(tile_encoder):
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
-    assert differences == {"transform": (SHIPPED_TRANSFORM, NORMALIZATION_ONLY)}
+    assert _recorded_differences(differences) == {
+        "transform": (SHIPPED_TRANSFORM, NORMALIZATION_ONLY)
+    }
 
 
 @pytest.mark.parametrize("level", ["slide", "patient"])
@@ -199,7 +207,7 @@ def test_pooled_identity_comparison_uses_the_registered_tile_dependency(
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
-    assert differences == {
+    assert _recorded_differences(differences) == {
         "tile_encoder_output_variant": ("default", "alternate"),
         "transform": (NORMALIZATION_ONLY, ALTERNATE_NORMALIZATION),
     }
@@ -207,15 +215,60 @@ def test_pooled_identity_comparison_uses_the_registered_tile_dependency(
     assert tile_encoder.devices == ["cpu"]
 
 
-def test_pooled_identity_comparison_accepts_missing_fields_without_loading_weights(tile_encoder):
+def test_pooled_identity_comparison_reports_missing_required_fields(tile_encoder):
+    """An unrecorded field is reported, never treated as equal; its current value is given."""
     differences = Model.from_preset(TILE_ENCODER, device="cuda").pooled_identity_differences(
-        {},
+        {"precision": "fp32"},
         preprocessing=None,
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
+    assert differences == {
+        "encoder_name": (MISSING_FIELD, TILE_ENCODER),
+        "output_variant": (MISSING_FIELD, "default"),
+        "feature_dtype": (MISSING_FIELD, "fp32"),
+        "transform": (MISSING_FIELD, SHIPPED_TRANSFORM),
+    }
+    assert tile_encoder.devices == ["cpu"]
+
+
+def test_pooled_identity_comparison_distinguishes_a_recorded_none_from_a_missing_field(
+    tile_encoder,
+):
+    differences = Model.from_preset(TILE_ENCODER).pooled_identity_differences(
+        {
+            "encoder_name": TILE_ENCODER,
+            "output_variant": None,
+            "precision": "fp32",
+            "feature_dtype": "fp32",
+            "transform": SHIPPED_TRANSFORM,
+        },
+        preprocessing=None,
+        execution=ExecutionOptions(precision="fp32", num_gpus=1),
+    )
+
+    assert differences == {"output_variant": (None, "default")}
+
+
+def test_pooled_identity_comparison_accepts_a_zero_tile_output_without_a_transform(tile_encoder):
+    """A zero-tile slide encodes no pixels, so its identity legitimately records no transform."""
+    recorded = {
+        "encoder_name": TILE_ENCODER,
+        "output_variant": "default",
+        "precision": "fp32",
+        "feature_dtype": "fp32",
+        "requested_tile_size_px": 32,
+        "encoder_input_size_px": 32,
+    }
+
+    differences = Model.from_preset(TILE_ENCODER).pooled_identity_differences(
+        recorded,
+        preprocessing=PreprocessingConfig(requested_tile_size_px=32, requested_spacing_um=0.5),
+        execution=ExecutionOptions(precision="fp32", num_gpus=1),
+        encoded_pixels=False,
+    )
+
     assert differences == {}
-    assert tile_encoder.variants == []
     assert tile_encoder.devices == []
 
 
@@ -225,9 +278,13 @@ def test_pooled_identity_comparison_resolves_the_extraction_precision_default(ti
         {"precision": "fp32", "feature_dtype": "fp32"},
         preprocessing=None,
         execution=execution,
+        encoded_pixels=False,
     )
 
-    assert differences == {"precision": ("fp32", "fp16"), "feature_dtype": ("fp32", "fp16")}
+    assert _recorded_differences(differences) == {
+        "precision": ("fp32", "fp16"),
+        "feature_dtype": ("fp32", "fp16"),
+    }
     assert tile_encoder.variants == []
 
 
@@ -241,9 +298,10 @@ def test_pooled_identity_comparison_resolves_hierarchical_geometry(tile_encoder)
         },
         preprocessing=PreprocessingConfig(region_tile_multiple=2),
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
+        encoded_pixels=False,
     )
 
-    assert differences == {
+    assert _recorded_differences(differences) == {
         "requested_tile_size_px": (64, 32),
         "encoder_input_size_px": (64, 32),
         "region_tile_multiple": (3, 2),
@@ -270,7 +328,12 @@ def test_pooled_identity_comparison_preserves_a_model_used_for_image_extraction(
         execution=execution,
     )
 
-    assert differences == {"transform": (SHIPPED_TRANSFORM, NORMALIZATION_ONLY)}
+    # An image identity declares no tile geometry; a slide recipe requires it.
+    assert differences == {
+        "requested_tile_size_px": (MISSING_FIELD, 32),
+        "encoder_input_size_px": (MISSING_FIELD, 32),
+        "transform": (SHIPPED_TRANSFORM, NORMALIZATION_ONLY),
+    }
     assert tile_encoder.encoded_images == 1
     assert artifact.metadata_path.read_bytes() == sidecar_before
 

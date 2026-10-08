@@ -403,6 +403,31 @@ def write_dense_image(
     )
 
 
+#: Payload formats an image embedding can be written in; they share one sidecar.
+IMAGE_EMBEDDING_FORMATS = ("pt", "npz")
+
+
+def image_embeddings_dir(output_dir: str | Path) -> Path:
+    """The resolved ``image_embeddings/`` directory, refusing one that escapes ``output_dir``.
+
+    A run resolves it once and names each image with :func:`image_embedding_names`.
+    """
+    output_root = Path(output_dir).expanduser().resolve()
+    embeddings_dir = (output_root / "image_embeddings").resolve()
+    if not embeddings_dir.is_relative_to(output_root):
+        raise ValueError("Image artifact path must stay within output_dir")
+    return embeddings_dir
+
+
+def image_embedding_names(sample_id: str, *, output_format: str) -> tuple[str, str]:
+    """``(payload_name, sidecar_name)`` of one image inside :func:`image_embeddings_dir`."""
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    return (
+        f"{sample_component}.{_validate_output_format(output_format)}",
+        f"{sample_component}.meta.json",
+    )
+
+
 def image_embedding_paths(
     output_dir: str | Path, *, sample_id: str, output_format: str
 ) -> tuple[Path, Path]:
@@ -410,18 +435,12 @@ def image_embedding_paths(
 
     ``image_embeddings/<sample_id>.{pt,npz}`` plus ``image_embeddings/<sample_id>.meta.json``.
     A given-geometry run has no slide, no coordinate and no annotation class — the caller's
-    ``sample_id`` is the whole identity — so the layout is flat and the resume check needs
-    nothing but the sample id.
+    ``sample_id`` is the whole identity — so the layout is flat. Both payload formats share
+    the sidecar, which records the ``format`` it certifies.
     """
-    output_root = Path(output_dir).expanduser().resolve()
-    sample_component = _validate_path_component(sample_id, field="sample_id")
-    embeddings_dir = (output_root / "image_embeddings").resolve()
-    if not embeddings_dir.is_relative_to(output_root):
-        raise ValueError("Image artifact path must stay within output_dir")
-    return (
-        embeddings_dir / f"{sample_component}.{_validate_output_format(output_format)}",
-        embeddings_dir / f"{sample_component}.meta.json",
-    )
+    payload_name, sidecar_name = image_embedding_names(sample_id, output_format=output_format)
+    embeddings_dir = image_embeddings_dir(output_dir)
+    return embeddings_dir / payload_name, embeddings_dir / sidecar_name
 
 
 def write_image_embedding(

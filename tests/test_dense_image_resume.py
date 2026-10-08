@@ -321,8 +321,8 @@ NORMALIZE_ONLY = {
 }
 
 
-def test_resume_accepts_a_pair_whose_sidecar_lacks_a_field(tmp_path):
-    """A sidecar written before a field existed cannot be checked on it: reuse the pair."""
+def test_resume_recomputes_a_pair_whose_sidecar_lacks_a_field(tmp_path):
+    """A sidecar that does not record a required field cannot be verified on it."""
     spec = ImageSpec(sample_id="sample-1", image_path=str((tmp_path / "source.png").resolve()))
     recipe = _resolved_recipe(tmp_path)
     recorded = recipe.for_image(spec)
@@ -336,8 +336,8 @@ def test_resume_accepts_a_pair_whose_sidecar_lacks_a_field(tmp_path):
         resolve_transform=lambda: pytest.fail("no recorded transform, so no encoder to load"),
     )
 
-    assert remaining == []
-    assert skipped == 1
+    assert remaining == [spec]
+    assert skipped == 0
 
 
 def test_dense_image_recipe_carries_the_transform_into_the_compatibility_record(tmp_path):
@@ -484,11 +484,10 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         )
         recorded = recipe.for_image(spec)
         value = recorded[field]
-        recomputed = value is not None
         if isinstance(value, bool):
             recorded[field] = not value
         elif value is None:
-            # A field the sidecar does not record is accepted, not recomputed.
+            # A field the sidecar does not record is recomputed too.
             recorded.pop(field)
         elif isinstance(value, str):
             recorded[field] = f"{value}-different"
@@ -503,5 +502,5 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
             [spec], out_dir, recipe
         )
 
-        assert remaining == ([spec] if recomputed else []), field
-        assert skipped == (0 if recomputed else 1), field
+        assert remaining == [spec], field
+        assert skipped == 0, field

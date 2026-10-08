@@ -57,7 +57,7 @@ from slide2vec.runtime.dense_image_reading import (
     read_dense_image,
 )
 from slide2vec.runtime.dense_regions import DenseGridEncoder
-from slide2vec.runtime.feature_identity import differing_fields, transform_record
+from slide2vec.runtime.feature_identity import known_differences, transform_record
 from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 from slide2vec.runtime.slide_encode import slide_encode_autocast_ctx
 
@@ -84,7 +84,8 @@ def dense_image_resume_decision(
 ) -> DenseImageResumeDecision:
     """Classify one on-disk pair against the current image extraction identity.
 
-    A field the sidecar does not record is accepted. ``resolve_transform`` supplies the
+    A required field the sidecar does not record (including the transform when
+    ``resolve_transform`` is given) is re-encoded. ``resolve_transform`` supplies the
     transform when ``recipe`` does not hold it yet; it loads the encoder, so it is called
     only when the sidecar records one.
     """
@@ -118,9 +119,8 @@ def dense_image_resume_decision(
             f"fields: {', '.join(malformed)}"
         )
 
-    differing = tuple(
-        sorted(differing_fields(recorded, expected, resolve_transform=resolve_transform))
-    )
+    known, missing = known_differences(recorded, expected, resolve_transform=resolve_transform)
+    differing = tuple(sorted({*known, *missing}))
     return DenseImageResumeDecision(
         needs_encode=bool(differing), differing_fields=differing
     )

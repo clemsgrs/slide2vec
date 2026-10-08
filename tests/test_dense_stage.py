@@ -431,10 +431,10 @@ def test_embed_regions_dense_resume_recomputes_regions_from_a_different_transfor
     assert _reads(fake_backend) - reads_after_first == 3
 
 
-def test_embed_regions_dense_resume_accepts_sidecars_that_lack_identity_fields(
+def test_embed_regions_dense_resume_recomputes_sidecars_that_lack_identity_fields(
     fake_backend, stub_read_plan, tmp_path
 ):
-    """ROIs written before the identity existed are reused, and no encoder is loaded."""
+    """ROIs whose identity is not recorded are recomputed, even for another encoder."""
     execution = ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32")
     artifacts = dense_stage.embed_regions_dense(
         _FakeModel(_encoder()), [_regions()], dense=_dense(), execution=execution
@@ -447,10 +447,13 @@ def test_embed_regions_dense_resume_accepts_sidecars_that_lack_identity_fields(
     reads_after_first = _reads(fake_backend)
     model = _FakeModel(_encoder(), name="other-encoder")
 
-    dense_stage.embed_regions_dense(model, [_regions()], dense=_dense(), execution=execution)
+    artifacts = dense_stage.embed_regions_dense(
+        model, [_regions()], dense=_dense(), execution=execution
+    )
 
-    assert _reads(fake_backend) == reads_after_first
-    assert model.loads == 0
+    assert _reads(fake_backend) == reads_after_first + 3
+    for artifact in artifacts:
+        assert artifact.metadata["compatibility"]["encoder_name"] == "other-encoder"
 
 
 def test_embed_regions_dense_all_present_does_not_dispatch(fake_backend, stub_read_plan, tmp_path, monkeypatch):

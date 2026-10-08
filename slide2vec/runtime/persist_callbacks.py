@@ -1,6 +1,5 @@
 """Incremental persist callback factory + resume-state queries."""
 
-import logging
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -26,8 +25,6 @@ from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 from slide2vec.runtime.persistence import update_process_list_after_embedding
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
 from slide2vec.utils.tiling_io import load_embedding_process_df
-
-logger = logging.getLogger("slide2vec")
 
 # Number of completed tile-level samples to buffer before rewriting the
 # process_list CSV. Each rewrite re-reads and re-writes the *entire* CSV, so
@@ -169,11 +166,11 @@ def pending_local_embedding_records(
     """Split the run into (pending, completed) for resume.
 
     A completed key is skipped only when every persisted sidecar (tile, hierarchical or
-    slide) records the same feature identity as this run. A field a sidecar does not
-    record cannot be checked: it is accepted, with one warning per run. A mismatch raises
-    rather than silently reusing embeddings computed with a different recipe.
-    ``resolve_transform`` loads the encoder, so it is called only when a completed
-    sidecar records a transform.
+    slide) exists and records this run's complete feature identity in its
+    ``compatibility`` object. A missing sidecar or required field makes the key pending
+    again. A known mismatch raises rather than silently reusing embeddings computed with
+    a different recipe. ``resolve_transform`` loads the encoder, so it is called only
+    when a completed sidecar records a transform.
     """
     if not resume:
         return list(successful_slides), list(tiling_results)
@@ -196,36 +193,26 @@ def pending_local_embedding_records(
             pending_slides.append(slide)
             pending_tiling_results.append(tiling_result)
             continue
-        for kind, subdir in _embedding_sidecars(
-            annotation,
-            persist_tile_embeddings=persist_tile_embeddings,
-            persist_hierarchical_embeddings=persist_hierarchical_embeddings,
-            include_slide_embeddings=include_slide_embeddings,
-        ):
-            metadata_path = output_dir / subdir / f"{slide.sample_id}.meta.json"
-            if not metadata_path.is_file():
-                continue
-            check.verify(
-                _recorded_identity(load_metadata(metadata_path)),
+        reusable = [
+            metadata_path.is_file()
+            and check.reusable(
+                load_metadata(metadata_path).get("compatibility"),
                 sample_id=slide.sample_id,
                 kind=kind,
                 path=output_dir / subdir / f"{slide.sample_id}.{output_format}",
             )
-    check.warn_unrecorded(logger)
+            for kind, subdir in _embedding_sidecars(
+                annotation,
+                persist_tile_embeddings=persist_tile_embeddings,
+                persist_hierarchical_embeddings=persist_hierarchical_embeddings,
+                include_slide_embeddings=include_slide_embeddings,
+            )
+            for metadata_path in [output_dir / subdir / f"{slide.sample_id}.meta.json"]
+        ]
+        if not all(reusable):
+            pending_slides.append(slide)
+            pending_tiling_results.append(tiling_result)
     return pending_slides, pending_tiling_results
-
-
-def _recorded_identity(metadata: dict[str, Any]) -> dict[str, Any]:
-    """The feature identity a pooled sidecar records.
-
-    Sidecars written before ``compatibility`` existed record only the tile size, at the
-    top level.
-    """
-    recorded = dict(metadata.get("compatibility") or {})
-    tile_size = metadata.get("requested_tile_size_px")
-    if tile_size is not None:
-        recorded.setdefault("requested_tile_size_px", int(tile_size))
-    return recorded
 
 
 def _tiling_result_annotation(tiling_result) -> str | None:

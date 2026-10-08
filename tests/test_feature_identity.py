@@ -16,10 +16,9 @@ Ways the pooled sidecars and their resume check can go wrong, each covered below
   the encoder its workers encoded with;
 * a resume reuses artifacts from a different encoder, output variant, precision, stored
   dtype, encoder input size or transform;
-* a resume raises on, or recomputes, artifacts written before a field existed, or warns
-  once per sidecar instead of once per run;
-* a resume loads the encoder although no completed sidecar records a transform, or holds
-  GPU memory in the multi-GPU parent;
+* a resume reuses an artifact whose identity does not record every required field, or
+  reads a required field back from outside the identity;
+* a resume holds GPU memory in the multi-GPU parent to verify a transform;
 * the local and the distributed path check different things.
 
 The image and dense paths are covered next to their stages (``test_image_stage.py``,
@@ -502,25 +501,65 @@ def _write_completed_tile_run(tmp_path, sidecars: dict[str, dict]) -> Path:
     return process_list_path
 
 
-def test_pooled_resume_accepts_sidecars_that_lack_fields_with_one_warning(
-    monkeypatch, tmp_path, caplog
+#: The complete identity ``_run_pipeline`` records for ``_FakeModel("virchow2")``.
+VIRCHOW2_IDENTITY = {
+    "encoder_name": "virchow2",
+    "output_variant": "cls_patch_mean",
+    "precision": "fp16",
+    "feature_dtype": "fp16",
+    "requested_tile_size_px": 224,
+    "encoder_input_size_px": 224,
+    "transform": NORMALIZE_ONLY,
+}
+
+
+@pytest.mark.parametrize(
+    "sidecar",
+    [
+        pytest.param({"encoder_name": "uni", "requested_tile_size_px": 224}, id="no-identity"),
+        pytest.param(
+            {"compatibility": {k: v for k, v in VIRCHOW2_IDENTITY.items() if k != "transform"}},
+            id="no-transform",
+        ),
+        pytest.param(
+            {"compatibility": {k: v for k, v in VIRCHOW2_IDENTITY.items() if k != "precision"}},
+            id="no-precision",
+        ),
+    ],
+)
+def test_pooled_resume_recomputes_sidecars_that_lack_required_fields(
+    monkeypatch, tmp_path, caplog, sidecar
 ):
-    """Artifacts written before the identity existed are reused, and no encoder is loaded."""
-    _write_completed_tile_run(
-        tmp_path, {"slide-a": {"encoder_name": "uni", "requested_tile_size_px": 224}}
-    )
-    model = _FakeModel("virchow2")
+    """An identity that does not record every required field cannot be verified."""
+    _write_completed_tile_run(tmp_path, {"slide-a": sidecar})
 
     with caplog.at_level("WARNING", logger="slide2vec"):
-        embedded = _run_pipeline(monkeypatch, tmp_path, model, preprocessing=RESUME)
+        embedded = _run_pipeline(monkeypatch, tmp_path, _FakeModel("virchow2"), preprocessing=RESUME)
 
-    assert embedded == []
-    assert model.loads == 0
-    assert [record.getMessage() for record in caplog.records] == [
-        "Resuming over 1 completed sidecar(s) that do not record encoder_input_size_px, "
-        "encoder_name, feature_dtype, output_variant, precision, transform; cannot verify "
-        "those fields against this run."
-    ]
+    assert embedded == ["slide-a"]
+    assert load_metadata(tmp_path / "tile_embeddings" / "slide-a.meta.json")[
+        "compatibility"
+    ] == VIRCHOW2_IDENTITY
+    assert caplog.records == []
+
+
+def test_pooled_resume_does_not_promote_a_top_level_tile_size(monkeypatch, tmp_path):
+    """A top-level tile size is not read back as part of the recorded identity."""
+    _write_completed_tile_run(
+        tmp_path,
+        {
+            "slide-a": {
+                "requested_tile_size_px": 224,
+                "compatibility": {
+                    k: v for k, v in VIRCHOW2_IDENTITY.items() if k != "requested_tile_size_px"
+                },
+            }
+        },
+    )
+
+    embedded = _run_pipeline(monkeypatch, tmp_path, _FakeModel("virchow2"), preprocessing=RESUME)
+
+    assert embedded == ["slide-a"]
 
 
 def test_pooled_resume_refuses_a_different_recorded_encoder_input_size(monkeypatch, tmp_path):
@@ -543,9 +582,7 @@ def test_pooled_resume_refuses_a_different_recorded_encoder_input_size(monkeypat
 def test_pooled_resume_loads_the_encoder_only_to_verify_a_recorded_transform(
     monkeypatch, tmp_path
 ):
-    _write_completed_tile_run(
-        tmp_path, {"slide-a": {"compatibility": {"transform": NORMALIZE_ONLY}}}
-    )
+    _write_completed_tile_run(tmp_path, {"slide-a": {"compatibility": VIRCHOW2_IDENTITY}})
     model = _FakeModel("virchow2")
 
     embedded = _run_pipeline(monkeypatch, tmp_path, model, preprocessing=RESUME)
@@ -604,7 +641,7 @@ def test_distributed_pooled_resume_verifies_the_transform_on_a_cpu_copy(monkeypa
     from slide2vec.api import Model
 
     process_list_path = _write_completed_tile_run(
-        tmp_path, {"slide-a": {"compatibility": {"transform": NORMALIZE_ONLY}}}
+        tmp_path, {"slide-a": {"compatibility": VIRCHOW2_IDENTITY}}
     )
     load_devices: list[str] = []
 

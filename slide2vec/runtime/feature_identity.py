@@ -115,25 +115,68 @@ def deferred_transform_record(
     return resolve
 
 
+class _MissingField:
+    """The recorded value reported for a required field an identity does not record."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "MISSING_FIELD"
+
+    def __reduce__(self) -> str:
+        return "MISSING_FIELD"
+
+
+#: Recorded value of a required identity field that a sidecar does not record. It is
+#: distinct from a recorded ``None``, which is a legitimate value for some fields.
+MISSING_FIELD = _MissingField()
+
+
 def differing_fields(
     recorded: dict[str, Any],
     requested: dict[str, Any],
     *,
     resolve_transform: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, tuple[Any, Any]]:
-    """Fields both records hold with different values, as ``{field: (recorded, requested)}``.
+    """Required fields *recorded* lacks or holds differently, as ``{field: (recorded, requested)}``.
 
-    A field missing from *recorded* (an artifact written before the field existed) is
-    accepted. ``resolve_transform`` supplies the requested transform when *requested*
-    does not hold it yet; it is called only when *recorded* holds one to verify.
+    Every field of *requested* is required, and so is ``transform`` when
+    ``resolve_transform`` supplies it. A required field that *recorded* lacks is reported
+    with :data:`MISSING_FIELD` as its recorded value. ``resolve_transform`` loads the
+    encoder; it is called once, when *requested* does not hold the transform yet.
     """
-    if "transform" in recorded and "transform" not in requested and resolve_transform is not None:
+    if resolve_transform is not None and "transform" not in requested:
         requested = {**requested, "transform": resolve_transform()}
     return {
-        field: (recorded[field], value)
+        field: (recorded.get(field, MISSING_FIELD), value)
         for field, value in requested.items()
-        if field in recorded and recorded[field] != value
+        if field not in recorded or recorded[field] != value
     }
+
+
+def known_differences(
+    recorded: dict[str, Any],
+    requested: dict[str, Any],
+    *,
+    resolve_transform: Callable[[], dict[str, Any]] | None = None,
+) -> tuple[dict[str, tuple[Any, Any]], tuple[str, ...]]:
+    """``(differing, missing)``: recorded values that differ, and required fields not recorded.
+
+    The resume form of :func:`differing_fields`. It loads the encoder only to verify a
+    recorded transform; a missing one is reported without loading.
+    """
+    transform_required = resolve_transform is not None or "transform" in requested
+    if "transform" not in recorded:
+        resolve_transform = None
+        requested = {key: value for key, value in requested.items() if key != "transform"}
+    differences = differing_fields(recorded, requested, resolve_transform=resolve_transform)
+    missing = [field for field, (old, _) in differences.items() if old is MISSING_FIELD]
+    if transform_required and "transform" not in recorded:
+        missing.append("transform")
+    differing = {
+        field: values for field, values in differences.items() if values[0] is not MISSING_FIELD
+    }
+    return differing, tuple(sorted(missing))
 
 
 def pooled_identity_differences(
@@ -142,8 +185,13 @@ def pooled_identity_differences(
     *,
     execution,
     preprocessing=None,
+    encoded_pixels: bool = True,
 ) -> dict[str, tuple[Any, Any]]:
-    """Compare a recorded pooled identity with the resolved current request."""
+    """Compare a recorded pooled identity with the resolved current request.
+
+    The transform is required unless the artifact encoded no pixels (``encoded_pixels``
+    is false, as for a zero-tile slide).
+    """
 
     def resolve_transform() -> dict[str, Any]:
         from slide2vec.api import Model
@@ -168,15 +216,16 @@ def pooled_identity_differences(
     return differing_fields(
         recorded,
         pooled_feature_identity(model, execution=execution, preprocessing=preprocessing),
-        resolve_transform=resolve_transform,
+        resolve_transform=resolve_transform if encoded_pixels else None,
     )
 
 
 class PooledResumeCheck:
     """Compare the completed pooled artifacts of one resume with the run's feature identity.
 
-    A different recorded value raises. A field a sidecar does not record cannot be
-    checked: it is accepted, and :meth:`warn_unrecorded` reports it once per run.
+    A different recorded value raises. An identity that does not record every required
+    field (the run's identity plus its ``transform``) cannot be verified, so the artifact
+    is not reusable.
     """
 
     def __init__(
@@ -184,12 +233,16 @@ class PooledResumeCheck:
     ) -> None:
         self._identity = identity
         self._resolve_transform = resolve_transform
-        self._unrecorded_fields: set[str] = set()
-        self._unverified_sidecars = 0
 
-    def verify(self, recorded: dict[str, Any], *, sample_id: str, kind: str, path) -> None:
-        """Raise when *recorded* differs from the run's identity, naming every such field."""
-        differing = differing_fields(
+    def reusable(self, recorded, *, sample_id: str, kind: str, path) -> bool:
+        """Whether *recorded* proves the run's identity; raise on a known difference.
+
+        *recorded* is the sidecar's ``compatibility`` value; anything but an object is
+        missing provenance.
+        """
+        if not isinstance(recorded, dict):
+            return False
+        differing, missing = known_differences(
             recorded, self._identity, resolve_transform=self._resolve_transform
         )
         if differing:
@@ -204,21 +257,7 @@ class PooledResumeCheck:
                 "a new output_dir, delete the stale artifacts, or request the recorded "
                 "values."
             )
-        unrecorded = [
-            field for field in (*self._identity, "transform") if field not in recorded
-        ]
-        self._unrecorded_fields.update(unrecorded)
-        self._unverified_sidecars += bool(unrecorded)
-
-    def warn_unrecorded(self, logger) -> None:
-        """Log one warning for the verified sidecars that do not record every field."""
-        if self._unrecorded_fields:
-            logger.warning(
-                "Resuming over %d completed sidecar(s) that do not record %s; cannot "
-                "verify those fields against this run.",
-                self._unverified_sidecars,
-                ", ".join(sorted(self._unrecorded_fields)),
-            )
+        return not missing
 
 
 def _leaf_differences(field: str, recorded, requested):

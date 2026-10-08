@@ -1,0 +1,37 @@
+slide2vec 7.0.0
+===============
+
+Strict resume provenance
+------------------------
+
+Resume reuses an artifact only when its sidecar records every required
+:ref:`feature identity <feature-identity>` field, including ``transform``
+(zero-tile slides record none). This applies to tile, hierarchical, slide,
+image and dense artifacts. An artifact with a missing field or no
+``compatibility`` object is recomputed. A different recorded value still
+raises (pooled) or recomputes (dense).
+
+``Model.embed_images`` also requires the sidecar to record the requested
+``image_path`` and ``format``:
+
+- A different ``image_path`` for a ``sample_id`` raises by default.
+  ``ExecutionOptions(on_image_mismatch="reencode")`` replaces the image
+  instead.
+- A missing ``image_path`` or ``format``, or a different ``format``,
+  re-encodes the image.
+- Source identity is the resolved path. Changed bytes at the same path are not
+  detected.
+
+Breaking changes
+----------------
+
+- Artifacts whose sidecars lack required provenance are no longer reused and
+  no longer produce the "Resuming over ... sidecar(s) that do not record"
+  warning. Expect a one-time re-encode of such artifacts.
+- A sidecar's top-level ``requested_tile_size_px`` is no longer read as part
+  of the recorded identity; only ``compatibility`` is read.
+- ``Model.pooled_identity_differences`` reports a required field the record
+  lacks as ``(slide2vec.MISSING_FIELD, current)`` instead of omitting it. A
+  missing ``transform`` loads a CPU encoder to report its current value. Pass
+  ``encoded_pixels=False`` for zero-tile slide outputs.
+- A completed pooled slide whose sidecar file is missing is recomputed.

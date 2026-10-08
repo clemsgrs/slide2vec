@@ -8,27 +8,38 @@ machinery, because the only thing that differs is the work unit:
    requested, so the encoder's shipped transform *is* the contract (see
    :class:`~slide2vec.runtime.encoder_input_contract.EncoderInputContract`);
 2. **normalize** the images into resolved, uniquely-named specs;
-3. **resume-filter** them — drop images whose sidecar already exists, before sharding, so
-   no rank draws an all-done shard and idles; a sidecar that records a different feature
-   identity raises; the skip count is logged;
+3. **plan resume** from one listing of ``image_embeddings/`` (see
+   :func:`plan_image_resume`): reuse complete artifacts whose provenance matches, then
+   invalidate the ones to replace — all before sharding, so no rank draws an all-done
+   shard and both execution modes act on the same decisions; the skip count is logged;
 4. **dispatch**: ``num_gpus=1`` runs :func:`~slide2vec.runtime.image_shard.run_image_shard`
    fully in-process (no torchrun); ``num_gpus>1`` writes a JSON request and launches
    :mod:`slide2vec.distributed.image_worker` under torchrun, which splits the list with the
    shared :func:`~slide2vec.runtime.sharding.plan_contiguous_shards`;
-5. **collect** one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input image by
-   reading the sidecars back off disk (the ranks already persisted them; nobody gathers).
+5. **collect** one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input image
+   without reading a sidecar: a reused image keeps the width its sidecar recorded during
+   resume, and a new one takes the width of the vectors the shard (or each rank's result
+   summary) reports.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import Popen
 from typing import Any, Callable, Sequence
 
 from slide2vec.api import ImageSpec
-from slide2vec.artifacts import ImageEmbeddingArtifact, image_embedding_paths, load_metadata
+from slide2vec.artifacts import (
+    IMAGE_EMBEDDING_FORMATS,
+    ImageEmbeddingArtifact,
+    image_embedding_names,
+    image_embeddings_dir,
+    load_metadata,
+)
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.distributed import (
     distributed_coordination_dir,
@@ -41,11 +52,7 @@ from slide2vec.runtime.feature_identity import (
     deferred_transform_record,
     pooled_feature_identity,
 )
-from slide2vec.runtime.image_shard import (
-    image_artifact_from_disk,
-    image_needs_encode,
-    run_image_shard,
-)
+from slide2vec.runtime.image_shard import run_image_shard
 from slide2vec.runtime.image_specs import (
     build_image_specs_request,
     normalize_image_specs,
@@ -57,38 +64,125 @@ from slide2vec.runtime.serialization import serialize_execution, serialize_model
 logger = logging.getLogger(__name__)
 
 
-def partition_images_by_resume(
+@dataclass(frozen=True)
+class ImageResumePlan:
+    """What one ``embed_images`` call encodes, reuses and invalidates, decided up front.
+
+    ``stale`` lists the files to delete before any image is encoded: every sidecar of an
+    image about to be replaced comes before any payload, so an interruption leaves those
+    images incomplete rather than certified by an old sidecar.
+    """
+
+    pending: list[ImageSpec]
+    reused_feature_dims: dict[str, int]
+    stale: list[Path]
+
+
+def plan_image_resume(
     specs: Sequence[ImageSpec],
-    out_dir,
+    embeddings_dir: Path,
     *,
     output_format: str,
     identity: dict[str, Any],
     resolve_transform: Callable[[], dict[str, Any]],
-) -> tuple[list[ImageSpec], int]:
-    """Split the spec list into (needs-encode, already-on-disk-count) by sidecar existence.
+    on_image_mismatch: str,
+) -> ImageResumePlan:
+    """Decide, from one listing of *embeddings_dir*, which images must be encoded.
 
-    An image already on disk must record the same feature identity as this run: a
-    mismatch raises. A field its sidecar does not record is accepted, with one warning
-    per run. ``resolve_transform`` loads the encoder, so it is called only when a sidecar
-    records a transform.
+    An image is reused only when its sidecar and this run's payload are both listed, the
+    sidecar records this ``output_format``, the requested source path, and this run's
+    feature identity. A recorded source path that differs raises, or with
+    ``on_image_mismatch="reencode"`` schedules the image for replacement. Missing
+    provenance always schedules replacement. A known feature-identity difference raises.
+    Nothing is deleted here, so a validation error leaves every artifact in place.
     """
-    remaining: list[ImageSpec] = []
+    names = _listed_names(embeddings_dir)
     check = PooledResumeCheck(identity, resolve_transform)
+    pending: list[ImageSpec] = []
+    reused: dict[str, int] = {}
+    stale_sidecars: list[Path] = []
+    stale_payloads: list[Path] = []
     for spec in specs:
-        if image_needs_encode(out_dir, spec, output_format=output_format):
-            remaining.append(spec)
+        payload_name, sidecar_name = image_embedding_names(
+            spec.sample_id, output_format=output_format
+        )
+        if sidecar_name not in names:
+            pending.append(spec)
             continue
-        payload_path, sidecar_path = image_embedding_paths(
-            out_dir, sample_id=spec.sample_id, output_format=output_format
+        metadata = load_metadata(embeddings_dir / sidecar_name)
+        decision, feature_dim = _resume_decision(
+            spec,
+            metadata,
+            payload_listed=payload_name in names,
+            output_format=output_format,
+            check=check,
+            payload_path=embeddings_dir / payload_name,
+            on_image_mismatch=on_image_mismatch,
         )
-        check.verify(
-            load_metadata(sidecar_path).get("compatibility") or {},
-            sample_id=spec.sample_id,
-            kind="image",
-            path=payload_path,
-        )
-    check.warn_unrecorded(logger)
-    return remaining, len(specs) - len(remaining)
+        if decision == "reuse":
+            reused[spec.sample_id] = feature_dim
+            continue
+        pending.append(spec)
+        stale_sidecars.append(embeddings_dir / sidecar_name)
+        if decision == "replace":
+            stale_payloads.extend(
+                embeddings_dir / name
+                for name in (
+                    image_embedding_names(spec.sample_id, output_format=variant)[0]
+                    for variant in IMAGE_EMBEDDING_FORMATS
+                )
+                if name in names
+            )
+    return ImageResumePlan(
+        pending=pending, reused_feature_dims=reused, stale=[*stale_sidecars, *stale_payloads]
+    )
+
+
+def _resume_decision(
+    spec: ImageSpec,
+    metadata: dict[str, Any],
+    *,
+    payload_listed: bool,
+    output_format: str,
+    check: PooledResumeCheck,
+    payload_path: Path,
+    on_image_mismatch: str,
+) -> tuple[str, int]:
+    """``("reuse", feature_dim)``, ``("encode", 0)`` or ``("replace", 0)`` for one image.
+
+    ``"encode"`` invalidates the sidecar only; ``"replace"`` also deletes every payload
+    variant, because the source or provenance behind them is unknown or different.
+    """
+    recorded_path = metadata.get("image_path")
+    if not recorded_path:
+        return "replace", 0
+    if recorded_path != str(spec.image_path):
+        if on_image_mismatch == "raise":
+            raise ValueError(
+                f"Cannot resume '{spec.sample_id}': its existing image embedding was "
+                f"computed from {recorded_path}, not the requested {spec.image_path}. "
+                'Pass ExecutionOptions(on_image_mismatch="reencode") to replace it, or '
+                "use a new sample_id."
+            )
+        return "replace", 0
+    if metadata.get("format") != output_format or not payload_listed:
+        return "encode", 0
+    feature_dim = metadata.get("feature_dim")
+    if not isinstance(feature_dim, int) or not check.reusable(
+        metadata.get("compatibility"),
+        sample_id=spec.sample_id,
+        kind="image",
+        path=payload_path,
+    ):
+        return "replace", 0
+    return "reuse", feature_dim
+
+
+def _listed_names(directory: Path) -> set[str]:
+    try:
+        return set(os.listdir(directory))
+    except FileNotFoundError:
+        return set()
 
 
 def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[ImageEmbeddingArtifact]:
@@ -107,16 +201,23 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     out_dir = Path(execution.output_dir).expanduser().resolve()
     execution = execution.with_output_dir(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
+    embeddings_dir = image_embeddings_dir(out_dir)
     identity = pooled_feature_identity(model, execution=execution)
-    remaining, skipped = partition_images_by_resume(
+    plan = plan_image_resume(
         specs,
-        out_dir,
+        embeddings_dir,
         output_format=execution.output_format,
         identity=identity,
         resolve_transform=deferred_transform_record(
             model, on_cpu_copy=execution.num_gpus > 1
         ),
+        on_image_mismatch=execution.on_image_mismatch,
     )
+    # Sidecars first: an image being replaced is incomplete before any payload changes.
+    for path in plan.stale:
+        path.unlink(missing_ok=True)
+    remaining = plan.pending
+    skipped = len(specs) - len(remaining)
     if skipped:
         logger.info(
             "resume: %s/%s images already on disk, encoding %s",
@@ -129,21 +230,62 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         encoding=len(remaining),
         num_gpus=execution.num_gpus,
     )
+    encoded_width = None
     if remaining:
         if execution.num_gpus == 1:
-            _run_images_in_process(
+            encoded_width = _run_images_in_process(
                 model, remaining, execution=execution, out_dir=out_dir, identity=identity
             )
         else:
-            _run_images_distributed(model, remaining, execution=execution, out_dir=out_dir)
+            encoded_width = _run_images_distributed(
+                model, remaining, execution=execution, out_dir=out_dir
+            )
     emit_progress("images.finished", total=len(specs))
-    return [
-        image_artifact_from_disk(out_dir, spec, output_format=execution.output_format)
-        for spec in specs
-    ]
+    return _collect_artifacts(
+        specs,
+        embeddings_dir,
+        output_format=execution.output_format,
+        reused_feature_dims=plan.reused_feature_dims,
+        encoded_width=encoded_width,
+    )
 
 
-def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> None:
+def _collect_artifacts(
+    specs: Sequence[ImageSpec],
+    embeddings_dir: Path,
+    *,
+    output_format: str,
+    reused_feature_dims: dict[str, int],
+    encoded_width: int | None,
+) -> list[ImageEmbeddingArtifact]:
+    """One artifact per spec, in input order, without touching the filesystem."""
+    artifacts = []
+    for spec in specs:
+        payload_name, sidecar_name = image_embedding_names(
+            spec.sample_id, output_format=output_format
+        )
+        feature_dim = reused_feature_dims.get(spec.sample_id, encoded_width)
+        artifacts.append(
+            ImageEmbeddingArtifact(
+                sample_id=spec.sample_id,
+                path=embeddings_dir / payload_name,
+                metadata_path=embeddings_dir / sidecar_name,
+                format=output_format,
+                feature_dim=int(feature_dim),
+            )
+        )
+    return artifacts
+
+
+def _single_width(widths, *, source: str) -> int:
+    """The one image-vector width of a run's newly encoded images."""
+    widths = set(widths)
+    if len(widths) != 1:
+        raise RuntimeError(f"{source} reported image-vector widths {sorted(widths)}; expected one")
+    return int(widths.pop())
+
+
+def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> int:
     # Loaded under the Given contract declared by embed_images, so the backend carries the
     # encoder's shipped transform — which the loader workers then apply itemwise.
     loaded = model._load_backend()
@@ -153,7 +295,7 @@ def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> Non
         # same way a distributed one does.
         emit_progress("images.batch.finished", rank=0, images=int(count))
 
-    run_image_shard(
+    artifacts = run_image_shard(
         specs,
         loaded=loaded,
         on_batch=_on_batch,
@@ -169,9 +311,12 @@ def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> Non
         num_workers=execution.resolved_image_num_workers_per_gpu(),
         prefetch_factor=int(execution.prefetch_factor),
     )
+    return _single_width(
+        (artifact.feature_dim for artifact in artifacts), source="The image encoder"
+    )
 
 
-def _run_images_distributed(model, specs, *, execution, out_dir) -> None:
+def _run_images_distributed(model, specs, *, execution, out_dir) -> int:
     validate_multi_gpu_execution(model, execution)
     progress_events_path = out_dir / "logs" / "image_worker.progress.jsonl"
     reset_progress_event_logs(progress_events_path)
@@ -182,6 +327,8 @@ def _run_images_distributed(model, specs, *, execution, out_dir) -> None:
             "execution": serialize_execution(execution),
             "output_dir": str(out_dir),
             "progress_events_path": str(progress_events_path),
+            # Each rank that encodes writes image_result.rank<N>.json here.
+            "result_dir": str(coordination_dir),
             **build_image_specs_request(specs),
         }
         request_path.write_text(json.dumps(request, indent=2, sort_keys=True), encoding="utf-8")
@@ -195,3 +342,10 @@ def _run_images_distributed(model, specs, *, execution, out_dir) -> None:
             progress_events_path=progress_events_path,
             popen_factory=Popen,
         )
+        summaries = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(coordination_dir.glob("image_result.rank*.json"))
+        ]
+    return _single_width(
+        (summary["feature_dim"] for summary in summaries), source="The image worker ranks"
+    )

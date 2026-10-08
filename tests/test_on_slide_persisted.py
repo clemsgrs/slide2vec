@@ -264,8 +264,24 @@ def test_distributed_hook_fires_once_per_annotation_artifact_for_multi_class_sam
 
 
 def test_distributed_hook_skips_resume_completed_slides(monkeypatch, tmp_path: Path):
+    from slide2vec.runtime.feature_identity import pooled_feature_identity
+
     write_process_list(tmp_path / "process_list.csv", [("slide-a", "tissue", 1, "success"), ("slide-b", "tissue", 1, "tbp")])
-    write_tile_embeddings("slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz")
+    # Resume reuses only an artifact that records the run's complete feature identity.
+    transform = {"normalize": None, "resize": None, "center_crop": None}
+    monkeypatch.setattr(
+        artifacts_collect, "deferred_transform_record", lambda *a, **k: lambda: transform
+    )
+    identity = pooled_feature_identity(
+        SimpleNamespace(name="virchow2", level="tile"),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="npz"),
+        preprocessing=PREPROCESSING,
+        transform=transform,
+    )
+    write_tile_embeddings(
+        "slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz",
+        metadata={"compatibility": identity},
+    )
     hook = HookRecorder()
 
     def fake_run_stage(*, successful_slides, on_progress_event=None, **kwargs):
