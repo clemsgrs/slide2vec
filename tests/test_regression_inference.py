@@ -884,9 +884,13 @@ def test_distributed_live_updater_fans_out_multi_class_finished_slide(monkeypatc
     captured = {}
 
     def fake_run_stage(*, on_progress_event=None, **kwargs):
-        if on_progress_event is not None:
+        # Workers emit one finished event per class; the last one triggers the whole-sample update.
+        for annotation in ("tumor", "stroma"):
             on_progress_event(
-                SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"})
+                SimpleNamespace(
+                    kind="embedding.slide.finished",
+                    payload={"sample_id": "slide-a", "annotation": annotation},
+                )
             )
         # Snapshot the process_list *after* the live update but *before* the final reconcile.
         captured["after_live_update"] = pd.read_csv(process_list_path)
@@ -967,12 +971,16 @@ def test_distributed_live_updater_defers_until_all_classes_persisted(monkeypatch
     captured = {}
 
     def fake_run_stage(*, on_progress_event=None, **kwargs):
-        # First finished event: stroma's embedding not yet on disk.
-        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        # First finished event (tumor): stroma's embedding not yet on disk.
+        on_progress_event(
+            SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a", "annotation": "tumor"})
+        )
         captured["after_first_event"] = pd.read_csv(process_list_path)
         # Stroma finishes and persists, then its finished event arrives.
         write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
-        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        on_progress_event(
+            SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a", "annotation": "stroma"})
+        )
         captured["after_second_event"] = pd.read_csv(process_list_path)
 
     monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)

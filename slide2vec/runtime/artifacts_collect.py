@@ -187,6 +187,11 @@ def collect_distributed_pipeline_artifacts(
         )
     slide_by_sample_id = {slide.sample_id: slide for slide in successful_slides}
     live_updated_sample_ids: set[str] = set()
+    # Pending classes not yet reported finished, per sample. Resume can requeue a class whose
+    # payload is still on disk (unverifiable provenance), so file existence alone is not completion.
+    unfinished_annotations: dict[str, set[str | None]] = {}
+    for slide, annotation in zip(pending_slides, pending_annotations):
+        unfinished_annotations.setdefault(slide.sample_id, set()).add(annotation)
 
     def _update_process_list_for_finished_slide(event) -> None:
         if getattr(event, "kind", None) != "embedding.slide.finished":
@@ -195,6 +200,10 @@ def collect_distributed_pipeline_artifacts(
         sample_id = str(payload.get("sample_id", ""))
         slide = slide_by_sample_id.get(sample_id)
         if slide is None or sample_id in live_updated_sample_ids:
+            return
+        unfinished = unfinished_annotations.get(sample_id, set())
+        unfinished.discard(_normalized_row_annotation(payload.get("annotation")))
+        if unfinished:
             return
         # A multi-class slide emits one finished event per (sample_id, annotation) item, and the
         # other classes may still be running on another rank. Wait until *every* annotation row for
