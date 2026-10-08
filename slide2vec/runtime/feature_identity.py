@@ -242,8 +242,31 @@ class PooledResumeCheck:
         """
         if not isinstance(recorded, dict):
             return False
+        return not self._raise_on_known_differences(
+            recorded,
+            sample_id=sample_id,
+            kind=kind,
+            path=path,
+            resolve_transform=self._resolve_transform,
+        )
+
+    def reject_known_differences(self, recorded, *, sample_id: str, kind: str, path) -> None:
+        """Raise if *recorded* holds a value that differs from the run's identity.
+
+        For an artifact that will be replaced rather than reused: it does not load the
+        encoder, so a recorded transform is not compared, and missing fields are accepted.
+        """
+        if isinstance(recorded, dict):
+            self._raise_on_known_differences(
+                recorded, sample_id=sample_id, kind=kind, path=path, resolve_transform=None
+            )
+
+    def _raise_on_known_differences(
+        self, recorded, *, sample_id: str, kind: str, path, resolve_transform
+    ) -> tuple[str, ...]:
+        """Raise on a known difference; otherwise return the required fields not recorded."""
         differing, missing = known_differences(
-            recorded, self._identity, resolve_transform=self._resolve_transform
+            recorded, self._identity, resolve_transform=resolve_transform
         )
         if differing:
             details = "; ".join(
@@ -257,7 +280,7 @@ class PooledResumeCheck:
                 "a new output_dir, delete the stale artifacts, or request the recorded "
                 "values."
             )
-        return not missing
+        return missing
 
 
 def _leaf_differences(field: str, recorded, requested):

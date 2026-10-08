@@ -96,7 +96,9 @@ def plan_image_resume(
     ``on_image_mismatch="reencode"`` schedules the image for replacement. Missing
     provenance (including a missing sidecar or recorded ``format``) always schedules
     replacement, which removes every payload variant. A known feature-identity
-    difference raises, and so does a missing source for any pending image when the run
+    difference recorded for the requested source raises, in any recorded format (a
+    format switch reuses nothing, but must not overwrite another encoder's output).
+    So does a missing source for any pending image when the run
     would invalidate artifacts (sources are stat-ed only then, so a run that deletes
     nothing, and every reused image, costs no extra filesystem call).
     Nothing is deleted here, so a validation error leaves every artifact in place.
@@ -182,7 +184,16 @@ def _resume_decision(
         return "replace", 0
     if recorded_format != output_format or not payload_listed:
         # A known format switch from the same source: the other-format payload is no
-        # longer certified (so never reused), but its provenance is known.
+        # longer certified (so never reused), but its provenance is known. Nothing is
+        # reused, but a known identity difference still means another encoder's output.
+        check.reject_known_differences(
+            metadata.get("compatibility"),
+            sample_id=spec.sample_id,
+            kind="image",
+            path=payload_path.with_name(
+                image_embedding_names(spec.sample_id, output_format=recorded_format)[0]
+            ),
+        )
         return "encode", 0
     feature_dim = metadata.get("feature_dim")
     if not isinstance(feature_dim, int) or not check.reusable(
@@ -212,8 +223,18 @@ def _require_sources(specs: Sequence[ImageSpec]) -> None:
 
 
 def _listed_names(directory: Path) -> set[str]:
+    """Names of *directory*'s entries, leaving out symlinks whose target is gone.
+
+    ``DirEntry`` type information comes from the listing itself, so only a symlink costs
+    a ``stat`` of its target; slide2vec writes regular files, so none does normally.
+    """
     try:
-        return set(os.listdir(directory))
+        with os.scandir(directory) as entries:
+            return {
+                entry.name
+                for entry in entries
+                if not entry.is_symlink() or entry.is_file()
+            }
     except FileNotFoundError:
         return set()
 

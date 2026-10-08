@@ -205,7 +205,8 @@ it from the filename. Resume reuses an image only when its sidecar records the
 requested format, the requested ``image_path`` and the full :ref:`feature
 identity <feature-identity>`:
 
-- A different recorded :ref:`feature identity <feature-identity>` raises.
+- A different recorded :ref:`feature identity <feature-identity>` raises,
+  whatever ``format`` the sidecar records.
 - A different recorded ``image_path`` raises by default. Set
   ``ExecutionOptions(on_image_mismatch="reencode")`` to replace that image's
   artifacts instead.

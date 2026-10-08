@@ -918,7 +918,7 @@ class _FileSystemSpy:
         self.probes = 0
         self.resolves = 0
         original_read_text = Path.read_text
-        original_listdir = os.listdir
+        original_scandir = os.scandir
         original_exists = Path.exists
         original_is_file = Path.is_file
         original_resolve = Path.resolve
@@ -928,9 +928,9 @@ class _FileSystemSpy:
             spy.sidecar_reads += path.name.endswith(".meta.json")
             return original_read_text(path, *args, **kwargs)
 
-        def listdir(path="."):
+        def scandir(path="."):
             spy.listings += str(path).endswith("image_embeddings")
-            return original_listdir(path)
+            return original_scandir(path)
 
         def probe(original):
             def wrapped(path, *args, **kwargs):
@@ -943,7 +943,7 @@ class _FileSystemSpy:
             return original_resolve(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", read_text)
-        monkeypatch.setattr(os, "listdir", listdir)
+        monkeypatch.setattr(os, "scandir", scandir)
         monkeypatch.setattr(Path, "exists", probe(original_exists))
         monkeypatch.setattr(Path, "is_file", probe(original_is_file))
         monkeypatch.setattr(Path, "resolve", resolve)
@@ -1106,3 +1106,96 @@ def test_completion_is_specific_to_the_requested_format(tmp_path, num_gpus):
         torch.load(pt.path, weights_only=True), _reference_embedding(tmp_path, model, image_a)
     )
     assert npz.path.stat().st_mtime_ns == npz_written_at
+
+
+def test_a_format_switch_still_refuses_another_encoders_artifacts(tmp_path, num_gpus):
+    """A sidecar for the requested source records its encoder whatever format it certifies."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+
+    def run(model, output_format):
+        return image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+
+    model = _FakeModel(_encoder())
+    run(model, "pt")
+    run(model, "npz")  # both payloads on disk; the sidecar certifies s.npz
+    written_at = {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()}
+
+    with pytest.raises(ValueError) as error:
+        run(_FakeModel(_encoder(), name="other-encoder"), "pt")
+
+    assert str(error.value) == (
+        f"Cannot resume 's': the existing image embeddings at {embeddings_dir.resolve() / 's.npz'} "
+        "were computed with a different feature identity: encoder_name (recorded "
+        "'fake-encoder', requested 'other-encoder'). Re-run into a new output_dir, delete the "
+        "stale artifacts, or request the recorded values."
+    )
+    assert {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()} == written_at
+
+
+def test_a_format_switch_reencodes_an_image_without_a_recorded_identity(tmp_path, num_gpus):
+    image_a = _image(tmp_path, "a.png", seed=1)
+
+    def run(model, output_format):
+        [artifact] = image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+        return artifact
+
+    run(_FakeModel(_encoder()), "npz")
+    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.pop("compatibility"))
+    other = _FakeModel(_encoder(), name="other-encoder")
+
+    artifact = run(other, "pt")
+
+    assert _sidecar(tmp_path, "s")["compatibility"]["encoder_name"] == "other-encoder"
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, other, image_a)
+    )
+
+
+@pytest.mark.parametrize("name", ["s.pt", "s.meta.json"], ids=["payload", "sidecar"])
+def test_a_dangling_artifact_symlink_is_reencoded(tmp_path, num_gpus, name):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    run()
+    link = tmp_path / "out" / "image_embeddings" / name
+    target = tmp_path / "elsewhere" / name
+    target.parent.mkdir()
+    link.rename(target)
+    link.symlink_to(target)
+    target.unlink()
+
+    [artifact] = run()
+
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, model, image_a)
+    )
+    assert artifact.metadata["image_path"] == str(image_a)
+
+
+def test_a_payload_symlink_to_a_file_is_reused(tmp_path, num_gpus):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    run()
+    link = tmp_path / "out" / "image_embeddings" / "s.pt"
+    target = tmp_path / "elsewhere" / "s.pt"
+    target.parent.mkdir()
+    link.rename(target)
+    link.symlink_to(target)
+
+    run()
+
+    assert link.is_symlink()
