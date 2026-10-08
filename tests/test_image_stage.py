@@ -700,6 +700,40 @@ def test_a_later_validation_error_deletes_no_earlier_artifact(tmp_path, num_gpus
     assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
 
 
+def test_a_rejected_multi_gpu_request_deletes_no_earlier_artifact(tmp_path, monkeypatch):
+    """Multi-GPU request validation also runs before anything is invalidated."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_a)],
+        execution=_execution(tmp_path),
+    )
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+    def reject(model, execution):
+        raise ValueError("ExecutionOptions.num_gpus=8 exceeds available CUDA devices (4)")
+
+    monkeypatch.setattr(image_stage, "validate_multi_gpu_execution", reject)
+    monkeypatch.setattr(
+        image_stage, "run_torchrun_worker",
+        lambda **kwargs: pytest.fail("a rejected request must not launch torchrun"),
+    )
+    with pytest.raises(ValueError, match="exceeds available CUDA devices"):
+        image_stage.embed_images(
+            model,
+            # s needs a new format; t is repointed and would be replaced.
+            [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_b)],
+            execution=_execution(
+                tmp_path, num_gpus=8, output_format="npz", on_image_mismatch="reencode"
+            ),
+        )
+
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
 def _fail_once(monkeypatch, module, name):
     original = getattr(module, name)
     calls = {"count": 0}

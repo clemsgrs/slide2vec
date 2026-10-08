@@ -213,6 +213,9 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         ),
         on_image_mismatch=execution.on_image_mismatch,
     )
+    if plan.pending and execution.num_gpus > 1:
+        # A rejected request must not cost earlier artifacts: validate before invalidating.
+        validate_multi_gpu_execution(model, execution)
     # Sidecars first: an image being replaced is incomplete before any payload changes.
     for path in plan.stale:
         path.unlink(missing_ok=True)
@@ -317,7 +320,6 @@ def _run_images_in_process(model, specs, *, execution, out_dir, identity) -> int
 
 
 def _run_images_distributed(model, specs, *, execution, out_dir) -> int:
-    validate_multi_gpu_execution(model, execution)
     progress_events_path = out_dir / "logs" / "image_worker.progress.jsonl"
     reset_progress_event_logs(progress_events_path)
     with distributed_coordination_dir(out_dir) as coordination_dir:
