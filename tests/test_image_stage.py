@@ -801,6 +801,55 @@ def test_a_missing_source_deletes_no_earlier_artifact(tmp_path, num_gpus, reques
     assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
 
 
+def test_a_missing_new_source_deletes_no_earlier_artifact(tmp_path, num_gpus):
+    """A new image that cannot be read must not cost another image its artifacts."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+    missing = tmp_path / "images" / "missing.png"
+
+    with pytest.raises(FileNotFoundError) as error:
+        image_stage.embed_images(
+            model,
+            # s needs a new format, which invalidates its sidecar; "new" has no artifacts.
+            [ImageSpec(sample_id="new", image_path=missing),
+             ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format="npz"),
+        )
+
+    assert "'new'" in str(error.value)
+    assert str(missing) in str(error.value)
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+@pytest.mark.parametrize("spelling", ["PT", "NPZ", "Npz"])
+def test_an_uppercase_output_format_resumes_its_own_artifacts(tmp_path, num_gpus, monkeypatch, spelling):
+    """Format spelling is canonicalized once, so a run reuses what it wrote."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus, output_format=spelling),
+    )
+    [first] = run()
+    canonical = spelling.lower()
+    assert first.format == canonical
+    assert first.path.name == f"s.{canonical}"
+    assert _sidecar(tmp_path, "s")["format"] == canonical
+
+    monkeypatch.setattr(image_stage, "_run_images_in_process",
+                        lambda *a, **k: pytest.fail("nothing to encode"))
+    monkeypatch.setattr(image_stage, "run_torchrun_worker",
+                        lambda **k: pytest.fail("nothing to encode"))
+    [second] = run()
+
+    assert second.format == canonical
+    assert second.path == first.path
+
+
 def _fail_once(monkeypatch, module, name):
     original = getattr(module, name)
     calls = {"count": 0}

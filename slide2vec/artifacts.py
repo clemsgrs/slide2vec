@@ -137,7 +137,8 @@ class ImageEmbeddingArtifact:
         return load_metadata(self.metadata_path)
 
 
-def _validate_output_format(output_format: str) -> str:
+def normalize_output_format(output_format: str) -> str:
+    """The canonical (lowercase) spelling of a supported ``output_format``."""
     normalized = output_format.lower()
     if normalized not in {"pt", "npz"}:
         raise ValueError(f"Unsupported output format: {output_format}")
@@ -423,7 +424,7 @@ def image_embedding_names(sample_id: str, *, output_format: str) -> tuple[str, s
     """``(payload_name, sidecar_name)`` of one image inside :func:`image_embeddings_dir`."""
     sample_component = _validate_path_component(sample_id, field="sample_id")
     return (
-        f"{sample_component}.{_validate_output_format(output_format)}",
+        f"{sample_component}.{normalize_output_format(output_format)}",
         f"{sample_component}.meta.json",
     )
 
@@ -459,7 +460,7 @@ def write_image_embedding(
     ROI write follows (:func:`write_dense_region`), and the reason a rank can be killed
     mid-shard without poisoning the output.
     """
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     payload_path, metadata_path = image_embedding_paths(
         output_dir, sample_id=sample_id, output_format=output_format
     )
@@ -539,7 +540,7 @@ def write_tile_embeddings(
     tile_index: Any | None = None,
     annotation: str | None = None,
 ) -> TileEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
     )
@@ -582,7 +583,7 @@ def write_tile_embedding_metadata(
     metadata: dict[str, Any] | None = None,
     annotation: str | None = None,
 ) -> Path:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     _, metadata_path = _setup_artifact_paths(
         output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
     )
@@ -608,7 +609,7 @@ def write_slide_embeddings(
     latents: Any | None = None,
     annotation: str | None = None,
 ) -> SlideEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, slide_embeddings_subdir(annotation), sample_id, output_format
@@ -657,7 +658,7 @@ def write_patient_embeddings(
     metadata: dict[str, Any] | None = None,
     num_slides: int = 0,
 ) -> PatientEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, "patient_embeddings", patient_id, output_format
     )
@@ -696,7 +697,7 @@ def write_hierarchical_embeddings(
     metadata: dict[str, Any] | None = None,
     annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, hierarchical_embeddings_subdir(annotation), sample_id, output_format

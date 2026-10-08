@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from subprocess import Popen
 from typing import Any, Callable, Sequence
@@ -39,6 +39,7 @@ from slide2vec.artifacts import (
     image_embedding_names,
     image_embeddings_dir,
     load_metadata,
+    normalize_output_format,
 )
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.distributed import (
@@ -95,8 +96,9 @@ def plan_image_resume(
     ``on_image_mismatch="reencode"`` schedules the image for replacement. Missing
     provenance (including a missing sidecar or recorded ``format``) always schedules
     replacement, which removes every payload variant. A known feature-identity
-    difference raises, and so does a missing source for an image with artifacts to
-    invalidate (its source is stat-ed only then, so fresh and reused images cost nothing).
+    difference raises, and so does a missing source for any pending image when the run
+    would invalidate artifacts (sources are stat-ed only then, so a run that deletes
+    nothing, and every reused image, costs no extra filesystem call).
     Nothing is deleted here, so a validation error leaves every artifact in place.
     """
     names = _listed_names(embeddings_dir)
@@ -105,7 +107,6 @@ def plan_image_resume(
     reused: dict[str, int] = {}
     stale_sidecars: list[Path] = []
     stale_payloads: list[Path] = []
-    invalidated: list[ImageSpec] = []
     for spec in specs:
         payload_name, sidecar_name = image_embedding_names(
             spec.sample_id, output_format=output_format
@@ -129,7 +130,6 @@ def plan_image_resume(
             reused[spec.sample_id] = feature_dim
             continue
         pending.append(spec)
-        stale_count = len(stale_sidecars) + len(stale_payloads)
         if sidecar_name in names:
             stale_sidecars.append(embeddings_dir / sidecar_name)
         if decision == "replace":
@@ -141,9 +141,10 @@ def plan_image_resume(
                 )
                 if name in names
             )
-        if len(stale_sidecars) + len(stale_payloads) > stale_count:
-            invalidated.append(spec)
-    _require_sources(invalidated)
+    if stale_sidecars or stale_payloads:
+        # Any pending source that cannot be read would fail the run after the deletions,
+        # costing those images their artifacts, so check all of them first.
+        _require_sources(pending)
     return ImageResumePlan(
         pending=pending, reused_feature_dims=reused, stale=[*stale_sidecars, *stale_payloads]
     )
@@ -195,7 +196,7 @@ def _resume_decision(
 
 
 def _require_sources(specs: Sequence[ImageSpec]) -> None:
-    """Raise unless every image about to lose its artifacts has a source to re-encode.
+    """Raise unless every image to encode has a source, before any artifact is deleted.
 
     Sources are only ever read with ``PIL.Image.open``, so a source must be a regular
     file (or a symlink to one); a directory could never be re-encoded.
@@ -204,9 +205,9 @@ def _require_sources(specs: Sequence[ImageSpec]) -> None:
     if missing:
         listed = ", ".join(f"'{spec.sample_id}' ({spec.image_path})" for spec in missing)
         raise FileNotFoundError(
-            f"Cannot re-encode {len(missing)} image(s) whose existing embeddings would be "
-            f"replaced: source image not found or not a regular file for {listed}. "
-            "No artifact was changed."
+            f"Cannot encode {len(missing)} image(s) in a run that would first replace "
+            f"existing embeddings: source image not found or not a regular file for "
+            f"{listed}. No artifact was changed."
         )
 
 
@@ -231,7 +232,13 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     )
     reject_image_level0_spacing_overrides(specs, method_name="embed_images()")
     out_dir = Path(execution.output_dir).expanduser().resolve()
-    execution = execution.with_output_dir(out_dir)
+    # One canonical format spelling for filenames, sidecars, ranks and returned artifacts,
+    # so a run spelled "PT" resumes what it wrote.
+    execution = replace(
+        execution,
+        output_dir=out_dir,
+        output_format=normalize_output_format(execution.output_format),
+    )
     out_dir.mkdir(parents=True, exist_ok=True)  # coordination dir + artifacts live under here
     embeddings_dir = image_embeddings_dir(out_dir)
     identity = pooled_feature_identity(model, execution=execution)
