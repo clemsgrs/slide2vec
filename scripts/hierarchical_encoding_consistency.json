@@ -1,0 +1,429 @@
+{
+  "command": "python scripts/hierarchical_encoding_consistency.py compare BEFORE.npz AFTER.npz",
+  "before": "d7aa60b.npz",
+  "after": "refactor.npz",
+  "settings": {
+    "slide": "tests/fixtures/input/test-wsi.tif",
+    "backend": "openslide",
+    "device": "cpu",
+    "precision": "fp32",
+    "requested_spacing_um": 0.5,
+    "requested_tile_size_px": 224,
+    "region_tile_multiple": 2,
+    "requested_region_size_px": 448,
+    "region_origins_lv0": [
+      [
+        4060,
+        444
+      ],
+      [
+        4948,
+        444
+      ],
+      [
+        1396,
+        5772
+      ],
+      [
+        1396,
+        11544
+      ]
+    ],
+    "batch_size": 6,
+    "world_sizes": [
+      1,
+      5,
+      17
+    ],
+    "encoder": "per-channel quadrant means (12 features)"
+  },
+  "passed": true,
+  "atol": 1e-06,
+  "checks": {
+    "local": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank0_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank0_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank10_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank10_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank11_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank11_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank12_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank12_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank13_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank13_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank14_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank14_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank15_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank15_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank16_embeddings": {
+      "passed": true,
+      "shape": [
+        0,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank16_flat_index": {
+      "passed": true,
+      "shape": [
+        0
+      ]
+    },
+    "world17_rank1_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank1_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank2_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank2_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank3_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank3_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank4_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank4_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank5_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank5_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank6_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank6_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank7_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank7_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank8_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank8_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world17_rank9_embeddings": {
+      "passed": true,
+      "shape": [
+        1,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world17_rank9_flat_index": {
+      "passed": true,
+      "shape": [
+        1
+      ]
+    },
+    "world1_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world1_rank0_embeddings": {
+      "passed": true,
+      "shape": [
+        16,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world1_rank0_flat_index": {
+      "passed": true,
+      "shape": [
+        16
+      ]
+    },
+    "world5_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank0_embeddings": {
+      "passed": true,
+      "shape": [
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank0_flat_index": {
+      "passed": true,
+      "shape": [
+        4
+      ]
+    },
+    "world5_rank1_embeddings": {
+      "passed": true,
+      "shape": [
+        3,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank1_flat_index": {
+      "passed": true,
+      "shape": [
+        3
+      ]
+    },
+    "world5_rank2_embeddings": {
+      "passed": true,
+      "shape": [
+        3,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank2_flat_index": {
+      "passed": true,
+      "shape": [
+        3
+      ]
+    },
+    "world5_rank3_embeddings": {
+      "passed": true,
+      "shape": [
+        3,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank3_flat_index": {
+      "passed": true,
+      "shape": [
+        3
+      ]
+    },
+    "world5_rank4_embeddings": {
+      "passed": true,
+      "shape": [
+        3,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "world5_rank4_flat_index": {
+      "passed": true,
+      "shape": [
+        3
+      ]
+    },
+    "after: local vs world1_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "after: local vs world5_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    },
+    "after: local vs world17_merged": {
+      "passed": true,
+      "shape": [
+        4,
+        4,
+        12
+      ],
+      "max_abs_diff": 0.0
+    }
+  }
+}

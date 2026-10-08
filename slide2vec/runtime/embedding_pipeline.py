@@ -36,7 +36,7 @@ from slide2vec.runtime.slide_encode import (
     encode_slide_with_latents_from_tiles,
 )
 from slide2vec.runtime.tiling import resolve_slide_backend, resolve_tile_store_archive_for_slide
-from slide2vec.runtime.types import LoadedModel
+from slide2vec.runtime.types import HierarchicalIndex, LoadedModel
 from slide2vec.runtime.worker_io import configure_cucim_worker_stderr, uses_cuda_runtime
 
 
@@ -189,87 +189,26 @@ def compute_hierarchical_embeddings_for_slide(
     *,
     preprocessing: PreprocessingConfig,
     execution: ExecutionOptions,
-    flat_indices=None,
 ):
-    loaded.encoder_input_size_px = None
-    geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
-    index = build_hierarchical_index(
-        tiling_result,
-        region_tile_multiple=int(geometry["region_tile_multiple"]),
-        tile_size_lv0=int(geometry["tile_size_lv0"]),
-    )
-    resolved_indices = index.flat_index
-    if flat_indices is not None:
-        resolved_indices = np.asarray(flat_indices, dtype=np.int64)
-        if resolved_indices.size == 0:
-            return torch.empty(
-                (index.num_regions, index.tiles_per_region, int(loaded.feature_dim)),
-                dtype=torch.float32,
-            )
-    collate_fn = OnTheFlyHierarchicalBatchCollator(
-        image_path=slide.image_path,
-        tiling_result=tiling_result,
-        region_index=index.region_index,
-        subtile_index_within_region=index.subtile_index_within_region,
-        read_region_size_px=int(geometry["read_region_size_px"]),
-        read_tile_size_px=int(geometry["read_tile_size_px"]),
-        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
-        backend=resolve_slide_backend(preprocessing.backend, tiling_result),
-        num_cucim_workers=preprocessing.num_cucim_workers,
-        gpu_decode=preprocessing.gpu_decode,
-    )
-    dataset = TileIndexDataset(resolved_indices)
-    batch_preprocessor = build_batch_preprocessor_for_tile_images(
+    """Encode every subtile of the slide into a ``(num_regions, tiles_per_region, D)`` grid."""
+    geometry, index = _plan_hierarchical_encoding(preprocessing, tiling_result)
+    flat_indices, flat_embeddings = _encode_hierarchical_subtiles(
         loaded,
-        requested_tile_size_px=int(geometry["requested_tile_size_px"]),
+        slide,
+        tiling_result,
+        preprocessing=preprocessing,
+        execution=execution,
+        geometry=geometry,
+        index=index,
+        flat_indices=index.flat_index,
     )
-    loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
-    if resolved_backend == "cucim":
-        effective_num_workers, _ = resolve_on_the_fly_num_workers(
-            preprocessing.num_cucim_workers,
-            num_gpus=execution.num_gpus,
-        )
-        loader_kwargs["num_workers"] = effective_num_workers
-        if effective_num_workers == 0:
-            loader_kwargs.pop("prefetch_factor", None)
-    configure_cucim_worker_stderr(loader_kwargs, backend=resolved_backend)
-    loader_kwargs["batch_sampler"] = collate_fn.build_batch_sampler(
-        batch_size=execution.batch_size,
-        dataset_indices=np.asarray(resolved_indices, dtype=np.int64),
-    )
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        collate_fn=collate_fn,
-        **loader_kwargs,
-    )
-    cast_dtype = autocast_dtype(torch, execution.precision)
-    autocast_context = (
-        torch.autocast(device_type="cuda", dtype=cast_dtype)
-        if cast_dtype is not None and uses_cuda_runtime(loaded.device)
-        else nullcontext()
-    )
-    def _compute_embeddings():
-        return run_forward_pass(
-            dataloader,
-            loaded,
-            autocast_context,
-            batch_preprocessor=batch_preprocessor,
-            sample_id=slide.sample_id,
-            total_items=len(dataset),
-            unit_label="tile",
-        )
-
-    if resolved_backend == "cucim":
-        batch_flat_indices, flat_embeddings = run_with_filtered_stderr(_compute_embeddings)
-    else:
-        batch_flat_indices, flat_embeddings = _compute_embeddings()
+    feature_dim = int(flat_embeddings.shape[-1])
     result = torch.empty(
-        (index.num_regions * index.tiles_per_region, int(flat_embeddings.shape[-1])),
+        (index.num_regions * index.tiles_per_region, feature_dim),
         dtype=flat_embeddings.dtype,
     )
-    result[batch_flat_indices] = flat_embeddings
-    return result.reshape(index.num_regions, index.tiles_per_region, int(flat_embeddings.shape[-1]))
+    result[flat_indices] = flat_embeddings
+    return result.reshape(index.num_regions, index.tiles_per_region, feature_dim)
 
 
 def compute_hierarchical_embedding_shard_for_slide(
@@ -281,14 +220,45 @@ def compute_hierarchical_embedding_shard_for_slide(
     execution: ExecutionOptions,
     flat_indices,
 ):
-    loaded.encoder_input_size_px = None
+    """Encode a selection of subtiles; return their flat indices and embeddings in loader order."""
+    geometry, index = _plan_hierarchical_encoding(preprocessing, tiling_result)
+    batch_flat_indices, flat_embeddings = _encode_hierarchical_subtiles(
+        loaded,
+        slide,
+        tiling_result,
+        preprocessing=preprocessing,
+        execution=execution,
+        geometry=geometry,
+        index=index,
+        flat_indices=np.asarray(flat_indices, dtype=np.int64),
+    )
+    return batch_flat_indices.numpy(), flat_embeddings
+
+
+def _plan_hierarchical_encoding(preprocessing: PreprocessingConfig, tiling_result) -> tuple[dict[str, int], HierarchicalIndex]:
     geometry = resolve_hierarchical_geometry(preprocessing, tiling_result)
     index = build_hierarchical_index(
         tiling_result,
         region_tile_multiple=int(geometry["region_tile_multiple"]),
         tile_size_lv0=int(geometry["tile_size_lv0"]),
     )
-    resolved_indices = np.asarray(flat_indices, dtype=np.int64)
+    return geometry, index
+
+
+def _encode_hierarchical_subtiles(
+    loaded: LoadedModel,
+    slide: SlideSpec,
+    tiling_result,
+    *,
+    preprocessing: PreprocessingConfig,
+    execution: ExecutionOptions,
+    geometry: dict[str, int],
+    index: HierarchicalIndex,
+    flat_indices: np.ndarray,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Read and encode ``flat_indices``; return ``(indices, embeddings)`` in loader order."""
+    loaded.encoder_input_size_px = None
+    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
     collate_fn = OnTheFlyHierarchicalBatchCollator(
         image_path=slide.image_path,
         tiling_result=tiling_result,
@@ -297,17 +267,16 @@ def compute_hierarchical_embedding_shard_for_slide(
         read_region_size_px=int(geometry["read_region_size_px"]),
         read_tile_size_px=int(geometry["read_tile_size_px"]),
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
-        backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+        backend=resolved_backend,
         num_cucim_workers=preprocessing.num_cucim_workers,
         gpu_decode=preprocessing.gpu_decode,
     )
-    dataset = TileIndexDataset(resolved_indices)
+    dataset = TileIndexDataset(flat_indices)
     batch_preprocessor = build_batch_preprocessor_for_tile_images(
         loaded,
         requested_tile_size_px=int(geometry["requested_tile_size_px"]),
     )
     loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
     if resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
@@ -319,7 +288,7 @@ def compute_hierarchical_embedding_shard_for_slide(
     configure_cucim_worker_stderr(loader_kwargs, backend=resolved_backend)
     loader_kwargs["batch_sampler"] = collate_fn.build_batch_sampler(
         batch_size=execution.batch_size,
-        dataset_indices=resolved_indices,
+        dataset_indices=flat_indices,
     )
     dataloader = torch.utils.data.DataLoader(dataset, collate_fn=collate_fn, **loader_kwargs)
     cast_dtype = autocast_dtype(torch, execution.precision)
@@ -328,6 +297,7 @@ def compute_hierarchical_embedding_shard_for_slide(
         if cast_dtype is not None and uses_cuda_runtime(loaded.device)
         else nullcontext()
     )
+
     def _compute_embeddings():
         return run_forward_pass(
             dataloader,
@@ -340,10 +310,8 @@ def compute_hierarchical_embedding_shard_for_slide(
         )
 
     if resolved_backend == "cucim":
-        batch_flat_indices, flat_embeddings = run_with_filtered_stderr(_compute_embeddings)
-    else:
-        batch_flat_indices, flat_embeddings = _compute_embeddings()
-    return batch_flat_indices.numpy(), flat_embeddings
+        return run_with_filtered_stderr(_compute_embeddings)
+    return _compute_embeddings()
 
 
 def compute_embedded_slides(
