@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import nullcontext
 from typing import Any, Iterator
 
 import torch
@@ -18,7 +17,6 @@ import torch
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.types import LoadedModel
 from slide2vec.runtime.worker_io import uses_cuda_runtime
-from slide2vec.utils.log_utils import suppress_c_stderr
 
 from .preprocessing import (
     apply_batch_transform_spec,
@@ -28,11 +26,6 @@ from .preprocessing import (
     resize_image_batch,
 )
 from .types import PreparedBatch
-
-
-def should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
-    collate_fn = getattr(dataloader, "collate_fn", None)
-    return bool(getattr(collate_fn, "_suppress_cucim_stderr", False))
 
 
 def build_batch_preprocessor(
@@ -243,13 +236,7 @@ def iter_forward_batches(
     """
     batch_index = 0
     processed = 0
-    prefetcher_context = (
-        suppress_c_stderr()
-        if should_suppress_cucim_dataloader_stderr(dataloader)
-        else nullcontext()
-    )
-    with prefetcher_context:
-        prefetcher = BatchPrefetcher(dataloader, loaded, batch_preprocessor)
+    prefetcher = BatchPrefetcher(dataloader, loaded, batch_preprocessor)
     with torch.inference_mode(), autocast_context:
         for prepared_batch in prefetcher:
             image = prepared_batch.image

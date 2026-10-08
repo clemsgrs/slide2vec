@@ -16,8 +16,9 @@ def get_args_parser(add_help: bool = True) -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     import slide2vec.distributed as distributed
-    import slide2vec.inference as inference
     from slide2vec.api import Model
+    from slide2vec.runtime.embedding_pipeline import compute_embedded_slides
+    from slide2vec.runtime.manifest import load_successful_tiled_slides
     from slide2vec.runtime.persist_callbacks import build_incremental_persist_callback
     from slide2vec.progress import JsonlProgressReporter, activate_progress_reporter
     from slide2vec.runtime.serialization import deserialize_execution, deserialize_preprocessing
@@ -44,10 +45,7 @@ def main(argv=None) -> int:
     execution = deserialize_execution(request["execution"])
     model._declare_encoder_input(preprocessing, emit_run_info=False)
     tiling_input_dir = Path(request.get("tiling_input_dir", str(output_dir)))
-    load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
-    if not callable(load_successful_tiled_slides_fn):
-        from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
-    slide_records, tiling_results = load_successful_tiled_slides_fn(tiling_input_dir)
+    slide_records, tiling_results = load_successful_tiled_slides(tiling_input_dir)
     # Each (sample_id, annotation) row is an independent work unit; key by the composite so a
     # multi-class slide's sibling classes never overwrite each other. Flat units (None / tissue /
     # merged) encode to the bare sample_id, byte-identical to pre-#168 single-class runs.
@@ -83,17 +81,13 @@ def main(argv=None) -> int:
     )
     context = activate_progress_reporter(reporter) if reporter is not None else nullcontext()
     with context:
-        build_incremental_persist_callback_fn = getattr(inference, "_build_incremental_persist_callback", build_incremental_persist_callback)
-        persist_callback, _, _ = build_incremental_persist_callback_fn(
+        persist_callback, _, _ = build_incremental_persist_callback(
             model=model,
             preprocessing=preprocessing,
             execution=execution,
             process_list_path=None,
         )
-        compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
-        if not callable(compute_embedded_slides_fn):
-            from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
-        compute_embedded_slides_fn(
+        compute_embedded_slides(
             model,
             assigned_slides,
             assigned_tiling_results,

@@ -429,7 +429,6 @@ class OnTheFlyHierarchicalBatchCollator:
     ):
         self._region_index = np.asarray(region_index, dtype=np.int32)
         self._subtile_index_within_region = np.asarray(subtile_index_within_region, dtype=np.int32)
-        self._tiles_per_region = int(self._subtile_index_within_region.max()) + 1 if len(self._subtile_index_within_region) else 0
         self._read_tile_size_px = int(read_tile_size_px)
         self._requested_tile_size_px = int(requested_tile_size_px)
         self._reader = WSIRegionReader(

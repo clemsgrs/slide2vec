@@ -7,7 +7,7 @@ import pandas as pd
 from hs2p import SlideSpec
 from hs2p.fileops import read_csv_keyed_by_sample_id
 
-from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
+from slide2vec.api import ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
     HierarchicalEmbeddingArtifact,
     normalize_artifact_annotation,
@@ -15,7 +15,6 @@ from slide2vec.artifacts import (
     TileEmbeddingArtifact,
 )
 from slide2vec.runtime.distributed_stage import run_distributed_embedding_stage
-from slide2vec.runtime.embedding_persist import persist_embedded_slide
 from slide2vec.runtime.feature_identity import (
     deferred_transform_record,
     pooled_feature_identity,
@@ -32,34 +31,6 @@ from slide2vec.runtime.persist_callbacks import (
 )
 from slide2vec.runtime.process_list import resolved_process_list_output_variant
 from slide2vec.progress import emit_progress
-
-
-def collect_local_pipeline_artifacts(
-    *,
-    model,
-    embedded_slides: Sequence[EmbeddedSlide],
-    tiling_results,
-    preprocessing: PreprocessingConfig,
-    execution: ExecutionOptions,
-) -> tuple[list[TileEmbeddingArtifact], list[HierarchicalEmbeddingArtifact], list[SlideEmbeddingArtifact]]:
-    tile_artifacts: list[TileEmbeddingArtifact] = []
-    hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
-    slide_artifacts: list[SlideEmbeddingArtifact] = []
-    for embedded_slide, tiling_result in zip(embedded_slides, tiling_results):
-        tile_artifact, slide_artifact = persist_embedded_slide(
-            model,
-            embedded_slide,
-            tiling_result,
-            preprocessing=preprocessing,
-            execution=execution,
-        )
-        if isinstance(tile_artifact, HierarchicalEmbeddingArtifact):
-            hierarchical_artifacts.append(tile_artifact)
-        elif tile_artifact is not None:
-            tile_artifacts.append(tile_artifact)
-        if slide_artifact is not None:
-            slide_artifacts.append(slide_artifact)
-    return tile_artifacts, hierarchical_artifacts, slide_artifacts
 
 
 def _embeddable_annotation_groups(

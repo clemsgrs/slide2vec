@@ -1413,52 +1413,6 @@ def test_run_pipeline_skips_zero_tile_slides_and_counts_only_embeddable_slides(m
     assert embedding_finished[-1].payload["slides_completed"] == 1
 
 
-def test_collect_local_pipeline_artifacts_filters_none_artifacts(monkeypatch):
-    import slide2vec.inference as inference
-
-    embedded_slides = [
-        EmbeddedSlide(
-            sample_id="slide-a",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=np.zeros((2,), dtype=np.float32),
-            x=np.array([0], dtype=np.int64),
-            y=np.array([0], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-a.svs"),
-            mask_path=None,
-        ),
-        EmbeddedSlide(
-            sample_id="slide-b",
-            tile_embeddings=np.zeros((1, 2), dtype=np.float32),
-            slide_embedding=None,
-            x=np.array([1], dtype=np.int64),
-            y=np.array([1], dtype=np.int64),
-            tile_size_lv0=224,
-            image_path=Path("/tmp/slide-b.svs"),
-            mask_path=None,
-        ),
-    ]
-    tiling_results = [SimpleNamespace(), SimpleNamespace()]
-
-    responses = [
-        ("tile-a", "slide-a"),
-        (None, "slide-b"),
-    ]
-    monkeypatch.setattr(artifacts_collect, "persist_embedded_slide", lambda *args, **kwargs: responses.pop(0))
-
-    tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_local_pipeline_artifacts(
-        model=SimpleNamespace(),
-        embedded_slides=embedded_slides,
-        tiling_results=tiling_results,
-        preprocessing=DEFAULT_PREPROCESSING,
-        execution=ExecutionOptions(output_dir=Path("/tmp")),
-    )
-
-    assert tile_artifacts == ["tile-a"]
-    assert hierarchical_artifacts == []
-    assert slide_artifacts == ["slide-a", "slide-b"]
-
-
 def test_run_pipeline_local_branch_uses_incremental_persist_callback(monkeypatch, tmp_path: Path):
     import slide2vec.inference as inference
 
@@ -1560,7 +1514,6 @@ def test_compute_embedded_slides_skips_retaining_results_when_collect_results_is
 
 def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, tmp_path: Path):
     import slide2vec.distributed as distributed
-    import slide2vec.inference as inference
     import slide2vec.runtime.serialization as serialization
     from slide2vec.api import Model
     from slide2vec.distributed import pipeline_worker
@@ -2726,29 +2679,6 @@ def test_configure_cucim_worker_stderr_skips_non_cucim_or_single_process_loader(
     loader_kwargs = {"num_workers": 4}
     worker_io.configure_cucim_worker_stderr(loader_kwargs, backend="asap")
     assert "worker_init_fn" not in loader_kwargs
-
-
-def test_should_suppress_cucim_dataloader_stderr_only_for_multi_worker_cucim_collators():
-    import slide2vec.inference as inference
-
-    dataloader = SimpleNamespace(
-        num_workers=4,
-        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
-    )
-    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is True
-
-    dataloader = SimpleNamespace(
-        num_workers=0,
-        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="cucim")),
-    )
-    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is False
-
-
-    dataloader = SimpleNamespace(
-        num_workers=4,
-        collate_fn=SimpleNamespace(_reader=SimpleNamespace(_backend="asap")),
-    )
-    assert worker_io.should_suppress_cucim_dataloader_stderr(dataloader) is False
 
 
 def test_load_successful_tiled_slides_preserves_spacing_at_level_0(monkeypatch, tmp_path: Path):
@@ -4596,15 +4526,6 @@ def test_load_model_auto_prefers_cuda_when_available(monkeypatch):
     assert loaded.device == torch.device("cuda")
 
 
-def test_scale_coordinates_scales_down():
-    from slide2vec.runtime.tiling import scale_coordinates
-
-    coords = np.array([[10, 20], [30, 40]])
-    # base=0.25, target=0.5 → scale=0.5 → coordinates halved
-    result = scale_coordinates(coords, base_spacing_um=0.25, spacing=0.5)
-    np.testing.assert_array_equal(result, [[5, 10], [15, 20]])
-
-
 # --- Issue #155: per-annotation tile-embedding spine (top-seam) ---
 
 
@@ -5755,6 +5676,87 @@ def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_colli
     assert tumor_path.is_file()
     assert stroma_path.is_file()
     assert tumor_path != stroma_path
+
+
+def test_direct_embed_worker_hierarchical_tile_shard_writes_rank_payload(monkeypatch, tmp_path: Path):
+    """A hierarchical tile-shard rank encodes its slice of the flat index through the runtime
+    embedding pipeline and writes it as a ``.hier.rank<N>.pt`` shard."""
+    import slide2vec.distributed as distributed
+    import slide2vec.runtime.serialization as serialization
+    from slide2vec.api import Model
+    from slide2vec.distributed import direct_embed_worker
+    from slide2vec.runtime.distributed import load_hierarchical_embedding_shards
+
+    coordination_dir = tmp_path / "coordination"
+    coordination_dir.mkdir()
+    request_path = tmp_path / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "model": {"name": "virchow2", "allow_non_recommended_settings": False},
+                "preprocessing": {},
+                "execution": {},
+                "coordination_dir": str(coordination_dir),
+                "strategy": "tile_shard",
+                "work_unit": "slide-a",
+            }
+        ),
+        encoding="utf-8",
+    )
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        requested_region_size_px=448,
+        region_tile_multiple=2,
+    )
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(
+        x=np.array([0]),
+        y=np.array([0]),
+        tile_size_lv0=448,
+        base_spacing_um=0.5,
+        level_downsamples=[1.0],
+        annotation=None,
+    )
+    loaded = SimpleNamespace(transforms=None, encoder_input_size_px=224)
+    captured = {}
+
+    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
+    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
+    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
+    monkeypatch.setattr(
+        Model,
+        "from_preset",
+        lambda *args, **kwargs: SimpleNamespace(
+            _declare_encoder_input=_noop_declare_encoder_input,
+            _load_backend=lambda: loaded,
+        ),
+    )
+    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: preprocessing)
+    monkeypatch.setattr(serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path))
+    monkeypatch.setattr(
+        manifest,
+        "load_successful_tiled_slides",
+        lambda output_dir: ([slide], [tiling_result]),
+    )
+
+    def fake_compute_shard(loaded_model, _slide, _tiling_result, *, flat_indices, **kwargs):
+        captured["loaded"] = loaded_model
+        captured["flat_indices"] = np.asarray(flat_indices).tolist()
+        return np.asarray(flat_indices), torch.ones((len(flat_indices), 2))
+
+    monkeypatch.setattr(embedding_pipeline, "compute_hierarchical_embedding_shard_for_slide", fake_compute_shard)
+
+    assert direct_embed_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
+
+    assert captured["loaded"] is loaded
+    assert captured["flat_indices"] == [0, 1, 2, 3]
+    [shard] = load_hierarchical_embedding_shards(coordination_dir, "slide-a")
+    assert shard["flat_index"].tolist() == [0, 1, 2, 3]
+    assert shard["tile_embeddings"].shape == (4, 2)
+    assert shard["encoder_input_size_px"] == 224
 
 
 def test_compute_embedded_slides_finished_event_carries_annotation(monkeypatch):

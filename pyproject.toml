@@ -150,7 +150,7 @@ include = ["slide2vec*"]
 
 [tool.setuptools.package-data]
 slide2vec = ["py.typed", "cufile.json"]
-"slide2vec.configs" = ["*.yaml", "models/*.yaml", "preprocessing/*.yaml"]
+"slide2vec.configs" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 addopts = "--cov=slide2vec -m 'not gpu_integration'"
