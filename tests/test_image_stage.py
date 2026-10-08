@@ -554,9 +554,10 @@ def _image(tmp_path, name: str, *, seed: int) -> Path:
 
 
 def _execution(tmp_path, *, num_gpus=1, output_format="pt", **kwargs) -> ExecutionOptions:
+    kwargs.setdefault("num_workers_per_gpu", 0)
     return ExecutionOptions(
         output_dir=tmp_path / "out", num_gpus=num_gpus, precision="fp32",
-        num_workers_per_gpu=0, output_format=output_format, **kwargs,
+        output_format=output_format, **kwargs,
     )
 
 
@@ -728,6 +729,34 @@ def test_a_rejected_multi_gpu_request_deletes_no_earlier_artifact(tmp_path, monk
             [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_b)],
             execution=_execution(
                 tmp_path, num_gpus=8, output_format="npz", on_image_mismatch="reencode"
+            ),
+        )
+
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+@pytest.mark.parametrize("workers", [-1, -4])
+def test_execution_options_reject_a_negative_worker_count(workers):
+    with pytest.raises(ValueError, match="num_workers_per_gpu"):
+        ExecutionOptions(num_gpus=1, num_workers_per_gpu=workers)
+
+
+def test_invalid_loader_settings_delete_no_earlier_artifact(tmp_path, num_gpus):
+    """Loader settings are request validation too: they fail before any invalidation."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+    with pytest.raises(ValueError, match="num_workers_per_gpu"):
+        image_stage.embed_images(
+            model,
+            # a format switch would invalidate the PT sidecar
+            [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(
+                tmp_path, num_gpus=num_gpus, output_format="npz", num_workers_per_gpu=-1
             ),
         )
 
@@ -913,6 +942,55 @@ def test_an_incomplete_pair_is_reencoded(tmp_path, num_gpus, removed):
     assert artifact.path.exists()
     assert artifact.metadata_path.exists()
     assert _sidecar(tmp_path, "s")["format"] == "pt"
+
+
+def _drop_format(tmp_path):
+    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.pop("format"))
+
+
+def _unknown_format(tmp_path):
+    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.update(format="h5"))
+
+
+def _drop_sidecar(tmp_path):
+    (tmp_path / "out" / "image_embeddings" / "s.meta.json").unlink()
+
+
+@pytest.mark.parametrize(
+    ("lose_provenance", "next_image"),
+    [
+        pytest.param(_drop_sidecar, "b.png", id="no-sidecar"),
+        pytest.param(_drop_format, "a.png", id="no-format"),
+        pytest.param(_unknown_format, "a.png", id="unknown-format"),
+    ],
+)
+def test_incomplete_provenance_removes_every_payload_variant(
+    tmp_path, num_gpus, lose_provenance, next_image
+):
+    """No payload of unknown provenance survives the image's re-encode, in any format."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+
+    def run(image, output_format):
+        return image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+
+    run(image_a, "pt")
+    run(image_a, "npz")  # s.pt stays on disk; the sidecar now certifies s.npz
+    lose_provenance(tmp_path)
+    image = tmp_path / "images" / next_image
+
+    [artifact] = run(image, "pt")
+
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    assert sorted(path.name for path in embeddings_dir.iterdir()) == ["s.meta.json", "s.pt"]
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image)
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, model, image)
+    )
 
 
 def test_completion_is_specific_to_the_requested_format(tmp_path, num_gpus):

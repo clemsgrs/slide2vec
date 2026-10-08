@@ -93,7 +93,9 @@ def plan_image_resume(
     sidecar records this ``output_format``, the requested source path, and this run's
     feature identity. A recorded source path that differs raises, or with
     ``on_image_mismatch="reencode"`` schedules the image for replacement. Missing
-    provenance always schedules replacement. A known feature-identity difference raises.
+    provenance (including a missing sidecar or recorded ``format``) always schedules
+    replacement, which removes every payload variant. A known feature-identity
+    difference raises.
     Nothing is deleted here, so a validation error leaves every artifact in place.
     """
     names = _listed_names(embeddings_dir)
@@ -106,24 +108,27 @@ def plan_image_resume(
         payload_name, sidecar_name = image_embedding_names(
             spec.sample_id, output_format=output_format
         )
-        if sidecar_name not in names:
-            pending.append(spec)
-            continue
-        metadata = load_metadata(embeddings_dir / sidecar_name)
-        decision, feature_dim = _resume_decision(
-            spec,
-            metadata,
-            payload_listed=payload_name in names,
-            output_format=output_format,
-            check=check,
-            payload_path=embeddings_dir / payload_name,
-            on_image_mismatch=on_image_mismatch,
-        )
+        if sidecar_name in names:
+            metadata = load_metadata(embeddings_dir / sidecar_name)
+            decision, feature_dim = _resume_decision(
+                spec,
+                metadata,
+                payload_listed=payload_name in names,
+                output_format=output_format,
+                check=check,
+                payload_path=embeddings_dir / payload_name,
+                on_image_mismatch=on_image_mismatch,
+            )
+        else:
+            # No sidecar certifies any payload left for this sample (e.g. an interrupted
+            # replacement), so its provenance is unknown.
+            decision, feature_dim = "replace", 0
         if decision == "reuse":
             reused[spec.sample_id] = feature_dim
             continue
         pending.append(spec)
-        stale_sidecars.append(embeddings_dir / sidecar_name)
+        if sidecar_name in names:
+            stale_sidecars.append(embeddings_dir / sidecar_name)
         if decision == "replace":
             stale_payloads.extend(
                 embeddings_dir / name
@@ -165,7 +170,12 @@ def _resume_decision(
                 "use a new sample_id."
             )
         return "replace", 0
-    if metadata.get("format") != output_format or not payload_listed:
+    recorded_format = metadata.get("format")
+    if recorded_format not in IMAGE_EMBEDDING_FORMATS:
+        return "replace", 0
+    if recorded_format != output_format or not payload_listed:
+        # A known format switch from the same source: the other-format payload is no
+        # longer certified (so never reused), but its provenance is known.
         return "encode", 0
     feature_dim = metadata.get("feature_dim")
     if not isinstance(feature_dim, int) or not check.reusable(

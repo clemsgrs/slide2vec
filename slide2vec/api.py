@@ -384,6 +384,8 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
+        if self.num_workers_per_gpu is not None and self.num_workers_per_gpu < 0:
+            raise ValueError("ExecutionOptions.num_workers_per_gpu must be non-negative")
         if self.on_image_mismatch not in IMAGE_MISMATCH_POLICIES:
             raise ValueError(
                 "ExecutionOptions.on_image_mismatch must be one of "

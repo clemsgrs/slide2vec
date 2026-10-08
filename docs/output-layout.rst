@@ -305,7 +305,9 @@ exist, the sidecar's ``format`` is the requested format, and the sidecar
 records the requested ``image_path`` and the full :ref:`feature identity
 <feature-identity>`. The ``.pt`` and ``.npz`` payloads share one sidecar, which
 certifies only the format it records. Before an image is replaced, its sidecar
-is deleted; the new sidecar is written last.
+is deleted; the new sidecar is written last. If the sidecar is missing, records
+no known ``format`` or ``image_path``, or records another ``image_path``, both
+payload variants are deleted too.
 
 Dense Region Grids
 ------------------

@@ -18,7 +18,8 @@ raises (pooled) or recomputes (dense).
   ``ExecutionOptions(on_image_mismatch="reencode")`` replaces the image
   instead.
 - A missing ``image_path`` or ``format``, or a different ``format``,
-  re-encodes the image.
+  re-encodes the image. A missing sidecar, ``image_path`` or ``format`` also
+  deletes the image's other-format payload.
 - Source identity is the resolved path. Changed bytes at the same path are not
   detected.
 
@@ -35,3 +36,4 @@ Breaking changes
   missing ``transform`` loads a CPU encoder to report its current value. Pass
   ``encoded_pixels=False`` for zero-tile slide outputs.
 - A completed pooled slide whose sidecar file is missing is recomputed.
+- ``ExecutionOptions`` rejects a negative ``num_workers_per_gpu``.
