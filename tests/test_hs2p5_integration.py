@@ -216,6 +216,47 @@ def test_wsi_mask_coordinates_and_previews_remain_compatible(tmp_path):
             preview.verify()
 
 
+def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_path):
+    pytest.importorskip("openslide")
+    from types import SimpleNamespace
+
+    from slide2vec.utils.config import get_cfg_from_args
+
+    fixtures = Path(__file__).parent / "fixtures"
+    slide = SlideSpec(
+        sample_id="test-wsi",
+        image_path=fixtures / "input" / "test-wsi.tif",
+        mask_path=fixtures / "input" / "test-mask.tif",
+    )
+    shared = {"backend": "openslide", "mask_backend": "openslide"}
+    preview = {"save_mask_preview": False, "save_tiling_preview": False}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "tiling:\n"
+        "  backend: openslide\n"
+        "  mask_backend: openslide\n"
+        "  params: {requested_spacing_um: 0.5, requested_tile_size_px: 224, tolerance: 0.07}\n"
+        "  preview: {save_mask_preview: false, save_tiling_preview: false}\n"
+    )
+    cli_cfg = get_cfg_from_args(
+        SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=True)
+    )
+    routes = {
+        "python": PreprocessingConfig(
+            requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, preview=preview, **shared
+        ),
+        "cli": PreprocessingConfig.from_config(cli_cfg),
+    }
+
+    with np.load(fixtures / "gt" / "test-wsi.coordinates.npz") as expected:
+        for route, preprocessing in routes.items():
+            _slides, (result,), _process_list = prepare_tiled_slides(
+                [slide], preprocessing, output_dir=tmp_path / route, num_workers=1
+            )
+            np.testing.assert_array_equal(result.x, expected["x"])
+            np.testing.assert_array_equal(result.y, expected["y"])
+
+
 @pytest.mark.parametrize("output_mode", ["per_annotation", "merged"])
 def test_wsi_annotation_previews_accept_spacingless_masks(tmp_path, output_mode):
     pytest.importorskip("openslide")

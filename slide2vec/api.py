@@ -66,19 +66,6 @@ SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
-#: Default annotation-mask vocabulary — plain binary tissue tiling. Mirrors hs2p's
-#: shipped default ``{background: 0, tissue: 1}``; leaving it untouched keeps a run
-#: behaving exactly as a tissue-only run. ``min_coverage.tissue`` is the single source
-#: of truth for the tissue threshold (the standalone ``tissue_threshold`` knob is gone).
-#: A :class:`PreprocessingConfig` ``masks`` value is deep-merged over this default, so
-#: callers only state what they override (e.g. ``{"min_coverage": {"tissue": 0.1}}``).
-DEFAULT_MASKS: dict[str, Any] = {
-    "output_mode": "per_annotation",
-    "pixel_mapping": {"background": 0, "tissue": 1},
-    "colors": {"background": None, "tissue": [157, 219, 129]},
-    "min_coverage": {"background": None, "tissue": 0.01},
-}
-
 _REQUESTED_TILE_SIZE_INTERPOLATION = "${tiling.params.requested_tile_size_px}"
 
 
@@ -92,6 +79,7 @@ def _load_default_preprocessing() -> dict[str, dict[str, Any]]:
         ("segmentation", "seg_params"),
         ("filtering", "filter_params"),
         ("preview", "preview"),
+        ("masks", "masks"),
     ):
         section = OmegaConf.to_container(getattr(tiling, config_name), resolve=False)
         if not isinstance(section, dict):
@@ -106,6 +94,13 @@ def _load_default_preprocessing() -> dict[str, dict[str, Any]]:
 #: Complete defaults for the nested public preprocessing sections, loaded from
 #: ``configs/default.yaml`` so Python and YAML entry points share one source.
 DEFAULT_PREPROCESSING = _load_default_preprocessing()
+
+#: Default annotation-mask vocabulary, loaded from ``configs/default.yaml``: plain
+#: binary tissue tiling (``{background: 0, tissue: 1}``) with
+#: ``min_coverage.tissue = 0.1``. ``min_coverage.tissue`` is the single source of truth
+#: for the tissue threshold. A :class:`PreprocessingConfig` ``masks`` value is
+#: deep-merged over this default, so callers only state what they override.
+DEFAULT_MASKS: dict[str, Any] = DEFAULT_PREPROCESSING["masks"]
 
 
 def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
@@ -213,7 +208,7 @@ class PreprocessingConfig:
     #: Annotation-mask vocabulary forwarded to hs2p's sampling resolver. Keys:
     #: ``output_mode``, ``pixel_mapping``, ``colors``, ``min_coverage``. A partial
     #: mapping is deep-merged over :data:`DEFAULT_MASKS`, so callers only state what
-    #: they override (e.g. ``{"min_coverage": {"tissue": 0.1}}``). The default
+    #: they override (e.g. ``{"min_coverage": {"tissue": 0.5}}``). The default
     #: ``{background, tissue}`` block is plain tissue tiling; ``min_coverage.tissue``
     #: is the single source of truth for the tissue threshold.
     masks: dict[str, Any] = field(default_factory=dict)

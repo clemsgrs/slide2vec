@@ -38,6 +38,7 @@ sys.path[:] = _prepend_repo_root_to_sys_path(sys.path)
 
 from scripts.benchmark_common import (  # noqa: E402
     build_pipeline,
+    disable_previews,
     parse_process_list,
     validate_completed_work,
     load_yaml as _load_yaml,
@@ -330,11 +331,10 @@ def build_trial_config(
     config["csv"] = str(csv_path)
     config["output_dir"] = str(output_dir)
     config["resume"] = False
-    config.setdefault("tiling", {}).setdefault("preview", {})
-    config["tiling"]["preview"]["save"] = False
+    disable_previews(config)
     config["wandb"]["enable"] = False
     config["model"]["batch_size"] = int(batch_size)
-    config["speed"]["num_workers_embedding"] = int(embedding_workers)
+    config["speed"]["num_dataloader_workers"] = int(embedding_workers)
     config["speed"]["num_gpus"] = int(num_gpus)
     return _to_namespace(config)
 
@@ -730,7 +730,7 @@ def _resolve_gpu_label(value: str) -> str:
 
 
 def _build_model_pipeline_from_config(config: dict[str, Any]):
-    return build_pipeline(config, reuse_coordinates=True, worker_key="num_workers_embedding")
+    return build_pipeline(config, reuse_coordinates=True)
 
 
 def _run_internal_harness(args: argparse.Namespace) -> int:

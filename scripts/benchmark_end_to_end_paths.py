@@ -70,6 +70,7 @@ sys.path[:] = _prepend_repo_root_to_sys_path(sys.path)
 
 from scripts.benchmark_common import (  # noqa: E402
     build_pipeline,
+    disable_previews,
     parse_process_list,
     validate_completed_work,
     load_yaml as _load_yaml,
@@ -199,14 +200,12 @@ def _default_base_config(
             "backend": "cucim",
             "read_coordinates_from": None,
             "read_tiles_from": None,
+            "masks": {"min_coverage": {"tissue": 0.01}},
             "params": {
                 "requested_spacing_um": 0.5,
                 "tolerance": 0.05,
                 "requested_tile_size_px": 256,
                 "overlap": 0.0,
-                "tissue_threshold": 0.01,
-                "drop_holes": False,
-                "use_padding": True,
             },
             "seg_params": {
                 "downsample": 64,
@@ -214,21 +213,19 @@ def _default_base_config(
                 "sthresh_up": 255,
                 "mthresh": 7,
                 "close": 4,
-                "use_otsu": False,
-                "use_hsv": True,
+                "method": "hsv",
             },
             "filter_params": {
                 "ref_tile_size": 256,
                 "a_t": 4,
                 "a_h": 2,
-                "max_n_holes": 8,
                 "filter_white": False,
                 "filter_black": False,
                 "white_threshold": 220,
                 "black_threshold": 25,
                 "fraction_threshold": 0.9,
             },
-            "preview": {"save": False, "downsample": 32},
+            "preview": {"save_mask_preview": False, "save_tiling_preview": False, "downsample": 32},
         },
         "speed": {
             "precision": "fp32",
@@ -236,7 +233,6 @@ def _default_base_config(
             "num_dataloader_workers": num_dataloader_workers,
             "num_cucim_workers": num_cucim_workers,
             "prefetch_factor_embedding": 4,
-            "persistent_workers_embedding": True,
         },
         "wandb": {"enable": False},
     }
@@ -250,8 +246,7 @@ def _merge_base_config(base: dict[str, Any], config_file: Path | None) -> dict[s
     merged["csv"] = base["csv"]
     merged["output_dir"] = base["output_dir"]
     merged["resume"] = False
-    merged.setdefault("tiling", {}).setdefault("preview", {})
-    merged["tiling"]["preview"]["save"] = False
+    disable_previews(merged)
     merged.setdefault("model", {})["batch_size"] = base["model"]["batch_size"]
     merged.setdefault("speed", {})
     merged["speed"]["num_preprocessing_workers"] = base["speed"]["num_preprocessing_workers"]

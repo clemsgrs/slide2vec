@@ -17,17 +17,21 @@ def test_benchmark_config_preserves_requested_pipeline_settings(module_name, bui
     pipeline = getattr(module, builder)({
         "output_dir": "/tmp/benchmark-config-only",
         "device": "cpu",
+        "output_format": "npz",
+        "save_tiles": True,
         "model": {"name": "phikonv2", "batch_size": 8},
-        "speed": {"num_dataloader_workers": 2, "precision": "fp32"},
+        "speed": {"num_dataloader_workers": 0, "precision": "fp32"},
         "tiling": {
             "backend": "openslide",
             "params": {"requested_spacing_um": 0.5, "requested_tile_size_px": 224},
             "masks": {"min_coverage": {"tissue": 0.3}},
-            "preview": {"save": False},
+            "preview": {"save_mask_preview": False, "save_tiling_preview": False},
         },
     })
+    assert pipeline.preprocessing.save_tiles is True
+    assert pipeline.execution.output_format == "npz"
     assert pipeline.execution.batch_size == 8
-    assert pipeline.execution.num_workers_per_gpu == 2
+    assert pipeline.execution.num_workers_per_gpu == 0
     assert pipeline.execution.num_gpus == 1
     assert pipeline.execution.precision == "fp32"
     assert pipeline.preprocessing.backend == "openslide"
@@ -35,6 +39,7 @@ def test_benchmark_config_preserves_requested_pipeline_settings(module_name, bui
     assert pipeline.preprocessing.requested_spacing_um == 0.5
     assert pipeline.preprocessing.masks["min_coverage"]["tissue"] == 0.3
     assert pipeline.preprocessing.preview["save_mask_preview"] is False
+    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
     assert pipeline.preprocessing.read_coordinates_from == (
         Path("/tmp/benchmark-config-only/coordinates") if reuses_coordinates else None
     )
@@ -125,7 +130,7 @@ def test_benchmark_real_fixture_cpu_pipeline(tmp_path, monkeypatch):
         "tiling": {
             "backend": "openslide", "mask_backend": "asap", "on_the_fly": True, "use_supertiles": False,
             "params": {"requested_spacing_um": 0.5, "requested_tile_size_px": 224, "tolerance": 0.07},
-            "preview": {"save": False},
+            "preview": {"save_mask_preview": False, "save_tiling_preview": False},
         },
     }
     config_path = tmp_path / "config.yaml"
@@ -142,27 +147,62 @@ def test_benchmark_real_fixture_cpu_pipeline(tmp_path, monkeypatch):
     metrics = json.loads(args.metrics_json.read_text())
     assert metrics["success"] is True
     assert metrics["failed_slides"] == 0
-    assert metrics["total_tiles"] == 474
+    assert metrics["total_tiles"] == 459
     assert metrics["tile_artifacts"] == 1
     assert metrics["timed_batches"] == 15
     features = torch.load(tmp_path / "tile_embeddings" / "test-wsi.pt", weights_only=True)
-    assert features.shape == (474, 3)
+    assert features.shape == (459, 3)
     assert bool(torch.isfinite(features).all())
 
 
-@pytest.mark.parametrize("module_name,builder,expected_workers", [
-    ("benchmark_end_to_end_paths", "_build_pipeline_from_config_dict", 2),
-    ("benchmark_tile_read_strategies", "_build_pipeline_from_config_dict", 2),
-    ("benchmark_embedding_throughput", "_build_model_pipeline_from_config", 7),
+@pytest.mark.parametrize("module_name,model_kwargs,expected_tissue", [
+    ("benchmark_end_to_end_paths", {}, 0.01),
+    ("benchmark_tile_read_strategies", {"model_name": "phikonv2"}, 0.1),
 ])
-def test_benchmark_worker_override_beats_legacy_config(module_name, builder, expected_workers):
+def test_benchmark_base_config_converts_with_current_keys(module_name, model_kwargs, expected_tissue):
     module = importlib.import_module(f"scripts.{module_name}")
-    pipeline = getattr(module, builder)({
-        "output_dir": "/tmp/benchmark-config-only", "device": "cpu",
-        "model": {"name": "phikonv2"},
-        "speed": {"num_dataloader_workers": 2, "num_workers_embedding": 7},
-    })
-    assert pipeline.execution.num_workers_per_gpu == expected_workers
+    config = module._default_base_config(
+        csv_path=Path("/tmp/slides.csv"),
+        output_dir=Path("/tmp/benchmark-config-only"),
+        batch_size=4,
+        num_dataloader_workers=0,
+        num_preprocessing_workers=1,
+        num_cucim_workers=2,
+        **model_kwargs,
+    )
+    config["model"]["name"] = "phikonv2"
+    config["tiling"]["params"]["requested_tile_size_px"] = 224
+    config["tiling"]["filter_params"]["ref_tile_size"] = 224
+
+    pipeline = module._build_pipeline_from_config_dict({**config, "device": "cpu"})
+
+    assert pipeline.execution.num_workers_per_gpu == 0
+    assert pipeline.execution.num_preprocessing_workers == 1
+    assert pipeline.preprocessing.num_cucim_workers == 2
+    assert pipeline.preprocessing.masks["min_coverage"]["tissue"] == expected_tissue
+    assert pipeline.preprocessing.segmentation["method"] == "hsv"
+    assert pipeline.preprocessing.preview["save_mask_preview"] is False
+    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
+
+
+def test_embedding_trial_config_sets_current_worker_and_preview_keys():
+    from scripts.benchmark_embedding_throughput import _build_model_pipeline_from_config, build_trial_config
+    from scripts.benchmark_common import to_plain_data
+
+    trial = to_plain_data(build_trial_config(
+        {"model": {"name": "phikonv2"}, "tiling": {"preview": {"save_mask_preview": True}}},
+        csv_path=Path("/tmp/slides.csv"),
+        output_dir=Path("/tmp/benchmark-config-only"),
+        batch_size=4,
+        embedding_workers=0,
+    ))
+
+    pipeline = _build_model_pipeline_from_config({**trial, "device": "cpu"})
+
+    assert pipeline.execution.num_workers_per_gpu == 0
+    assert pipeline.execution.batch_size == 4
+    assert pipeline.preprocessing.preview["save_mask_preview"] is False
+    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
 
 
 def test_runtime_benchmark_checks_expected_pixels_and_rejects_changed_baseline(tmp_path, monkeypatch):
