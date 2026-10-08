@@ -97,12 +97,26 @@ def test_partial_preview_override_changes_only_requested_field():
     }
 
 
-def test_public_preprocessing_defaults_match_standard_configuration():
-    cfg = load_config("default")
-    cfg.tiling.params.requested_spacing_um = 0.5
-    cfg.tiling.params.requested_tile_size_px = 224
+def _cli_preprocessing(tmp_path: Path, opts: list[str]) -> PreprocessingConfig:
+    from slide2vec.utils.config import get_cfg_from_args
 
-    standard = PreprocessingConfig.from_config(cfg)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "csv: /tmp/slides.csv\n"
+        "output_dir: /tmp/output\n"
+        "tiling:\n"
+        "  params:\n"
+        "    requested_spacing_um: 0.5\n"
+        "    requested_tile_size_px: 224\n"
+    )
+    cfg = get_cfg_from_args(
+        SimpleNamespace(config_file=str(config_path), output_dir=None, opts=opts, run_on_cpu=False)
+    )
+    return PreprocessingConfig.from_config(cfg)
+
+
+def test_public_preprocessing_defaults_match_standard_configuration(tmp_path: Path):
+    standard = _cli_preprocessing(tmp_path, [])
     public = PreprocessingConfig(
         requested_spacing_um=0.5,
         requested_tile_size_px=224,
@@ -111,6 +125,44 @@ def test_public_preprocessing_defaults_match_standard_configuration():
     assert public.segmentation == standard.segmentation
     assert public.filtering == standard.filtering
     assert public.preview == standard.preview
+    assert public.masks == standard.masks
+    assert public.masks["min_coverage"] == {"background": None, "tissue": 0.1}
+
+
+def test_partial_masks_override_matches_between_python_and_cli(tmp_path: Path):
+    standard = _cli_preprocessing(tmp_path, ["tiling.masks.min_coverage.tissue=0.4"])
+    public = PreprocessingConfig(
+        requested_spacing_um=0.5,
+        requested_tile_size_px=224,
+        masks={"min_coverage": {"tissue": 0.4}},
+    )
+
+    assert public.masks == standard.masks
+    assert public.masks == {
+        "output_mode": "per_annotation",
+        "pixel_mapping": {"background": 0, "tissue": 1},
+        "colors": {"background": None, "tissue": [157, 219, 129]},
+        "min_coverage": {"background": None, "tissue": 0.4},
+    }
+
+
+def test_default_masks_constant_keeps_its_public_shape():
+    from slide2vec.api import DEFAULT_MASKS
+
+    assert DEFAULT_MASKS == {
+        "output_mode": "per_annotation",
+        "pixel_mapping": {"background": 0, "tissue": 1},
+        "colors": {"background": None, "tissue": [157, 219, 129]},
+        "min_coverage": {"background": None, "tissue": 0.1},
+    }
+
+
+def test_default_tissue_threshold_reaches_hs2p_unchanged():
+    from slide2vec.runtime.tiling import build_hs2p_configs
+
+    tiling_cfg = build_hs2p_configs(DEFAULT_PREPROCESSING)[0]
+
+    assert tiling_cfg.min_coverage["tissue"] == 0.1
 
 
 def test_public_filtering_default_tracks_requested_tile_size():
@@ -359,6 +411,37 @@ def test_setup_resumes_from_base_output_dir_when_resume_dirname_is_empty(
     assert cfg.output_dir == str(tmp_path / "output")
     assert cfg_path == str(tmp_path / "output" / "config.yaml")
     assert (tmp_path / "output").is_dir()
+
+
+@pytest.mark.parametrize(("seed_lines", "expected_seed"), [(["seed: 123"], 123), ([], 0)])
+def test_setup_seeds_with_the_configured_seed_and_saves_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed_lines,
+    expected_seed,
+):
+    pytest.importorskip("omegaconf")
+    from omegaconf import OmegaConf
+
+    from slide2vec.utils.config import setup
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(["csv: /tmp/slides.csv", f"output_dir: {tmp_path / 'output'}", *seed_lines])
+    )
+    args = SimpleNamespace(
+        config_file=str(config_path), output_dir=None, opts=[], skip_datetime=True, run_on_cpu=False
+    )
+    seeds: list[int] = []
+    monkeypatch.setattr("slide2vec.utils.config.is_main_process", lambda: True)
+    monkeypatch.setattr("slide2vec.utils.config.fix_random_seeds", seeds.append)
+    monkeypatch.setattr("slide2vec.utils.config.setup_logging", lambda **kwargs: None)
+    monkeypatch.setattr("slide2vec.utils.config.get_sha", lambda: "deadbeef")
+
+    _cfg, cfg_path = setup(args)
+
+    assert seeds == [expected_seed]
+    assert OmegaConf.load(cfg_path).seed == expected_seed
 
 
 def test_npz_artifacts_round_trip(tmp_path: Path):

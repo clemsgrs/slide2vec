@@ -118,10 +118,14 @@ def get_cfg_from_args(args):
     user_cfg = OmegaConf.load(args.config_file)
     cli_cfg = OmegaConf.from_cli(args.opts)
     requested_cfg = OmegaConf.merge(user_cfg, cli_cfg)
+    return resolve_config(requested_cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
 
+
+def resolve_config(requested_cfg, *, run_on_cpu: bool = False):
+    """Merge a requested config over ``default.yaml``, fill encoder defaults, resolve, and validate."""
     default_cfg = OmegaConf.create(default_config)
     model_name = OmegaConf.select(requested_cfg, "model.name")
-    cfg = OmegaConf.merge(default_cfg, user_cfg, cli_cfg)
+    cfg = OmegaConf.merge(default_cfg, requested_cfg)
     requested_spacing_um = OmegaConf.select(cfg, "tiling.params.requested_spacing_um")
     requested_tile_size_px = OmegaConf.select(cfg, "tiling.params.requested_tile_size_px")
     precision = OmegaConf.select(cfg, "speed.precision")
@@ -138,7 +142,7 @@ def get_cfg_from_args(args):
         )
         _fill_null_encoder_defaults(cfg, encoder_defaults)
     OmegaConf.resolve(cfg)
-    validate_model_recommended_settings(cfg, run_on_cpu=bool(getattr(args, "run_on_cpu", False)))
+    validate_model_recommended_settings(cfg, run_on_cpu=run_on_cpu)
     return cfg
 
 
@@ -171,7 +175,7 @@ def setup(args):
         output_dir.mkdir(exist_ok=cfg.resume or args.skip_datetime, parents=True)
     cfg.output_dir = str(output_dir)
 
-    fix_random_seeds(0)
+    fix_random_seeds(int(cfg.seed))
     setup_logging(output=cfg.output_dir, level=logging.INFO)
     logger.info("git:\n  {}\n".format(get_sha()))
     cfg_path = write_config(cfg, cfg.output_dir)

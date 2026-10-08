@@ -72,6 +72,8 @@ The main configuration sections are:
      - :doc:`preprocessing`, masks, geometry, and previews
    * - ``speed``
      - GPU and worker counts, precision, and :ref:`output dtype <execution-options>`
+   * - ``seed``
+     - Random seed set at startup (default ``0``)
 
 Command options
 ---------------

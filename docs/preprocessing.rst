@@ -149,7 +149,8 @@ plain tissue path is otherwise unchanged.
 In annotation mode the per-slide ``mask_path`` (argument or manifest column) is
 **required** and is read as a multi-label raster: each class occupies a
 distinct integer pixel value. The ``masks`` block maps that vocabulary and is
-deep-merged over the default, so you only state what you add:
+deep-merged over the default, so you only state what you add. The default block
+is ``slide2vec.api.DEFAULT_MASKS``, loaded from the bundled ``default.yaml``:
 
 - ``pixel_mapping`` — ``{class_name: integer pixel value}``. Values must be
   distinct integers in ``[0, 255]``; ``merged`` is a reserved name. A class may
@@ -159,7 +160,7 @@ deep-merged over the default, so you only state what you add:
 - ``min_coverage`` — ``{class_name: float | null}``; the minimum fraction of a
   tile covered by that class to keep it. ``null`` means *don't sample that
   class*. The ``tissue`` entry is the single source of truth for the tissue
-  threshold.
+  threshold. It defaults to ``0.1`` for both the Python API and YAML/CLI runs.
 - ``colors`` — ``{class_name: [r, g, b] | null}`` used when rendering previews.
 - ``output_mode`` — ``per_annotation`` (one artifact set per sampled class) or
   ``merged`` (one set per slide over the union of tiles passing any class).
