@@ -763,6 +763,38 @@ def test_invalid_loader_settings_delete_no_earlier_artifact(tmp_path, num_gpus):
     assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
 
 
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode-to-missing-source"])
+def test_a_missing_source_deletes_no_earlier_artifact(tmp_path, num_gpus, request_kind):
+    """An image is never invalidated for a source that cannot be read to replace it."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_c = _image(tmp_path, "c.png", seed=3)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_c)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+    if request_kind == "format-switch":
+        image_a.unlink()  # e.g. a scratch copy cleaned up after extraction
+        missing, options = image_a, {"output_format": "npz"}
+    else:
+        missing, options = tmp_path / "images" / "b.png", {"on_image_mismatch": "reencode"}
+
+    with pytest.raises(FileNotFoundError) as error:
+        image_stage.embed_images(
+            model,
+            [ImageSpec(sample_id="s", image_path=missing), ImageSpec(sample_id="t", image_path=image_c)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert "'s'" in str(error.value)
+    assert str(missing) in str(error.value)
+    assert "'t'" not in str(error.value)
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
 def _fail_once(monkeypatch, module, name):
     original = getattr(module, name)
     calls = {"count": 0}

@@ -95,7 +95,8 @@ def plan_image_resume(
     ``on_image_mismatch="reencode"`` schedules the image for replacement. Missing
     provenance (including a missing sidecar or recorded ``format``) always schedules
     replacement, which removes every payload variant. A known feature-identity
-    difference raises.
+    difference raises, and so does a missing source for an image with artifacts to
+    invalidate (its source is stat-ed only then, so fresh and reused images cost nothing).
     Nothing is deleted here, so a validation error leaves every artifact in place.
     """
     names = _listed_names(embeddings_dir)
@@ -104,6 +105,7 @@ def plan_image_resume(
     reused: dict[str, int] = {}
     stale_sidecars: list[Path] = []
     stale_payloads: list[Path] = []
+    invalidated: list[ImageSpec] = []
     for spec in specs:
         payload_name, sidecar_name = image_embedding_names(
             spec.sample_id, output_format=output_format
@@ -127,6 +129,7 @@ def plan_image_resume(
             reused[spec.sample_id] = feature_dim
             continue
         pending.append(spec)
+        stale_count = len(stale_sidecars) + len(stale_payloads)
         if sidecar_name in names:
             stale_sidecars.append(embeddings_dir / sidecar_name)
         if decision == "replace":
@@ -138,6 +141,9 @@ def plan_image_resume(
                 )
                 if name in names
             )
+        if len(stale_sidecars) + len(stale_payloads) > stale_count:
+            invalidated.append(spec)
+    _require_sources(invalidated)
     return ImageResumePlan(
         pending=pending, reused_feature_dims=reused, stale=[*stale_sidecars, *stale_payloads]
     )
@@ -186,6 +192,17 @@ def _resume_decision(
     ):
         return "replace", 0
     return "reuse", feature_dim
+
+
+def _require_sources(specs: Sequence[ImageSpec]) -> None:
+    """Raise unless every image about to lose its artifacts has a source to re-encode."""
+    missing = [spec for spec in specs if not os.path.exists(spec.image_path)]
+    if missing:
+        listed = ", ".join(f"'{spec.sample_id}' ({spec.image_path})" for spec in missing)
+        raise FileNotFoundError(
+            f"Cannot re-encode {len(missing)} image(s) whose existing embeddings would be "
+            f"replaced: source image not found for {listed}. No artifact was changed."
+        )
 
 
 def _listed_names(directory: Path) -> set[str]:

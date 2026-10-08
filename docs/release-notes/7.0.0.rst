@@ -20,6 +20,8 @@ raises (pooled) or recomputes (dense).
 - A missing ``image_path`` or ``format``, or a different ``format``,
   re-encodes the image. A missing sidecar, ``image_path`` or ``format`` also
   deletes the image's other-format payload.
+- An image to re-encode whose source file is missing raises
+  ``FileNotFoundError`` before any artifact is deleted.
 - Source identity is the resolved path. Changed bytes at the same path are not
   detected.
 
