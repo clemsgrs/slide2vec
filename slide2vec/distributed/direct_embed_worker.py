@@ -17,8 +17,12 @@ def main(argv=None) -> int:
     import torch
 
     import slide2vec.distributed as distributed
-    import slide2vec.inference as inference
     from slide2vec.api import Model
+    from slide2vec.runtime.embedding_pipeline import (
+        compute_embedded_slides,
+        compute_hierarchical_embedding_shard_for_slide,
+        compute_tile_embeddings_for_slide,
+    )
     from slide2vec.runtime.hierarchical import (
         build_hierarchical_index,
         is_hierarchical_preprocessing,
@@ -56,11 +60,9 @@ def main(argv=None) -> int:
     )
     from slide2vec.runtime.embedding import tiling_result_annotation
     from slide2vec.runtime.feature_identity import transform_record
+    from slide2vec.runtime.manifest import load_successful_tiled_slides
 
-    load_successful_tiled_slides_fn = getattr(inference, "load_successful_tiled_slides", None)
-    if not callable(load_successful_tiled_slides_fn):
-        from slide2vec.runtime.manifest import load_successful_tiled_slides as load_successful_tiled_slides_fn
-    slide_records, tiling_results = load_successful_tiled_slides_fn(output_dir)
+    slide_records, tiling_results = load_successful_tiled_slides(output_dir)
     # Key by the composite (sample_id, annotation) work unit so a multi-class slide's sibling
     # classes never overwrite each other; flat units collapse to the bare sample_id key.
     paired_by_unit = {
@@ -95,16 +97,7 @@ def main(argv=None) -> int:
                     tile_size_lv0=int(geometry["tile_size_lv0"]),
                 )
                 flat_indices = np.array_split(index.flat_index, world_size)[global_rank]
-                compute_hierarchical_embedding_shard_for_slide_fn = getattr(
-                    inference,
-                    "_compute_hierarchical_embedding_shard_for_slide",
-                    None,
-                )
-                if not callable(compute_hierarchical_embedding_shard_for_slide_fn):
-                    from slide2vec.runtime.embedding_pipeline import (
-                        compute_hierarchical_embedding_shard_for_slide as compute_hierarchical_embedding_shard_for_slide_fn,
-                    )
-                shard_indices, tile_embeddings = compute_hierarchical_embedding_shard_for_slide_fn(
+                shard_indices, tile_embeddings = compute_hierarchical_embedding_shard_for_slide(
                     loaded,
                     slide,
                     tiling_result,
@@ -122,16 +115,7 @@ def main(argv=None) -> int:
             else:
                 num_tiles = len(tiling_result.x)
                 tile_indices = np.array_split(np.arange(num_tiles, dtype=np.int64), world_size)[global_rank]
-                compute_tile_embeddings_for_slide_fn = getattr(
-                    inference,
-                    "_compute_tile_embeddings_for_slide",
-                    None,
-                )
-                if not callable(compute_tile_embeddings_for_slide_fn):
-                    from slide2vec.runtime.embedding_pipeline import (
-                        compute_tile_embeddings_for_slide as compute_tile_embeddings_for_slide_fn,
-                    )
-                tile_embeddings = compute_tile_embeddings_for_slide_fn(
+                tile_embeddings = compute_tile_embeddings_for_slide(
                     loaded,
                     model,
                     slide,
@@ -170,10 +154,7 @@ def main(argv=None) -> int:
             )
             torch.save(payload, coordination_dir / f"{stem}.embedded.pt")
 
-        compute_embedded_slides_fn = getattr(inference, "_compute_embedded_slides", None)
-        if not callable(compute_embedded_slides_fn):
-            from slide2vec.runtime.embedding_pipeline import compute_embedded_slides as compute_embedded_slides_fn
-        compute_embedded_slides_fn(
+        compute_embedded_slides(
             model,
             assigned_slides,
             assigned_tiling_results,

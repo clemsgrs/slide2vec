@@ -39,13 +39,5 @@ def configure_cucim_worker_stderr(loader_kwargs: dict[str, Any], *, backend: str
     loader_kwargs["worker_init_fn"] = _worker_init
 
 
-def should_suppress_cucim_dataloader_stderr(dataloader) -> bool:
-    if int(getattr(dataloader, "num_workers", 0)) <= 0:
-        return False
-    collate_fn = getattr(dataloader, "collate_fn", None)
-    reader = getattr(collate_fn, "_reader", None)
-    return getattr(reader, "_backend", None) == "cucim"
-
-
 def uses_cuda_runtime(device) -> bool:
     return str(device).startswith("cuda") and torch.cuda.is_available()

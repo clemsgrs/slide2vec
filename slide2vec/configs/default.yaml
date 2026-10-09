@@ -9,7 +9,7 @@ save_tiles: false # save extracted tiles as {sample_id}.tiles.tar in addition to
 seed: 0 # seed for reproducibility
 
 model:
-  name: # preset model name; see docs/models.md for supported request strings
+  name: # preset model name; see docs/models.rst for supported request strings
   output_variant: # requested output variant for presets that expose multiple outputs
   batch_size: 32
   save_tile_embeddings: false # whether to save tile embeddings alongside the pooled slide embedding when level is "slide"
@@ -18,7 +18,7 @@ model:
   allow_non_recommended_settings: false # when true, non-recommended spacing / tile size / precision combinations warn instead of erroring
 
 tiling:
-  on_the_fly: true # read tiles directly from WSI during embedding (requires cucim backend)
+  on_the_fly: true # read tiles directly from the WSI during embedding; when false, embedding reads tiles from {sample_id}.tiles.tar
   gpu_decode: false # GPU-accelerated batch decoding via device="cuda" in cucim read_region; set true to opt in when the runtime is configured for it (experimental, may not be stable across all environments)
   adaptive_batching: false # when true, vary batch size to align with super tile boundaries (avoids redundant reads but batch size fluctuates)
   use_supertiles: true # group tiles into 8x8/4x4/2x2 super tile reads to reduce WSI read calls (on-the-fly path only)

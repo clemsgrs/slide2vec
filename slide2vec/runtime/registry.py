@@ -23,17 +23,6 @@ class Registry:
             raise ValueError(msg)
         self._entries[name] = _Entry(cls=cls, metadata=metadata or {})
 
-    def register_decorator(
-        self, name: str, *, metadata: dict[str, Any] | None = None
-    ):
-        """Decorator form of register."""
-
-        def decorator(cls: type) -> type:
-            self.register(name, cls, metadata=metadata)
-            return cls
-
-        return decorator
-
     def _before_read(self) -> None:
         """Run domain-specific setup before registry entries are observed."""
 

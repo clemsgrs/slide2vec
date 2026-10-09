@@ -1,6 +1,4 @@
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 
 def config_resource(*parts: str):
@@ -16,8 +14,3 @@ def load_config(*parts: str):
     resource = config_resource(*parts)
     with resource.open("r", encoding="utf-8") as handle:
         return OmegaConf.load(handle)
-
-
-@contextmanager
-def config_path(*parts: str) -> Iterator[Path]:
-    yield config_resource(*parts)

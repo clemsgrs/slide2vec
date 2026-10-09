@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-import numpy as np
 from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, load_tiling_result
 from hs2p.configs.resolvers import resolve_sampling_request, resolve_tiling_config
 
@@ -118,7 +117,3 @@ def load_tiling_result_from_paths(coordinates_npz_path: Path, coordinates_meta_p
         coordinates_meta_path=coordinates_meta_path,
     )
 
-
-def scale_coordinates(coordinates: np.ndarray, base_spacing_um: float, spacing: float) -> np.ndarray:
-    scale = base_spacing_um / spacing
-    return (coordinates * scale).astype(int)
