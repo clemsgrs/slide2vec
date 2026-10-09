@@ -914,7 +914,7 @@ def test_a_failed_torchrun_setup_deletes_no_earlier_artifact(
 def test_a_torchrun_launch_that_starts_no_rank_deletes_no_earlier_artifact(
     tmp_path, num_gpus, monkeypatch, request_kind, launch_error
 ):
-    """The ranks invalidate their own shards, so a launch that never starts one costs nothing."""
+    """Ranks invalidate image by image as they write, so a launch that starts none costs nothing."""
     image, options = _replacement_request(tmp_path, request_kind, num_gpus=num_gpus)
     before = _artifact_bytes(tmp_path)
 
@@ -933,7 +933,7 @@ def test_a_torchrun_launch_that_starts_no_rank_deletes_no_earlier_artifact(
 
 @pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
 def test_a_rank_load_failure_deletes_none_of_that_ranks_artifacts(tmp_path, num_gpus, monkeypatch):
-    """A rank invalidates its shard only once its encoder is loaded."""
+    """A rank invalidates nothing before its encoder loads: it deletes per image, at write."""
     import os
 
     import slide2vec.api as api
@@ -972,6 +972,119 @@ def test_a_rank_load_failure_deletes_none_of_that_ranks_artifacts(tmp_path, num_
         name: before[name] for name in ("t.pt", "t.meta.json")
     }
     assert _sidecar(tmp_path, "s")["image_path"] == str(image_b)  # rank 0 went ahead
+
+
+class _Teardown(Exception):
+    """Stands in for the SIGTERM the torchrun agent sends sibling ranks on a rank failure."""
+
+
+def _sibling_request(tmp_path, request_kind, *, num_gpus):
+    """Write s, t, u, v as PT, each from its own image; return a replacing run's specs/options."""
+    names = ["s", "t", "u", "v"]
+    old = [_image(tmp_path, f"{name}-a.png", seed=index) for index, name in enumerate(names)]
+    image_stage.embed_images(
+        _FakeModel(_encoder()),
+        [ImageSpec(sample_id=name, image_path=path) for name, path in zip(names, old)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    if request_kind == "format-switch":  # invalidates every PT sidecar
+        sources, options = old, {"output_format": "npz"}
+    else:  # invalidates every sidecar and PT payload
+        sources = [_image(tmp_path, f"{name}-b.png", seed=10 + i) for i, name in enumerate(names)]
+        options = {"on_image_mismatch": "reencode"}
+    specs = [ImageSpec(sample_id=name, image_path=path) for name, path in zip(names, sources)]
+    return specs, options
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_sibling_rank_torn_down_before_writing_keeps_its_artifacts(
+    tmp_path, num_gpus, monkeypatch, request_kind
+):
+    """Rank 1 fails to load; the agent tears rank 0 down mid-encode. Nothing is lost."""
+    import os
+
+    import slide2vec.api as api
+    from slide2vec.distributed import image_worker
+    from slide2vec.runtime import image_shard
+
+    specs, options = _sibling_request(tmp_path, request_kind, num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+    rank_model = api.Model.from_preset
+
+    def from_preset(cls, name, **kwargs):
+        loaded_model = rank_model(name, **kwargs)
+        if os.environ.get("RANK") == "1":  # rank 1 owns u, v
+
+            def fail_to_load():
+                raise RuntimeError("simulated rank load failure")
+
+            loaded_model._load_backend = fail_to_load
+        return loaded_model
+
+    encode = image_shard.iter_forward_batches
+
+    def torn_down_encode(*args, **kwargs):
+        if os.environ.get("RANK") == "0":  # rank 0 owns s, t: killed during its first batch
+            raise _Teardown("SIGTERM from the torchrun agent")
+        return encode(*args, **kwargs)
+
+    def agent(*, module, num_gpus, output_dir, request_path, **kwargs):
+        # The real agent runs ranks concurrently; any rank failure fails the launch.
+        failures = []
+        for rank in range(num_gpus):
+            with monkeypatch.context() as env:
+                env.setenv("RANK", str(rank))
+                env.setenv("WORLD_SIZE", str(num_gpus))
+                env.setenv("LOCAL_RANK", str(rank))
+                try:
+                    image_worker.main(
+                        ["--output-dir", str(output_dir), "--request-path", str(request_path)]
+                    )
+                except Exception as error:  # noqa: BLE001
+                    failures.append(error)
+        if failures:
+            raise RuntimeError("Distributed image feature extraction failed")
+
+    monkeypatch.setattr(api.Model, "from_preset", classmethod(from_preset))
+    monkeypatch.setattr(image_shard, "iter_forward_batches", torn_down_encode)
+    monkeypatch.setattr(image_stage, "run_torchrun_worker", agent)
+    with pytest.raises(RuntimeError, match="Distributed image feature extraction failed"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), specs,
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_mid_run_failure_costs_at_most_the_batch_in_flight(tmp_path, request_kind):
+    """An undecodable source in a later batch keeps every not-yet-written image's artifacts."""
+    specs, options = _sibling_request(tmp_path, request_kind, num_gpus=1)
+    output_format = options.get("output_format", "pt")
+    before = _artifact_bytes(tmp_path)
+    # u's source still exists, so planning accepts it, but it no longer decodes.
+    Path(specs[2].image_path).write_bytes(b"not an image")
+
+    with pytest.raises(PIL.UnidentifiedImageError):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), specs,
+            execution=_execution(tmp_path, batch_size=1, **options),
+        )
+
+    after = _artifact_bytes(tmp_path)
+    kept = lambda name: all(  # noqa: E731
+        after.get(key) == before[key] for key in (f"{name}.pt", f"{name}.meta.json")
+    )
+    assert kept("u") and kept("v")  # the failing image and the one never reached
+    for spec in specs[:2]:  # written before the failure, or still untouched
+        if not kept(spec.sample_id):
+            sidecar = _sidecar(tmp_path, spec.sample_id)
+            assert sidecar["format"] == output_format
+            assert sidecar["image_path"] == str(spec.image_path)
+            assert f"{spec.sample_id}.{output_format}" in after
+    assert not kept("s")  # the run made progress before the failure
 
 
 @pytest.mark.parametrize("batch_size", [0, -2])

@@ -11,9 +11,10 @@ machinery, because the only thing that differs is the work unit:
 3. **plan resume** from one listing of ``image_embeddings/`` (see
    :func:`plan_image_resume`): reuse complete artifacts whose provenance matches and pick
    the ones to replace — all before sharding, so no rank draws an all-done shard and both
-   execution modes act on the same decisions; the skip count is logged. Whoever encodes
-   an image invalidates its replaced artifacts once its encoder is loaded (the in-process
-   runner, or the torchrun rank that owns it), so a failed load or launch deletes nothing;
+   execution modes act on the same decisions; the skip count is logged. The shard loop
+   that encodes an image (in-process, or on the torchrun rank that owns it) invalidates
+   its replaced artifacts right before writing it, so a failed load or launch deletes
+   nothing and a failure part-way through costs at most the images in flight;
 4. **dispatch**: ``num_gpus=1`` runs :func:`~slide2vec.runtime.image_shard.run_image_shard`
    fully in-process (no torchrun); ``num_gpus>1`` writes a JSON request and launches
    :mod:`slide2vec.distributed.image_worker` under torchrun, which splits the list with the
@@ -55,7 +56,7 @@ from slide2vec.runtime.feature_identity import (
     deferred_transform_record,
     pooled_feature_identity,
 )
-from slide2vec.runtime.image_shard import invalidate_image_artifacts, run_image_shard
+from slide2vec.runtime.image_shard import run_image_shard
 from slide2vec.runtime.image_specs import (
     build_image_specs_request,
     normalize_image_specs,
@@ -71,10 +72,11 @@ logger = logging.getLogger(__name__)
 class ImageResumePlan:
     """What one ``embed_images`` call encodes, reuses and invalidates, decided up front.
 
-    ``stale`` maps each pending image to the files to delete before it is encoded: its
-    sidecar, if any, then the payloads to replace. Whoever encodes the image deletes them
-    with :func:`~slide2vec.runtime.image_shard.invalidate_image_artifacts`, sidecars first,
-    so an interruption leaves it incomplete rather than certified by an old sidecar.
+    ``stale`` maps each pending image to the files to delete before it is replaced: its
+    sidecar, if any, then the payloads to replace. The shard loop that encodes the image
+    (:func:`~slide2vec.runtime.image_shard.run_image_shard`) deletes them, sidecar first,
+    right before writing it, so an interruption leaves at most the images in flight
+    incomplete, never certified by an old sidecar.
     """
 
     pending: list[ImageSpec]
@@ -292,10 +294,10 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         num_gpus=execution.num_gpus,
     )
 
-    # Whoever encodes an image invalidates its stale files once only encoding can fail, so
-    # a rejected request, a failed encoder load or a failed launch costs no earlier
-    # artifact. Only pending images have stale files: a run that encodes nothing deletes
-    # nothing.
+    # The shard loop invalidates each image's stale files right before writing it, so a
+    # rejected request, a failed encoder load or launch, or a failure part-way through
+    # costs at most the images in flight. Only pending images have stale files: a run that
+    # encodes nothing deletes nothing.
     encoded_width = None
     if remaining:
         if execution.num_gpus == 1:
@@ -355,8 +357,8 @@ def _single_width(widths, *, source: str) -> int:
 def _run_images_in_process(model, specs, *, execution, out_dir, identity, stale) -> int:
     # Loaded under the Given contract declared by embed_images, so the backend carries the
     # encoder's shipped transform — which the loader workers then apply itemwise. Loaded,
-    # like every setting resolved, before invalidating: gated weights or a bad device must
-    # not cost earlier artifacts.
+    # like every setting resolved, before anything is invalidated: gated weights or a bad
+    # device must not cost earlier artifacts.
     loaded = model._load_backend()
     settings = {
         "batch_size": int(execution.batch_size),
@@ -373,11 +375,11 @@ def _run_images_in_process(model, specs, *, execution, out_dir, identity, stale)
         # same way a distributed one does.
         emit_progress("images.batch.finished", rank=0, images=int(count))
 
-    invalidate_image_artifacts(specs, stale)
     artifacts = run_image_shard(
         specs,
         loaded=loaded,
         on_batch=_on_batch,
+        stale=stale,
         out_dir=out_dir,
         identity=identity,
         output_format=execution.output_format,
@@ -390,8 +392,9 @@ def _run_images_in_process(model, specs, *, execution, out_dir, identity, stale)
 
 
 def _run_images_distributed(model, specs, *, execution, out_dir, stale) -> int:
-    # The parent deletes nothing: each rank invalidates its own shard's stale files once its
-    # encoder is loaded, so a failed setup, launch or rank load keeps that shard's artifacts.
+    # The parent deletes nothing: each rank invalidates an image's stale files right before
+    # writing it, so a failed setup, launch, rank load or sibling rank costs at most the
+    # images in flight.
     validate_multi_gpu_execution(model, execution)
     progress_events_path = out_dir / "logs" / "image_worker.progress.jsonl"
     reset_progress_event_logs(progress_events_path)
@@ -404,7 +407,7 @@ def _run_images_distributed(model, specs, *, execution, out_dir, stale) -> int:
             "progress_events_path": str(progress_events_path),
             # Each rank that encodes writes image_result.rank<N>.json here.
             "result_dir": str(coordination_dir),
-            # The plan's invalidations, which each rank applies to its own shard.
+            # The plan's invalidations, which each rank applies image by image.
             "stale": {
                 sample_id: [str(path) for path in paths] for sample_id, paths in stale.items()
             },

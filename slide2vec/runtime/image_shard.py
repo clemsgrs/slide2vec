@@ -108,17 +108,13 @@ def _move_batch_to_device(loaded: "LoadedModel") -> Callable:
     return move
 
 
-def invalidate_image_artifacts(
-    images: Sequence["ImageSpec"], stale: Mapping[str, Sequence[str | Path]]
-) -> None:
-    """Delete the files the parent planned to invalidate for *images*, sidecars first.
+def _invalidate(paths: Sequence[str | Path]) -> None:
+    """Delete one image's planned stale files, its sidecar before any payload.
 
-    Called with the encoder loaded, right before :func:`run_image_shard`, so a run that
-    fails to load or to start keeps its earlier artifacts. Every sidecar goes before any
-    payload: an image being replaced is incomplete before any of its payloads changes.
+    The image is incomplete before any of its payloads changes, so an interruption between
+    here and its new sidecar never leaves an old sidecar certifying a new payload.
     """
-    files = [Path(path) for spec in images for path in stale.get(spec.sample_id, ())]
-    for path in sorted(files, key=lambda path: not path.name.endswith(".meta.json")):
+    for path in sorted(map(Path, paths), key=lambda path: not path.name.endswith(".meta.json")):
         path.unlink(missing_ok=True)
 
 
@@ -135,6 +131,7 @@ def run_image_shard(
     num_workers: int = 4,
     prefetch_factor: int = 4,
     on_batch: Callable[[int], None] | None = None,
+    stale: Mapping[str, Sequence[str | Path]] | None = None,
 ) -> list[ImageEmbeddingArtifact]:
     """Encode + persist every image of one shard: one payload + one sidecar per image.
 
@@ -145,7 +142,11 @@ def run_image_shard(
     with the width of the vector actually written. ``identity`` is the run's feature
     identity; the transform this shard applies is added to it in every sidecar.
     ``on_batch`` is invoked with each encoded batch's image count for per-batch progress.
+    ``stale`` maps images to the files the parent planned to invalidate; each image's are
+    deleted right before its new payload is written, so a failure or teardown costs at most
+    the images of the batch in flight.
     """
+    stale = stale or {}
     pending = list(images)
     written: dict[str, ImageEmbeddingArtifact] = {}
     if pending:
@@ -185,6 +186,7 @@ def run_image_shard(
         ):
             for index, embedding in zip(indices.tolist(), embeddings):
                 spec = pending[int(index)]
+                _invalidate(stale.get(spec.sample_id, ()))
                 # ``clone`` before persisting: each row is a view onto the whole batch's
                 # storage, and torch.save serializes a tensor's *storage*, so saving the
                 # view unclipped would write the entire batch into every artifact.

@@ -27,7 +27,7 @@ def get_args_parser(add_help: bool = True):
 def main(argv=None) -> int:
     from slide2vec.progress import emit_progress
     from slide2vec.runtime.feature_identity import pooled_feature_identity
-    from slide2vec.runtime.image_shard import invalidate_image_artifacts, run_image_shard
+    from slide2vec.runtime.image_shard import run_image_shard
     from slide2vec.runtime.image_specs import image_specs_from_request
     from slide2vec.runtime.model_settings import resolve_output_precision
     from slide2vec.runtime.serialization import deserialize_execution
@@ -50,9 +50,6 @@ def main(argv=None) -> int:
     # contract. emit_run_info=False — the run-info line is logged once by the parent.
     model._declare_given_encoder_input(emit_run_info=False)
     loaded = model._load_backend()
-    # The parent planned what to invalidate; each rank deletes only its own shard's files,
-    # once its encoder is loaded, so a launch or load that fails costs that shard nothing.
-    invalidate_image_artifacts(shard, request["stale"])
 
     with worker_progress_context(request, rank=rank):
         def _on_batch(count: int) -> None:
@@ -70,6 +67,10 @@ def main(argv=None) -> int:
             num_workers=execution.resolved_image_num_workers_per_gpu(),
             prefetch_factor=int(execution.prefetch_factor),
             on_batch=_on_batch,
+            # The parent planned what to invalidate; the shard loop deletes each image's
+            # files right before writing it, so a failed launch, load or sibling rank costs
+            # at most the images in flight.
+            stale=request["stale"],
         )
     # The parent collects artifacts without reading sidecars: report the vector width.
     result_path = Path(request["result_dir"]) / f"image_result.rank{rank.global_rank}.json"

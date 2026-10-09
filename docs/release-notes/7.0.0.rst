@@ -26,9 +26,9 @@ raises (pooled) or recomputes (dense).
   is missing or not a regular file raises ``FileNotFoundError`` before any
   artifact is deleted.
 - An image's existing artifacts are deleted only after the request is
-  validated and the encoder that re-encodes it is loaded, in-process or on the
-  torchrun rank that owns the image. A failure before then, including a failed
-  torchrun launch, leaves them unchanged.
+  validated and the image is re-encoded, right before its new payload is
+  written. A failure before then, including a failed torchrun launch or a
+  failed sibling rank, leaves them unchanged.
 - ``output_format`` is case-insensitive: ``"PT"`` writes, records and resumes
   ``pt``.
 - Source identity is the resolved path. Changed bytes at the same path are not
