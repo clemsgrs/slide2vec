@@ -18,13 +18,16 @@ raises (pooled) or recomputes (dense).
   ``ExecutionOptions(on_image_mismatch="reencode")`` replaces the image
   instead.
 - A missing ``image_path`` or ``format``, or a different ``format``,
-  re-encodes the image. A missing sidecar, ``image_path`` or ``format`` also
-  deletes the image's other-format payload.
+  re-encodes the image. A missing sidecar, ``image_path``, ``format`` or
+  feature-identity field also deletes the image's other-format payload.
 - A different recorded feature identity raises also when the sidecar records
   another ``format``.
 - When a run would delete existing artifacts, an image to encode whose source
   is missing or not a regular file raises ``FileNotFoundError`` before any
   artifact is deleted.
+- Existing artifacts are deleted only after the request is validated and, with
+  ``num_gpus=1``, the encoder is loaded. A failure before then leaves them
+  unchanged.
 - ``output_format`` is case-insensitive: ``"PT"`` writes, records and resumes
   ``pt``.
 - Source identity is the resolved path. Changed bytes at the same path are not
@@ -43,4 +46,5 @@ Breaking changes
   missing ``transform`` loads a CPU encoder to report its current value. Pass
   ``encoded_pixels=False`` for zero-tile slide outputs.
 - A completed pooled slide whose sidecar file is missing is recomputed.
-- ``ExecutionOptions`` rejects a negative ``num_workers_per_gpu``.
+- ``ExecutionOptions`` rejects a negative ``num_workers_per_gpu`` and a
+  ``batch_size`` below 1.

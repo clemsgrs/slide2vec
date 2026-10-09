@@ -382,6 +382,8 @@ class ExecutionOptions:
         object.__setattr__(self, "output_dtype", normalize_output_dtype(self.output_dtype))
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
+        if self.batch_size < 1:
+            raise ValueError("ExecutionOptions.batch_size must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
         if self.num_workers_per_gpu is not None and self.num_workers_per_gpu < 0:

@@ -250,16 +250,19 @@ class PooledResumeCheck:
             resolve_transform=self._resolve_transform,
         )
 
-    def reject_known_differences(self, recorded, *, sample_id: str, kind: str, path) -> None:
-        """Raise if *recorded* holds a value that differs from the run's identity.
+    def records_every_field(self, recorded, *, sample_id: str, kind: str, path) -> bool:
+        """Whether *recorded* holds every required field; raise on a known difference.
 
         For an artifact that will be replaced rather than reused: it does not load the
-        encoder, so a recorded transform is not compared, and missing fields are accepted.
+        encoder, so a recorded transform's value is not compared, but a missing transform
+        counts as a missing field.
         """
-        if isinstance(recorded, dict):
-            self._raise_on_known_differences(
-                recorded, sample_id=sample_id, kind=kind, path=path, resolve_transform=None
-            )
+        if not isinstance(recorded, dict):
+            return False
+        missing = self._raise_on_known_differences(
+            recorded, sample_id=sample_id, kind=kind, path=path, resolve_transform=None
+        )
+        return not missing and "transform" in recorded
 
     def _raise_on_known_differences(
         self, recorded, *, sample_id: str, kind: str, path, resolve_transform

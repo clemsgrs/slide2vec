@@ -825,6 +825,105 @@ def test_a_missing_new_source_deletes_no_earlier_artifact(tmp_path, num_gpus):
     assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
 
 
+def _replacement_request(tmp_path, request_kind, *, num_gpus=1):
+    """Write s from a.png as PT; return the image and options of a run that replaces it."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    image_stage.embed_images(
+        _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    if request_kind == "format-switch":  # invalidates the PT sidecar
+        return image_a, {"output_format": "npz"}
+    return image_b, {"on_image_mismatch": "reencode"}  # invalidates the sidecar and s.pt
+
+
+def _artifact_bytes(tmp_path) -> dict[str, bytes]:
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    return {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_an_in_process_load_failure_deletes_no_earlier_artifact(tmp_path, request_kind):
+    """The encoder is loaded before anything is invalidated (gated weights, a bad device)."""
+    image, options = _replacement_request(tmp_path, request_kind)
+    before = _artifact_bytes(tmp_path)
+    model = _FakeModel(_encoder())
+
+    def fail_to_load():
+        raise RuntimeError("simulated backend load failure")
+
+    model._load_backend = fail_to_load
+
+    with pytest.raises(RuntimeError, match="simulated backend load failure"):
+        image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+def test_an_in_process_run_loads_the_encoder_only_when_it_needs_it(tmp_path):
+    """A full resume loads only to verify the recorded transform; collection never loads."""
+    specs = _images(tmp_path, ["a", "b"])
+    first = _FakeModel(_encoder())
+    image_stage.embed_images(first, specs, execution=_execution(tmp_path))
+    resumed = _FakeModel(_encoder())
+
+    image_stage.embed_images(resumed, specs, execution=_execution(tmp_path))
+
+    assert first.loads == 1  # encoding
+    assert resumed.loads == 1  # transform verification
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+@pytest.mark.parametrize("failing", ["reset_progress_event_logs", "distributed_coordination_dir"])
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_failed_torchrun_setup_deletes_no_earlier_artifact(
+    tmp_path, num_gpus, monkeypatch, request_kind, failing
+):
+    """The torchrun request is staged in the output directory before anything is invalidated."""
+    image, options = _replacement_request(tmp_path, request_kind, num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+
+    def fail(*args, **kwargs):
+        raise PermissionError(f"simulated failure in {failing}")
+
+    monkeypatch.setattr(image_stage, failing, fail)
+    with pytest.raises(PermissionError, match="simulated failure"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("batch_size", [0, -2])
+def test_execution_options_reject_a_non_positive_batch_size(batch_size):
+    with pytest.raises(ValueError, match="batch_size"):
+        ExecutionOptions(num_gpus=1, batch_size=batch_size)
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+def test_an_unserializable_request_deletes_no_earlier_artifact(tmp_path, num_gpus):
+    """A request the torchrun ranks cannot receive fails before anything is invalidated."""
+    image, options = _replacement_request(tmp_path, "reencode", num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+
+    with pytest.raises(TypeError, match="JSON serializable"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image)],
+            # A NumPy integer passes ExecutionOptions validation but has no JSON form.
+            execution=_execution(
+                tmp_path, num_gpus=num_gpus, prefetch_factor=np.int64(4), **options
+            ),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
 @pytest.mark.parametrize("spelling", ["PT", "NPZ", "Npz"])
 def test_an_uppercase_output_format_resumes_its_own_artifacts(tmp_path, num_gpus, monkeypatch, spelling):
     """Format spelling is canonicalized once, so a run reuses what it wrote."""
@@ -1136,7 +1235,28 @@ def test_a_format_switch_still_refuses_another_encoders_artifacts(tmp_path, num_
     assert {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()} == written_at
 
 
-def test_a_format_switch_reencodes_an_image_without_a_recorded_identity(tmp_path, num_gpus):
+@pytest.mark.parametrize(
+    ("lose_identity", "encoder_name"),
+    [
+        pytest.param(
+            lambda metadata: metadata.pop("compatibility"), "other-encoder", id="no-identity"
+        ),
+        pytest.param(
+            lambda metadata: metadata["compatibility"].pop("encoder_name"),
+            "other-encoder",
+            id="no-encoder-name",
+        ),
+        pytest.param(
+            lambda metadata: metadata["compatibility"].pop("transform"),
+            "fake-encoder",
+            id="no-transform",
+        ),
+    ],
+)
+def test_a_format_switch_reencodes_an_image_without_a_recorded_identity(
+    tmp_path, num_gpus, lose_identity, encoder_name
+):
+    """Unverifiable provenance is replaced: no payload variant of it survives the switch."""
     image_a = _image(tmp_path, "a.png", seed=1)
 
     def run(model, output_format):
@@ -1146,13 +1266,18 @@ def test_a_format_switch_reencodes_an_image_without_a_recorded_identity(tmp_path
         )
         return artifact
 
+    torch.manual_seed(0)
     run(_FakeModel(_encoder()), "npz")
-    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.pop("compatibility"))
-    other = _FakeModel(_encoder(), name="other-encoder")
+    _edit_sidecar(tmp_path, "s", lose_identity)
+    torch.manual_seed(1)  # different weights: the replacement is observable
+    other = _FakeModel(_encoder(), name=encoder_name)
 
     artifact = run(other, "pt")
 
-    assert _sidecar(tmp_path, "s")["compatibility"]["encoder_name"] == "other-encoder"
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    assert sorted(path.name for path in embeddings_dir.iterdir()) == ["s.meta.json", "s.pt"]
+    assert _sidecar(tmp_path, "s")["compatibility"]["encoder_name"] == encoder_name
+    assert _sidecar(tmp_path, "s")["compatibility"]["transform"] == SHIPPED_TRANSFORM
     torch.testing.assert_close(
         torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, other, image_a)
     )

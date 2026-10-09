@@ -306,8 +306,10 @@ records the requested ``image_path`` and the full :ref:`feature identity
 <feature-identity>`. The ``.pt`` and ``.npz`` payloads share one sidecar, which
 certifies only the format it records. Before an image is replaced, its sidecar
 is deleted; the new sidecar is written last. If the sidecar is missing, records
-no known ``format`` or ``image_path``, or records another ``image_path``, both
-payload variants are deleted too.
+no known ``format`` or ``image_path``, records another ``image_path``, or lacks
+a required feature-identity field, both payload variants are deleted too.
+Nothing is deleted until the request is validated and, with ``num_gpus=1``, the
+encoder is loaded.
 
 Dense Region Grids
 ------------------
