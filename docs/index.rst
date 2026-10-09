@@ -58,6 +58,4 @@ slide, then choose the workflow below.
    :hidden:
    :caption: Release Notes
 
-   release-notes/7.0.0
-   release-notes/5.9.0
-   release-notes/5.6.0
+   GitHub releases <https://github.com/clemsgrs/slide2vec/releases>
