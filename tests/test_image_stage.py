@@ -49,21 +49,85 @@ class _FakeModel:
     has been declared, mirroring the real ``Model``.
     """
 
+    #: The latest model built per name: what a mocked torchrun rank loads for it.
+    latest: dict = {}
+
     def __init__(self, encoder, *, name: str = "fake-encoder") -> None:
         self._loaded = _loaded(encoder)
         self.name = name
         self.level = "tile"
         self._output_variant = None
         self._requested_device = "cpu"
+        self._encoder_input = None
         self.allow_non_recommended_settings = False
         self.declared_given = False
+        self.loads = 0
+        _FakeModel.latest[name] = self
+
+    @property
+    def feature_dim(self):
+        # Loads the backend and may describe slide output: collection must not use it.
+        raise AssertionError("embed_images must not read Model.feature_dim")
 
     def _declare_given_encoder_input(self, *, emit_run_info):
         self.declared_given = True
 
     def _load_backend(self):
         assert self.declared_given, "the image path must declare Given before it loads"
+        self.loads += 1
         return self._loaded
+
+
+@pytest.fixture(params=[1, 2], ids=["in-process", "torchrun"])
+def num_gpus(request, monkeypatch):
+    """Run ``embed_images`` in-process, or through mocked torchrun ranks.
+
+    The mocked launch runs the real ``image_worker.main`` once per rank, in this process,
+    with each rank loading the latest :class:`_FakeModel` of the requested name.
+    """
+    if request.param == 1:
+        return 1
+    import slide2vec.api as api
+    from slide2vec.distributed import image_worker
+
+    def rank_model(name, **kwargs):
+        parent = _FakeModel.latest[name]
+
+        def load_backend():
+            parent.rank_loads = getattr(parent, "rank_loads", 0) + 1
+            return parent._loaded
+
+        return SimpleNamespace(
+            name=name,
+            level="tile",
+            _output_variant=None,
+            _encoder_input=None,
+            allow_non_recommended_settings=False,
+            _declare_given_encoder_input=lambda *, emit_run_info: None,
+            _load_backend=load_backend,
+        )
+
+    def fake_torchrun(*, module, num_gpus, output_dir, request_path, **kwargs):
+        assert module == "slide2vec.distributed.image_worker"
+        for rank in range(num_gpus):
+            with monkeypatch.context() as env:
+                env.setenv("RANK", str(rank))
+                env.setenv("WORLD_SIZE", str(num_gpus))
+                env.setenv("LOCAL_RANK", str(rank))
+                assert image_worker.main(
+                    ["--output-dir", str(output_dir), "--request-path", str(request_path)]
+                ) == 0
+
+    monkeypatch.setattr(
+        api.Model, "from_preset", classmethod(lambda cls, name, **kwargs: rank_model(name))
+    )
+    monkeypatch.setattr(image_stage, "run_torchrun_worker", fake_torchrun)
+    monkeypatch.setattr(image_stage, "validate_multi_gpu_execution", lambda *a, **k: None)
+    monkeypatch.setattr(
+        image_stage, "_run_images_in_process",
+        lambda *a, **k: pytest.fail("num_gpus>1 must not encode in-process"),
+    )
+    return request.param
 
 
 def _images(tmp_path, names, *, width=64, height=64) -> list[ImageSpec]:
@@ -138,10 +202,15 @@ def test_embed_images_num_gpus_gt_one_launches_image_worker(tmp_path, monkeypatc
         request = json.loads(Path(request_path).read_text())
         captured.update(module=module, num_gpus=num_gpus, output_dir=output_dir, request=request)
         specs = image_specs.image_specs_from_request(request)
-        for shard in plan_contiguous_shards(specs, num_gpus):
-            run_image_shard(shard, loaded=rank_loaded, out_dir=Path(output_dir), batch_size=2,
-                            output_precision="fp32", num_workers=0,
-                            identity={"encoder_name": "fake-encoder"})
+        for rank, shard in enumerate(plan_contiguous_shards(specs, num_gpus)):
+            artifacts = run_image_shard(
+                shard, loaded=rank_loaded, out_dir=Path(output_dir), batch_size=2,
+                output_precision="fp32", num_workers=0,
+                identity={"encoder_name": "fake-encoder"},
+            )
+            Path(request["result_dir"], f"image_result.rank{rank}.json").write_text(
+                json.dumps({"feature_dim": artifacts[0].feature_dim}), encoding="utf-8"
+            )
 
     monkeypatch.setattr(image_stage, "run_torchrun_worker", _fake_run)
     monkeypatch.setattr(image_stage, "validate_multi_gpu_execution", lambda *a, **k: None)
@@ -279,30 +348,69 @@ def test_embed_images_resume_refuses_artifacts_from_a_different_transform(tmp_pa
     ) in str(error.value)
 
 
-def test_embed_images_resume_accepts_sidecars_that_lack_the_identity(tmp_path, caplog):
-    """Artifacts written before the identity existed are reused, with one warning per run."""
-    execution = ExecutionOptions(
-        output_dir=tmp_path / "out", num_gpus=1, precision="fp32", num_workers_per_gpu=0
-    )
-    specs = _images(tmp_path, ["a", "b"])
-    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=execution)
-    for spec in specs:
-        path = tmp_path / "out" / "image_embeddings" / f"{spec.sample_id}.meta.json"
-        legacy = json.loads(path.read_text(encoding="utf-8"))
-        del legacy["compatibility"]
-        path.write_text(json.dumps(legacy), encoding="utf-8")
-    model = _FakeModel(_encoder(), name="other-encoder")
-    model._load_backend = lambda: pytest.fail("no recorded transform, so no encoder to load")
+def _edit_sidecar(tmp_path, sample_id: str, edit) -> None:
+    path = tmp_path / "out" / "image_embeddings" / f"{sample_id}.meta.json"
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    edit(metadata)
+    path.write_text(json.dumps(metadata), encoding="utf-8")
 
-    with caplog.at_level("WARNING", logger="slide2vec.runtime.image_stage"):
-        artifacts = image_stage.embed_images(model, specs, execution=execution)
+
+def _payload(tmp_path, sample_id: str, output_format: str = "pt"):
+    path = tmp_path / "out" / "image_embeddings" / f"{sample_id}.{output_format}"
+    if output_format == "pt":
+        return torch.load(path, weights_only=True)
+    return torch.from_numpy(np.load(path)["features"])
+
+
+def test_embed_images_reencodes_sidecars_without_an_identity_for_another_encoder(tmp_path, num_gpus):
+    """No recorded identity, so nothing proves the old features match the new encoder."""
+    specs = _images(tmp_path, ["a", "b"])
+    torch.manual_seed(0)
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=_execution(tmp_path, num_gpus=num_gpus))
+    old = {spec.sample_id: _payload(tmp_path, spec.sample_id) for spec in specs}
+    for spec in specs:
+        _edit_sidecar(tmp_path, spec.sample_id, lambda metadata: metadata.pop("compatibility"))
+    torch.manual_seed(1)
+    other = _FakeModel(_encoder(), name="other-encoder")
+
+    artifacts = image_stage.embed_images(other, specs, execution=_execution(tmp_path, num_gpus=num_gpus))
 
     assert [artifact.sample_id for artifact in artifacts] == ["a", "b"]
-    assert [record.getMessage() for record in caplog.records] == [
-        "Resuming over 2 completed sidecar(s) that do not record encoder_name, "
-        "feature_dtype, output_variant, precision, transform; cannot verify those fields "
-        "against this run."
-    ]
+    for spec in specs:
+        assert not torch.equal(_payload(tmp_path, spec.sample_id), old[spec.sample_id])
+        assert _sidecar(tmp_path, spec.sample_id)["compatibility"]["encoder_name"] == (
+            "other-encoder"
+        )
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param(lambda metadata: metadata["compatibility"].pop("transform"), id="transform"),
+        pytest.param(
+            lambda metadata: metadata["compatibility"].pop("feature_dtype"), id="feature-dtype"
+        ),
+        pytest.param(lambda metadata: metadata.pop("image_path"), id="image-path"),
+        pytest.param(lambda metadata: metadata.update(image_path=""), id="empty-image-path"),
+        pytest.param(lambda metadata: metadata.pop("format"), id="format"),
+    ],
+)
+def test_embed_images_reencodes_an_image_with_missing_provenance(tmp_path, num_gpus, edit):
+    specs = _images(tmp_path, ["a", "b"])
+    torch.manual_seed(0)
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=_execution(tmp_path, num_gpus=num_gpus))
+    old_a, old_b = _payload(tmp_path, "a"), _payload(tmp_path, "b")
+    _edit_sidecar(tmp_path, "a", edit)
+    torch.manual_seed(1)  # same identity, different weights: a re-encode is observable
+
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=_execution(tmp_path, num_gpus=num_gpus))
+
+    assert not torch.equal(_payload(tmp_path, "a"), old_a)
+    assert torch.equal(_payload(tmp_path, "b"), old_b)
+    sidecar = _sidecar(tmp_path, "a")
+    assert sidecar["image_path"] == str(specs[0].image_path)
+    assert sidecar["format"] == "pt"
+    assert sidecar["compatibility"]["transform"] == SHIPPED_TRANSFORM
 
 
 def test_embed_images_rejects_duplicate_sample_ids(tmp_path):
@@ -410,6 +518,8 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
         ),
         "output_dir": str(tmp_path / "out"),
         "progress_events_path": None,
+        "result_dir": str(tmp_path),
+        "stale": {},
         **image_specs.build_image_specs_request(specs),
     }
     request_path = tmp_path / "image_request.json"
@@ -425,3 +535,1023 @@ def test_worker_encodes_only_its_rank_shard(tmp_path, monkeypatch):
     # World of 2 ranks: plan_contiguous_shards([a,b,c,d], 2) => rank 1 owns [c, d].
     embeddings_dir = tmp_path / "out" / "image_embeddings"
     assert sorted(p.name for p in embeddings_dir.glob("*.pt")) == ["c.pt", "d.pt"]
+    assert json.loads((tmp_path / "image_result.rank1.json").read_text()) == {
+        "feature_dim": loaded.model.encode_dim,
+        "images": 2,
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Source provenance, format-specific completion and recovery (issue #364)
+# --------------------------------------------------------------------------------------
+
+
+def _image(tmp_path, name: str, *, seed: int) -> Path:
+    path = tmp_path / "images" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pixels = np.random.default_rng(seed).integers(0, 256, size=(64, 64, 3), dtype=np.uint8)
+    Image.fromarray(pixels).save(path)
+    return path
+
+
+def _execution(tmp_path, *, num_gpus=1, output_format="pt", **kwargs) -> ExecutionOptions:
+    kwargs.setdefault("num_workers_per_gpu", 0)
+    return ExecutionOptions(
+        output_dir=tmp_path / "out", num_gpus=num_gpus, precision="fp32",
+        output_format=output_format, **kwargs,
+    )
+
+
+def test_embed_images_refuses_a_sample_repointed_to_another_image(tmp_path, num_gpus):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+
+    with pytest.raises(ValueError) as error:
+        image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_b)],
+                                 execution=_execution(tmp_path, num_gpus=num_gpus))
+
+    message = str(error.value)
+    assert "'s'" in message
+    assert str(image_a) in message
+    assert str(image_b) in message
+
+
+def test_embed_images_refuses_a_repointed_sample_when_the_format_changes_too(tmp_path, num_gpus):
+    """The sidecar is shared by both payload formats, so a format switch is no bypass."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus, output_format="pt"))
+
+    with pytest.raises(ValueError) as error:
+        image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_b)],
+                                 execution=_execution(tmp_path, num_gpus=num_gpus, output_format="npz"))
+
+    assert str(image_a) in str(error.value)
+    assert str(image_b) in str(error.value)
+    assert not (tmp_path / "out" / "image_embeddings" / "s.npz").exists()
+
+
+@pytest.mark.parametrize("policy", ["warn", "", None, "RAISE"])
+def test_execution_options_reject_an_unknown_image_mismatch_policy(policy):
+    with pytest.raises(ValueError, match="on_image_mismatch"):
+        ExecutionOptions(num_gpus=1, on_image_mismatch=policy)
+
+
+def test_image_mismatch_policy_crosses_to_the_torchrun_ranks():
+    from slide2vec.runtime.serialization import deserialize_execution, serialize_execution
+
+    execution = ExecutionOptions(num_gpus=1, on_image_mismatch="reencode")
+
+    assert ExecutionOptions(num_gpus=1).on_image_mismatch == "raise"
+    assert deserialize_execution(serialize_execution(execution)).on_image_mismatch == "reencode"
+
+
+def _reference_embedding(tmp_path, model, image_path):
+    """The image's embedding computed from scratch in its own output directory."""
+    from slide2vec.runtime.image_shard import run_image_shard
+
+    [artifact] = run_image_shard(
+        [ImageSpec(sample_id="reference", image_path=str(image_path))],
+        loaded=model._loaded, out_dir=tmp_path / "reference", batch_size=1,
+        output_precision="fp32", identity={}, num_workers=0,
+    )
+    return torch.load(artifact.path, weights_only=True)
+
+
+def test_reencode_policy_replaces_a_repointed_sample_and_skips_the_rest(tmp_path, num_gpus):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    image_c = _image(tmp_path, "c.png", seed=3)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_c)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    t_written_at = (tmp_path / "out" / "image_embeddings" / "t.pt").stat().st_mtime_ns
+
+    artifacts = image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_b), ImageSpec(sample_id="t", image_path=image_c)],
+        execution=_execution(tmp_path, num_gpus=num_gpus, on_image_mismatch="reencode"),
+    )
+
+    assert [artifact.sample_id for artifact in artifacts] == ["s", "t"]
+    torch.testing.assert_close(
+        _payload(tmp_path, "s"), _reference_embedding(tmp_path, model, image_b)
+    )
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image_b)
+    assert (tmp_path / "out" / "image_embeddings" / "t.pt").stat().st_mtime_ns == t_written_at
+
+
+def test_reencode_policy_tracks_the_source_across_format_switches(tmp_path, num_gpus):
+    """A/PT -> B/NPZ -> B/PT: the final PT holds B, never the stale A payload."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+
+    def run(image, output_format):
+        return image_stage.embed_images(
+            model,
+            [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(
+                tmp_path, num_gpus=num_gpus, output_format=output_format, on_image_mismatch="reencode"
+            ),
+        )
+
+    run(image_a, "pt")
+    run(image_b, "npz")
+    assert not (tmp_path / "out" / "image_embeddings" / "s.pt").exists()
+    [artifact] = run(image_b, "pt")
+
+    assert artifact.format == "pt"
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True),
+        _reference_embedding(tmp_path, model, image_b),
+    )
+    assert _sidecar(tmp_path, "s")["format"] == "pt"
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image_b)
+
+
+def test_a_later_validation_error_deletes_no_earlier_artifact(tmp_path, num_gpus):
+    """Validation finishes before anything is invalidated."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+    with pytest.raises(ValueError, match="Cannot resume 't'"):
+        image_stage.embed_images(
+            model,
+            # s needs a new format; t is repointed, which raises under the default policy.
+            [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_b)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format="npz"),
+        )
+
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+def test_a_rejected_multi_gpu_request_deletes_no_earlier_artifact(tmp_path, num_gpus, monkeypatch):
+    """Multi-GPU request validation also runs before anything is invalidated."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+    def reject(model, execution):
+        raise ValueError("ExecutionOptions.num_gpus=8 exceeds available CUDA devices (4)")
+
+    monkeypatch.setattr(image_stage, "validate_multi_gpu_execution", reject)
+    monkeypatch.setattr(
+        image_stage, "run_torchrun_worker",
+        lambda **kwargs: pytest.fail("a rejected request must not launch torchrun"),
+    )
+    with pytest.raises(ValueError, match="exceeds available CUDA devices"):
+        image_stage.embed_images(
+            model,
+            # s needs a new format; t is repointed and would be replaced.
+            [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_b)],
+            execution=_execution(
+                tmp_path, num_gpus=8, output_format="npz", on_image_mismatch="reencode"
+            ),
+        )
+
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+@pytest.mark.parametrize("workers", [-1, -4])
+def test_execution_options_reject_a_negative_worker_count(workers):
+    with pytest.raises(ValueError, match="num_workers_per_gpu"):
+        ExecutionOptions(num_gpus=1, num_workers_per_gpu=workers)
+
+
+def test_invalid_loader_settings_delete_no_earlier_artifact(tmp_path, num_gpus):
+    """Loader settings are request validation too: they fail before any invalidation."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+    with pytest.raises(ValueError, match="num_workers_per_gpu"):
+        image_stage.embed_images(
+            model,
+            # a format switch would invalidate the PT sidecar
+            [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(
+                tmp_path, num_gpus=num_gpus, output_format="npz", num_workers_per_gpu=-1
+            ),
+        )
+
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "request_kind", ["format-switch", "reencode-to-missing-source", "reencode-to-directory-source"]
+)
+def test_a_missing_source_deletes_no_earlier_artifact(tmp_path, num_gpus, request_kind):
+    """An image is never invalidated for a source that cannot be read to replace it."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_c = _image(tmp_path, "c.png", seed=3)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_c)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+    if request_kind == "format-switch":
+        image_a.unlink()  # e.g. a scratch copy cleaned up after extraction
+        missing, options = image_a, {"output_format": "npz"}
+    elif request_kind == "reencode-to-missing-source":
+        missing, options = tmp_path / "images" / "b.png", {"on_image_mismatch": "reencode"}
+    else:
+        missing = tmp_path / "images" / "adir"  # exists, but PIL can never open it
+        missing.mkdir()
+        options = {"on_image_mismatch": "reencode"}
+
+    with pytest.raises(FileNotFoundError) as error:
+        image_stage.embed_images(
+            model,
+            [ImageSpec(sample_id="s", image_path=missing), ImageSpec(sample_id="t", image_path=image_c)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert "'s'" in str(error.value)
+    assert str(missing) in str(error.value)
+    assert "'t'" not in str(error.value)
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+def test_a_missing_new_source_deletes_no_earlier_artifact(tmp_path, num_gpus):
+    """A new image that cannot be read must not cost another image its artifacts."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    before = {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+    missing = tmp_path / "images" / "missing.png"
+
+    with pytest.raises(FileNotFoundError) as error:
+        image_stage.embed_images(
+            model,
+            # s needs a new format, which invalidates its sidecar; "new" has no artifacts.
+            [ImageSpec(sample_id="new", image_path=missing),
+             ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format="npz"),
+        )
+
+    assert "'new'" in str(error.value)
+    assert str(missing) in str(error.value)
+    assert {path.name: path.read_bytes() for path in embeddings_dir.iterdir()} == before
+
+
+def _replacement_request(tmp_path, request_kind, *, num_gpus=1):
+    """Write s from a.png as PT; return the image and options of a run that replaces it."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    image_stage.embed_images(
+        _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    if request_kind == "format-switch":  # invalidates the PT sidecar
+        return image_a, {"output_format": "npz"}
+    return image_b, {"on_image_mismatch": "reencode"}  # invalidates the sidecar and s.pt
+
+
+def _artifact_bytes(tmp_path) -> dict[str, bytes]:
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    return {path.name: path.read_bytes() for path in embeddings_dir.iterdir()}
+
+
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_an_in_process_load_failure_deletes_no_earlier_artifact(tmp_path, request_kind):
+    """The encoder is loaded before anything is invalidated (gated weights, a bad device)."""
+    image, options = _replacement_request(tmp_path, request_kind)
+    before = _artifact_bytes(tmp_path)
+    model = _FakeModel(_encoder())
+
+    def fail_to_load():
+        raise RuntimeError("simulated backend load failure")
+
+    model._load_backend = fail_to_load
+
+    with pytest.raises(RuntimeError, match="simulated backend load failure"):
+        image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+def test_an_in_process_run_loads_the_encoder_only_when_it_needs_it(tmp_path):
+    """A full resume loads only to verify the recorded transform; collection never loads."""
+    specs = _images(tmp_path, ["a", "b"])
+    first = _FakeModel(_encoder())
+    image_stage.embed_images(first, specs, execution=_execution(tmp_path))
+    resumed = _FakeModel(_encoder())
+
+    image_stage.embed_images(resumed, specs, execution=_execution(tmp_path))
+
+    assert first.loads == 1  # encoding
+    assert resumed.loads == 1  # transform verification
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+@pytest.mark.parametrize("failing", ["reset_progress_event_logs", "distributed_coordination_dir"])
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_failed_torchrun_setup_deletes_no_earlier_artifact(
+    tmp_path, num_gpus, monkeypatch, request_kind, failing
+):
+    """The torchrun request is staged in the output directory before anything is invalidated."""
+    image, options = _replacement_request(tmp_path, request_kind, num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+
+    def fail(*args, **kwargs):
+        raise PermissionError(f"simulated failure in {failing}")
+
+    monkeypatch.setattr(image_stage, failing, fail)
+    with pytest.raises(PermissionError, match="simulated failure"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+@pytest.mark.parametrize(
+    "launch_error",
+    [
+        pytest.param(OSError(11, "Resource temporarily unavailable"), id="popen"),
+        pytest.param(RuntimeError("Distributed image feature extraction failed"), id="agent"),
+    ],
+)
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_torchrun_launch_that_starts_no_rank_deletes_no_earlier_artifact(
+    tmp_path, num_gpus, monkeypatch, request_kind, launch_error
+):
+    """Ranks invalidate image by image as they write, so a launch that starts none costs nothing."""
+    image, options = _replacement_request(tmp_path, request_kind, num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+
+    def fail_to_launch(**kwargs):
+        raise launch_error
+
+    monkeypatch.setattr(image_stage, "run_torchrun_worker", fail_to_launch)
+    with pytest.raises(type(launch_error), match=str(launch_error.args[-1])):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+def test_a_rank_load_failure_deletes_none_of_that_ranks_artifacts(tmp_path, num_gpus, monkeypatch):
+    """A rank invalidates nothing before its encoder loads: it deletes per image, at write."""
+    import os
+
+    import slide2vec.api as api
+
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(
+        model,
+        [ImageSpec(sample_id="s", image_path=image_a), ImageSpec(sample_id="t", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    before = _artifact_bytes(tmp_path)
+    rank_model = api.Model.from_preset
+
+    def from_preset(cls, name, **kwargs):
+        loaded_model = rank_model(name, **kwargs)
+        if os.environ.get("RANK") == "1":  # rank 1 owns t
+
+            def fail_to_load():
+                raise RuntimeError("simulated rank load failure")
+
+            loaded_model._load_backend = fail_to_load
+        return loaded_model
+
+    monkeypatch.setattr(api.Model, "from_preset", classmethod(from_preset))
+    with pytest.raises(RuntimeError, match="simulated rank load failure"):
+        image_stage.embed_images(
+            model,
+            [ImageSpec(sample_id="s", image_path=image_b), ImageSpec(sample_id="t", image_path=image_b)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, on_image_mismatch="reencode"),
+        )
+
+    after = _artifact_bytes(tmp_path)
+    assert {name: after.get(name) for name in ("t.pt", "t.meta.json")} == {
+        name: before[name] for name in ("t.pt", "t.meta.json")
+    }
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image_b)  # rank 0 went ahead
+
+
+class _Teardown(Exception):
+    """Stands in for the SIGTERM the torchrun agent sends sibling ranks on a rank failure."""
+
+
+def _sibling_request(tmp_path, request_kind, *, num_gpus):
+    """Write s, t, u, v as PT, each from its own image; return a replacing run's specs/options."""
+    names = ["s", "t", "u", "v"]
+    old = [_image(tmp_path, f"{name}-a.png", seed=index) for index, name in enumerate(names)]
+    image_stage.embed_images(
+        _FakeModel(_encoder()),
+        [ImageSpec(sample_id=name, image_path=path) for name, path in zip(names, old)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    if request_kind == "format-switch":  # invalidates every PT sidecar
+        sources, options = old, {"output_format": "npz"}
+    else:  # invalidates every sidecar and PT payload
+        sources = [_image(tmp_path, f"{name}-b.png", seed=10 + i) for i, name in enumerate(names)]
+        options = {"on_image_mismatch": "reencode"}
+    specs = [ImageSpec(sample_id=name, image_path=path) for name, path in zip(names, sources)]
+    return specs, options
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_sibling_rank_torn_down_before_writing_keeps_its_artifacts(
+    tmp_path, num_gpus, monkeypatch, request_kind
+):
+    """Rank 1 fails to load; the agent tears rank 0 down mid-encode. Nothing is lost."""
+    import os
+
+    import slide2vec.api as api
+    from slide2vec.distributed import image_worker
+    from slide2vec.runtime import image_shard
+
+    specs, options = _sibling_request(tmp_path, request_kind, num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+    rank_model = api.Model.from_preset
+
+    def from_preset(cls, name, **kwargs):
+        loaded_model = rank_model(name, **kwargs)
+        if os.environ.get("RANK") == "1":  # rank 1 owns u, v
+
+            def fail_to_load():
+                raise RuntimeError("simulated rank load failure")
+
+            loaded_model._load_backend = fail_to_load
+        return loaded_model
+
+    encode = image_shard.iter_forward_batches
+
+    def torn_down_encode(*args, **kwargs):
+        if os.environ.get("RANK") == "0":  # rank 0 owns s, t: killed during its first batch
+            raise _Teardown("SIGTERM from the torchrun agent")
+        return encode(*args, **kwargs)
+
+    def agent(*, module, num_gpus, output_dir, request_path, **kwargs):
+        # The real agent runs ranks concurrently; any rank failure fails the launch.
+        failures = []
+        for rank in range(num_gpus):
+            with monkeypatch.context() as env:
+                env.setenv("RANK", str(rank))
+                env.setenv("WORLD_SIZE", str(num_gpus))
+                env.setenv("LOCAL_RANK", str(rank))
+                try:
+                    image_worker.main(
+                        ["--output-dir", str(output_dir), "--request-path", str(request_path)]
+                    )
+                except Exception as error:  # noqa: BLE001
+                    failures.append(error)
+        if failures:
+            raise RuntimeError("Distributed image feature extraction failed")
+
+    monkeypatch.setattr(api.Model, "from_preset", classmethod(from_preset))
+    monkeypatch.setattr(image_shard, "iter_forward_batches", torn_down_encode)
+    monkeypatch.setattr(image_stage, "run_torchrun_worker", agent)
+    with pytest.raises(RuntimeError, match="Distributed image feature extraction failed"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), specs,
+            execution=_execution(tmp_path, num_gpus=num_gpus, **options),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("request_kind", ["format-switch", "reencode"])
+def test_a_mid_run_failure_costs_at_most_the_batch_in_flight(tmp_path, request_kind):
+    """An undecodable source in a later batch keeps every not-yet-written image's artifacts."""
+    specs, options = _sibling_request(tmp_path, request_kind, num_gpus=1)
+    output_format = options.get("output_format", "pt")
+    before = _artifact_bytes(tmp_path)
+    # u's source still exists, so planning accepts it, but it no longer decodes.
+    Path(specs[2].image_path).write_bytes(b"not an image")
+
+    with pytest.raises(PIL.UnidentifiedImageError):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), specs,
+            execution=_execution(tmp_path, batch_size=1, **options),
+        )
+
+    after = _artifact_bytes(tmp_path)
+    kept = lambda name: all(  # noqa: E731
+        after.get(key) == before[key] for key in (f"{name}.pt", f"{name}.meta.json")
+    )
+    assert kept("u") and kept("v")  # the failing image and the one never reached
+    for spec in specs[:2]:  # written before the failure, or still untouched
+        if not kept(spec.sample_id):
+            sidecar = _sidecar(tmp_path, spec.sample_id)
+            assert sidecar["format"] == output_format
+            assert sidecar["image_path"] == str(spec.image_path)
+            assert f"{spec.sample_id}.{output_format}" in after
+    assert not kept("s")  # the run made progress before the failure
+
+
+@pytest.mark.parametrize("batch_size", [0, -2])
+def test_execution_options_reject_a_non_positive_batch_size(batch_size):
+    with pytest.raises(ValueError, match="batch_size"):
+        ExecutionOptions(num_gpus=1, batch_size=batch_size)
+
+
+@pytest.mark.parametrize("num_gpus", [2], indirect=True, ids=["torchrun"])
+def test_an_unserializable_request_deletes_no_earlier_artifact(tmp_path, num_gpus):
+    """A request the torchrun ranks cannot receive fails before anything is invalidated."""
+    image, options = _replacement_request(tmp_path, "reencode", num_gpus=num_gpus)
+    before = _artifact_bytes(tmp_path)
+
+    with pytest.raises(TypeError, match="JSON serializable"):
+        image_stage.embed_images(
+            _FakeModel(_encoder()), [ImageSpec(sample_id="s", image_path=image)],
+            # A NumPy integer passes ExecutionOptions validation but has no JSON form.
+            execution=_execution(
+                tmp_path, num_gpus=num_gpus, prefetch_factor=np.int64(4), **options
+            ),
+        )
+
+    assert _artifact_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize("spelling", ["PT", "NPZ", "Npz"])
+def test_an_uppercase_output_format_resumes_its_own_artifacts(tmp_path, num_gpus, monkeypatch, spelling):
+    """Format spelling is canonicalized once, so a run reuses what it wrote."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus, output_format=spelling),
+    )
+    [first] = run()
+    canonical = spelling.lower()
+    assert first.format == canonical
+    assert first.path.name == f"s.{canonical}"
+    assert _sidecar(tmp_path, "s")["format"] == canonical
+
+    monkeypatch.setattr(image_stage, "_run_images_in_process",
+                        lambda *a, **k: pytest.fail("nothing to encode"))
+    monkeypatch.setattr(image_stage, "run_torchrun_worker",
+                        lambda **k: pytest.fail("nothing to encode"))
+    [second] = run()
+
+    assert second.format == canonical
+    assert second.path == first.path
+
+
+def _fail_once(monkeypatch, module, name):
+    original = getattr(module, name)
+    calls = {"count": 0}
+
+    def fail_first(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError(f"simulated failure in {name}")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, fail_first)
+
+
+@pytest.mark.parametrize(
+    ("module_name", "function"),
+    [
+        pytest.param("slide2vec.artifacts", "_write_metadata", id="before-sidecar"),
+        pytest.param("torch", "save", id="during-payload"),
+    ],
+)
+@pytest.mark.parametrize("output_format", ["pt", "npz"])
+def test_an_interrupted_replacement_leaves_the_image_incomplete(
+    tmp_path, num_gpus, monkeypatch, module_name, function, output_format
+):
+    """No old sidecar ever certifies a replacement payload; the next run recovers."""
+    import importlib
+
+    image_a = _image(tmp_path, "a.png", seed=1)
+    image_b = _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+    image_stage.embed_images(model, [ImageSpec(sample_id="s", image_path=image_a)],
+                             execution=_execution(tmp_path, num_gpus=num_gpus))
+    run_b = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_b)],
+        execution=_execution(
+            tmp_path, num_gpus=num_gpus, output_format=output_format,
+            on_image_mismatch="reencode",
+        ),
+    )
+    if function == "save" and output_format == "npz":
+        module_name, function = "numpy", "savez_compressed"
+    with monkeypatch.context() as patch:
+        _fail_once(patch, importlib.import_module(module_name), function)
+        with pytest.raises(OSError, match="simulated failure"):
+            run_b()
+
+    assert not (tmp_path / "out" / "image_embeddings" / "s.meta.json").exists()
+    [artifact] = run_b()
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image_b)
+    torch.testing.assert_close(
+        _payload(tmp_path, "s", output_format).to(torch.float32),
+        _reference_embedding(tmp_path, model, image_b),
+    )
+    assert artifact.format == output_format
+
+
+class _FileSystemSpy:
+    """Counts the filesystem calls ``embed_images`` makes under the artifact directory."""
+
+    def __init__(self, monkeypatch, out_dir: Path) -> None:
+        import os
+
+        self.out_dir = str(out_dir)
+        self.sidecar_reads = 0
+        self.listings = 0
+        self.probes = 0
+        self.resolves = 0
+        original_read_text = Path.read_text
+        original_scandir = os.scandir
+        original_exists = Path.exists
+        original_is_file = Path.is_file
+        original_resolve = Path.resolve
+        spy = self
+
+        def read_text(path, *args, **kwargs):
+            spy.sidecar_reads += path.name.endswith(".meta.json")
+            return original_read_text(path, *args, **kwargs)
+
+        def scandir(path="."):
+            spy.listings += str(path).endswith("image_embeddings")
+            return original_scandir(path)
+
+        def probe(original):
+            def wrapped(path, *args, **kwargs):
+                spy.probes += "image_embeddings" in str(path)
+                return original(path, *args, **kwargs)
+            return wrapped
+
+        def resolve(path, *args, **kwargs):
+            spy.resolves += str(path).startswith(spy.out_dir)
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+        monkeypatch.setattr(os, "scandir", scandir)
+        monkeypatch.setattr(Path, "exists", probe(original_exists))
+        monkeypatch.setattr(Path, "is_file", probe(original_is_file))
+        monkeypatch.setattr(Path, "resolve", resolve)
+
+
+def test_collection_reads_no_sidecar_and_keeps_input_order(tmp_path, num_gpus, monkeypatch):
+    model = _FakeModel(_encoder())
+    width = int(model._loaded.model.encode_dim)
+    specs = {spec.sample_id: spec for spec in _images(tmp_path, ["a", "b", "c"])}
+    with monkeypatch.context() as patch:
+        first_run = _FileSystemSpy(patch, tmp_path / "out")
+        image_stage.embed_images(
+            model, [specs["a"], specs["b"]], execution=_execution(tmp_path, num_gpus=num_gpus)
+        )
+    _edit_sidecar(tmp_path, "b", lambda metadata: metadata.update(feature_dim=7))
+
+    with monkeypatch.context() as patch:
+        resumed_run = _FileSystemSpy(patch, tmp_path / "out")
+        artifacts = image_stage.embed_images(
+            model,
+            [specs["c"], specs["b"], specs["a"]],
+            execution=_execution(tmp_path, num_gpus=num_gpus),
+        )
+
+    assert first_run.sidecar_reads == 0
+    assert resumed_run.sidecar_reads == 2  # resume only: one read per reused image
+    assert [(a.sample_id, a.feature_dim, a.format) for a in artifacts] == [
+        ("c", width, "pt"), ("b", 7, "pt"), ("a", width, "pt"),
+    ]
+    embeddings_dir = (tmp_path / "out" / "image_embeddings").resolve()
+    for artifact in artifacts:
+        assert artifact.path == embeddings_dir / f"{artifact.sample_id}.pt"
+        assert artifact.metadata_path == embeddings_dir / f"{artifact.sample_id}.meta.json"
+        assert artifact.metadata["sample_id"] == artifact.sample_id
+
+
+def test_collection_reports_the_image_vector_width_without_loading(tmp_path, num_gpus):
+    """A slide encoder's slide width (PRISM: 1280) is not its image-vector width (2560)."""
+    model = _FakeModel(_encoder())
+    width = int(model._loaded.model.encode_dim)
+    model._loaded.feature_dim = width + 1000  # the slide output, never an image vector
+    specs = _images(tmp_path, ["a", "b", "c"])
+
+    artifacts = image_stage.embed_images(
+        model, specs, execution=_execution(tmp_path, num_gpus=num_gpus)
+    )
+
+    assert [artifact.feature_dim for artifact in artifacts] == [width] * 3
+    assert model.loads == (1 if num_gpus == 1 else 0)  # encoding only, never collection
+
+
+def test_resume_lists_the_artifacts_once_and_probes_no_image(tmp_path, num_gpus, monkeypatch):
+    model = _FakeModel(_encoder())
+    resolves = []
+    for names in (["a"], ["a", "b", "c", "d"]):
+        specs = _images(tmp_path, names)
+        image_stage.embed_images(model, specs, execution=_execution(tmp_path, num_gpus=num_gpus))
+        with monkeypatch.context() as patch:
+            spy = _FileSystemSpy(patch, tmp_path / "out")
+            image_stage.embed_images(
+                model, specs, execution=_execution(tmp_path, num_gpus=num_gpus)
+            )
+        assert spy.listings == 1
+        assert spy.probes == 0
+        resolves.append(spy.resolves)
+
+    assert resolves[0] == resolves[1]  # output-root resolution does not scale with images
+
+
+@pytest.mark.parametrize("removed", ["s.meta.json", "s.pt"], ids=["no-sidecar", "no-payload"])
+def test_an_incomplete_pair_is_reencoded(tmp_path, num_gpus, removed):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    run()
+    (tmp_path / "out" / "image_embeddings" / removed).unlink()
+
+    [artifact] = run()
+
+    assert artifact.path.exists()
+    assert artifact.metadata_path.exists()
+    assert _sidecar(tmp_path, "s")["format"] == "pt"
+
+
+def _drop_format(tmp_path):
+    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.pop("format"))
+
+
+def _unknown_format(tmp_path):
+    _edit_sidecar(tmp_path, "s", lambda metadata: metadata.update(format="h5"))
+
+
+def _drop_sidecar(tmp_path):
+    (tmp_path / "out" / "image_embeddings" / "s.meta.json").unlink()
+
+
+@pytest.mark.parametrize(
+    ("lose_provenance", "next_image"),
+    [
+        pytest.param(_drop_sidecar, "b.png", id="no-sidecar"),
+        pytest.param(_drop_format, "a.png", id="no-format"),
+        pytest.param(_unknown_format, "a.png", id="unknown-format"),
+    ],
+)
+def test_incomplete_provenance_removes_every_payload_variant(
+    tmp_path, num_gpus, lose_provenance, next_image
+):
+    """No payload of unknown provenance survives the image's re-encode, in any format."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    _image(tmp_path, "b.png", seed=2)
+    model = _FakeModel(_encoder())
+
+    def run(image, output_format):
+        return image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+
+    run(image_a, "pt")
+    run(image_a, "npz")  # s.pt stays on disk; the sidecar now certifies s.npz
+    lose_provenance(tmp_path)
+    image = tmp_path / "images" / next_image
+
+    [artifact] = run(image, "pt")
+
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    assert sorted(path.name for path in embeddings_dir.iterdir()) == ["s.meta.json", "s.pt"]
+    assert _sidecar(tmp_path, "s")["image_path"] == str(image)
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, model, image)
+    )
+
+
+def test_completion_is_specific_to_the_requested_format(tmp_path, num_gpus):
+    """The shared sidecar certifies only the format it records."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+
+    def run(output_format):
+        [artifact] = image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+        return artifact
+
+    run("pt")
+    npz = run("npz")
+    assert npz.format == "npz"
+    assert _sidecar(tmp_path, "s")["format"] == "npz"
+    npz_written_at = npz.path.stat().st_mtime_ns
+
+    pt = run("pt")  # a.pt is still on disk, but the sidecar certifies the npz payload
+
+    assert pt.format == "pt"
+    assert _sidecar(tmp_path, "s")["format"] == "pt"
+    torch.testing.assert_close(
+        torch.load(pt.path, weights_only=True), _reference_embedding(tmp_path, model, image_a)
+    )
+    assert npz.path.stat().st_mtime_ns == npz_written_at
+
+
+def test_a_format_switch_still_refuses_another_encoders_artifacts(tmp_path, num_gpus):
+    """A sidecar for the requested source records its encoder whatever format it certifies."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+
+    def run(model, output_format):
+        return image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+
+    model = _FakeModel(_encoder())
+    run(model, "pt")
+    run(model, "npz")  # both payloads on disk; the sidecar certifies s.npz
+    written_at = {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()}
+
+    with pytest.raises(ValueError) as error:
+        run(_FakeModel(_encoder(), name="other-encoder"), "pt")
+
+    assert str(error.value) == (
+        f"Cannot resume 's': the existing image embeddings at {embeddings_dir.resolve() / 's.npz'} "
+        "were computed with a different feature identity: encoder_name (recorded "
+        "'fake-encoder', requested 'other-encoder'). Re-run into a new output_dir, delete the "
+        "stale artifacts, or request the recorded values."
+    )
+    assert {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()} == written_at
+
+
+def test_a_format_switch_still_refuses_another_transforms_artifacts(tmp_path, num_gpus):
+    """A format switch compares the recorded transform too, as a reuse candidate would."""
+    from torchvision.transforms import v2
+
+    image_a = _image(tmp_path, "a.png", seed=1)
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+
+    def run(model, output_format):
+        return image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+
+    model = _FakeModel(_encoder())
+    run(model, "pt")
+    run(model, "npz")  # both payloads on disk; the sidecar certifies s.npz
+    written_at = {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()}
+    changed = _FakeModel(_encoder())
+    changed._loaded.transforms = v2.Compose([
+        v2.ToImage(),
+        v2.Resize((224, 224), antialias=True),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
+    ])
+
+    with pytest.raises(ValueError) as error:
+        run(changed, "pt")
+
+    assert f"at {embeddings_dir.resolve() / 's.npz'} were computed" in str(error.value)
+    assert "transform.resize.size (recorded [248], requested [224, 224])" in str(error.value)
+    assert {path.name: path.stat().st_mtime_ns for path in embeddings_dir.iterdir()} == written_at
+
+
+def test_format_switches_verify_the_transform_with_one_load(tmp_path):
+    """The transform is resolved once per run, however many images switch format."""
+    specs = _images(tmp_path, ["a", "b"])
+    image_stage.embed_images(_FakeModel(_encoder()), specs, execution=_execution(tmp_path))
+    switched = _FakeModel(_encoder())
+
+    image_stage.embed_images(switched, specs, execution=_execution(tmp_path, output_format="npz"))
+
+    assert switched.loads == 2  # transform verification + encoding (Model caches the backend)
+
+
+@pytest.mark.parametrize(
+    ("lose_identity", "encoder_name"),
+    [
+        pytest.param(
+            lambda metadata: metadata.pop("compatibility"), "other-encoder", id="no-identity"
+        ),
+        pytest.param(
+            lambda metadata: metadata["compatibility"].pop("encoder_name"),
+            "other-encoder",
+            id="no-encoder-name",
+        ),
+        pytest.param(
+            lambda metadata: metadata["compatibility"].pop("transform"),
+            "fake-encoder",
+            id="no-transform",
+        ),
+    ],
+)
+def test_a_format_switch_reencodes_an_image_without_a_recorded_identity(
+    tmp_path, num_gpus, lose_identity, encoder_name
+):
+    """Unverifiable provenance is replaced: no payload variant of it survives the switch."""
+    image_a = _image(tmp_path, "a.png", seed=1)
+
+    def run(model, output_format):
+        [artifact] = image_stage.embed_images(
+            model, [ImageSpec(sample_id="s", image_path=image_a)],
+            execution=_execution(tmp_path, num_gpus=num_gpus, output_format=output_format),
+        )
+        return artifact
+
+    torch.manual_seed(0)
+    run(_FakeModel(_encoder()), "npz")
+    _edit_sidecar(tmp_path, "s", lose_identity)
+    torch.manual_seed(1)  # different weights: the replacement is observable
+    other = _FakeModel(_encoder(), name=encoder_name)
+
+    artifact = run(other, "pt")
+
+    embeddings_dir = tmp_path / "out" / "image_embeddings"
+    assert sorted(path.name for path in embeddings_dir.iterdir()) == ["s.meta.json", "s.pt"]
+    assert _sidecar(tmp_path, "s")["compatibility"]["encoder_name"] == encoder_name
+    assert _sidecar(tmp_path, "s")["compatibility"]["transform"] == SHIPPED_TRANSFORM
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, other, image_a)
+    )
+
+
+@pytest.mark.parametrize("name", ["s.pt", "s.meta.json"], ids=["payload", "sidecar"])
+def test_a_dangling_artifact_symlink_is_reencoded(tmp_path, num_gpus, name):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    run()
+    link = tmp_path / "out" / "image_embeddings" / name
+    target = tmp_path / "elsewhere" / name
+    target.parent.mkdir()
+    link.rename(target)
+    link.symlink_to(target)
+    target.unlink()
+
+    [artifact] = run()
+
+    torch.testing.assert_close(
+        torch.load(artifact.path, weights_only=True), _reference_embedding(tmp_path, model, image_a)
+    )
+    assert artifact.metadata["image_path"] == str(image_a)
+
+
+def test_a_payload_symlink_to_a_file_is_reused(tmp_path, num_gpus):
+    image_a = _image(tmp_path, "a.png", seed=1)
+    model = _FakeModel(_encoder())
+    run = lambda: image_stage.embed_images(  # noqa: E731
+        model, [ImageSpec(sample_id="s", image_path=image_a)],
+        execution=_execution(tmp_path, num_gpus=num_gpus),
+    )
+    run()
+    link = tmp_path / "out" / "image_embeddings" / "s.pt"
+    target = tmp_path / "elsewhere" / "s.pt"
+    target.parent.mkdir()
+    link.rename(target)
+    link.symlink_to(target)
+
+    run()
+
+    assert link.is_symlink()

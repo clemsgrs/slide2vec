@@ -306,6 +306,9 @@ class PreprocessingConfig:
         return replace(self, mask_backend=mask_backend)
 
 
+#: Accepted values of :attr:`ExecutionOptions.on_image_mismatch`.
+IMAGE_MISMATCH_POLICIES = ("raise", "reencode")
+
 
 @dataclass(frozen=True, kw_only=True)
 class ExecutionOptions:
@@ -342,6 +345,10 @@ class ExecutionOptions:
     #: Return and persist the slide encoder's latent representations (PRISM). Encoders
     #: without latents ignore it.
     save_latents: bool = False
+    #: :meth:`Model.embed_images` only: what to do when an existing image embedding
+    #: records a different source ``image_path`` for its ``sample_id``. ``"raise"``
+    #: (default) refuses to resume; ``"reencode"`` replaces that image's artifacts.
+    on_image_mismatch: str = "raise"
 
     @classmethod
     def from_config(cls, cfg: Any, *, run_on_cpu: bool = False) -> "ExecutionOptions":
@@ -375,8 +382,18 @@ class ExecutionOptions:
         object.__setattr__(self, "output_dtype", normalize_output_dtype(self.output_dtype))
         if resolved_num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
+        if self.batch_size < 1:
+            raise ValueError("ExecutionOptions.batch_size must be at least 1")
         if self.prefetch_factor < 1:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
+        if self.num_workers_per_gpu is not None and self.num_workers_per_gpu < 0:
+            raise ValueError("ExecutionOptions.num_workers_per_gpu must be non-negative")
+        if self.on_image_mismatch not in IMAGE_MISMATCH_POLICIES:
+            raise ValueError(
+                "ExecutionOptions.on_image_mismatch must be one of "
+                f"{', '.join(repr(policy) for policy in IMAGE_MISMATCH_POLICIES)}; "
+                f"got {self.on_image_mismatch!r}"
+            )
         cap = cpu_worker_limit()
         cpu_count = os.cpu_count() or 1
         slurm_limit = slurm_cpu_limit()
@@ -694,22 +711,26 @@ class Model:
         *,
         preprocessing: PreprocessingConfig | None,
         execution: ExecutionOptions | None = None,
+        encoded_pixels: bool = True,
     ) -> dict[str, tuple[Any, Any]]:
         """Compare a pooled sidecar's ``compatibility`` block with the current recipe.
 
-        Returns ``{field: (recorded, current)}`` for differing fields held by both
-        identities. Missing fields retain the extraction resume semantics: they
-        cannot be verified and are accepted. The caller owns the policy for an
-        unrecorded identity or a difference.
+        Returns ``{field: (recorded, current)}`` for every required field that the
+        record holds with a different value or does not hold. A field the record does
+        not hold is reported as :data:`slide2vec.MISSING_FIELD`, which is distinct
+        from a recorded ``None``. An empty result means the record proves the current
+        identity. The caller owns the policy for a difference.
 
         Explicitly pass ``preprocessing=None`` for pre-cropped images, whose shipped
         transform determines geometry. Pass a :class:`PreprocessingConfig` for
         tiles read from slides; its unset fields resolve as in pooled extraction.
         ``execution`` defaults to the model's recommended precision and needs no
-        output directory.
+        output directory. The ``transform`` is required unless ``encoded_pixels`` is
+        false: pass ``encoded_pixels=False`` for a zero-tile slide, which encodes no
+        pixels and records no transform.
 
-        Only a recorded ``transform`` loads weights, on an isolated CPU model.
-        Slide and patient models load their registered tile encoder and tile output
+        Comparing the ``transform`` loads weights, on an isolated CPU model. Slide
+        and patient models load their registered tile encoder and tile output
         variant, without loading aggregation weights. This method does not change
         this model's input contract or loaded backend, encode pixels, or write files.
         """
@@ -724,6 +745,7 @@ class Model:
             dict(recorded),
             execution=resolved_execution,
             preprocessing=resolved_preprocessing,
+            encoded_pixels=encoded_pixels,
         )
 
     def prepare_dense_encoder(
@@ -1019,8 +1041,11 @@ class Model:
         decoded, preprocessed with the encoder's **shipped** transform, encoded, and written
         to ``image_embeddings/<sample_id>.pt`` plus a provenance sidecar. The run splits its
         images across all visible GPUs (``execution.num_gpus``); ``num_gpus=1`` encodes
-        fully in-process. Resume is automatic — images whose sidecar already exists are
-        skipped, and a sidecar that records a different feature identity raises. Returns
+        fully in-process. Resume is automatic: an image is skipped only when its sidecar
+        records this ``output_format``, the requested ``image_path`` and the full feature
+        identity. A different recorded feature identity raises; a different recorded
+        ``image_path`` raises unless ``execution.on_image_mismatch="reencode"``; missing
+        provenance re-encodes. Returns
         one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input image, in input
         order.
 

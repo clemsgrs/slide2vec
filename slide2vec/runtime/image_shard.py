@@ -18,8 +18,8 @@ Two things distinguish it from the pooled tile loop it otherwise reuses wholesal
   killed rank resumable at image granularity rather than losing the whole shard.
 
 Writes are atomic and sidecar-last (see :func:`~slide2vec.artifacts.write_image_embedding`),
-so a payload without a sidecar unambiguously means an interrupted image and resume trusts
-the sidecar as the done-marker.
+so a payload without a sidecar unambiguously means an interrupted image. Resume is the
+parent's job: a shard encodes exactly the images it is handed.
 
 One property of the Given regime is worth stating explicitly, because it is what makes
 batching possible at all: the encoder's shipped transform maps *every* input onto one fixed
@@ -34,15 +34,14 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from functools import partial
-from typing import TYPE_CHECKING, Callable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
 import torch
 
 from slide2vec.artifacts import (
     ImageEmbeddingArtifact,
     cast_feature_dtype,
-    image_embedding_paths,
-    load_metadata,
     write_image_embedding,
 )
 from slide2vec.data.dataset import ImageFileDataset, StackedImageCollator
@@ -58,38 +57,6 @@ from slide2vec.runtime.preprocessing import apply_transforms_itemwise
 if TYPE_CHECKING:
     from slide2vec.api import ImageSpec
     from slide2vec.runtime.types import LoadedModel
-
-
-def image_needs_encode(out_dir, spec: "ImageSpec", *, output_format: str) -> bool:
-    """Resume predicate: an image is done iff its sidecar *and* this run's payload exist.
-
-    The sidecar is written last, so its presence is the done-marker; a payload with no
-    sidecar is an interrupted write and is re-encoded. The payload is checked too because
-    the sidecar name carries no format: a rerun that switches ``output_format`` would
-    otherwise see the previous run's sidecar, skip every image, and hand back artifacts
-    pointing at payloads that were never written.
-    """
-    payload_path, sidecar_path = image_embedding_paths(
-        out_dir, sample_id=spec.sample_id, output_format=output_format
-    )
-    return not (sidecar_path.exists() and payload_path.exists())
-
-
-def image_artifact_from_disk(
-    out_dir, spec: "ImageSpec", *, output_format: str
-) -> ImageEmbeddingArtifact:
-    """Rebuild the artifact record for an image already on disk (skipped, or final collect)."""
-    payload_path, sidecar_path = image_embedding_paths(
-        out_dir, sample_id=spec.sample_id, output_format=output_format
-    )
-    metadata = load_metadata(sidecar_path)
-    return ImageEmbeddingArtifact(
-        sample_id=spec.sample_id,
-        path=payload_path,
-        metadata_path=sidecar_path,
-        format=output_format,
-        feature_dim=int(metadata["feature_dim"]),
-    )
 
 
 def image_embedding_metadata(
@@ -141,6 +108,16 @@ def _move_batch_to_device(loaded: "LoadedModel") -> Callable:
     return move
 
 
+def _invalidate(paths: Sequence[str | Path]) -> None:
+    """Delete one image's planned stale files, its sidecar before any payload.
+
+    The image is incomplete before any of its payloads changes, so an interruption between
+    here and its new sidecar never leaves an old sidecar certifying a new payload.
+    """
+    for path in sorted(map(Path, paths), key=lambda path: not path.name.endswith(".meta.json")):
+        path.unlink(missing_ok=True)
+
+
 def run_image_shard(
     images: Sequence["ImageSpec"],
     *,
@@ -154,21 +131,23 @@ def run_image_shard(
     num_workers: int = 4,
     prefetch_factor: int = 4,
     on_batch: Callable[[int], None] | None = None,
+    stale: Mapping[str, Sequence[str | Path]] | None = None,
 ) -> list[ImageEmbeddingArtifact]:
-    """Encode + persist one shard's images, one payload + one sidecar per image.
+    """Encode + persist every image of one shard: one payload + one sidecar per image.
 
-    Skips any image already complete on disk (see :func:`image_needs_encode`), encodes the
-    rest through the shared forward loop, and writes each batch's embeddings before the
-    next batch is encoded. Returns one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input
-    image in input order — freshly written or (when skipped) read back off disk.
-    ``identity`` is the run's feature identity; the transform this shard applies is added
-    to it in every sidecar. ``on_batch`` is invoked with each encoded batch's image count
-    for per-batch progress.
+    The parent decides which images need encoding before it shards them (see
+    :func:`~slide2vec.runtime.image_stage.plan_image_resume`); this loop encodes exactly
+    that work, writing each batch's embeddings before the next batch is encoded. Returns
+    one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per image, in input order,
+    with the width of the vector actually written. ``identity`` is the run's feature
+    identity; the transform this shard applies is added to it in every sidecar.
+    ``on_batch`` is invoked with each encoded batch's image count for per-batch progress.
+    ``stale`` maps images to the files the parent planned to invalidate; each image's are
+    deleted right before its new payload is written, so a failure or teardown costs at most
+    the images of the batch in flight.
     """
-    images = list(images)
-    pending = [
-        spec for spec in images if image_needs_encode(out_dir, spec, output_format=output_format)
-    ]
+    stale = stale or {}
+    pending = list(images)
     written: dict[str, ImageEmbeddingArtifact] = {}
     if pending:
         # The observed encoder input is a fact of this run, not of a previous one.
@@ -207,6 +186,7 @@ def run_image_shard(
         ):
             for index, embedding in zip(indices.tolist(), embeddings):
                 spec = pending[int(index)]
+                _invalidate(stale.get(spec.sample_id, ()))
                 # ``clone`` before persisting: each row is a view onto the whole batch's
                 # storage, and torch.save serializes a tensor's *storage*, so saving the
                 # view unclipped would write the entire batch into every artifact.
@@ -225,8 +205,4 @@ def run_image_shard(
                 )
             if on_batch is not None:
                 on_batch(int(indices.numel()))
-    return [
-        written.get(spec.sample_id)
-        or image_artifact_from_disk(out_dir, spec, output_format=output_format)
-        for spec in images
-    ]
+    return [written[spec.sample_id] for spec in pending]

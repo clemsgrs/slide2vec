@@ -25,6 +25,7 @@ from slide2vec.artifacts import (
     TileEmbeddingArtifact,
 )
 from slide2vec.runtime.dense_encode import DenseEncodeGeometry, DenseEncodeKit
+from slide2vec.runtime.feature_identity import MISSING_FIELD
 from slide2vec.encoders import (
     EncoderProviderDiagnostic,
     list_encoder_provider_diagnostics,
@@ -56,5 +57,6 @@ __all__ = [
     "DenseRegionArtifact",
     "DenseImageArtifact",
     "ImageEmbeddingArtifact",
+    "MISSING_FIELD",
     "__version__",
 ]

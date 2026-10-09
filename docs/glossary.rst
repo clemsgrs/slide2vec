@@ -40,5 +40,6 @@ The dense-image API uses the following terms consistently:
 
    compatible artifact
       A dense-image payload plus a readable sidecar whose normalized source
-      identity and extraction recipe match the current call on every field the
-      sidecar records. Only a compatible artifact is eligible for resume.
+      identity and extraction recipe match the current call on every field.
+      A sidecar that does not record a field is not compatible. Only a
+      compatible artifact is eligible for resume.

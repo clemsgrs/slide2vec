@@ -71,6 +71,7 @@ def serialize_execution(
         "save_tile_embeddings": execution.save_tile_embeddings,
         "save_slide_embeddings": execution.save_slide_embeddings,
         "save_latents": execution.save_latents,
+        "on_image_mismatch": execution.on_image_mismatch,
     }
 
 
@@ -244,4 +245,5 @@ def deserialize_execution(payload: dict[str, Any]) -> ExecutionOptions:
         save_tile_embeddings=save_tile_embeddings,
         save_slide_embeddings=save_slide_embeddings,
         save_latents=save_latents,
+        on_image_mismatch=payload.get("on_image_mismatch", "raise"),
     )

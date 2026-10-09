@@ -137,7 +137,8 @@ class ImageEmbeddingArtifact:
         return load_metadata(self.metadata_path)
 
 
-def _validate_output_format(output_format: str) -> str:
+def normalize_output_format(output_format: str) -> str:
+    """The canonical (lowercase) spelling of a supported ``output_format``."""
     normalized = output_format.lower()
     if normalized not in {"pt", "npz"}:
         raise ValueError(f"Unsupported output format: {output_format}")
@@ -403,6 +404,31 @@ def write_dense_image(
     )
 
 
+#: Payload formats an image embedding can be written in; they share one sidecar.
+IMAGE_EMBEDDING_FORMATS = ("pt", "npz")
+
+
+def image_embeddings_dir(output_dir: str | Path) -> Path:
+    """The resolved ``image_embeddings/`` directory, refusing one that escapes ``output_dir``.
+
+    A run resolves it once and names each image with :func:`image_embedding_names`.
+    """
+    output_root = Path(output_dir).expanduser().resolve()
+    embeddings_dir = (output_root / "image_embeddings").resolve()
+    if not embeddings_dir.is_relative_to(output_root):
+        raise ValueError("Image artifact path must stay within output_dir")
+    return embeddings_dir
+
+
+def image_embedding_names(sample_id: str, *, output_format: str) -> tuple[str, str]:
+    """``(payload_name, sidecar_name)`` of one image inside :func:`image_embeddings_dir`."""
+    sample_component = _validate_path_component(sample_id, field="sample_id")
+    return (
+        f"{sample_component}.{normalize_output_format(output_format)}",
+        f"{sample_component}.meta.json",
+    )
+
+
 def image_embedding_paths(
     output_dir: str | Path, *, sample_id: str, output_format: str
 ) -> tuple[Path, Path]:
@@ -410,18 +436,12 @@ def image_embedding_paths(
 
     ``image_embeddings/<sample_id>.{pt,npz}`` plus ``image_embeddings/<sample_id>.meta.json``.
     A given-geometry run has no slide, no coordinate and no annotation class — the caller's
-    ``sample_id`` is the whole identity — so the layout is flat and the resume check needs
-    nothing but the sample id.
+    ``sample_id`` is the whole identity — so the layout is flat. Both payload formats share
+    the sidecar, which records the ``format`` it certifies.
     """
-    output_root = Path(output_dir).expanduser().resolve()
-    sample_component = _validate_path_component(sample_id, field="sample_id")
-    embeddings_dir = (output_root / "image_embeddings").resolve()
-    if not embeddings_dir.is_relative_to(output_root):
-        raise ValueError("Image artifact path must stay within output_dir")
-    return (
-        embeddings_dir / f"{sample_component}.{_validate_output_format(output_format)}",
-        embeddings_dir / f"{sample_component}.meta.json",
-    )
+    payload_name, sidecar_name = image_embedding_names(sample_id, output_format=output_format)
+    embeddings_dir = image_embeddings_dir(output_dir)
+    return embeddings_dir / payload_name, embeddings_dir / sidecar_name
 
 
 def write_image_embedding(
@@ -440,7 +460,7 @@ def write_image_embedding(
     ROI write follows (:func:`write_dense_region`), and the reason a rank can be killed
     mid-shard without poisoning the output.
     """
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     payload_path, metadata_path = image_embedding_paths(
         output_dir, sample_id=sample_id, output_format=output_format
     )
@@ -520,7 +540,7 @@ def write_tile_embeddings(
     tile_index: Any | None = None,
     annotation: str | None = None,
 ) -> TileEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
     )
@@ -563,7 +583,7 @@ def write_tile_embedding_metadata(
     metadata: dict[str, Any] | None = None,
     annotation: str | None = None,
 ) -> Path:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     _, metadata_path = _setup_artifact_paths(
         output_dir, tile_embeddings_subdir(annotation), sample_id, output_format
     )
@@ -589,7 +609,7 @@ def write_slide_embeddings(
     latents: Any | None = None,
     annotation: str | None = None,
 ) -> SlideEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, slide_embeddings_subdir(annotation), sample_id, output_format
@@ -638,7 +658,7 @@ def write_patient_embeddings(
     metadata: dict[str, Any] | None = None,
     num_slides: int = 0,
 ) -> PatientEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, "patient_embeddings", patient_id, output_format
     )
@@ -677,7 +697,7 @@ def write_hierarchical_embeddings(
     metadata: dict[str, Any] | None = None,
     annotation: str | None = None,
 ) -> HierarchicalEmbeddingArtifact:
-    output_format = _validate_output_format(output_format)
+    output_format = normalize_output_format(output_format)
     annotation = structural_artifact_annotation(annotation)
     artifact_path, metadata_path = _setup_artifact_paths(
         output_dir, hierarchical_embeddings_subdir(annotation), sample_id, output_format

@@ -59,6 +59,14 @@ DEFAULT_PREPROCESSING = PreprocessingConfig()
 
 #: The one identity field sidecars recorded before ``compatibility`` existed.
 TILE_SIZE_224 = {"requested_tile_size_px": 224}
+#: The transform record stand-in backends resolve (``transforms=None`` records no step).
+TRANSFORM = {"normalize": None, "resize": None, "center_crop": None}
+#: A sidecar identity that records every field ``TILE_SIZE_224`` resume requires.
+RECORDED_224 = {**TILE_SIZE_224, "transform": TRANSFORM}
+
+
+def _recorded_transform():
+    return TRANSFORM
 
 
 def _no_transform_to_resolve():
@@ -434,8 +442,24 @@ def test_collect_distributed_pipeline_artifacts_resume_skips_completed_hierarchi
     monkeypatch,
     tmp_path: Path,
 ):
+    from slide2vec.runtime.feature_identity import pooled_feature_identity
+
     completed_slide = make_slide("slide-done")
     pending_slide = make_slide("slide-pending")
+    preprocessing = replace(
+        DEFAULT_PREPROCESSING,
+        requested_region_size_px=448,
+        region_tile_multiple=2,
+        resume=True,
+    )
+    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
+    model = SimpleNamespace(name="virchow2", level="tile")
+    identity = pooled_feature_identity(
+        model, execution=execution, preprocessing=preprocessing, transform=TRANSFORM
+    )
+    monkeypatch.setattr(
+        artifacts_collect, "deferred_transform_record", lambda *a, **k: _recorded_transform
+    )
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
         "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,tiling_status,num_tiles,coordinates_npz_path,coordinates_meta_path,feature_status,feature_path,encoder_name,output_variant,feature_kind,error,traceback\n"
@@ -448,16 +472,8 @@ def test_collect_distributed_pipeline_artifacts_resume_skips_completed_hierarchi
         np.zeros((1, 2, 4), dtype=np.float32),
         output_dir=tmp_path,
         output_format="pt",
-        metadata={"image_path": "/tmp/slide-done.svs"},
+        metadata={"image_path": "/tmp/slide-done.svs", "compatibility": identity},
     )
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        requested_region_size_px=448,
-        region_tile_multiple=2,
-        resume=True,
-    )
-    execution = ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="pt")
-    model = SimpleNamespace(name="virchow2", level="tile")
     captured = {}
 
     def fake_run_stage(**kwargs):
@@ -868,9 +884,13 @@ def test_distributed_live_updater_fans_out_multi_class_finished_slide(monkeypatc
     captured = {}
 
     def fake_run_stage(*, on_progress_event=None, **kwargs):
-        if on_progress_event is not None:
+        # Workers emit one finished event per class; the last one triggers the whole-sample update.
+        for annotation in ("tumor", "stroma"):
             on_progress_event(
-                SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"})
+                SimpleNamespace(
+                    kind="embedding.slide.finished",
+                    payload={"sample_id": "slide-a", "annotation": annotation},
+                )
             )
         # Snapshot the process_list *after* the live update but *before* the final reconcile.
         captured["after_live_update"] = pd.read_csv(process_list_path)
@@ -951,12 +971,16 @@ def test_distributed_live_updater_defers_until_all_classes_persisted(monkeypatch
     captured = {}
 
     def fake_run_stage(*, on_progress_event=None, **kwargs):
-        # First finished event: stroma's embedding not yet on disk.
-        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        # First finished event (tumor): stroma's embedding not yet on disk.
+        on_progress_event(
+            SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a", "annotation": "tumor"})
+        )
         captured["after_first_event"] = pd.read_csv(process_list_path)
         # Stroma finishes and persists, then its finished event arrives.
         write_slide_embeddings("slide-a", np.zeros((8,), dtype=np.float32), output_dir=tmp_path, annotation="stroma")
-        on_progress_event(SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a"}))
+        on_progress_event(
+            SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": "slide-a", "annotation": "stroma"})
+        )
         captured["after_second_event"] = pd.read_csv(process_list_path)
 
     monkeypatch.setattr(artifacts_collect, "run_distributed_embedding_stage", fake_run_stage)
@@ -1708,12 +1732,31 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
         "slide-b,tissue,/tmp/slide-b.svs,,auto,asap,,success,1,/tmp/slide-b.coordinates.npz,/tmp/slide-b.coordinates.meta.json,tbp,,\n",
         encoding="utf-8",
     )
+    model = SimpleNamespace(
+        name="virchow2",
+        level="tile",
+        _requested_device="cpu",
+        _declare_encoder_input=_noop_declare_encoder_input,
+        _load_backend=lambda: SimpleNamespace(
+            feature_dim=2, device="cpu", model=SimpleNamespace(), transforms=None
+        ),
+    )
+    preprocessing = replace(DEFAULT_PREPROCESSING, resume=True)
+    execution = ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1)
+    from slide2vec.runtime.feature_identity import pooled_feature_identity
+
+    identity = pooled_feature_identity(
+        model,
+        execution=execution,
+        preprocessing=tiling_pipeline.resolve_model_preprocessing(model, preprocessing),
+        transform=TRANSFORM,
+    )
     write_tile_embeddings(
         "slide-a",
         np.array([[9.0, 9.0]], dtype=np.float32),
         output_dir=tmp_path,
         output_format="npz",
-        metadata={"image_path": "/tmp/slide-a.svs"},
+        metadata={"image_path": "/tmp/slide-a.svs", "compatibility": identity},
         tile_index=np.array([0], dtype=np.int64),
     )
 
@@ -1729,19 +1772,8 @@ def test_run_pipeline_resume_skips_successful_local_embeddings(monkeypatch, tmp_
 
     monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide", fake_compute_tile_embeddings)
 
-    model = SimpleNamespace(
-        name="virchow2",
-        level="tile",
-        _requested_device="cpu",
-        _declare_encoder_input=_noop_declare_encoder_input,
-        _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
-    )
-
     result = inference.run_pipeline(
-        model,
-        slides=slides,
-        preprocessing=replace(DEFAULT_PREPROCESSING, resume=True),
-        execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
+        model, slides=slides, preprocessing=preprocessing, execution=execution
     )
 
     assert computed_sample_ids == ["slide-b"]
@@ -1763,7 +1795,13 @@ def _write_completed_tile_run(tmp_path: Path, *, recorded_tile_size_px: int) -> 
         np.array([[1.0, 2.0]], dtype=np.float32),
         output_dir=tmp_path,
         output_format="npz",
-        metadata={"requested_tile_size_px": recorded_tile_size_px, "encoder_input_size_px": 224},
+        metadata={
+            "compatibility": {
+                "requested_tile_size_px": recorded_tile_size_px,
+                "encoder_input_size_px": 224,
+                "transform": TRANSFORM,
+            }
+        },
     )
     return process_list_path
 
@@ -1785,7 +1823,7 @@ def test_resume_refuses_existing_tile_embeddings_from_a_different_tile_size(tmp_
             save_latents=False,
             resume=True,
             identity=TILE_SIZE_224,
-            resolve_transform=_no_transform_to_resolve,
+            resolve_transform=_recorded_transform,
         )
 
     assert str(error.value) == (
@@ -1811,7 +1849,7 @@ def test_resume_skips_existing_tile_embeddings_recorded_at_the_same_tile_size(tm
         save_latents=False,
         resume=True,
         identity=TILE_SIZE_224,
-        resolve_transform=_no_transform_to_resolve,
+        resolve_transform=_recorded_transform,
     )
 
     assert pending_slides == []
@@ -1842,7 +1880,9 @@ def test_run_pipeline_resume_refuses_stale_tile_size_before_embedding(monkeypatc
         level="tile",
         _requested_device="cpu",
         _declare_encoder_input=_noop_declare_encoder_input,
-        _load_backend=lambda: SimpleNamespace(feature_dim=2, device="cpu", model=SimpleNamespace()),
+        _load_backend=lambda: SimpleNamespace(
+            feature_dim=2, device="cpu", model=SimpleNamespace(), transforms=None
+        ),
     )
 
     with pytest.raises(
@@ -1874,7 +1914,10 @@ def _write_completed_slide_only_run(tmp_path: Path, *, recorded_tile_size_px: in
         metadata={
             "encoder_name": "moozy-slide",
             "encoder_level": "slide",
-            "requested_tile_size_px": recorded_tile_size_px,
+            "compatibility": {
+                "requested_tile_size_px": recorded_tile_size_px,
+                "transform": TRANSFORM,
+            },
         },
     )
     return process_list_path
@@ -1897,7 +1940,7 @@ def test_resume_refuses_existing_slide_embeddings_from_a_different_tile_size(tmp
             save_latents=False,
             resume=True,
             identity=TILE_SIZE_224,
-            resolve_transform=_no_transform_to_resolve,
+            resolve_transform=_recorded_transform,
         )
 
     assert str(error.value) == (
@@ -1923,7 +1966,7 @@ def test_resume_skips_existing_slide_embeddings_recorded_at_the_same_tile_size(t
         save_latents=False,
         resume=True,
         identity=TILE_SIZE_224,
-        resolve_transform=_no_transform_to_resolve,
+        resolve_transform=_recorded_transform,
     )
 
     assert pending_slides == []
@@ -1949,8 +1992,8 @@ def test_slide_embedding_metadata_records_the_requested_tile_size():
     }
 
 
-def test_resume_warns_when_existing_slide_embeddings_record_no_tile_size(tmp_path: Path, caplog):
-    """A pre-metadata sidecar cannot be verified; it is reused, but not silently."""
+def test_resume_recomputes_slide_embeddings_that_record_no_identity(tmp_path: Path, caplog):
+    """A sidecar without a ``compatibility`` object cannot be verified: recompute it."""
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
         "sample_id,annotation,image_path,mask_path,requested_backend,backend,"
@@ -1983,14 +2026,11 @@ def test_resume_warns_when_existing_slide_embeddings_record_no_tile_size(tmp_pat
             resolve_transform=_no_transform_to_resolve,
         )
 
-    assert pending_slides == []
-    assert (
-        "Resuming over 1 completed sidecar(s) that do not record requested_tile_size_px, "
-        "transform; cannot verify those fields against this run."
-    ) in caplog.text
+    assert [slide.sample_id for slide in pending_slides] == ["slide-a"]
+    assert caplog.records == []
 
 
-def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: Path):
+def test_resume_recomputes_an_existing_tile_embedding_without_metadata(tmp_path: Path):
     slide = make_slide("slide-a")
     process_list_path = tmp_path / "process_list.csv"
     process_list_path.write_text(
@@ -2023,8 +2063,8 @@ def test_resume_skip_accepts_existing_tile_embedding_without_metadata(tmp_path: 
         annotation=None,
     )
 
-    assert pending_slides == []
-    assert pending_tiling_results == []
+    assert pending_slides == [slide]  # no sidecar, so no provenance to verify
+    assert len(pending_tiling_results) == 1
     assert tile_artifact.feature_dim == 2
     assert tile_artifact.num_tiles == 1
 
@@ -4963,6 +5003,7 @@ def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path:
         np.zeros((8,), dtype=np.float32),
         output_dir=tmp_path,
         annotation="tumor",
+        metadata={"compatibility": RECORDED_224},
     )
 
     slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
@@ -4980,7 +5021,7 @@ def test_resume_gate_keys_slide_embeddings_by_sample_id_and_annotation(tmp_path:
         save_latents=False,
         resume=True,
         identity=TILE_SIZE_224,
-        resolve_transform=_no_transform_to_resolve,
+        resolve_transform=_recorded_transform,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]
@@ -5426,6 +5467,7 @@ def test_resume_gate_keys_hierarchical_embeddings_by_sample_id_and_annotation(tm
         np.zeros((1, 4, 8), dtype=np.float32),
         output_dir=tmp_path,
         annotation="tumor",
+        metadata={"compatibility": RECORDED_224},
     )
 
     slide = make_slide("slide-a", mask_path=Path("/tmp/slide-a-mask.png"))
@@ -5443,7 +5485,7 @@ def test_resume_gate_keys_hierarchical_embeddings_by_sample_id_and_annotation(tm
         save_latents=False,
         resume=True,
         identity=TILE_SIZE_224,
-        resolve_transform=_no_transform_to_resolve,
+        resolve_transform=_recorded_transform,
     )
 
     assert [tr.annotation for tr in pending_results] == ["stroma"]

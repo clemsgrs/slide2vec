@@ -199,10 +199,22 @@ embedding artifact per image:
    print(artifacts[0].feature_dim)  # 2560
 
 The run uses the GPUs selected by ``ExecutionOptions.num_gpus`` and resumes
-automatically when repeated with the same output directory. A resume with a
-different :ref:`feature identity <feature-identity>` raises. ``sample_id`` is the
+automatically when repeated with the same output directory. ``sample_id`` is the
 artifact's identity and must be unique within a run; slide2vec never derives
-it from the filename. Mixed-size inputs are supported: each image goes through
+it from the filename. Resume reuses an image only when its sidecar records the
+requested format, the requested ``image_path`` and the full :ref:`feature
+identity <feature-identity>`:
+
+- A different recorded :ref:`feature identity <feature-identity>` raises,
+  whatever ``format`` the sidecar records.
+- A different recorded ``image_path`` raises by default. Set
+  ``ExecutionOptions(on_image_mismatch="reencode")`` to replace that image's
+  artifacts instead.
+- Missing provenance (no ``image_path``, ``format`` or required identity
+  field) and a different ``format`` re-encode the image.
+
+Source identity is the resolved path: new bytes written at the same path are
+not detected. Mixed-size inputs are supported: each image goes through
 the encoder's shipped transform before batching. ``spacing_at_level_0`` is
 not accepted by this pooled image API; use dense extraction when physical
 spacing is part of the request.
@@ -260,13 +272,15 @@ the :class:`~slide2vec.PreprocessingConfig` used for extraction instead:
 
 Unset preprocessing fields and execution precision use the same defaults as
 extraction. The result is ``{field: (recorded, current)}``, with the same
-:ref:`feature identity <feature-identity>` comparison as resume. Missing
-fields are accepted because they cannot be verified; an empty result therefore
-does not certify fields the saved identity never recorded. The caller decides
-whether to warn, reject, or extract again.
+:ref:`feature identity <feature-identity>` comparison as resume. A required
+field the saved identity does not record is reported with
+``slide2vec.MISSING_FIELD`` as its recorded value, so an empty result
+certifies every required field. Pass ``encoded_pixels=False`` for a zero-tile
+slide, which records no ``transform``. The caller decides whether to warn,
+reject, or extract again.
 
-Comparing metadata requires no encoder weights. A recorded ``transform`` loads
-one isolated CPU encoder to compare the recipe. Slide and patient models use
+Comparing metadata requires no encoder weights. Comparing the ``transform``
+loads one isolated CPU encoder to resolve the current recipe. Slide and patient models use
 their registered tile encoder and tile output variant without loading their
 aggregation weights. The method preserves the caller's model, does not encode
 pixels or write artifacts, and needs no output directory.

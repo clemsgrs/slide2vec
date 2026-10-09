@@ -387,8 +387,8 @@ def test_run_dense_image_shard_reencodes_when_the_transform_changes(tmp_path, mo
     assert meta["compatibility"]["transform"]["normalize"]["mean"] == [0.485, 0.456, 0.406]
 
 
-def test_run_dense_image_shard_reuses_a_pair_whose_sidecar_lacks_the_transform(tmp_path):
-    """Grids written before the transform was recorded are not recomputed."""
+def test_run_dense_image_shard_recomputes_a_pair_whose_sidecar_lacks_the_transform(tmp_path):
+    """A grid whose sidecar does not record the transform cannot be verified."""
     enc = _encoder()
     spec = _spec(tmp_path, "a")
     out_dir = tmp_path / "out"
@@ -406,7 +406,8 @@ def test_run_dense_image_shard_reuses_a_pair_whose_sidecar_lacks_the_transform(t
         recipe=_recipe(), batch_size=1, num_workers=0
     )
 
-    assert second.path.stat().st_mtime_ns == written_at
+    assert second.path.stat().st_mtime_ns != written_at
+    assert "transform" in json.loads(second.metadata_path.read_text())["compatibility"]
 
 
 def test_spacing_readable_sidecar_records_the_complete_resolved_plan(

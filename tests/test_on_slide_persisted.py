@@ -210,8 +210,11 @@ def _distributed_collect(monkeypatch, tmp_path: Path, *, fake_run_stage, hook, s
     )
 
 
-def _finished_event(sample_id: str):
-    return SimpleNamespace(kind="embedding.slide.finished", payload={"sample_id": sample_id})
+def _finished_event(sample_id: str, annotation: str | None = None):
+    # Workers emit one finished event per (sample_id, annotation) work unit, carrying its annotation.
+    return SimpleNamespace(
+        kind="embedding.slide.finished", payload={"sample_id": sample_id, "annotation": annotation}
+    )
 
 
 def test_distributed_hook_fires_as_each_finished_event_is_consumed(monkeypatch, tmp_path: Path):
@@ -249,10 +252,10 @@ def test_distributed_hook_fires_once_per_annotation_artifact_for_multi_class_sam
 
     def fake_run_stage(*, on_progress_event=None, **kwargs):
         write_tile_embeddings("slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz", annotation="tumor")
-        on_progress_event(_finished_event("slide-a"))
+        on_progress_event(_finished_event("slide-a", "tumor"))
         seen_inside_stage["after_first"] = list(hook.sample_ids)
         write_tile_embeddings("slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz", annotation="stroma")
-        on_progress_event(_finished_event("slide-a"))
+        on_progress_event(_finished_event("slide-a", "stroma"))
 
     slide = make_slide("slide-a")
     _distributed_collect(monkeypatch, tmp_path, fake_run_stage=fake_run_stage, hook=hook, slides=[slide, slide])
@@ -264,8 +267,24 @@ def test_distributed_hook_fires_once_per_annotation_artifact_for_multi_class_sam
 
 
 def test_distributed_hook_skips_resume_completed_slides(monkeypatch, tmp_path: Path):
+    from slide2vec.runtime.feature_identity import pooled_feature_identity
+
     write_process_list(tmp_path / "process_list.csv", [("slide-a", "tissue", 1, "success"), ("slide-b", "tissue", 1, "tbp")])
-    write_tile_embeddings("slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz")
+    # Resume reuses only an artifact that records the run's complete feature identity.
+    transform = {"normalize": None, "resize": None, "center_crop": None}
+    monkeypatch.setattr(
+        artifacts_collect, "deferred_transform_record", lambda *a, **k: lambda: transform
+    )
+    identity = pooled_feature_identity(
+        SimpleNamespace(name="virchow2", level="tile"),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=2, output_format="npz"),
+        preprocessing=PREPROCESSING,
+        transform=transform,
+    )
+    write_tile_embeddings(
+        "slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz",
+        metadata={"compatibility": identity},
+    )
     hook = HookRecorder()
 
     def fake_run_stage(*, successful_slides, on_progress_event=None, **kwargs):
@@ -281,6 +300,56 @@ def test_distributed_hook_skips_resume_completed_slides(monkeypatch, tmp_path: P
 
     assert hook.sample_ids == ["slide-b"]
     assert [artifact.sample_id for artifact in tile_artifacts] == ["slide-a", "slide-b"]
+
+
+def test_distributed_hook_waits_for_requeued_siblings_of_a_multi_class_sample(monkeypatch, tmp_path: Path):
+    """A resumed class whose sidecar lacks provenance is recomputed, but its stale payload stays on
+    disk until rewritten. The live update must wait for that class's own finished event, not treat
+    the stale file as complete, so the hook never sees the old embedding."""
+    write_process_list(
+        tmp_path / "process_list.csv",
+        [("slide-a", "tumor", 1, "success"), ("slide-a", "stroma", 1, "success")],
+    )
+    monkeypatch.setattr(
+        artifacts_collect, "deferred_transform_record", lambda *a, **k: lambda: {"normalize": None}
+    )
+    for annotation in ("tumor", "stroma"):
+        # No ``compatibility`` block: unverifiable, so resume requeues the class.
+        write_tile_embeddings(
+            "slide-a", np.zeros((1, 2), dtype=np.float32), output_dir=tmp_path, output_format="npz",
+            annotation=annotation,
+        )
+    new_features = np.ones((1, 2), dtype=np.float32)
+    seen = {}
+
+    def hook(artifact):
+        with np.load(artifact.path) as payload:
+            seen[artifact.annotation] = {key: payload[key].copy() for key in payload.files}
+
+    def fake_run_stage(*, successful_slides, annotations, on_progress_event=None, **kwargs):
+        assert [slide.sample_id for slide in successful_slides] == ["slide-a", "slide-a"]
+        assert list(annotations) == ["tumor", "stroma"]
+        write_tile_embeddings(
+            "slide-a", new_features, output_dir=tmp_path, output_format="npz", annotation="tumor"
+        )
+        on_progress_event(_finished_event("slide-a", "tumor"))
+        seen["after_tumor"] = sorted(key for key in seen if key != "after_tumor")
+        write_tile_embeddings(
+            "slide-a", new_features, output_dir=tmp_path, output_format="npz", annotation="stroma"
+        )
+        on_progress_event(_finished_event("slide-a", "stroma"))
+
+    slide = make_slide("slide-a")
+    _distributed_collect(
+        monkeypatch, tmp_path, fake_run_stage=fake_run_stage, hook=hook, slides=[slide, slide],
+        preprocessing=replace(PREPROCESSING, resume=True),
+    )
+
+    # Stroma was still stale on disk when tumor finished: nothing fired yet.
+    assert seen.pop("after_tumor") == []
+    assert sorted(seen) == ["stroma", "tumor"]
+    for payload in seen.values():
+        assert any(np.array_equal(values, new_features) for values in payload.values())
 
 
 def test_distributed_hook_receives_hierarchical_artifact_under_hierarchical_preprocessing(monkeypatch, tmp_path: Path):

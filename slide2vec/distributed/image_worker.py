@@ -55,7 +55,7 @@ def main(argv=None) -> int:
         def _on_batch(count: int) -> None:
             emit_progress("images.batch.finished", rank=rank.global_rank, images=int(count))
 
-        run_image_shard(
+        artifacts = run_image_shard(
             shard,
             loaded=loaded,
             out_dir=output_dir,
@@ -67,7 +67,17 @@ def main(argv=None) -> int:
             num_workers=execution.resolved_image_num_workers_per_gpu(),
             prefetch_factor=int(execution.prefetch_factor),
             on_batch=_on_batch,
+            # The parent planned what to invalidate; the shard loop deletes each image's
+            # files right before writing it, so a failed launch, load or sibling rank costs
+            # at most the images in flight.
+            stale=request["stale"],
         )
+    # The parent collects artifacts without reading sidecars: report the vector width.
+    result_path = Path(request["result_dir"]) / f"image_result.rank{rank.global_rank}.json"
+    result_path.write_text(
+        json.dumps({"feature_dim": int(artifacts[0].feature_dim), "images": len(artifacts)}),
+        encoding="utf-8",
+    )
     return 0
 
 

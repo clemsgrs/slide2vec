@@ -41,7 +41,7 @@ from slide2vec.artifacts import (
     write_dense_region,
 )
 from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
-from slide2vec.runtime.feature_identity import differing_fields, transform_record
+from slide2vec.runtime.feature_identity import known_differences, transform_record
 
 if TYPE_CHECKING:
     import torch
@@ -113,7 +113,8 @@ def region_needs_encode(
 
     The sidecar is written last (D6), so its presence is the done-marker; a ``.pt`` with no
     sidecar is a crashed write and is re-encoded, and so is a sidecar whose ``.pt`` is gone.
-    A field the sidecar does not record is accepted. ``resolve_transform`` supplies the
+    A required field the sidecar does not record (including the transform when
+    ``resolve_transform`` is given) is re-encoded. ``resolve_transform`` supplies the
     transform when ``identity`` does not hold it yet; it loads the encoder, so it is called
     only when the sidecar records one.
     """
@@ -125,13 +126,12 @@ def region_needs_encode(
     recorded = load_metadata(sidecar_path).get("compatibility")
     if not isinstance(recorded, dict):
         return True
-    return bool(
-        differing_fields(
-            recorded,
-            {**region_read_compatibility(spec), **identity},
-            resolve_transform=resolve_transform,
-        )
+    differing, missing = known_differences(
+        recorded,
+        {**region_read_compatibility(spec), **identity},
+        resolve_transform=resolve_transform,
     )
+    return bool(differing or missing)
 
 
 def dense_artifact_from_disk(out_dir, spec) -> DenseRegionArtifact:

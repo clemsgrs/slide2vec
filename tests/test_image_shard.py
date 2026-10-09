@@ -184,42 +184,32 @@ def test_run_image_shard_records_the_observed_encoder_input_size(tmp_path):
     assert metadata["image_path"] == str(specs[0].image_path)
 
 
-def test_run_image_shard_skips_images_with_existing_sidecar(tmp_path):
-    """Resume: an image whose sidecar exists is not re-decoded or re-encoded."""
-    encoder = _encoder()
-    specs = [_spec(tmp_path, name, width=64, height=64) for name in ("a", "b", "c")]
-    out_dir = tmp_path / "out"
-
-    first = run_image_shard(
-        specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=2,
-        output_precision="fp32", identity=IDENTITY, num_workers=0,
-    )
-    payload_mtimes = {a.sample_id: a.path.stat().st_mtime_ns for a in first}
-
-    second = run_image_shard(
-        specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=2,
-        output_precision="fp32", identity=IDENTITY, num_workers=0,
-    )
-
-    assert [a.sample_id for a in second] == [a.sample_id for a in first]
-    assert {a.sample_id: a.path.stat().st_mtime_ns for a in second} == payload_mtimes
-
-
-def test_run_image_shard_reencodes_payload_missing_its_sidecar(tmp_path):
-    """Crash-safety: a payload with no sidecar is incomplete and is re-encoded."""
+def test_run_image_shard_encodes_every_assigned_image(tmp_path):
+    """Resume is the parent's decision: a shard re-encodes what it is handed."""
     encoder = _encoder()
     specs = [_spec(tmp_path, name, width=64, height=64) for name in ("a", "b")]
     out_dir = tmp_path / "out"
-    run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=2,
-                    output_precision="fp32", identity=IDENTITY, num_workers=0)
+    first = run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=2,
+                            output_precision="fp32", identity=IDENTITY, num_workers=0)
+    written_at = {a.sample_id: a.metadata_path.stat().st_mtime_ns for a in first}
+    encoded = []
+    loaded = _loaded(encoder)
+    original_encode = loaded.model.encode_tiles
 
-    _, sidecar_path = image_embedding_paths(out_dir, sample_id="b", output_format="pt")
-    sidecar_path.unlink()
+    def counting_encode(batch):
+        encoded.append(int(batch.shape[0]))
+        return original_encode(batch)
 
-    run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=2,
-                    output_precision="fp32", identity=IDENTITY, num_workers=0)
+    loaded.model.encode_tiles = counting_encode
 
-    assert sidecar_path.exists()
+    second = run_image_shard(specs, loaded=loaded, out_dir=out_dir, batch_size=2,
+                             output_precision="fp32", identity=IDENTITY, num_workers=0)
+
+    assert sum(encoded) == 2
+    assert [a.sample_id for a in second] == ["a", "b"]
+    assert all(
+        a.metadata_path.stat().st_mtime_ns != written_at[a.sample_id] for a in second
+    )
 
 
 def test_multi_rank_matches_single_rank(tmp_path):
@@ -249,23 +239,6 @@ def test_multi_rank_matches_single_rank(tmp_path):
         one = torch.load(single_dir / "image_embeddings" / name, weights_only=True)
         many = torch.load(multi_dir / "image_embeddings" / name, weights_only=True)
         torch.testing.assert_close(one, many)
-
-
-def test_run_image_shard_reencodes_when_the_output_format_changes(tmp_path):
-    """The sidecar name carries no format, so resume must check this run's payload too."""
-    encoder = _encoder()
-    specs = [_spec(tmp_path, "a", width=64, height=64)]
-    out_dir = tmp_path / "out"
-    run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=1,
-                    output_precision="fp32", identity=IDENTITY, num_workers=0)
-
-    artifacts = run_image_shard(specs, loaded=_loaded(encoder), out_dir=out_dir, batch_size=1,
-                               output_precision="fp32", identity=IDENTITY, output_format="npz", num_workers=0)
-
-    assert artifacts[0].path.suffix == ".npz"
-    assert artifacts[0].path.exists()
-    payload = np.load(artifacts[0].path)["features"]
-    assert payload.shape == (encoder.encode_dim,)
 
 
 def test_payload_size_is_independent_of_batch_size(tmp_path):
