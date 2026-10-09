@@ -3,7 +3,7 @@ Preprocessing
 
 Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
 geometry, tissue segmentation, annotation sampling, and previews.
-Preprocessing requires hs2p 5.1.0 or newer.
+Preprocessing requires hs2p 6.0.0 or newer.
 
 Backends
 --------
@@ -11,7 +11,7 @@ Backends
 The ``backend`` field controls which slide-reading library is used:
 
 - ``"auto"`` — tries cucim → vips → openslide → asap for WSI inputs and picks
-  the first backend that can open the path
+  the first backend that can open and decode the path
 - ``"cucim"`` — NVIDIA cuCIM for supported slide formats, including SVS and TIFF
 - ``"openslide"`` — broad format support, CPU-only
 - ``"vips"`` — libvips, good for large TIFF files
@@ -37,11 +37,10 @@ plus ``"pil"`` for PNG/JPEG masks (selected directly by ``"auto"``) and
 TIFF masks that store samples other than 8-bit unsigned (for example 16-bit
 labels), which the other readers would convert. It is
 resolved independently from the mask path, so a mask can use a different
-decoder than its slide. hs2p never silently falls back to another reader, so
-set ``mask_backend`` explicitly (e.g. ``"openslide"``) when the slide backend
-cannot decode a mask — for example a deflate-compressed label TIFF that cuCIM
-can open but not decode. It defaults to ``"auto"`` and is ignored for slides
-with no source mask.
+decoder than its slide. ``"auto"`` skips a backend that can open a mask but
+not decode it, such as cuCIM with a deflate-compressed label TIFF. An explicit
+``mask_backend`` is used as given. It defaults to ``"auto"`` and is ignored
+for slides with no source mask.
 
 The ``auto`` priority can change when hs2p or the installed backend set
 changes. Set ``backend`` and ``mask_backend`` explicitly when decoder selection
