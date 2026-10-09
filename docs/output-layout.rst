@@ -308,8 +308,8 @@ certifies only the format it records. Before an image is replaced, its sidecar
 is deleted; the new sidecar is written last. If the sidecar is missing, records
 no known ``format`` or ``image_path``, records another ``image_path``, or lacks
 a required feature-identity field, both payload variants are deleted too.
-Nothing is deleted until the request is validated and, with ``num_gpus=1``, the
-encoder is loaded.
+An image's files are deleted only after the request is validated and the encoder
+that re-encodes it is loaded, in-process or on the torchrun rank that owns it.
 
 Dense Region Grids
 ------------------

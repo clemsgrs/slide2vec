@@ -34,7 +34,8 @@ from __future__ import annotations
 
 from contextlib import nullcontext
 from functools import partial
-from typing import TYPE_CHECKING, Callable, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
 import torch
 
@@ -105,6 +106,20 @@ def _move_batch_to_device(loaded: "LoadedModel") -> Callable:
         return image
 
     return move
+
+
+def invalidate_image_artifacts(
+    images: Sequence["ImageSpec"], stale: Mapping[str, Sequence[str | Path]]
+) -> None:
+    """Delete the files the parent planned to invalidate for *images*, sidecars first.
+
+    Called with the encoder loaded, right before :func:`run_image_shard`, so a run that
+    fails to load or to start keeps its earlier artifacts. Every sidecar goes before any
+    payload: an image being replaced is incomplete before any of its payloads changes.
+    """
+    files = [Path(path) for spec in images for path in stale.get(spec.sample_id, ())]
+    for path in sorted(files, key=lambda path: not path.name.endswith(".meta.json")):
+        path.unlink(missing_ok=True)
 
 
 def run_image_shard(
