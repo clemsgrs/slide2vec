@@ -42,13 +42,32 @@ def _installed_encoder_providers() -> list[importlib_metadata.EntryPoint]:
     return sorted(providers, key=lambda provider: (provider.name, provider.value))
 
 
+def _import_encoder_modules() -> None:
+    """Import the built-in and drop-in encoder modules, which register themselves.
+
+    A read while that package is still importing (a module reading the registry at
+    module scope) would see only the modules imported so far, so discovery must not
+    complete over it. Refuse the read; the error names the cause.
+    """
+    models = import_module("slide2vec.encoders.models")
+    if not models.IMPORT_COMPLETE:
+        raise RuntimeError(
+            "The encoder registry was read while slide2vec.encoders.models was still "
+            "importing. Encoder modules register themselves at import; call "
+            "list_models() or read preset metadata from a function, not at module scope."
+        )
+
+
 class EncoderRegistry(Registry):
     """Encoder registry with one lazy, process-global discovery pass.
 
     The first read imports ``slide2vec.encoders.models`` (built-in and drop-in encoder
     modules, which register themselves) and then loads every installed provider.
     Deferring the built-in import to the first read lets an encoder module import
-    from the top-level ``slide2vec`` package without a circular import.
+    from the top-level ``slide2vec`` package without a circular import. The import
+    runs before the read claims discovery, outside the discovery lock: a thread
+    holding Python's import lock for that package then never waits on a discovery
+    owner that is itself waiting on the import.
     """
 
     def __init__(self) -> None:
@@ -61,6 +80,15 @@ class EncoderRegistry(Registry):
 
     def _ensure_plugins_discovered(self) -> None:
         current_thread = get_ident()
+        with self._discovery_condition:
+            if self._discovery_state is _DiscoveryState.COMPLETE:
+                return
+            if (
+                self._discovery_state is _DiscoveryState.RUNNING
+                and self._discovery_owner == current_thread
+            ):
+                return
+        _import_encoder_modules()
         with self._discovery_condition:
             while self._discovery_state is _DiscoveryState.RUNNING:
                 if self._discovery_owner == current_thread:
@@ -76,7 +104,6 @@ class EncoderRegistry(Registry):
 
         diagnostics: list[EncoderProviderDiagnostic] = []
         try:
-            import_module("slide2vec.encoders.models")
             for entry_point in _installed_encoder_providers():
                 entries_before_provider = dict(self._entries)
                 try:

@@ -12,7 +12,10 @@ the ``register_encoder(encode_dim=...)`` shorthand. Ways this can fail, each pin
 - ``to`` records the device but does not move the module, or does not return ``self``;
 - the shorthand produces metadata that differs from the explicit ``output_variants`` form;
 - the shorthand is accepted together with, or instead of, the explicit form without error;
-- the public names are not importable from ``slide2vec``.
+- the public names are not importable from ``slide2vec``;
+- a module that reads the registry at module scope completes discovery over the
+  built-ins imported so far, or deadlocks a concurrent direct model import against the
+  discovery owner.
 """
 
 import json
@@ -155,8 +158,89 @@ Path(os.environ["DROP_IN_WORKER_REPORT"]).write_text(json.dumps({
 """
 
 
+REENTRANT_MODULE = """
+from slide2vec import list_models
+
+PRESETS_AT_IMPORT = list_models()
+"""
+
+# A direct model import holds the package import lock while a registry read in another
+# thread wants to import the same package; the module above then reads the registry from
+# inside the import. Both threads must finish, each with the registry's refusal.
+REENTRANT_SCRIPT = """
+import threading
+
+results = {}
+
+
+def direct_import():
+    try:
+        from slide2vec.encoders.models.uni import UNI  # noqa: F401
+    except BaseException as error:
+        results["import"] = error
+    else:
+        results["import"] = None
+
+
+def registry_read():
+    from slide2vec import list_models
+
+    try:
+        list_models()
+    except BaseException as error:
+        results["read"] = error
+    else:
+        results["read"] = None
+
+
+threads = [
+    threading.Thread(target=direct_import, daemon=True),
+    threading.Thread(target=registry_read, daemon=True),
+]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join(timeout=120)
+assert not any(thread.is_alive() for thread in threads), "a thread is still blocked"
+for key in ("import", "read"):
+    error = results[key]
+    assert isinstance(error, RuntimeError), (key, repr(error))
+    assert "still importing" in str(error), (key, str(error))
+
+# The refusal is not cached as a completed discovery over a partial registry.
+from slide2vec import list_models
+
+try:
+    list_models()
+except RuntimeError as error:
+    assert "still importing" in str(error)
+else:
+    raise AssertionError("a module-scope registry read was accepted on a later read")
+"""
+
+
 def _run(script: str, *, env: dict, cwd: Path) -> None:
-    subprocess.run([sys.executable, "-c", textwrap.dedent(script)], cwd=cwd, env=env, check=True)
+    subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        cwd=cwd,
+        env=env,
+        check=True,
+        timeout=300,
+    )
+
+
+def _repository_env() -> dict:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(REPOSITORY_ROOT), env.get("PYTHONPATH")) if p
+    )
+    return env
+
+
+def _remove_module(module_path: Path) -> None:
+    module_path.unlink(missing_ok=True)
+    for cached in (MODELS_DIR / "__pycache__").glob(f"{module_path.stem}.*.pyc"):
+        cached.unlink()
 
 
 def test_drop_in_module_registers_and_encodes_in_fresh_interpreters(tmp_path: Path):
@@ -166,10 +250,7 @@ def test_drop_in_module_registers_and_encodes_in_fresh_interpreters(tmp_path: Pa
     assert "drop-in-test" not in builtin_presets
     assert any(encoder_registry.info(name)["source"].startswith("moozy") or name.startswith("moozy") for name in builtin_presets)
 
-    env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        p for p in (str(REPOSITORY_ROOT), env.get("PYTHONPATH")) if p
-    )
+    env = _repository_env()
     env["BUILTIN_PRESETS"] = json.dumps(builtin_presets)
     env["DROP_IN_OUTPUT_DIR"] = str(tmp_path / "out")
     env["DROP_IN_REPORT"] = str(tmp_path / "report.json")
@@ -181,9 +262,7 @@ def test_drop_in_module_registers_and_encodes_in_fresh_interpreters(tmp_path: Pa
         _run(CONSUMER_SCRIPT, env=env, cwd=tmp_path)
         _run(WORKER_SCRIPT, env=env, cwd=tmp_path)
     finally:
-        module_path.unlink(missing_ok=True)
-        for cached in (MODELS_DIR / "__pycache__").glob(f"{module_name}.*.pyc"):
-            cached.unlink()
+        _remove_module(module_path)
 
     expected_class = [f"slide2vec.encoders.models.{module_name}", "DropInTest"]
     report = json.loads((tmp_path / "report.json").read_text())
@@ -195,6 +274,15 @@ def test_drop_in_module_registers_and_encodes_in_fresh_interpreters(tmp_path: Pa
         "feature_dim": 8,
         "registered_class": expected_class,
     }
+
+
+def test_module_scope_registry_read_is_refused_without_deadlock(tmp_path: Path):
+    module_path = MODELS_DIR / f"zz_reentrant_{uuid.uuid4().hex[:8]}.py"
+    module_path.write_text(textwrap.dedent(REENTRANT_MODULE))
+    try:
+        _run(REENTRANT_SCRIPT, env=_repository_env(), cwd=tmp_path)
+    finally:
+        _remove_module(module_path)
 
 
 def test_underscore_modules_are_not_imported_as_encoders():
@@ -238,7 +326,9 @@ def test_torch_tile_encoder_owns_eval_device_and_transforms():
         assert tuple(encoder.encode_tiles(declared[None]).shape) == (1, 4)
 
 
-def test_register_encoder_encode_dim_shorthand_matches_explicit_output_variants():
+def test_register_encoder_encode_dim_shorthand_matches_explicit_output_variants(
+    isolated_encoder_registry,
+):
     common = dict(
         input_size=16,
         supports_variable_input_size=False,

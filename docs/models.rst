@@ -398,11 +398,13 @@ From a source checkout
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Save the file as ``slide2vec/encoders/models/my_tile_model.py``. Every module
-in that directory is imported with the package, so the preset appears in
-``list_models()``, works as ``model.name`` in YAML and on the CLI, and is
-rebuilt by every torchrun worker. Files whose name starts with an underscore are
-skipped. A file that fails to import fails ``import slide2vec``; the traceback
-names the file.
+in that directory is imported on the first registry read (``list_models()``, a
+preset lookup, loading a model), so the preset appears in ``list_models()``,
+works as ``model.name`` in YAML and on the CLI, and is rebuilt by every torchrun
+worker. Files whose name starts with an underscore are skipped. A file that fails
+to import makes that first read fail; the traceback names the file. Register at
+module scope, but call ``list_models()`` or read preset metadata only inside
+functions: a read while the directory is still importing is refused.
 
 From an installed package
 ~~~~~~~~~~~~~~~~~~~~~~~~~

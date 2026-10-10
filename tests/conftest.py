@@ -8,6 +8,21 @@ import pytest
 
 
 @pytest.fixture
+def isolated_encoder_registry(monkeypatch):
+    """Keep registrations made by one test out of the process-global encoder registry.
+
+    Built-in modules and installed providers register on the registry's first read, so
+    the snapshot is taken after that read. Restoring an earlier, empty snapshot would
+    leave discovery complete with no built-ins for the rest of the session.
+    """
+    from slide2vec.encoders import encoder_registry
+
+    encoder_registry.names()
+    monkeypatch.setattr(encoder_registry, "_entries", dict(encoder_registry._entries))
+    return encoder_registry
+
+
+@pytest.fixture
 def run_current_test_in_subprocess(request):
     """Re-run the current pytest case once in an isolated, timeout-bounded process."""
 

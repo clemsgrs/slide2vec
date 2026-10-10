@@ -15,5 +15,10 @@ __all__ = [
     if not module.name.startswith("_")
 ]
 
+IMPORT_COMPLETE = False
+"""False while the modules below are importing; the registry refuses reads until then."""
+
 for _name in __all__:
     import_module(f"{__name__}.{_name}")
+
+IMPORT_COMPLETE = True

@@ -28,7 +28,6 @@ from slide2vec.api import (  # noqa: E402
 from slide2vec.artifacts import DenseImageArtifact  # noqa: E402
 from slide2vec.encoders.base import TileEncoder  # noqa: E402
 from slide2vec.encoders.registry import (  # noqa: E402
-    encoder_registry,
     register_encoder,
 )
 from slide2vec.runtime.dense_image_reading import (  # noqa: E402
@@ -97,11 +96,8 @@ class _LiteralIdentityEncoder(TileEncoder, torch.nn.Module):
 
 
 @pytest.fixture
-def literal_encoder_registry(monkeypatch) -> str:
+def literal_encoder_registry(isolated_encoder_registry) -> str:
     """Register the oracle encoder only for one public-API test."""
-    monkeypatch.setattr(
-        encoder_registry, "_entries", dict(encoder_registry._entries)
-    )
     register_encoder(
         _LITERAL_ENCODER_NAME,
         output_variants={"default": {"encode_dim": 3}},
