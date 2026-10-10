@@ -148,8 +148,7 @@ class _HibouBase(TileEncoder):
 
 @register_encoder(
     "hibou-b",
-    output_variants={"default": {"encode_dim": 768}},
-    default_output_variant="default",
+    encode_dim=768,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=14,
@@ -166,8 +165,7 @@ class HibouB(_HibouBase):
 
 @register_encoder(
     "hibou-l",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=14,

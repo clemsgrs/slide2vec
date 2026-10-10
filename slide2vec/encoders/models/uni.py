@@ -10,8 +10,7 @@ from slide2vec.encoders.registry import register_encoder
 
 @register_encoder(
     "uni",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=16,
@@ -31,8 +30,7 @@ class UNI(TimmTileEncoder):
 
 @register_encoder(
     "uni2",
-    output_variants={"default": {"encode_dim": 1536}},
-    default_output_variant="default",
+    encode_dim=1536,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=14,

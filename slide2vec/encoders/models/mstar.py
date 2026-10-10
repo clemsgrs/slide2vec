@@ -30,8 +30,7 @@ _MSTAR_STD = (0.229, 0.224, 0.225)
 
 @register_encoder(
     "mstar",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=16,

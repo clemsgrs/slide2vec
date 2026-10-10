@@ -146,8 +146,7 @@ class _PhikonBase(TileEncoder):
 
 @register_encoder(
     "phikon",
-    output_variants={"default": {"encode_dim": 768}},
-    default_output_variant="default",
+    encode_dim=768,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=16,
@@ -165,8 +164,7 @@ class Phikon(_PhikonBase):
 
 @register_encoder(
     "phikonv2",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=16,

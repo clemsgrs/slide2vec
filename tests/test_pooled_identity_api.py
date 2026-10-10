@@ -11,7 +11,7 @@ from PIL import Image
 from torchvision.transforms import v2
 
 from slide2vec import MISSING_FIELD, ExecutionOptions, ImageSpec, Model, PreprocessingConfig
-from slide2vec.encoders import PatientEncoder, SlideEncoder, TileEncoder, encoder_registry, register_encoder
+from slide2vec.encoders import PatientEncoder, SlideEncoder, TileEncoder, register_encoder
 
 TILE_ENCODER = "identity-api-tile"
 SHIPPED_TRANSFORM = {
@@ -42,9 +42,8 @@ def _recorded_differences(differences):
 
 
 @pytest.fixture
-def tile_encoder(monkeypatch):
+def tile_encoder(monkeypatch, isolated_encoder_registry):
     """A weight-free provider with known transforms and observable device selection."""
-    monkeypatch.setattr(encoder_registry, "_entries", dict(encoder_registry._entries))
 
     @register_encoder(
         TILE_ENCODER,

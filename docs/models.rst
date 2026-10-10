@@ -350,18 +350,70 @@ download files, or access the network. Slide and patient reports include
 ``tile_encoder`` and ``tile_encoder_output_variant`` so you can preflight the
 fixed tile dependency the same way.
 
-Custom encoder plugin package
------------------------------
+.. _bring-your-own-encoder:
 
-An encoder owned outside this repository can behave exactly like a built-in
-preset. Package it as a Python distribution with a zero-argument provider in
-the ``slide2vec.encoders`` entry-point group. Installing the distribution is
-enough: the Python API and CLI discover it lazily, without a manual import.
+Bring your own encoder
+----------------------
 
-Minimal package layout
+Any encoder can be a preset. Subclass :class:`~slide2vec.TorchTileEncoder` for a
+``torch.nn.Module`` that maps ``(B, 3, H, W)`` to ``(B, D)``, or
+:class:`~slide2vec.TimmTileEncoder` for a timm model (dense grids and attention
+maps included), and register it with :func:`~slide2vec.register_encoder`. Load
+weights in the constructor, never at import time.
+
+.. code-block:: python
+
+   import torch
+
+   from slide2vec import TorchTileEncoder, register_encoder
+
+
+   @register_encoder(
+       "my-tile-model",
+       encode_dim=768,
+       input_size=224,
+       supports_variable_input_size=False,
+       supported_spacing_um=0.5,
+       precision="fp16",
+       source="/models/my-tile-model.ts",
+   )
+   class MyTileModel(TorchTileEncoder):
+       def __init__(self, *, output_variant: str | None = None):
+           model = torch.jit.load("/models/my-tile-model.ts", map_location="cpu")
+           super().__init__(
+               model,
+               encode_dim=768,
+               input_size=224,
+               mean=(0.485, 0.456, 0.406),
+               std=(0.229, 0.224, 0.225),
+               output_variant=output_variant,
+           )
+
+``mean`` and ``std`` are the model's own normalization; check its model card
+rather than assuming ImageNet values. For a timm checkpoint, copy
+``slide2vec/encoders/models/uni.py`` and change the model name, ``encode_dim``,
+``patch_size`` and spacing. Then make the module importable in one of two ways.
+
+From a source checkout
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Create these two files in a separate repository:
+Save the file as ``slide2vec/encoders/models/my_tile_model.py``. Every module
+in that directory is imported on the first registry read (``list_models()``, a
+preset lookup, loading a model), so the preset appears in ``list_models()``,
+works as ``model.name`` in YAML and on the CLI, and is rebuilt by every torchrun
+worker. Files whose name starts with an underscore are skipped. A file that fails
+to import makes that first read fail; the traceback names the file. Register at
+module scope, but call ``list_models()`` or read preset metadata only inside
+functions: a read while the directory is still importing is refused.
+
+From an installed package
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``pip install slide2vec`` or the Docker image, ship the module as its own
+distribution with a zero-argument provider in the ``slide2vec.encoders``
+entry-point group. Installing it is enough: discovery is lazy, a provider that
+raises is skipped and reported in the "Available: ..." error, and workers
+rediscover the preset by name.
 
 .. code-block:: text
 
@@ -369,9 +421,8 @@ Create these two files in a separate repository:
    ├── pyproject.toml
    └── src/
        └── my_slide2vec_encoders/
-           └── __init__.py
-
-``pyproject.toml`` declares the installed provider:
+           ├── __init__.py
+           └── tile_model.py      # the class above
 
 .. code-block:: toml
 
@@ -382,7 +433,7 @@ Create these two files in a separate repository:
    [project]
    name = "my-slide2vec-encoders"
    version = "0.1.0"
-   dependencies = ["slide2vec>=5.7", "torch", "torchvision"]
+   dependencies = ["slide2vec>=7.1", "torch", "torchvision"]
 
    [project.entry-points."slide2vec.encoders"]
    my_org = "my_slide2vec_encoders:register_encoders"
@@ -390,87 +441,15 @@ Create these two files in a separate repository:
    [tool.setuptools.packages.find]
    where = ["src"]
 
-``src/my_slide2vec_encoders/__init__.py`` implements the public Encoder
-contract and registers its static preset metadata:
+``src/my_slide2vec_encoders/__init__.py`` imports the module so its decorator
+runs. The provider stays metadata-only: no weights, no network.
 
 .. code-block:: python
 
-   from pathlib import Path
-
-   import torch
-   from torch import Tensor
-   from torchvision.transforms import v2
-
-   from slide2vec.encoders import (
-       TileEncoder,
-       register_encoder,
-       resolve_requested_output_variant,
-   )
-
-   CHECKPOINT = Path("/models/my-tile-model.ts")
-
-
-   class MyTileModel(TileEncoder):
-       def __init__(self, *, output_variant: str | None = None):
-           self._output_variant = resolve_requested_output_variant(output_variant)
-           self._device = torch.device("cpu")
-           # Loading belongs in construction, never in register_encoders().
-           self._model = torch.jit.load(CHECKPOINT, map_location="cpu").eval()
-
-       def get_transform(self):
-           # Shipped recipe, applied to given (pre-cropped) images only.
-           return v2.Compose([
-               v2.ToImage(),
-               v2.Resize((224, 224)),
-               v2.ToDtype(torch.float32, scale=True),
-               v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-           ])
-
-       def get_normalization_transform(self):
-           # Required. Photometrics only (dtype, scaling, normalization): declared
-           # slide runs read the requested tile size and encode exactly that size.
-           return v2.Compose([
-               v2.ToImage(),
-               v2.ToDtype(torch.float32, scale=True),
-               v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-           ])
-
-       def encode_tiles(self, batch: Tensor) -> Tensor:
-           return self._model(batch)
-
-       @property
-       def encode_dim(self) -> int:
-           return 768
-
-       @property
-       def device(self) -> torch.device:
-           return self._device
-
-       def to(self, device: torch.device | str):
-           self._device = torch.device(device)
-           self._model = self._model.to(self._device)
-           return self
-
-
    def register_encoders() -> None:
-       register_encoder(
-           "my-tile-model",
-           level="tile",
-           output_variants={"default": {"encode_dim": 768}},
-           default_output_variant="default",
-           input_size=224,
-           supports_variable_input_size=False,
-           supported_spacing_um=0.5,
-           precision="fp16",
-           source="/models/my-tile-model.ts",
-       )(MyTileModel)
+       from my_slide2vec_encoders import tile_model  # noqa: F401
 
-The provider must stay metadata-only: ``register_encoders()`` must not
-construct an encoder, read a checkpoint, or access the network. That work
-belongs to the encoder constructor.
-
-Install and use it
-~~~~~~~~~~~~~~~~~~
+Install and use it:
 
 .. code-block:: console
 
@@ -483,6 +462,5 @@ Install and use it
    assert "my-tile-model" in list_models()
    model = Model.from_preset("my-tile-model")
 
-The same preset name works as ``model.name`` in YAML and in the CLI. For
-distributed extraction, install the plugin distribution — and make its weights
-and credentials reachable — in the same way on every worker and node.
+For distributed extraction, install the distribution, and make its weights and
+credentials reachable, in the same way on every worker and node.

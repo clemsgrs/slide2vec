@@ -15,9 +15,8 @@ from slide2vec.encoders import (
 
 
 @pytest.fixture(autouse=True)
-def _restore_encoder_registry(monkeypatch):
+def _restore_encoder_registry(isolated_encoder_registry):
     """Keep synthetic registrations local to each test."""
-    monkeypatch.setattr(encoder_registry, "_entries", dict(encoder_registry._entries))
 
 
 class _PooledOnlyEncoder(TileEncoder):
