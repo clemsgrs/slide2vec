@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from importlib import import_module
 from importlib import metadata as importlib_metadata
 import inspect
 from threading import Condition, RLock, get_ident
@@ -42,7 +43,13 @@ def _installed_encoder_providers() -> list[importlib_metadata.EntryPoint]:
 
 
 class EncoderRegistry(Registry):
-    """Encoder registry with one lazy, process-global plugin discovery pass."""
+    """Encoder registry with one lazy, process-global discovery pass.
+
+    The first read imports ``slide2vec.encoders.models`` (built-in and drop-in encoder
+    modules, which register themselves) and then loads every installed provider.
+    Deferring the built-in import to the first read lets an encoder module import
+    from the top-level ``slide2vec`` package without a circular import.
+    """
 
     def __init__(self) -> None:
         super().__init__("encoders")
@@ -69,6 +76,7 @@ class EncoderRegistry(Registry):
 
         diagnostics: list[EncoderProviderDiagnostic] = []
         try:
+            import_module("slide2vec.encoders.models")
             for entry_point in _installed_encoder_providers():
                 entries_before_provider = dict(self._entries)
                 try:
@@ -406,8 +414,9 @@ def _validate_encoder_capability_contract(
 def register_encoder(
     name: str,
     *,
-    output_variants: dict[str, dict[str, Any]],
-    default_output_variant: str,
+    encode_dim: int | None = None,
+    output_variants: dict[str, dict[str, Any]] | None = None,
+    default_output_variant: str | None = None,
     input_size: int | None = None,
     supports_variable_input_size: bool | None = None,
     variable_input_model_kwargs: dict[str, Any] | None = None,
@@ -424,6 +433,9 @@ def register_encoder(
 
     Args:
         name: Unique encoder name (e.g. "uni2", "virchow2").
+        encode_dim: Feature dimension of an encoder with a single output. Shorthand
+            for ``output_variants={"default": {"encode_dim": encode_dim}}`` with
+            ``default_output_variant="default"``; pass one form or the other.
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
         input_size: Default final square model input size in pixels. Declared
@@ -461,6 +473,25 @@ def register_encoder(
         precision: Recommended inference precision ("fp16" or "fp32").
         source: Model source identifier (e.g. HuggingFace hub path).
     """
+    explicit_output = output_variants is not None or default_output_variant is not None
+    if encode_dim is not None and explicit_output:
+        raise ValueError(
+            f"Encoder '{name}' declares encode_dim and output_variants / "
+            "default_output_variant; pass encode_dim alone for a single output, or "
+            "output_variants with default_output_variant for named outputs."
+        )
+    if encode_dim is not None:
+        if type(encode_dim) is not int or encode_dim <= 0:
+            raise ValueError(
+                f"Encoder '{name}' must declare encode_dim as a positive int; got {encode_dim!r}."
+            )
+        output_variants = {"default": {"encode_dim": encode_dim}}
+        default_output_variant = "default"
+    if output_variants is None or default_output_variant is None:
+        raise ValueError(
+            f"Encoder '{name}' must declare encode_dim, or output_variants together "
+            "with default_output_variant."
+        )
     if default_output_variant not in output_variants:
         raise ValueError(
             f"default_output_variant '{default_output_variant}' must be present in output_variants"
