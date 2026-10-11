@@ -407,6 +407,10 @@ class ProcessorTransform:
 class Encoder(ABC):
     """Shared lifecycle contract for all encoders."""
 
+    #: Whether slide or patient aggregation accepts overlapping tiles (a tile stride
+    #: smaller than the tile size). Tile encoders ignore it.
+    supports_tile_overlap: bool = True
+
     @property
     @abstractmethod
     def encode_dim(self) -> int:

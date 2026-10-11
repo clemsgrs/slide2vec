@@ -107,20 +107,41 @@ def test_slide_encoder_aggregates_in_eval_mode(monkeypatch):
     assert torch.equal(first, second)
 
 
-def test_tiles_224px_apart_get_distinct_consecutive_grid_positions():
+@pytest.mark.parametrize("origin", [0, 224, 300])
+def test_tiles_224px_apart_get_distinct_consecutive_grid_positions(origin):
     slide_encoder = pytest.importorskip("gigapath.slide_encoder")
-    # 224px tiles at 0.5 µm on a 0.25 µm slide: 448px apart at level 0.
+    # 224px tiles at 0.5 µm on a 0.25 µm slide: 448px apart at level 0. hs2p starts
+    # each contour's grid at its bounding box, so the origin need not be a multiple
+    # of the tile size; 224 is half a tile.
     tile_size_lv0 = 448
     steps = torch.arange(16)
     grid_y, grid_x = torch.meshgrid(steps, steps, indexing="ij")
-    coordinates = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1) * tile_size_lv0
+    coordinates = origin + torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1) * tile_size_lv0
 
     grid = gigapath_module.slide_grid_coordinates(coordinates.unsqueeze(0), tile_size_lv0)
     longnet = SimpleNamespace(slide_ngrids=1000)
     positions = slide_encoder.LongNetViT.coords_to_pos(longnet, grid, 256)[0]
 
-    expected = grid_x.flatten() * 1000 + grid_y.flatten() + 1
+    first_cell = origin // tile_size_lv0
+    expected = (grid_x.flatten() + first_cell) * 1000 + grid_y.flatten() + first_cell + 1
     assert torch.equal(positions, expected)
+
+
+def test_slide_encoder_rejects_overlapping_tiles():
+    from slide2vec.api import Model, PreprocessingConfig, _validate_model_config
+    from slide2vec.runtime.slide_encode import require_supported_tile_stride
+
+    model = Model(name="gigapath-slide", device="cpu")
+    preprocessing = PreprocessingConfig(
+        requested_spacing_um=0.5, requested_tile_size_px=224, overlap=0.5
+    )
+    with pytest.raises(ValueError, match="non-overlapping tiles"):
+        _validate_model_config(model, preprocessing)
+
+    encoder = gigapath_module.GigaPathSlideEncoder.__new__(gigapath_module.GigaPathSlideEncoder)
+    require_supported_tile_stride(encoder, step_px_lv0=448, tile_size_lv0=448)
+    with pytest.raises(ValueError, match="non-overlapping tiles"):
+        require_supported_tile_stride(encoder, step_px_lv0=224, tile_size_lv0=448)
 
 
 def test_resume_does_not_reuse_slide_embeddings_without_the_aggregation_revision():

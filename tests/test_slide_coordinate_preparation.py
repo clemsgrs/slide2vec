@@ -58,6 +58,7 @@ def make_tiling_result() -> SimpleNamespace:
         x=np.array([0, 512], dtype=np.int64),
         y=np.array([0, 1024], dtype=np.int64),
         tile_size_lv0=512,
+        step_px_lv0=512,
         base_spacing_um=0.25,
         requested_spacing_um=0.5,
     )

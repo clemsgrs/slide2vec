@@ -82,10 +82,14 @@ _SLIDE_GRID_CELL_PX = 256
 def slide_grid_coordinates(coordinates: torch.Tensor, tile_size_lv0: int) -> torch.Tensor:
     """Map level-0 tile coordinates to one 256px LongNet grid cell per tile.
 
-    Raw 0.5 µm coordinates of 224px tiles would put 8 tiles in 7 cells per axis. The
-    grid index assumes the tile stride equals the tile size.
+    Raw 0.5 µm coordinates of 224px tiles would put 8 tiles in 7 cells per axis.
+    ``floor`` keeps the cells of a grid consecutive whatever its origin (hs2p starts
+    each contour's grid at its bounding box), and tiles that do not overlap always
+    get different cells. Overlapping tiles can share a cell, so the slide encoder
+    does not support tile overlap.
     """
-    return torch.round(coordinates.to(torch.float32) / tile_size_lv0) * _SLIDE_GRID_CELL_PX
+    cells = torch.div(coordinates.to(torch.long), int(tile_size_lv0), rounding_mode="floor")
+    return cells * _SLIDE_GRID_CELL_PX
 
 
 @register_encoder(
@@ -102,6 +106,8 @@ def slide_grid_coordinates(coordinates: torch.Tensor, tile_size_lv0: int) -> tor
     source=_HF_REPO_ID,
 )
 class GigaPathSlideEncoder(SlideEncoder):
+    supports_tile_overlap = False
+
     def __init__(self, *, output_variant: str | None = None):
         from gigapath.slide_encoder import create_model
 

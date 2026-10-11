@@ -1490,6 +1490,8 @@ def _validate_model_config(
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
+    if preprocessing.overlap and not encoder_registry.require(name).supports_tile_overlap:
+        raise ValueError(f"Encoder '{name}' requires non-overlapping tiles (overlap=0)")
     model._declare_encoder_input(preprocessing, emit_run_info=True)
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
     on_cpu = model._requested_device == "cpu"
