@@ -194,6 +194,7 @@ assert encoder_registry.info("private-beta") == {
     "patch_size": None,
     "tile_encoder": None,
     "tile_encoder_output_variant": None,
+    "aggregation_revision": None,
     "supported_spacing_um": [0.25, 0.5],
     "default_spacing_um": 0.5,
     "precision": "fp16",
