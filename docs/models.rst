@@ -441,8 +441,9 @@ rediscover the preset by name.
    [tool.setuptools.packages.find]
    where = ["src"]
 
-``src/my_slide2vec_encoders/__init__.py`` imports the module so its decorator
-runs. The provider stays metadata-only: no weights, no network.
+``src/my_slide2vec_encoders/__init__.py`` defines the provider, which imports
+the module so its decorator runs. The provider stays metadata-only: no weights,
+no network.
 
 .. code-block:: python
 
