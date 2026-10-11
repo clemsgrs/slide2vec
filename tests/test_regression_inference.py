@@ -1288,10 +1288,7 @@ def test_aggregate_tiles_uses_autocast_for_slide_encoding(monkeypatch, tmp_path:
 
     loaded = SimpleNamespace(
         device=torch.device("cpu"),
-        model=SimpleNamespace(
-            encode_slide=encode_slide,
-            prepare_coordinates=lambda coordinates, **_spacings: coordinates,
-        ),
+        model=SimpleNamespace(encode_slide=encode_slide),
     )
     model = SimpleNamespace(
         name="prism",

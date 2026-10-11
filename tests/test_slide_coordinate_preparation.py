@@ -7,7 +7,7 @@ import torch
 
 import slide2vec.inference as inference
 from slide2vec.api import ExecutionOptions, PreprocessingConfig
-from slide2vec.encoders.base import PatientEncoder, SlideEncoder
+from slide2vec.encoders.base import PatientEncoder
 from slide2vec.encoders.models.gigapath import GigaPathSlideEncoder
 from slide2vec.runtime import (
     distributed_stage,
@@ -53,10 +53,6 @@ class CapturingPatientEncoder(CapturingSlideEncoderMixin, PatientEncoder):
         return slide_embeddings.mean(dim=0)
 
 
-class CapturingIdentitySlideEncoder(CapturingSlideEncoderMixin, SlideEncoder):
-    pass
-
-
 def make_tiling_result() -> SimpleNamespace:
     return SimpleNamespace(
         x=np.array([0, 512], dtype=np.int64),
@@ -67,7 +63,7 @@ def make_tiling_result() -> SimpleNamespace:
     )
 
 
-def test_direct_slide_aggregation_prepares_gigapath_coordinates() -> None:
+def test_direct_slide_aggregation_passes_level0_coordinates() -> None:
     encoder = CapturingGigaPathEncoder()
     loaded = SimpleNamespace(device=torch.device("cpu"), model=encoder)
     model = SimpleNamespace(level="slide", name="gigapath-slide")
@@ -87,11 +83,11 @@ def test_direct_slide_aggregation_prepares_gigapath_coordinates() -> None:
 
     assert torch.equal(
         encoder.coordinates,
-        torch.tensor([[0, 0], [256, 512]], dtype=torch.long),
+        torch.tensor([[0, 0], [512, 1024]], dtype=torch.int),
     )
 
 
-def test_patient_pipeline_uses_shared_coordinate_preparation(
+def test_patient_pipeline_passes_level0_coordinates(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -140,7 +136,7 @@ def test_patient_pipeline_uses_shared_coordinate_preparation(
     assert encoder.coordinates.dtype == torch.int
 
 
-def test_distributed_slide_aggregation_uses_shared_coordinate_preparation(
+def test_distributed_slide_aggregation_passes_level0_coordinates(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -193,36 +189,11 @@ def test_distributed_slide_aggregation_uses_shared_coordinate_preparation(
 
     assert torch.equal(
         encoder.coordinates,
-        torch.tensor([[0, 0], [256, 512]], dtype=torch.long),
-    )
-
-
-def test_non_gigapath_slide_aggregation_retains_coordinates_with_base_identity_hook() -> None:
-    encoder = CapturingIdentitySlideEncoder()
-    loaded = SimpleNamespace(device=torch.device("cpu"), model=encoder)
-    model = SimpleNamespace(level="slide", name="identity-slide")
-
-    embedding_pipeline.aggregate_tile_embeddings_for_slide(
-        loaded,
-        model,
-        SimpleNamespace(sample_id="slide-a", image_path=Path("slide-a.svs")),
-        make_tiling_result(),
-        torch.ones((2, 4)),
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=512,
-        ),
-        execution=ExecutionOptions(precision="fp32"),
-    )
-
-    assert torch.equal(
-        encoder.coordinates,
         torch.tensor([[0, 0], [512, 1024]], dtype=torch.int),
     )
-    assert encoder.coordinates.dtype == torch.int
 
 
-def test_persisted_tile_aggregation_prepares_gigapath_coordinates(
+def test_persisted_tile_aggregation_passes_level0_coordinates(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -259,5 +230,5 @@ def test_persisted_tile_aggregation_prepares_gigapath_coordinates(
 
     assert torch.equal(
         encoder.coordinates,
-        torch.tensor([[0, 0], [256, 512]], dtype=torch.long),
+        torch.tensor([[0, 0], [512, 1024]], dtype=torch.int),
     )

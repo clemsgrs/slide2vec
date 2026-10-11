@@ -10,18 +10,25 @@ Ways this can fail:
 - ``create_model`` receives a path other than the downloaded file: it then silently
   keeps random weights;
 - the slide model stays in the training mode ``create_model`` returns it in: dropout
-  is active and two aggregations of the same tiles differ.
+  is active and two aggregations of the same tiles differ;
+- tiles that are not 256px at 0.5 µm reach LongNet as raw coordinates: its
+  ``floor(coords / 256)`` puts two 224px tiles in one grid cell;
+- resume reuses a slide embedding aggregated before that fix.
 """
 
 from __future__ import annotations
 
 import sys
 import types
+from types import SimpleNamespace
 
+import pytest
 import torch
 from huggingface_hub.errors import LocalEntryNotFoundError
 
 import slide2vec.encoders.models.gigapath as gigapath_module
+from slide2vec.api import ExecutionOptions
+from slide2vec.runtime.feature_identity import PooledResumeCheck, pooled_feature_identity
 
 
 class _DropoutSlideModel(torch.nn.Module):
@@ -94,7 +101,37 @@ def test_slide_encoder_aggregates_in_eval_mode(monkeypatch):
     generator = torch.Generator().manual_seed(0)
     tile_features = torch.randn(32, 1536, generator=generator)
     coordinates = torch.randint(0, 4096, (32, 2), generator=generator)
-    first = encoder.encode_slide(tile_features, coordinates)
-    second = encoder.encode_slide(tile_features, coordinates)
+    first = encoder.encode_slide(tile_features, coordinates, tile_size_lv0=448)
+    second = encoder.encode_slide(tile_features, coordinates, tile_size_lv0=448)
     assert first.shape == (768,)
     assert torch.equal(first, second)
+
+
+def test_tiles_224px_apart_get_distinct_consecutive_grid_positions():
+    slide_encoder = pytest.importorskip("gigapath.slide_encoder")
+    # 224px tiles at 0.5 µm on a 0.25 µm slide: 448px apart at level 0.
+    tile_size_lv0 = 448
+    steps = torch.arange(16)
+    grid_y, grid_x = torch.meshgrid(steps, steps, indexing="ij")
+    coordinates = torch.stack([grid_x.flatten(), grid_y.flatten()], dim=-1) * tile_size_lv0
+
+    grid = gigapath_module.slide_grid_coordinates(coordinates.unsqueeze(0), tile_size_lv0)
+    longnet = SimpleNamespace(slide_ngrids=1000)
+    positions = slide_encoder.LongNetViT.coords_to_pos(longnet, grid, 256)[0]
+
+    expected = grid_x.flatten() * 1000 + grid_y.flatten() + 1
+    assert torch.equal(positions, expected)
+
+
+def test_resume_does_not_reuse_slide_embeddings_without_the_aggregation_revision():
+    model = SimpleNamespace(name="gigapath-slide", level="slide")
+    transform = {"normalize": None, "resize": None, "center_crop": None}
+    identity = pooled_feature_identity(
+        model, execution=ExecutionOptions(precision="fp16"), transform=transform
+    )
+    assert identity["aggregation_revision"] == 1
+
+    check = PooledResumeCheck(identity, resolve_transform=lambda: transform)
+    before_fix = {key: value for key, value in identity.items() if key != "aggregation_revision"}
+    assert not check.reusable(before_fix, sample_id="slide-a", kind="slide", path="slide-a.pt")
+    assert check.reusable(identity, sample_id="slide-a", kind="slide", path="slide-a.pt")

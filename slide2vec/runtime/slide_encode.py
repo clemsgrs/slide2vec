@@ -67,11 +67,6 @@ def _slide_encoder_inputs(loaded: LoadedModel, tile_embeddings: torch.Tensor, ti
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
-    coordinate_tensor = loaded.model.prepare_coordinates(
-        coordinate_tensor,
-        base_spacing_um=float(tiling_result.base_spacing_um),
-        requested_spacing_um=float(tiling_result.requested_spacing_um),
-    )
     return tile_embeddings.to(loaded.device), coordinate_tensor
 
 

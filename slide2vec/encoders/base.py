@@ -424,16 +424,6 @@ class Encoder(ABC):
         """Move encoder to the given device. Returns self."""
         ...
 
-    def prepare_coordinates(
-        self,
-        coordinates: Tensor,
-        *,
-        base_spacing_um: float,
-        requested_spacing_um: float,
-    ) -> Tensor:
-        """Hook for model-specific coordinate normalization."""
-        return coordinates
-
 
 class TileEncoder(Encoder):
     """Base class for encoders that operate directly on image tiles."""

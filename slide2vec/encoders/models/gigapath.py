@@ -74,11 +74,28 @@ class GigaPath(TimmTileEncoder):
         ])
 
 
+# LongNetViT.coords_to_pos places a tile at floor(coords / 256): it expects 0.5 µm
+# coordinates of 256px tiles. create_model never overrides that tile size.
+_SLIDE_GRID_CELL_PX = 256
+
+
+def slide_grid_coordinates(coordinates: torch.Tensor, tile_size_lv0: int) -> torch.Tensor:
+    """Map level-0 tile coordinates to one 256px LongNet grid cell per tile.
+
+    Raw 0.5 µm coordinates of 224px tiles would put 8 tiles in 7 cells per axis. The
+    grid index assumes the tile stride equals the tile size.
+    """
+    return torch.round(coordinates.to(torch.float32) / tile_size_lv0) * _SLIDE_GRID_CELL_PX
+
+
 @register_encoder(
     "gigapath-slide",
     level="slide",
     tile_encoder="gigapath",
     tile_encoder_output_variant="default",
+    # 1: tile positions are grid indices (see encode_slide). Unrecorded: raw 0.5 µm
+    # coordinates, which misplace tiles that are not 256px.
+    aggregation_revision=1,
     encode_dim=768,
     supported_spacing_um=0.5,
     precision="fp16",
@@ -109,16 +126,6 @@ class GigaPathSlideEncoder(SlideEncoder):
         self._model = self._model.to(self._device)
         return self
 
-    def prepare_coordinates(
-        self,
-        coordinates: torch.Tensor,
-        *,
-        base_spacing_um: float,
-        requested_spacing_um: float,
-    ) -> torch.Tensor:
-        scale = float(base_spacing_um) / float(requested_spacing_um)
-        return torch.floor(coordinates.to(torch.float32) * scale).to(torch.long)
-
     def encode_slide(
         self,
         tile_features: torch.Tensor,
@@ -126,12 +133,13 @@ class GigaPathSlideEncoder(SlideEncoder):
         *,
         tile_size_lv0: int | None = None,
     ) -> torch.Tensor:
-        if coordinates is None:
-            raise ValueError("GigaPath slide encoding requires coordinates")
+        if coordinates is None or tile_size_lv0 is None:
+            raise ValueError("GigaPath slide encoding requires coordinates and tile_size_lv0")
         if tile_features.ndim == 2:
             tile_features = tile_features.unsqueeze(0)
         if coordinates.ndim == 2:
             coordinates = coordinates.unsqueeze(0)
+        coordinates = slide_grid_coordinates(coordinates, tile_size_lv0)
         # prov-gigapath's reference usage feeds fp32 tile embeddings under autocast;
         # fp16 input risks dtype mismatches in ops autocast does not cover.
         tile_features = tile_features.float()

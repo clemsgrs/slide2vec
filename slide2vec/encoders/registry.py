@@ -451,6 +451,7 @@ def register_encoder(
     level: str = "tile",
     tile_encoder: str | None = None,
     tile_encoder_output_variant: str | None = None,
+    aggregation_revision: int | None = None,
     supported_spacing_um: float | list[float] | None,
     default_spacing_um: float | None = None,
     precision: str = "fp16",
@@ -481,6 +482,10 @@ def register_encoder(
         level: Encoder output level ("tile", "slide", or "patient").
         tile_encoder: Registered tile encoder dependency for slide/patient models.
         tile_encoder_output_variant: Fixed tile output variant for slide/patient models.
+        aggregation_revision: Revision of a slide/patient encoder's aggregation. Bump
+            it when a fix changes the embedding produced from the same tile
+            embeddings. Sidecars record it, so ``resume`` does not reuse embeddings
+            from another revision.
         supported_spacing_um: The spacing(s) in µm/px the model was trained/validated
             for; :func:`validate_encoder_config` rejects requests outside this set
             unless ``allow_non_recommended_settings=True``. ``None`` marks a
@@ -523,6 +528,13 @@ def register_encoder(
         raise ValueError(
             f"default_output_variant '{default_output_variant}' must be present in output_variants"
         )
+    if aggregation_revision is not None and (
+        level == "tile" or type(aggregation_revision) is not int or aggregation_revision <= 0
+    ):
+        raise ValueError(
+            f"Encoder '{name}' must declare aggregation_revision as a positive int on a "
+            f"slide or patient encoder; got {aggregation_revision!r} at level {level!r}."
+        )
     if level == "tile" and type(supports_variable_input_size) is not bool:
         raise ValueError(
             f"Tile encoder '{name}' must declare supports_variable_input_size=True|False"
@@ -537,6 +549,7 @@ def register_encoder(
         "patch_size": patch_size,
         "tile_encoder": tile_encoder,
         "tile_encoder_output_variant": tile_encoder_output_variant,
+        "aggregation_revision": aggregation_revision,
         "supported_spacing_um": supported_spacing_um,
         "default_spacing_um": default_spacing_um,
         "precision": precision,

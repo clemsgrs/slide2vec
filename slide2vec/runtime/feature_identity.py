@@ -36,6 +36,8 @@ def pooled_feature_identity(
         info = encoder_registry.info(model.name)
         identity["tile_encoder"] = info["tile_encoder"]
         identity["tile_encoder_output_variant"] = info["tile_encoder_output_variant"]
+        if info.get("aggregation_revision") is not None:
+            identity["aggregation_revision"] = info["aggregation_revision"]
     if preprocessing is not None:
         if preprocessing.requested_tile_size_px is not None:
             # A pooled slide run declares its encoder input: exactly the requested tile size.
