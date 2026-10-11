@@ -247,7 +247,8 @@ the feature identity that ``resume`` compares.
 - ``precision`` is the inference precision; ``feature_dtype`` is the stored
   dtype.
 - ``tile_encoder`` and ``tile_encoder_output_variant`` are present for slide
-  and patient encoders.
+  and patient encoders. ``aggregation_revision`` is present for encoders that
+  declare one (``gigapath-slide``).
 - ``requested_tile_size_px`` and ``encoder_input_size_px`` are present for
   slide runs. Hierarchical runs add ``region_tile_multiple`` and
   ``requested_region_size_px``.

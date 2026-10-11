@@ -64,15 +64,25 @@ def encode_slide_with_latents_from_tiles(
 
 
 def _slide_encoder_inputs(loaded: LoadedModel, tile_embeddings: torch.Tensor, tiling_result):
+    require_supported_tile_stride(
+        loaded.model,
+        step_px_lv0=int(tiling_result.step_px_lv0),
+        tile_size_lv0=int(tiling_result.tile_size_lv0),
+    )
     x_values, y_values = coordinate_arrays(tiling_result)
     coordinates = np.column_stack((x_values, y_values))
     coordinate_tensor = torch.tensor(coordinates, dtype=torch.int, device=loaded.device)
-    coordinate_tensor = loaded.model.prepare_coordinates(
-        coordinate_tensor,
-        base_spacing_um=float(tiling_result.base_spacing_um),
-        requested_spacing_um=float(tiling_result.requested_spacing_um),
-    )
     return tile_embeddings.to(loaded.device), coordinate_tensor
+
+
+def require_supported_tile_stride(encoder, *, step_px_lv0: int, tile_size_lv0: int) -> None:
+    """Raise when *encoder* does not support tile overlap and the tiles overlap."""
+    if encoder.supports_tile_overlap or step_px_lv0 == tile_size_lv0:
+        return
+    raise ValueError(
+        f"{type(encoder).__name__} requires non-overlapping tiles (overlap=0): the tile "
+        f"stride is {step_px_lv0}px at level 0 for {tile_size_lv0}px tiles."
+    )
 
 
 def describe_device_mode(model, execution: ExecutionOptions) -> str:

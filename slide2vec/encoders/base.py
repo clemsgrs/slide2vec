@@ -407,6 +407,10 @@ class ProcessorTransform:
 class Encoder(ABC):
     """Shared lifecycle contract for all encoders."""
 
+    #: Whether slide or patient aggregation accepts overlapping tiles (a tile stride
+    #: smaller than the tile size). Tile encoders ignore it.
+    supports_tile_overlap: bool = True
+
     @property
     @abstractmethod
     def encode_dim(self) -> int:
@@ -423,16 +427,6 @@ class Encoder(ABC):
     def to(self, device: torch.device | str) -> "Encoder":
         """Move encoder to the given device. Returns self."""
         ...
-
-    def prepare_coordinates(
-        self,
-        coordinates: Tensor,
-        *,
-        base_spacing_um: float,
-        requested_spacing_um: float,
-    ) -> Tensor:
-        """Hook for model-specific coordinate normalization."""
-        return coordinates
 
 
 class TileEncoder(Encoder):
