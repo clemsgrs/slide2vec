@@ -75,8 +75,7 @@ def _encode_trunk_dense(*, trunk, batch: Tensor, encoder_name: str) -> Tensor:
 
 @register_encoder(
     "conch",
-    output_variants={"default": {"encode_dim": 512}},
-    default_output_variant="default",
+    encode_dim=512,
     input_size=448,
     supports_variable_input_size=True,
     patch_size=16,
@@ -161,8 +160,7 @@ class CONCH(TileEncoder):
 
 @register_encoder(
     "conchv15",
-    output_variants={"default": {"encode_dim": 768}},
-    default_output_variant="default",
+    encode_dim=768,
     input_size=448,
     supports_variable_input_size=True,
     patch_size=16,

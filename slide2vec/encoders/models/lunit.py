@@ -22,8 +22,7 @@ _LUNIT_STD = (0.21716536, 0.26081574, 0.20723464)
 
 @register_encoder(
     "lunit",
-    output_variants={"default": {"encode_dim": 384}},
-    default_output_variant="default",
+    encode_dim=384,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=8,

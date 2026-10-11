@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from importlib import import_module
 from importlib import metadata as importlib_metadata
 import inspect
 from threading import Condition, RLock, get_ident
@@ -41,8 +42,33 @@ def _installed_encoder_providers() -> list[importlib_metadata.EntryPoint]:
     return sorted(providers, key=lambda provider: (provider.name, provider.value))
 
 
+def _import_encoder_modules() -> None:
+    """Import the built-in and drop-in encoder modules, which register themselves.
+
+    A read while that package is still importing (a module reading the registry at
+    module scope) would see only the modules imported so far, so discovery must not
+    complete over it. Refuse the read; the error names the cause.
+    """
+    models = import_module("slide2vec.encoders.models")
+    if not models.IMPORT_COMPLETE:
+        raise RuntimeError(
+            "The encoder registry was read while slide2vec.encoders.models was still "
+            "importing. Encoder modules register themselves at import; call "
+            "list_models() or read preset metadata from a function, not at module scope."
+        )
+
+
 class EncoderRegistry(Registry):
-    """Encoder registry with one lazy, process-global plugin discovery pass."""
+    """Encoder registry with one lazy, process-global discovery pass.
+
+    The first read imports ``slide2vec.encoders.models`` (built-in and drop-in encoder
+    modules, which register themselves) and then loads every installed provider.
+    Deferring the built-in import to the first read lets an encoder module import
+    from the top-level ``slide2vec`` package without a circular import. The import
+    runs before the read claims discovery, outside the discovery lock: a thread
+    holding Python's import lock for that package then never waits on a discovery
+    owner that is itself waiting on the import.
+    """
 
     def __init__(self) -> None:
         super().__init__("encoders")
@@ -54,6 +80,15 @@ class EncoderRegistry(Registry):
 
     def _ensure_plugins_discovered(self) -> None:
         current_thread = get_ident()
+        with self._discovery_condition:
+            if self._discovery_state is _DiscoveryState.COMPLETE:
+                return
+            if (
+                self._discovery_state is _DiscoveryState.RUNNING
+                and self._discovery_owner == current_thread
+            ):
+                return
+        _import_encoder_modules()
         with self._discovery_condition:
             while self._discovery_state is _DiscoveryState.RUNNING:
                 if self._discovery_owner == current_thread:
@@ -406,8 +441,9 @@ def _validate_encoder_capability_contract(
 def register_encoder(
     name: str,
     *,
-    output_variants: dict[str, dict[str, Any]],
-    default_output_variant: str,
+    encode_dim: int | None = None,
+    output_variants: dict[str, dict[str, Any]] | None = None,
+    default_output_variant: str | None = None,
     input_size: int | None = None,
     supports_variable_input_size: bool | None = None,
     variable_input_model_kwargs: dict[str, Any] | None = None,
@@ -424,6 +460,9 @@ def register_encoder(
 
     Args:
         name: Unique encoder name (e.g. "uni2", "virchow2").
+        encode_dim: Feature dimension of an encoder with a single output. Shorthand
+            for ``output_variants={"default": {"encode_dim": encode_dim}}`` with
+            ``default_output_variant="default"``; pass one form or the other.
         output_variants: Supported named encoder outputs with concrete metadata.
         default_output_variant: Default output variant name.
         input_size: Default final square model input size in pixels. Declared
@@ -461,6 +500,25 @@ def register_encoder(
         precision: Recommended inference precision ("fp16" or "fp32").
         source: Model source identifier (e.g. HuggingFace hub path).
     """
+    explicit_output = output_variants is not None or default_output_variant is not None
+    if encode_dim is not None and explicit_output:
+        raise ValueError(
+            f"Encoder '{name}' declares encode_dim and output_variants / "
+            "default_output_variant; pass encode_dim alone for a single output, or "
+            "output_variants with default_output_variant for named outputs."
+        )
+    if encode_dim is not None:
+        if type(encode_dim) is not int or encode_dim <= 0:
+            raise ValueError(
+                f"Encoder '{name}' must declare encode_dim as a positive int; got {encode_dim!r}."
+            )
+        output_variants = {"default": {"encode_dim": encode_dim}}
+        default_output_variant = "default"
+    if output_variants is None or default_output_variant is None:
+        raise ValueError(
+            f"Encoder '{name}' must declare encode_dim, or output_variants together "
+            "with default_output_variant."
+        )
     if default_output_variant not in output_variants:
         raise ValueError(
             f"default_output_variant '{default_output_variant}' must be present in output_variants"

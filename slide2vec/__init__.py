@@ -28,7 +28,11 @@ from slide2vec.runtime.dense_encode import DenseEncodeGeometry, DenseEncodeKit
 from slide2vec.runtime.feature_identity import MISSING_FIELD
 from slide2vec.encoders import (
     EncoderProviderDiagnostic,
+    TileEncoder,
+    TimmTileEncoder,
+    TorchTileEncoder,
     list_encoder_provider_diagnostics,
+    register_encoder,
 )
 
 
@@ -39,6 +43,10 @@ __all__ = [
     "list_models",
     "EncoderProviderDiagnostic",
     "list_encoder_provider_diagnostics",
+    "register_encoder",
+    "TileEncoder",
+    "TimmTileEncoder",
+    "TorchTileEncoder",
     "Pipeline",
     "PreprocessingConfig",
     "DenseOptions",

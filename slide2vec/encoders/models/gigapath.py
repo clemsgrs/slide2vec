@@ -39,8 +39,7 @@ _GIGAPATH_STD = (0.229, 0.224, 0.225)
 
 @register_encoder(
     "gigapath",
-    output_variants={"default": {"encode_dim": 1536}},
-    default_output_variant="default",
+    encode_dim=1536,
     input_size=224,
     supports_variable_input_size=True,
     # 16, NOT 14, despite the timm architecture name `vit_giant_patch14_dinov2`
@@ -80,8 +79,7 @@ class GigaPath(TimmTileEncoder):
     level="slide",
     tile_encoder="gigapath",
     tile_encoder_output_variant="default",
-    output_variants={"default": {"encode_dim": 768}},
-    default_output_variant="default",
+    encode_dim=768,
     supported_spacing_um=0.5,
     precision="fp16",
     source=_HF_REPO_ID,

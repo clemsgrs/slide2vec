@@ -42,6 +42,22 @@ PreprocessingConfig
 See :doc:`preprocessing` for the :class:`~slide2vec.PreprocessingConfig`
 field reference, readers, segmentation, annotation sampling, and previews.
 
+Encoder authoring
+-----------------
+
+See :ref:`bring-your-own-encoder` for the two ways to make a new preset
+importable.
+
+.. autofunction:: slide2vec.register_encoder
+
+.. autoclass:: slide2vec.TorchTileEncoder
+   :members: get_transform, get_normalization_transform, encode_tiles
+
+.. autoclass:: slide2vec.TimmTileEncoder
+
+.. autoclass:: slide2vec.TileEncoder
+   :members: get_transform, get_normalization_transform, encode_tiles, encode_tiles_dense, patch_size
+
 ExecutionOptions
 -----------------
 

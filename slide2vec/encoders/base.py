@@ -597,8 +597,83 @@ class PatientEncoder(Encoder):
         ...
 
 
-class TimmTileEncoder(TileEncoder):
-    """Convenience base for timm-backed tile encoders."""
+class TorchTileEncoder(TileEncoder):
+    """Base for a tile encoder built on one ``torch.nn.Module``.
+
+    Owns the module, its device and ``encode_dim``, and builds both transforms from the
+    model's photometrics: ``get_transform`` resizes a given image to ``input_size`` then
+    normalizes; ``get_normalization_transform`` only normalizes. The module must map a
+    ``(B, 3, H, W)`` float batch to ``(B, encode_dim)``. Load weights in the subclass
+    constructor and hand the module over; it is switched to ``eval`` here.
+
+    Pooled extraction only. A subclass with a recoverable patch grid overrides
+    ``encode_tiles_dense`` and ``patch_size`` together (see :class:`TimmTileEncoder`).
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        *,
+        encode_dim: int,
+        input_size: int,
+        mean: tuple[float, ...],
+        std: tuple[float, ...],
+        output_variant: str | None = None,
+    ):
+        self._encode_dim = int(encode_dim)
+        self._input_size = int(input_size)
+        self._mean = tuple(float(value) for value in mean)
+        self._std = tuple(float(value) for value in std)
+        self._attach_model(model, output_variant=output_variant)
+
+    def _attach_model(self, model: torch.nn.Module, *, output_variant: str | None) -> None:
+        """Take ownership of the module: eval mode, default device, output variant."""
+        self._model = model.eval()
+        self._device = preferred_default_device()
+        if not hasattr(self, "_output_variant"):
+            self._output_variant = resolve_requested_output_variant(output_variant)
+
+    def get_transform(self) -> Callable:
+        return v2.Compose([
+            v2.ToImage(),
+            v2.Resize((self._input_size, self._input_size), antialias=True),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=self._mean, std=self._std),
+        ])
+
+    def get_normalization_transform(self) -> Callable:
+        # Photometrics only: no Resize / CenterCrop, so declared runs encode the
+        # exact tile geometry they requested.
+        return v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=self._mean, std=self._std),
+        ])
+
+    def encode_tiles(self, batch: Tensor) -> Tensor:
+        return self._model(batch)
+
+    @property
+    def encode_dim(self) -> int:
+        return self._encode_dim
+
+    @property
+    def device(self) -> torch.device:
+        return self._device
+
+    def to(self, device: torch.device | str) -> "TorchTileEncoder":
+        self._device = torch.device(device)
+        self._model = self._model.to(self._device)
+        return self
+
+
+class TimmTileEncoder(TorchTileEncoder):
+    """Convenience base for timm-backed tile encoders.
+
+    Creates the timm model and adds the dense grid, pre-norm and attention taps a timm
+    ViT exposes. Both transforms and ``encode_dim`` come from the model's own
+    ``pretrained_cfg`` and ``num_features``; ``get_transform`` is timm's eval recipe.
+    """
 
     def __init__(
         self,
@@ -609,20 +684,17 @@ class TimmTileEncoder(TileEncoder):
     ):
         defaults = {"pretrained": True, "num_classes": 0}
         defaults.update(timm_kwargs)
-        self._model = timm.create_model(model_name, **defaults).eval()
-        self._device = preferred_default_device()
-        if not hasattr(self, "_output_variant"):
-            self._output_variant = resolve_requested_output_variant(output_variant)
+        self._attach_model(
+            timm.create_model(model_name, **defaults), output_variant=output_variant
+        )
 
     def get_transform(self) -> Callable:
         data_config = resolve_data_config(self._model.pretrained_cfg, model=self._model)
         return create_transform(**data_config)
 
     def get_normalization_transform(self) -> Callable:
-        # Normalization only — no Resize/CenterCrop.
-        # mean/std come from the same resolved data config get_transform uses, so the
-        # photometric pipeline matches pooled extraction even for encoders with custom
-        # normalization (e.g. H-optimus 0.7072.../0.2119...); verified per-encoder.
+        # Normalization only, no Resize/CenterCrop; mean/std from the same resolved data
+        # config get_transform uses, so declared runs match the shipped photometrics.
         cfg = resolve_data_config(self._model.pretrained_cfg, model=self._model)
         return v2.Compose([
             v2.ToImage(),
@@ -630,8 +702,9 @@ class TimmTileEncoder(TileEncoder):
             v2.Normalize(mean=cfg["mean"], std=cfg["std"]),
         ])
 
-    def encode_tiles(self, batch: Tensor) -> Tensor:
-        return self._model(batch)
+    @property
+    def encode_dim(self) -> int:
+        return self._model.num_features
 
     def _dense_patch_size(self) -> tuple[int, int]:
         """Backbone patch size as ``(patch_h, patch_w)``."""
@@ -729,16 +802,3 @@ class TimmTileEncoder(TileEncoder):
             include_registers=include_registers,
             encoder_name=type(self).__name__,
         )
-
-    @property
-    def encode_dim(self) -> int:
-        return self._model.num_features
-
-    @property
-    def device(self) -> torch.device:
-        return self._device
-
-    def to(self, device: torch.device | str) -> "TimmTileEncoder":
-        self._device = torch.device(device)
-        self._model = self._model.to(self._device)
-        return self

@@ -61,8 +61,7 @@ def _unwrap_gpfm_state_dict(payload: Mapping[str, object]) -> dict[str, torch.Te
 
 @register_encoder(
     "gpfm",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=14,

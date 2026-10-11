@@ -6,8 +6,7 @@ from slide2vec.encoders.registry import register_encoder
 
 @register_encoder(
     "prost40m",
-    output_variants={"default": {"encode_dim": 384}},
-    default_output_variant="default",
+    encode_dim=384,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=14,

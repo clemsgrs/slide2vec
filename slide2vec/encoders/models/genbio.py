@@ -64,8 +64,7 @@ _GENBIO_STD = (0.188, 0.240, 0.187)
     "genbio-pathfm",
     # encode_dim 4608 = embed_dim (1536) x 3 colour channels; patch_size 16 (a 224
     # tile -> a 14x14 = 196 patch-token grid) — see module docstring.
-    output_variants={"default": {"encode_dim": 4608}},
-    default_output_variant="default",
+    encode_dim=4608,
     input_size=224,
     supports_variable_input_size=True,
     patch_size=16,

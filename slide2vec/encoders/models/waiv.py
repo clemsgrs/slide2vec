@@ -117,8 +117,7 @@ class _WaivEncoder(TileEncoder):
 
 @register_encoder(
     "phaet",
-    output_variants={"default": {"encode_dim": 1024}},
-    default_output_variant="default",
+    encode_dim=1024,
     input_size=_PHAET_INPUT_SIZE,
     supports_variable_input_size=True,
     patch_size=_PHAET_PATCH_SIZE,
@@ -143,8 +142,7 @@ class Phaet(_WaivEncoder):
 
 @register_encoder(
     "mascaret",
-    output_variants={"default": {"encode_dim": 1536}},
-    default_output_variant="default",
+    encode_dim=1536,
     input_size=_MASCARET_INPUT_SIZE,
     supports_variable_input_size=True,
     patch_size=_MASCARET_PATCH_SIZE,

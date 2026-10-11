@@ -69,8 +69,7 @@ class _HOptimusBase(TimmTileEncoder):
 
 @register_encoder(
     "h-optimus-0",
-    output_variants={"default": {"encode_dim": 1536}},
-    default_output_variant="default",
+    encode_dim=1536,
     input_size=224,
     supports_variable_input_size=True,
     variable_input_model_kwargs={"dynamic_img_size": True},
@@ -108,8 +107,7 @@ class HOptimus0(TimmTileEncoder):
 
 @register_encoder(
     "h-optimus-1",
-    output_variants={"default": {"encode_dim": 1536}},
-    default_output_variant="default",
+    encode_dim=1536,
     input_size=224,
     supports_variable_input_size=True,
     variable_input_model_kwargs={"dynamic_img_size": True},

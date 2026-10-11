@@ -1,7 +1,8 @@
 """slide2vec encoder package.
 
-Importing this package triggers registration of all built-in encoders via
-the ``models`` subpackage.
+Built-in and drop-in encoders (``slide2vec.encoders.models``) and installed plugin
+providers register on the registry's first read, not at import time, so an encoder
+module may import its base class and decorator from ``slide2vec`` itself.
 """
 
 from slide2vec.encoders.base import (
@@ -10,6 +11,7 @@ from slide2vec.encoders.base import (
     SlideEncoder,
     TileEncoder,
     TimmTileEncoder,
+    TorchTileEncoder,
     reshape_tokens_to_grid,
     resolve_recommended_dynamic_img_size,
     resolve_requested_output_variant,
@@ -28,9 +30,6 @@ from slide2vec.encoders.registry import (
     resolve_tile_dependency_output,
 )
 
-# Trigger registration of all built-in encoders.
-from slide2vec.encoders import models  # noqa: F401
-
 __all__ = [
     "Encoder",
     "EncoderCapabilities",
@@ -39,6 +38,7 @@ __all__ = [
     "TileEncoder",
     "SlideEncoder",
     "TimmTileEncoder",
+    "TorchTileEncoder",
     "reshape_tokens_to_grid",
     "resolve_recommended_dynamic_img_size",
     "resolve_requested_output_variant",
