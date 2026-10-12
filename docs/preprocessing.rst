@@ -192,17 +192,17 @@ from it with :func:`dataclasses.replace`. Its fields:
   under one class only.
 - ``min_coverage`` — ``{class_name: float}``; the minimum fraction of a tile
   covered by that class to keep it. Only listed classes are sampled.
-  ``min_coverage["tissue"]`` is the tissue threshold; slide2vec's default is
-  ``0.1`` for both the Python API and YAML/CLI runs.
+  ``min_coverage["tissue"]`` is the tissue threshold. The default is hs2p's,
+  ``0.01``, for both the Python API and YAML/CLI runs.
 - ``colors`` — ``{class_name: (r, g, b) | None}`` used when rendering
   previews; lists every class of ``pixel_mapping``.
 - ``output_mode`` — ``"per_annotation"`` (one artifact set per sampled class)
   or ``"merged"`` (one set per slide over the union of tiles passing any
   class). Patient-level models accept only ``"merged"``; ``"per_annotation"``
   raises a ``ValueError`` before embedding.
-- ``strategy`` — ``"independent"`` (slide2vec's default) samples each class
-  against its own mask; ``"joint"`` samples once over the union, then keeps
-  tiles per class by coverage.
+- ``strategy`` — ``"joint"`` (the default) samples once over the union, then
+  keeps tiles per class by coverage; ``"independent"`` samples each class
+  against its own mask.
 
 **Tumor-only bag features.** Add a ``tumor`` class and sample only it:
 

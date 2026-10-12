@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import torch
 from hs2p import (
+    DEFAULT_MASK_SAMPLING,
     FilterConfig,
     MaskSamplingConfig,
     PreviewConfig,
@@ -143,10 +144,6 @@ def _default_preview() -> PreviewConfig:
     return resolve_preview_config(_default_view())
 
 
-def _default_masks() -> MaskSamplingConfig:
-    return resolve_mask_sampling_config(_default_view())
-
-
 def _default_tiling(*, requested_spacing_um: float, requested_tile_size_px: int) -> TilingConfig:
     """The ``TilingConfig`` a ``None`` :attr:`PreprocessingConfig.tiling` resolves to."""
     return resolve_tiling_config(
@@ -182,10 +179,10 @@ class PreprocessingConfig:
     filter: FilterConfig | None = None
     #: hs2p previews. The default saves the mask and tiling previews.
     preview: PreviewConfig = field(default_factory=_default_preview)
-    #: hs2p annotation-mask vocabulary and sampling. The default is binary tissue tiling
-    #: (``{background: 0, tissue: 1}``) with ``min_coverage={"tissue": 0.1}`` and
-    #: ``strategy="independent"``. See :doc:`preprocessing`.
-    masks: MaskSamplingConfig = field(default_factory=_default_masks)
+    #: hs2p annotation-mask vocabulary and sampling. The default is hs2p's
+    #: ``DEFAULT_MASK_SAMPLING``: binary tissue tiling (``{background: 0, tissue: 1}``)
+    #: with ``min_coverage={"tissue": 0.01}``. See :doc:`preprocessing`.
+    masks: MaskSamplingConfig = DEFAULT_MASK_SAMPLING
     #: Parent region side length in pixels (hierarchical mode).
     #: Auto-derived as ``requested_tile_size_px × region_tile_multiple`` when ``None``.
     requested_region_size_px: int | None = None
