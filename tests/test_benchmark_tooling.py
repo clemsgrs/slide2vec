@@ -147,11 +147,11 @@ def test_benchmark_real_fixture_cpu_pipeline(tmp_path, monkeypatch):
     metrics = json.loads(args.metrics_json.read_text())
     assert metrics["success"] is True
     assert metrics["failed_slides"] == 0
-    assert metrics["total_tiles"] == 459
+    assert metrics["total_tiles"] == 474
     assert metrics["tile_artifacts"] == 1
     assert metrics["timed_batches"] == 15
     features = torch.load(tmp_path / "tile_embeddings" / "test-wsi.pt", weights_only=True)
-    assert features.shape == (459, 3)
+    assert features.shape == (474, 3)
     assert bool(torch.isfinite(features).all())
 
 

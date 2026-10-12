@@ -79,7 +79,6 @@ def test_cli_config_hydrates_the_held_hs2p_configs(tmp_path: Path):
         pixel_mapping={"background": 0, "tissue": 1},
         colors={"background": None, "tissue": (157, 219, 129)},
         min_coverage={"tissue": 0.4},
-        strategy="independent",
     )
 
 
@@ -94,21 +93,25 @@ def test_cli_config_rejects_unknown_hs2p_keys(tmp_path: Path):
 
 
 def test_public_preprocessing_defaults_match_standard_configuration(tmp_path: Path):
-    from hs2p import MaskSamplingConfig
+    from hs2p import DEFAULT_MASK_SAMPLING
 
     standard = _cli_preprocessing(tmp_path, [])
     public = PreprocessingConfig()
 
     assert public.segmentation == standard.segmentation
     assert public.preview == standard.preview
-    assert public.masks == standard.masks
-    assert public.masks == MaskSamplingConfig(
-        pixel_mapping={"background": 0, "tissue": 1},
-        colors={"background": None, "tissue": (157, 219, 129)},
-        min_coverage={"tissue": 0.1},
-        output_mode="per_annotation",
-        strategy="independent",
-    )
+    assert public.masks == DEFAULT_MASK_SAMPLING
+    assert standard.masks == DEFAULT_MASK_SAMPLING
+
+
+def test_default_masks_are_not_shared_between_configs():
+    from hs2p import DEFAULT_MASK_SAMPLING
+
+    first = PreprocessingConfig()
+    first.masks.min_coverage["tissue"] = 0.9
+
+    assert PreprocessingConfig().masks.min_coverage["tissue"] == 0.01
+    assert DEFAULT_MASK_SAMPLING.min_coverage["tissue"] == 0.01
 
 
 def test_unset_tiling_and_filter_resolve_like_the_standard_configuration(tmp_path: Path):

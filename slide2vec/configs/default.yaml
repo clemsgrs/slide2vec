@@ -33,9 +33,10 @@ tiling:
     # behaves exactly as a tissue-only run. Customising the vocabulary (e.g. adding a `tumor`
     # class with its own pixel value + min_coverage) opts the run into annotation-aware sampling,
     # where `mask_path` is read as a multi-label raster. The `tissue` min_coverage entry below is
-    # the single source of truth for the tissue threshold.
+    # the single source of truth for the tissue threshold. These defaults match hs2p's
+    # DEFAULT_MASK_SAMPLING.
     output_mode: per_annotation # how sampled tiles are grouped into artifacts. per_annotation: one flat artifact set per sampled class, namespaced under a `<class>/` subdir (the `tissue` class collapses to the flat root). merged: a single flat artifact set per slide over the union of tiles passing any active class threshold — it carries no class label, so it lands at the flat output root (no `<class>/` subdir).
-    strategy: independent # how classes are sampled when annotation sampling is active. independent: tile each class on its own binary mask. joint: tile once over the union of sampled classes, then keep tiles per class by coverage. Ignored for the tissue-only default.
+    strategy: joint # how classes are sampled when annotation sampling is active. independent: tile each class on its own binary mask. joint: tile once over the union of sampled classes, then keep tiles per class by coverage. Ignored for the tissue-only default.
     pixel_mapping: # {class_name: integer pixel value in the mask raster}; a list (e.g. tumor: [2, 3]) merges several values into one class; every mask value must be declared
       background: 0
       tissue: 1
@@ -44,7 +45,7 @@ tiling:
       tissue: [157, 219, 129]
     min_coverage: # {class_name: float | null}; minimum fraction of a tile that must be covered to keep it; null = don't sample that class
       background:
-      tissue: 0.1
+      tissue: 0.01
   params:
     requested_spacing_um: # spacing at which to tile the slide, in microns per pixel; filled from a preset model when available
     tolerance: 0.05 # tolerance for matching the spacing (float between 0 and 1, deciding how much the spacing can deviate from the one specified in the slide metadata)

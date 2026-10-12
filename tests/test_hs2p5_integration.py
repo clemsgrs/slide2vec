@@ -252,13 +252,20 @@ def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_pa
         "cli": PreprocessingConfig.from_config(cli_cfg),
     }
 
+    coordinates = {}
+    for route, preprocessing in routes.items():
+        _slides, (result,), _process_list = prepare_tiled_slides(
+            [slide], preprocessing, output_dir=tmp_path / route, num_workers=1
+        )
+        coordinates[route] = (result.x, result.y)
+
+    np.testing.assert_array_equal(coordinates["python"][0], coordinates["cli"][0])
+    np.testing.assert_array_equal(coordinates["python"][1], coordinates["cli"][1])
+    # hs2p's default tissue threshold (0.01) keeps every tile of the 0.1 ground truth, plus 15.
+    kept = set(zip(*coordinates["python"]))
+    assert len(kept) == 474
     with np.load(fixtures / "gt" / "test-wsi.coordinates.npz") as expected:
-        for route, preprocessing in routes.items():
-            _slides, (result,), _process_list = prepare_tiled_slides(
-                [slide], preprocessing, output_dir=tmp_path / route, num_workers=1
-            )
-            np.testing.assert_array_equal(result.x, expected["x"])
-            np.testing.assert_array_equal(result.y, expected["y"])
+        assert set(zip(expected["x"], expected["y"])) <= kept
 
 
 @pytest.mark.parametrize("output_mode", ["per_annotation", "merged"])
