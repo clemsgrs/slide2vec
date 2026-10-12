@@ -182,7 +182,7 @@ class PreprocessingConfig:
     #: hs2p annotation-mask vocabulary and sampling. The default is hs2p's
     #: ``DEFAULT_MASK_SAMPLING``: binary tissue tiling (``{background: 0, tissue: 1}``)
     #: with ``min_coverage={"tissue": 0.01}``. See :doc:`preprocessing`.
-    masks: MaskSamplingConfig = DEFAULT_MASK_SAMPLING
+    masks: MaskSamplingConfig = field(default_factory=lambda: replace(DEFAULT_MASK_SAMPLING))
     #: Parent region side length in pixels (hierarchical mode).
     #: Auto-derived as ``requested_tile_size_px × region_tile_multiple`` when ``None``.
     requested_region_size_px: int | None = None

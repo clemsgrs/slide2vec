@@ -261,8 +261,11 @@ def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_pa
 
     np.testing.assert_array_equal(coordinates["python"][0], coordinates["cli"][0])
     np.testing.assert_array_equal(coordinates["python"][1], coordinates["cli"][1])
-    # hs2p's default tissue threshold (0.01) keeps more tiles than the ground truth's 0.1.
-    assert len(coordinates["python"][0]) == 474
+    # hs2p's default tissue threshold (0.01) keeps every tile of the 0.1 ground truth, plus 15.
+    kept = set(zip(*coordinates["python"]))
+    assert len(kept) == 474
+    with np.load(fixtures / "gt" / "test-wsi.coordinates.npz") as expected:
+        assert set(zip(expected["x"], expected["y"])) <= kept
 
 
 @pytest.mark.parametrize("output_mode", ["per_annotation", "merged"])

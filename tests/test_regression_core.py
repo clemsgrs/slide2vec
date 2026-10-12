@@ -104,6 +104,16 @@ def test_public_preprocessing_defaults_match_standard_configuration(tmp_path: Pa
     assert standard.masks == DEFAULT_MASK_SAMPLING
 
 
+def test_default_masks_are_not_shared_between_configs():
+    from hs2p import DEFAULT_MASK_SAMPLING
+
+    first = PreprocessingConfig()
+    first.masks.min_coverage["tissue"] = 0.9
+
+    assert PreprocessingConfig().masks.min_coverage["tissue"] == 0.01
+    assert DEFAULT_MASK_SAMPLING.min_coverage["tissue"] == 0.01
+
+
 def test_unset_tiling_and_filter_resolve_like_the_standard_configuration(tmp_path: Path):
     import slide2vec.api as api
 
