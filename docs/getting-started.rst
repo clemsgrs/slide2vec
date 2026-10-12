@@ -36,10 +36,18 @@ Embed a slide
 
 .. code-block:: python
 
+   from hs2p import TilingConfig
    from slide2vec import Model, PreprocessingConfig
 
    model = Model.from_preset("virchow2")
-   preprocessing = PreprocessingConfig(requested_spacing_um=0.5)
+   preprocessing = PreprocessingConfig(
+       tiling=TilingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           tolerance=0.05,
+           overlap=0.0,
+       ),
+   )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
    tile_embeddings = embedded.tile_embeddings  # shape (N, 2560)
@@ -83,19 +91,27 @@ weights:
 Control preprocessing
 ---------------------
 
-The preset supplies tile size and, when unambiguous, spacing defaults.
-Models with several supported spacings, including Virchow2, require an explicit
-``requested_spacing_um``. Use :class:`~slide2vec.PreprocessingConfig` to set
-geometry and tissue selection:
+:class:`~slide2vec.PreprocessingConfig` holds hs2p's config dataclasses.
+Leave ``tiling`` unset to take spacing and tile size from the preset. Models
+with several supported spacings, including Virchow2, need an explicit
+``TilingConfig``. To also raise the tissue threshold:
 
 .. code-block:: python
 
+   from dataclasses import replace
+
+   from hs2p import TilingConfig
    from slide2vec import PreprocessingConfig
 
+   default_masks = PreprocessingConfig().masks
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
-       masks={"min_coverage": {"tissue": 0.1}},
+       tiling=TilingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           tolerance=0.05,
+           overlap=0.0,
+       ),
+       masks=replace(default_masks, min_coverage={"tissue": 0.3}),
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
@@ -143,11 +159,11 @@ Use :class:`~slide2vec.Pipeline` with a CSV :doc:`manifest`:
 
 .. code-block:: python
 
-   from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+   from slide2vec import ExecutionOptions, Model, Pipeline
 
    pipeline = Pipeline(
        model=Model.from_preset("virchow2"),
-       preprocessing=PreprocessingConfig(requested_spacing_um=0.5),
+       preprocessing=preprocessing,
        execution=ExecutionOptions(output_dir="outputs/run"),
    )
    result = pipeline.run(manifest_path="/path/to/slides.csv")

@@ -39,10 +39,10 @@ def pooled_feature_identity(
         if info.get("aggregation_revision") is not None:
             identity["aggregation_revision"] = info["aggregation_revision"]
     if preprocessing is not None:
-        if preprocessing.requested_tile_size_px is not None:
+        if preprocessing.tiling is not None:
             # A pooled slide run declares its encoder input: exactly the requested tile size.
-            identity["requested_tile_size_px"] = int(preprocessing.requested_tile_size_px)
-            identity["encoder_input_size_px"] = int(preprocessing.requested_tile_size_px)
+            identity["requested_tile_size_px"] = int(preprocessing.tiling.requested_tile_size_px)
+            identity["encoder_input_size_px"] = int(preprocessing.tiling.requested_tile_size_px)
         # Set by hierarchical runs only.
         if preprocessing.region_tile_multiple is not None:
             identity["region_tile_multiple"] = int(preprocessing.region_tile_multiple)

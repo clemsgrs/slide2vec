@@ -19,7 +19,7 @@ Tile-level encoders
 
 Spacing values are supported scales, in microns per pixel. If a preset
 supports several scales and has no registered default, pass
-``PreprocessingConfig(requested_spacing_um=...)`` explicitly for slide
+``PreprocessingConfig(tiling=hs2p.TilingConfig(...))`` explicitly for slide
 extraction.
 
 Registry ``input_size`` is the default **final** model input size. Slide
@@ -50,7 +50,12 @@ DINOv2 at its native checkpoint resolution:
    model.embed_slides(
        slides,
        preprocessing=PreprocessingConfig(
-           requested_spacing_um=0.5, requested_tile_size_px=518,
+           tiling=TilingConfig(
+               requested_spacing_um=0.5,
+               requested_tile_size_px=518,
+               tolerance=0.05,
+               overlap=0.0,
+           ),
        ),
    )
 

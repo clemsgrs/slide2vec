@@ -128,7 +128,7 @@ def build_hierarchical_embedding_metadata(
         "read_tile_size_px": int(geometry["read_tile_size_px"]),
         "requested_region_size_px": int(geometry["requested_region_size_px"]),
         "read_region_size_px": int(geometry["read_region_size_px"]),
-        "requested_spacing_um": float(preprocessing.requested_spacing_um),
+        "requested_spacing_um": float(preprocessing.tiling.requested_spacing_um),
         "encoder_input_size_px": (
             int(encoder_input_size_px) if encoder_input_size_px is not None else None
         ),

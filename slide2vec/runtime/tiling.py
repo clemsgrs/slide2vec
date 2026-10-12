@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-from hs2p import FilterConfig, PreviewConfig, SegmentationConfig, load_tiling_result
-from hs2p.configs.resolvers import resolve_sampling_request, resolve_tiling_config
+from hs2p import load_tiling_result
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.runtime.hierarchical import is_hierarchical_preprocessing
 
 
 def resolve_tiling_backend(preprocessing: PreprocessingConfig | None) -> str:
-    if preprocessing is None:
+    if preprocessing is None or preprocessing.tiling is None:
         return "asap"
-    return preprocessing.backend
+    return preprocessing.tiling.backend
 
 
 def resolve_slide_backend(requested_backend: str, tiling_result) -> str:
@@ -26,69 +25,29 @@ def resolve_slide_backend(requested_backend: str, tiling_result) -> str:
     return "asap"
 
 
-def build_preview_config(preview: dict[str, Any]) -> PreviewConfig:
-    return PreviewConfig(
-        save_mask_preview=bool(preview["save_mask_preview"]),
-        save_tiling_preview=bool(preview["save_tiling_preview"]),
-        downsample=int(preview["downsample"]),
-        tissue_contour_color=tuple(int(channel) for channel in preview["tissue_contour_color"]),
-        mask_overlay_alpha=float(preview["mask_overlay_alpha"]),
-    )
+def hs2p_tiling_kwargs(preprocessing: PreprocessingConfig) -> dict[str, Any]:
+    """The held hs2p configs as ``tile_slides`` keyword arguments.
 
-
-def build_hs2p_configs(
-    preprocessing: PreprocessingConfig,
-):
-    requested_tile_size_px = (
-        preprocessing.requested_region_size_px
-        if is_hierarchical_preprocessing(preprocessing)
-        else preprocessing.requested_tile_size_px
-    )
-    # Reuse hs2p's tiling-config resolver so the resolved min_coverage map comes from
-    # masks.min_coverage (the single source of truth; min_coverage["tissue"] is the tissue
-    # threshold) and independent_sampling is threaded consistently. The resolver reads
-    # attributes, so wrap the masks dict.
-    tiling_adapter = SimpleNamespace(
-        tiling=SimpleNamespace(
-            masks=SimpleNamespace(**dict(preprocessing.masks)),
-            params=SimpleNamespace(
-                requested_spacing_um=preprocessing.requested_spacing_um,
-                requested_tile_size_px=requested_tile_size_px,
-                tolerance=preprocessing.tolerance,
-                overlap=preprocessing.overlap,
-            ),
-            independent_sampling=preprocessing.independent_sampling,
-            backend=resolve_tiling_backend(preprocessing),
-            # Mask backend is resolved independently from the mask path by hs2p; pass the
-            # requested value straight through (default "auto"). Unlike the slide backend it
-            # has no "asap" fallback — a maskless slide simply never resolves it.
-            mask_backend=preprocessing.mask_backend,
+    A hierarchical run tiles parent regions, so hs2p receives ``requested_region_size_px``
+    as its tile size.
+    """
+    if preprocessing.tiling is None or preprocessing.filter is None:
+        raise ValueError(
+            "preprocessing.tiling and preprocessing.filter must be resolved from the model "
+            "before tiling."
         )
-    )
-    tiling_cfg = resolve_tiling_config(tiling_adapter)
-    # Resolve the annotation-sampling invocation from the same masks subtree. A masks block
-    # left at hs2p's shipped default ({background:0, tissue:1}) yields (None, None, None) so
-    # the plain binary-tissue path is byte-for-byte unchanged; any customization (a new class,
-    # an extra pixel value) opts the run into multi-label annotation sampling. The resolver
-    # validates the masks config (duplicate values, unsafe label names, out-of-range values)
-    # and raises ValueError up front, before any slide is opened.
-    sampling, selection_strategy, output_mode = resolve_sampling_request(
-        tiling_adapter, tiling=tiling_cfg
-    )
-    segmentation_cfg = SegmentationConfig(**dict(preprocessing.segmentation))
-    filtering_cfg = FilterConfig(**dict(preprocessing.filtering))
-    preview_cfg = build_preview_config(dict(preprocessing.preview))
-    return (
-        tiling_cfg,
-        segmentation_cfg,
-        filtering_cfg,
-        preview_cfg,
-        preprocessing.read_coordinates_from,
-        preprocessing.resume,
-        sampling,
-        selection_strategy,
-        output_mode,
-    )
+    tiling_cfg = preprocessing.tiling
+    if is_hierarchical_preprocessing(preprocessing):
+        tiling_cfg = replace(
+            tiling_cfg, requested_tile_size_px=int(preprocessing.requested_region_size_px)
+        )
+    return {
+        "tiling": tiling_cfg,
+        "segmentation": preprocessing.segmentation,
+        "filtering": preprocessing.filter,
+        "preview": preprocessing.preview,
+        "masks": preprocessing.masks,
+    }
 
 
 def tile_store_archive_path(tile_store_root: Path, sample_id: str) -> Path:

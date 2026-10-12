@@ -12,6 +12,7 @@ from torchvision.transforms import v2
 
 from slide2vec import MISSING_FIELD, ExecutionOptions, ImageSpec, Model, PreprocessingConfig
 from slide2vec.encoders import PatientEncoder, SlideEncoder, TileEncoder, register_encoder
+from tests.tiling_helpers import tiling_config
 
 TILE_ENCODER = "identity-api-tile"
 SHIPPED_TRANSFORM = {
@@ -185,7 +186,7 @@ def test_pooled_identity_comparison_reads_the_shipped_transform_on_cpu(tile_enco
 def test_pooled_identity_comparison_reads_the_declared_transform(tile_encoder):
     differences = Model.from_preset(TILE_ENCODER).pooled_identity_differences(
         {"transform": SHIPPED_TRANSFORM},
-        preprocessing=PreprocessingConfig(requested_tile_size_px=32, requested_spacing_um=0.5),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 32)),
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
@@ -202,7 +203,7 @@ def test_pooled_identity_comparison_uses_the_registered_tile_dependency(
 
     differences = model.pooled_identity_differences(
         {"tile_encoder_output_variant": "default", "transform": NORMALIZATION_ONLY},
-        preprocessing=PreprocessingConfig(requested_tile_size_px=32, requested_spacing_um=0.5),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 32)),
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
     )
 
@@ -262,7 +263,7 @@ def test_pooled_identity_comparison_accepts_a_zero_tile_output_without_a_transfo
 
     differences = Model.from_preset(TILE_ENCODER).pooled_identity_differences(
         recorded,
-        preprocessing=PreprocessingConfig(requested_tile_size_px=32, requested_spacing_um=0.5),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 32)),
         execution=ExecutionOptions(precision="fp32", num_gpus=1),
         encoded_pixels=False,
     )
@@ -323,7 +324,7 @@ def test_pooled_identity_comparison_preserves_a_model_used_for_image_extraction(
 
     differences = model.pooled_identity_differences(
         artifact.metadata["compatibility"],
-        preprocessing=PreprocessingConfig(requested_tile_size_px=32, requested_spacing_um=0.5),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 32)),
         execution=execution,
     )
 

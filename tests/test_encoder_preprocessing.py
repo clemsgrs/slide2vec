@@ -10,6 +10,7 @@ import torch
 from torchvision import transforms
 
 from slide2vec.encoders import encoder_registry
+from tests.tiling_helpers import tiling_config
 
 
 def recipe_encoder(name):
@@ -143,9 +144,7 @@ def test_default_declared_pooled_encodes_the_224_it_read(
 
     monkeypatch.setattr(inference, "embed_slides", embed_slides)
     model = Model.from_preset(name, device="cpu")
-    assert model.embed_slides([], preprocessing=PreprocessingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=None,
-    )) == {}
+    assert model.embed_slides([], preprocessing=PreprocessingConfig()) == {}
     assert [tuple(batch.shape) for batch in observed] == [(1, 3, 224, 224)] * 2
     assert_border_intact(observed[0][0], size=224, red=expected_red, black=expected_black)
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
@@ -240,9 +239,12 @@ def test_dinov2_public_pooled_recipe_reaches_encoding(
 
     monkeypatch.setattr(inference, "embed_slides", embed_slides)
     model = Model.from_preset("dinov2-vitb14", device="cpu", allow_non_recommended_settings=permission)
-    assert model.embed_slides([], preprocessing=PreprocessingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=requested,
-    )) == {}
+    preprocessing = (
+        PreprocessingConfig()
+        if requested is None
+        else PreprocessingConfig(tiling=tiling_config(0.5, requested))
+    )
+    assert model.embed_slides([], preprocessing=preprocessing) == {}
     assert [tuple(batch.shape) for batch in observed] == [(1, 3, expected_size, expected_size)] * 2
     assert_border_intact(observed[0][0], size=expected_size, red=IMAGENET_RED, black=IMAGENET_BLACK)
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
@@ -256,9 +258,7 @@ def test_dinov2_public_pooled_225_raises_even_with_permission(monkeypatch):
     monkeypatch.setattr(inference, "embed_slides", lambda *a, **k: pytest.fail("must reject before dispatch"))
     model = Model.from_preset("dinov2-vitb14", device="cpu", allow_non_recommended_settings=True)
     with pytest.raises(ValueError, match="divisible by its 14x14 patch geometry"):
-        model.embed_slides([], preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5, requested_tile_size_px=225,
-        ))
+        model.embed_slides([], preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 225)))
 
 
 def test_dinov2_public_pooled_native_518_requires_permission(monkeypatch):
@@ -268,9 +268,7 @@ def test_dinov2_public_pooled_native_518_requires_permission(monkeypatch):
     monkeypatch.setattr(inference, "embed_slides", lambda *a, **k: pytest.fail("must reject before dispatch"))
     model = Model.from_preset("dinov2-vitb14", device="cpu")
     with pytest.raises(ValueError, match="allow_non_recommended_settings=True"):
-        model.embed_slides([], preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5, requested_tile_size_px=518,
-        ))
+        model.embed_slides([], preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 518)))
 
 
 @pytest.mark.parametrize("name, expected_black", [
@@ -344,9 +342,12 @@ def test_dinov3_public_pooled_recipe_reaches_encoding(
 
     monkeypatch.setattr(inference, "embed_slides", embed_slides)
     model = Model.from_preset("dinov3-vitb16", device="cpu", allow_non_recommended_settings=permission)
-    assert model.embed_slides([], preprocessing=PreprocessingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=requested,
-    )) == {}
+    preprocessing = (
+        PreprocessingConfig()
+        if requested is None
+        else PreprocessingConfig(tiling=tiling_config(0.5, requested))
+    )
+    assert model.embed_slides([], preprocessing=preprocessing) == {}
     assert [tuple(batch.shape) for batch in observed] == [(1, 3, expected_size, expected_size)] * 2
     assert_border_intact(observed[0][0], size=expected_size, red=IMAGENET_RED, black=IMAGENET_BLACK)
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise

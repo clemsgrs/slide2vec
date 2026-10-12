@@ -9,6 +9,7 @@ TILING_PARAMS = {
 
 TILING_MASKS = {
     "output_mode": "per_annotation",
+    "strategy": "independent",
     "pixel_mapping": {"background": 0, "tissue": 1},
     "colors": {"background": None, "tissue": [157, 219, 129]},
     "min_coverage": {"background": None, "tissue": 0.1},

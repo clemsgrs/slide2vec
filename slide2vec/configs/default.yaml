@@ -27,7 +27,6 @@ tiling:
   read_tiles_from: # path to an existing directory containing pre-extracted `.tiles.tar` tile stores to reuse instead of starting tiling from scratch
   backend: "auto" # backend to use for slide reading; "auto" tries cucim -> vips -> openslide -> asap. Pin a backend for stable decoder selection across upgrades.
   mask_backend: "auto" # backend for reading source masks (precomputed tissue / annotation), resolved independently from the mask path; "auto" probes openability like `backend`. Set explicitly (e.g. "openslide") when a mask needs a different decoder than its slide — hs2p never silently falls back. "auto" selects "tifffile" for TIFF masks whose samples are not 8-bit unsigned (e.g. 16-bit labels)
-  independent_sampling: true # selection strategy when annotation sampling is active. true: sample each class independently against its own binary mask (independent selection); false: sample once over the union of active classes, then post-filter per class by coverage (joint selection). Ignored when the masks vocabulary is left at the tissue-only default.
   masks:
     # Annotation-mask vocabulary forwarded to hs2p's sampling resolver. The shipped default
     # ({background:0, tissue:1}) is plain binary tissue tiling — leave it untouched and the run
@@ -36,6 +35,7 @@ tiling:
     # where `mask_path` is read as a multi-label raster. The `tissue` min_coverage entry below is
     # the single source of truth for the tissue threshold.
     output_mode: per_annotation # how sampled tiles are grouped into artifacts. per_annotation: one flat artifact set per sampled class, namespaced under a `<class>/` subdir (the `tissue` class collapses to the flat root). merged: a single flat artifact set per slide over the union of tiles passing any active class threshold — it carries no class label, so it lands at the flat output root (no `<class>/` subdir).
+    strategy: independent # how classes are sampled when annotation sampling is active. independent: tile each class on its own binary mask. joint: tile once over the union of sampled classes, then keep tiles per class by coverage. Ignored for the tissue-only default.
     pixel_mapping: # {class_name: integer pixel value in the mask raster}; a list (e.g. tumor: [2, 3]) merges several values into one class; every mask value must be declared
       background: 0
       tissue: 1

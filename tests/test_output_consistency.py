@@ -75,7 +75,6 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
             "read_tiles_from": None,
             "on_the_fly": True,
             "backend": "asap",
-            "independent_sampling": True,
             "masks": TILING_MASKS,
             "params": TILING_PARAMS,
             "seg_params": TILING_SEG_PARAMS,

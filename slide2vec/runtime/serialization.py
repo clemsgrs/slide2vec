@@ -1,6 +1,15 @@
-import copy
+import dataclasses
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+from hs2p import (
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    TilingConfig,
+)
 
 from slide2vec.api import (
     DenseImageOptions,
@@ -21,18 +30,36 @@ def serialize_model(model) -> dict[str, Any]:
     }
 
 
+def _hs2p_config_payload(config: Any) -> dict[str, Any] | None:
+    """JSON-ready fields of a held hs2p config dataclass (``None`` stays ``None``)."""
+    if config is None:
+        return None
+
+    def plain(value: Any) -> Any:
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, Mapping):
+            return {str(key): plain(item) for key, item in value.items()}
+        if isinstance(value, (tuple, list)):
+            return [plain(item) for item in value]
+        return value
+
+    return {field.name: plain(getattr(config, field.name)) for field in dataclasses.fields(config)}
+
+
+def _hs2p_config(cls: type, payload: dict[str, Any] | None) -> Any:
+    return None if payload is None else cls(**payload)
+
+
 def serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any]:
     return {
-        "backend": preprocessing.backend,
-        "mask_backend": preprocessing.mask_backend,
-        "requested_spacing_um": preprocessing.requested_spacing_um,
-        "requested_tile_size_px": preprocessing.requested_tile_size_px,
+        "tiling": _hs2p_config_payload(preprocessing.tiling),
+        "segmentation": _hs2p_config_payload(preprocessing.segmentation),
+        "filter": _hs2p_config_payload(preprocessing.filter),
+        "preview": _hs2p_config_payload(preprocessing.preview),
+        "masks": _hs2p_config_payload(preprocessing.masks),
         "requested_region_size_px": preprocessing.requested_region_size_px,
         "region_tile_multiple": preprocessing.region_tile_multiple,
-        "tolerance": preprocessing.tolerance,
-        "overlap": preprocessing.overlap,
-        "masks": copy.deepcopy(preprocessing.masks),
-        "independent_sampling": preprocessing.independent_sampling,
         "read_coordinates_from": str(preprocessing.read_coordinates_from) if preprocessing.read_coordinates_from is not None else None,
         "read_tiles_from": str(preprocessing.read_tiles_from) if preprocessing.read_tiles_from is not None else None,
         "on_the_fly": preprocessing.on_the_fly,
@@ -43,9 +70,6 @@ def serialize_preprocessing(preprocessing: PreprocessingConfig) -> dict[str, Any
         "jpeg_backend": preprocessing.jpeg_backend,
         "num_cucim_workers": preprocessing.num_cucim_workers,
         "resume": preprocessing.resume,
-        "segmentation": dict(preprocessing.segmentation),
-        "filtering": dict(preprocessing.filtering),
-        "preview": dict(preprocessing.preview),
     }
 
 
@@ -184,10 +208,11 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         else None
     )
     return PreprocessingConfig(
-        backend=payload["backend"],
-        mask_backend=payload.get("mask_backend", "auto"),
-        requested_spacing_um=float(payload["requested_spacing_um"]),
-        requested_tile_size_px=int(payload["requested_tile_size_px"]),
+        tiling=_hs2p_config(TilingConfig, payload["tiling"]),
+        segmentation=_hs2p_config(SegmentationConfig, payload["segmentation"]),
+        filter=_hs2p_config(FilterConfig, payload["filter"]),
+        preview=_hs2p_config(PreviewConfig, payload["preview"]),
+        masks=_hs2p_config(MaskSamplingConfig, payload["masks"]),
         requested_region_size_px=(
             int(payload["requested_region_size_px"])
             if "requested_region_size_px" in payload and payload["requested_region_size_px"] is not None
@@ -198,10 +223,6 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
             if "region_tile_multiple" in payload and payload["region_tile_multiple"] is not None
             else None
         ),
-        tolerance=float(payload["tolerance"]),
-        overlap=float(payload["overlap"]),
-        masks=copy.deepcopy(payload["masks"]) if "masks" in payload and payload["masks"] else {},
-        independent_sampling=bool(payload.get("independent_sampling", True)),
         read_coordinates_from=read_coordinates_from,
         read_tiles_from=read_tiles_from,
         on_the_fly=bool(payload.get("on_the_fly", True)),
@@ -212,9 +233,6 @@ def deserialize_preprocessing(payload: dict[str, Any]) -> PreprocessingConfig:
         jpeg_backend=str(payload.get("jpeg_backend", "pil")),
         num_cucim_workers=int(payload.get("num_cucim_workers", 4)),
         resume=bool(payload["resume"]) if "resume" in payload else False,
-        segmentation=dict(payload["segmentation"]) if "segmentation" in payload else {},
-        filtering=dict(payload["filtering"]) if "filtering" in payload else {},
-        preview=dict(payload["preview"]) if "preview" in payload else {},
     )
 
 

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+from hs2p import FilterConfig, MaskSamplingConfig, PreviewConfig, SegmentationConfig
 
 from slide2vec.api import (
     EmbeddedSlide,
@@ -27,6 +28,7 @@ from slide2vec.artifacts import (
 )
 from slide2vec.configs.resources import config_resource, load_config
 from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+from tests.tiling_helpers import tiling_config
 from slide2vec.runtime import (
     artifacts_collect,
     batching,
@@ -49,8 +51,9 @@ from slide2vec.runtime import (
 
 
 def PreprocessingConfig(*args, **kwargs):
-    kwargs.setdefault("requested_spacing_um", 0.5)
-    kwargs.setdefault("requested_tile_size_px", 224)
+    """A model-resolved preprocessing: tiling and filter are held."""
+    kwargs.setdefault("tiling", tiling_config())
+    kwargs.setdefault("filter", FilterConfig(ref_tile_size=224))
     return BasePreprocessingConfig(*args, **kwargs)
 
 
@@ -1889,7 +1892,7 @@ def test_run_pipeline_resume_refuses_stale_tile_size_before_embedding(monkeypatc
         inference.run_pipeline(
             model,
             slides=slides,
-            preprocessing=replace(DEFAULT_PREPROCESSING, resume=True, requested_tile_size_px=224),
+            preprocessing=replace(DEFAULT_PREPROCESSING, resume=True, tiling=replace(DEFAULT_PREPROCESSING.tiling, requested_tile_size_px=224)),
             execution=ExecutionOptions(output_dir=tmp_path, output_format="npz", num_gpus=1),
         )
 
@@ -2214,21 +2217,6 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
         captured["kwargs"] = kwargs
 
     monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
-    monkeypatch.setattr(
-        tiling_pipeline,
-        "build_hs2p_configs",
-        lambda preprocessing: (
-            SimpleNamespace(requested_backend="cucim"),
-            "segmentation",
-            "filtering",
-            "preview",
-            None,
-            False,
-            None,
-            None,
-            None,
-        ),
-    )
 
     slide = manifest.coerce_slide_spec(
         {
@@ -2246,7 +2234,7 @@ def test_tile_slides_forwards_spacing_at_level_0_to_hs2p(monkeypatch, tmp_path: 
     )
 
     assert captured["slides"][0].spacing_at_level_0 == pytest.approx(0.25)
-    assert captured["kwargs"]["preview"] == "preview"
+    assert captured["kwargs"]["preview"] == DEFAULT_PREPROCESSING.preview
     assert captured["kwargs"]["save_tiles"] is True
 
 
@@ -2260,21 +2248,6 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
         captured["kwargs"] = kwargs
 
     monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
-    monkeypatch.setattr(
-        tiling_pipeline,
-        "build_hs2p_configs",
-        lambda preprocessing: (
-            SimpleNamespace(requested_backend="auto"),
-            "segmentation",
-            "filtering",
-            "preview",
-            None,
-            False,
-            None,
-            None,
-            None,
-        ),
-    )
 
     tiling_pipeline.tile_slides_call(
         [make_slide("slide-a")],
@@ -2284,78 +2257,6 @@ def test_tile_slides_skips_saving_tiles_when_external_store_is_configured(monkey
     )
 
     assert captured["kwargs"]["save_tiles"] is False
-
-
-def test_tile_slides_forwards_merged_output_mode_and_selection_strategy(monkeypatch, tmp_path: Path):
-    """End-to-end seam: a ``merged`` masks block with ``independent_sampling: false`` must
-    forward output_mode=merged and selection_strategy=joint_sampling into hs2p's tile_slides."""
-    import slide2vec.inference as inference
-
-    captured = {}
-
-    def fake_tile_slides(slides, **kwargs):
-        captured["kwargs"] = kwargs
-
-    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
-
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        backend="asap",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks={
-            "output_mode": "merged",
-            "pixel_mapping": {"tumor": 2},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        },
-        independent_sampling=False,
-    )
-
-    tiling_pipeline.tile_slides_call(
-        [make_slide("slide-a")],
-        preprocessing,
-        output_dir=tmp_path,
-        num_workers=0,
-    )
-
-    assert captured["kwargs"]["output_mode"] == "merged"
-    assert captured["kwargs"]["selection_strategy"] == "joint_sampling"
-    assert captured["kwargs"]["sampling"] is not None
-
-
-def test_tile_slides_forwards_independent_sampling_selection_strategy(monkeypatch, tmp_path: Path):
-    import slide2vec.inference as inference
-
-    captured = {}
-
-    def fake_tile_slides(slides, **kwargs):
-        captured["kwargs"] = kwargs
-
-    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
-
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        backend="asap",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks={
-            "pixel_mapping": {"tumor": 2},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        },
-        independent_sampling=True,
-    )
-
-    tiling_pipeline.tile_slides_call(
-        [make_slide("slide-a")],
-        preprocessing,
-        output_dir=tmp_path,
-        num_workers=0,
-    )
-
-    assert captured["kwargs"]["selection_strategy"] == "independent_sampling"
-    assert captured["kwargs"]["output_mode"] == "per_annotation"
 
 
 def test_prepare_tiled_slides_reconstructs_legacy_merged_output_mode(
@@ -2400,53 +2301,6 @@ def test_prepare_tiled_slides_reconstructs_legacy_merged_output_mode(
     )
 
     assert captured["identity"] == (None, "merged", "merged")
-
-
-def test_build_hs2p_configs_constructs_preview_config():
-    import slide2vec.runtime.tiling as runtime_tiling
-
-    preprocessing = PreprocessingConfig(
-        backend="asap",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        tolerance=0.05,
-        overlap=0.0,
-        masks={"min_coverage": {"tissue": 0.1}},
-        segmentation={"downsample": 64, "method": "hsv"},
-        filtering={"ref_tile_size": 224},
-        preview={
-            "save_mask_preview": True,
-            "save_tiling_preview": False,
-            "downsample": 32,
-            "tissue_contour_color": (157, 219, 129),
-            "mask_overlay_alpha": 0.5,
-        },
-    )
-
-    (
-        tiling_cfg,
-        segmentation_cfg,
-        filtering_cfg,
-        preview_cfg,
-        read_coordinates_from,
-        resume,
-        sampling,
-        selection_strategy,
-        output_mode,
-    ) = runtime_tiling.build_hs2p_configs(preprocessing)
-
-    assert tiling_cfg.backend == "asap"
-    assert tiling_cfg.min_coverage["tissue"] == pytest.approx(0.1)  # resolved from masks.min_coverage.tissue
-    assert segmentation_cfg.downsample == 64
-    assert segmentation_cfg.method == "hsv"
-    assert filtering_cfg.ref_tile_size == 224
-    assert preview_cfg.save_mask_preview is True
-    assert preview_cfg.save_tiling_preview is False
-    assert preview_cfg.downsample == 32
-    assert preview_cfg.tissue_contour_color == (157, 219, 129)
-    assert preview_cfg.mask_overlay_alpha == pytest.approx(0.5)
-    assert read_coordinates_from is None
-    assert resume is False
 
 
 def test_prepare_tiled_slides_records_spacing_at_level_0_in_process_list(monkeypatch, tmp_path: Path):
@@ -2645,7 +2499,7 @@ def test_record_slide_metadata_in_process_list_adds_backend_columns(monkeypatch,
     recorded = pd.read_csv(process_list_path)
     assert "requested_backend" in recorded.columns
     assert "backend" in recorded.columns
-    assert recorded.loc[0, "requested_backend"] == DEFAULT_PREPROCESSING.backend
+    assert recorded.loc[0, "requested_backend"] == DEFAULT_PREPROCESSING.tiling.backend
     assert recorded.loc[0, "backend"] == "asap"
 
 
@@ -2680,7 +2534,7 @@ def test_preload_asap_wholeslidedata_suppresses_noisy_import(monkeypatch, capfd)
 
     monkeypatch.setattr(tiling_pipeline.importlib, "import_module", fake_import_module)
 
-    tiling_pipeline.preload_asap_wholeslidedata(replace(DEFAULT_PREPROCESSING, backend="asap"))
+    tiling_pipeline.preload_asap_wholeslidedata(replace(DEFAULT_PREPROCESSING, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="asap")))
 
     captured = capfd.readouterr()
     assert captured.err == ""
@@ -3700,7 +3554,7 @@ def test_compute_tile_embeddings_for_slide_uses_cpu_budget_for_auto_workers_on_n
             read_tile_size_px=4,
             tile_size_lv0=224,
         ),
-        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, num_cucim_workers=4, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="auto")),
         execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=None, num_gpus=1),
     )
 
@@ -3944,7 +3798,7 @@ def test_compute_tile_embeddings_for_slide_caps_on_the_fly_workers_to_slurm(monk
             SimpleNamespace(level="tile"),
             slide,
             tiling_result,
-            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, num_cucim_workers=4, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="cucim")),
             execution=execution,
         )
 
@@ -4033,7 +3887,7 @@ def test_compute_tile_embeddings_for_slide_rejects_non_positive_cucim_worker_cou
                 read_tile_size_px=4,
                 tile_size_lv0=224,
             ),
-            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=0),
+            preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, num_cucim_workers=0, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="cucim")),
             execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=99, num_gpus=2),
         )
 
@@ -4120,7 +3974,7 @@ def test_compute_tile_embeddings_for_slide_filters_on_the_fly_cucim_stderr_witho
         SimpleNamespace(level="tile"),
         slide,
         tiling_result,
-        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="cucim", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, num_cucim_workers=4, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="cucim")),
         execution=execution,
     )
 
@@ -4200,7 +4054,7 @@ def test_compute_tile_embeddings_for_slide_uses_resolved_cucim_backend_when_auto
             read_tile_size_px=4,
             tile_size_lv0=224,
         ),
-        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, backend="auto", num_cucim_workers=4),
+        preprocessing=replace(DEFAULT_PREPROCESSING, on_the_fly=True, num_cucim_workers=4, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="auto")),
         execution=ExecutionOptions(batch_size=2, num_workers_per_gpu=8, num_gpus=1),
     )
 
@@ -4239,7 +4093,7 @@ def test_persist_embedded_slide_records_resolved_backend_when_auto(monkeypatch, 
             coordinates_meta_path=Path("/tmp/slide-a.coordinates.meta.json"),
             tiles_tar_path=Path("/tmp/slide-a.tiles.tar"),
         ),
-        preprocessing=replace(DEFAULT_PREPROCESSING, backend="auto"),
+        preprocessing=replace(DEFAULT_PREPROCESSING, tiling=replace(DEFAULT_PREPROCESSING.tiling, backend="auto")),
         execution=ExecutionOptions(output_dir=tmp_path),
     )
 
@@ -4319,12 +4173,7 @@ def test_build_hierarchical_index_is_region_major_and_row_major_within_region():
 def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch():
     import slide2vec.inference as inference
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        requested_region_size_px=1792,
-        region_tile_multiple=8,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 224), requested_region_size_px=1792, region_tile_multiple=8)
     tiling_result = SimpleNamespace(
         read_tile_size_px=3319,
         read_spacing_um=0.27,
@@ -4344,12 +4193,7 @@ def test_resolve_hierarchical_geometry_scales_tile_first_under_spacing_mismatch(
 def test_resolve_hierarchical_geometry_keeps_level0_footprint_when_spacing_matches_base():
     import slide2vec.inference as inference
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        requested_region_size_px=448,
-        region_tile_multiple=2,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 224), requested_region_size_px=448, region_tile_multiple=2)
     tiling_result = SimpleNamespace(
         read_tile_size_px=224,
         read_spacing_um=0.486187607049942,
@@ -5109,9 +4953,8 @@ def test_collect_pipeline_artifacts_reloads_per_class_slide_embeddings(tmp_path:
     assert [a.annotation for a in slide_artifacts] == ["tumor", "stroma"]
 
 
-def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeypatch, tmp_path: Path):
-    """Customized masks block forwards a sampling spec, selection strategy, output mode AND the
-    slide's annotation mask to hs2p — the wiring that lets hs2p enforce a required raster."""
+def test_tile_slides_call_hands_the_held_hs2p_configs_to_hs2p(monkeypatch, tmp_path: Path):
+    """hs2p receives the held dataclasses as given, and the slide's annotation mask."""
     captured = {}
 
     def fake_tile_slides(slides, **kwargs):
@@ -5120,15 +4963,19 @@ def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeyp
 
     monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
 
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        on_the_fly=True,
-        masks={
-            "pixel_mapping": {"tumor": 2},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        },
-        independent_sampling=True,
+    masks = MaskSamplingConfig(
+        pixel_mapping={"tumor": 2, "stroma": 3},
+        colors={"tumor": (255, 0, 0), "stroma": (0, 0, 255)},
+        min_coverage={"tumor": 0.5, "stroma": 0.5},
+        output_mode="merged",
+        strategy="joint",
+    )
+    preprocessing = PreprocessingConfig(
+        tiling=tiling_config(0.5, 224, backend="asap", mask_backend="openslide"),
+        segmentation=SegmentationConfig(method="otsu", downsample=32),
+        filter=FilterConfig(ref_tile_size=224, a_t=7),
+        preview=PreviewConfig(save_mask_preview=True),
+        masks=masks,
     )
     slide = manifest.coerce_slide_spec(
         {
@@ -5145,67 +4992,16 @@ def test_tile_slides_call_forwards_sampling_and_mask_for_annotation_mode(monkeyp
         num_workers=0,
     )
 
-    assert captured["kwargs"]["sampling"] is not None
-    assert "tumor" in captured["kwargs"]["sampling"].active_annotations
-    assert captured["kwargs"]["selection_strategy"] == "independent_sampling"
-    assert captured["kwargs"]["output_mode"] == "per_annotation"
+    kwargs = captured["kwargs"]
+    assert kwargs["tiling"] == tiling_config(0.5, 224, backend="asap", mask_backend="openslide")
+    assert kwargs["segmentation"] == SegmentationConfig(method="otsu", downsample=32)
+    assert kwargs["filtering"] == FilterConfig(ref_tile_size=224, a_t=7)
+    assert kwargs["preview"] == PreviewConfig(save_mask_preview=True)
+    assert kwargs["masks"] == masks
     assert Path(captured["slides"][0].mask_path) == Path("/tmp/slide-a-mask.png")
 
 
-def test_tile_slides_call_forwards_preview_and_class_colors_for_annotation_mode(
-    monkeypatch, tmp_path: Path
-):
-    """Annotation mode must hand hs2p the PreviewConfig AND a sampling spec whose
-    color_mapping carries masks.colors, so the multi-label mask preview and per-class
-    tiling previews render with the configured colors."""
-    captured = {}
-
-    def fake_tile_slides(slides, **kwargs):
-        captured["kwargs"] = kwargs
-
-    monkeypatch.setattr(tiling_pipeline, "tile_slides", fake_tile_slides)
-
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        on_the_fly=True,
-        masks={
-            "pixel_mapping": {"tumor": 2, "stroma": 3},
-            "colors": {"tumor": [255, 0, 0], "stroma": [0, 0, 255]},
-            "min_coverage": {"tumor": 0.5, "stroma": 0.5},
-        },
-        independent_sampling=True,
-    )
-    slide = manifest.coerce_slide_spec(
-        {
-            "sample_id": "slide-a",
-            "image_path": "/tmp/slide-a.svs",
-            "mask_path": "/tmp/slide-a-mask.png",
-        }
-    )
-
-    tiling_pipeline.tile_slides_call(
-        [slide],
-        preprocessing,
-        output_dir=tmp_path,
-        num_workers=0,
-    )
-
-    preview = captured["kwargs"]["preview"]
-    assert preview is not None
-    assert preview.save_mask_preview is True
-    assert preview.save_tiling_preview is True
-
-    sampling = captured["kwargs"]["sampling"]
-    assert sampling is not None
-    # masks.colors must reach the sampling spec hs2p uses to render the previews, so
-    # each class is drawn with its configured color.
-    assert sampling.color_mapping is not None
-    assert sampling.color_mapping["tumor"] == [255, 0, 0]
-    assert sampling.color_mapping["stroma"] == [0, 0, 255]
-
-
-def test_tile_slides_call_default_masks_block_forwards_no_sampling(monkeypatch, tmp_path: Path):
-    """Default masks block leaves the plain tissue path unchanged: no sampling forwarded."""
+def test_tile_slides_call_tiles_hierarchical_runs_at_the_region_size(monkeypatch, tmp_path: Path):
     captured = {}
 
     def fake_tile_slides(slides, **kwargs):
@@ -5215,14 +5011,29 @@ def test_tile_slides_call_default_masks_block_forwards_no_sampling(monkeypatch, 
 
     tiling_pipeline.tile_slides_call(
         [make_slide("slide-a")],
-        replace(DEFAULT_PREPROCESSING, on_the_fly=True),
+        PreprocessingConfig(
+            tiling=tiling_config(0.5, 224),
+            requested_region_size_px=1344,
+            region_tile_multiple=6,
+        ),
         output_dir=tmp_path,
         num_workers=0,
     )
 
-    assert captured["kwargs"]["sampling"] is None
-    assert captured["kwargs"]["selection_strategy"] is None
-    assert captured["kwargs"]["output_mode"] is None
+    assert captured["kwargs"]["tiling"] == tiling_config(0.5, 1344)
+    assert captured["kwargs"]["filtering"] == FilterConfig(ref_tile_size=224)
+
+
+def test_tile_slides_call_refuses_an_unresolved_preprocessing(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(tiling_pipeline, "tile_slides", lambda *args, **kwargs: None)
+
+    with pytest.raises(ValueError, match="resolved"):
+        tiling_pipeline.tile_slides_call(
+            [make_slide("slide-a")],
+            BasePreprocessingConfig(),
+            output_dir=tmp_path,
+            num_workers=0,
+        )
 
 
 def test_zero_tile_sidecar_namespaces_per_class(tmp_path: Path):
@@ -5743,13 +5554,7 @@ def test_direct_embed_worker_hierarchical_tile_shard_writes_rank_payload(monkeyp
         ),
         encoding="utf-8",
     )
-    preprocessing = replace(
-        DEFAULT_PREPROCESSING,
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        requested_region_size_px=448,
-        region_tile_multiple=2,
-    )
+    preprocessing = replace(DEFAULT_PREPROCESSING, requested_region_size_px=448, region_tile_multiple=2, tiling=replace(DEFAULT_PREPROCESSING.tiling, requested_spacing_um=0.5, requested_tile_size_px=224))
     slide = make_slide("slide-a")
     tiling_result = SimpleNamespace(
         x=np.array([0]),

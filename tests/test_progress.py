@@ -23,13 +23,14 @@ from slide2vec.runtime import (
     process_list,
     tiling_pipeline,
 )
+from tests.tiling_helpers import tiling_config
 
 
 def _noop_declare_encoder_input(*args, **kwargs):
     """Stand-in models declare nothing: these tests stub ``_load_backend`` outright."""
     return None
 
-DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(tiling=tiling_config(0.5, 224))
 
 
 class RecordingReporter:

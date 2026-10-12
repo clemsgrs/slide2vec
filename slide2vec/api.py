@@ -1,5 +1,5 @@
 
-import copy
+import functools
 import logging
 import math
 import os
@@ -10,7 +10,21 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import torch
-from hs2p import SlideSpec
+from hs2p import (
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    SlideSpec,
+    TilingConfig,
+)
+from hs2p.configs.resolvers import (
+    resolve_filter_config,
+    resolve_mask_sampling_config,
+    resolve_preview_config,
+    resolve_segmentation_config,
+    resolve_tiling_config,
+)
 
 from slide2vec.artifacts import (
     DenseImageArtifact,
@@ -66,111 +80,118 @@ SlideSequence = Sequence[SlideInput]
 TilingResultsInput = Sequence[Any] | Mapping[str, Any]
 
 
-_REQUESTED_TILE_SIZE_INTERPOLATION = "${tiling.params.requested_tile_size_px}"
+#: Keys under ``tiling`` that slide2vec owns. Every other key under ``tiling`` is hs2p's
+#: vocabulary, hydrated and validated by hs2p's own config resolvers.
+_SLIDE2VEC_TILING_KEYS = (
+    "on_the_fly",
+    "gpu_decode",
+    "adaptive_batching",
+    "use_supertiles",
+    "jpeg_backend",
+    "read_tiles_from",
+)
+_SLIDE2VEC_TILING_PARAMS_KEYS = ("requested_region_size_px", "region_tile_multiple")
 
 
-def _load_default_preprocessing() -> dict[str, dict[str, Any]]:
-    """Read the public nested defaults from the package's canonical YAML config."""
+def _hs2p_section(tiling: Any) -> dict[str, Any]:
+    """The hs2p keys of a slide2vec ``tiling`` node, as a plain mapping.
+
+    Interpolations stay unresolved, so ``filter_params.ref_tile_size`` keeps tracking
+    ``params.requested_tile_size_px`` when the params are set.
+    """
     from omegaconf import OmegaConf
 
-    tiling = load_config("default").tiling
-    defaults: dict[str, dict[str, Any]] = {}
-    for public_name, config_name in (
-        ("segmentation", "seg_params"),
-        ("filtering", "filter_params"),
-        ("preview", "preview"),
-        ("masks", "masks"),
-    ):
-        section = OmegaConf.to_container(getattr(tiling, config_name), resolve=False)
-        if not isinstance(section, dict):
-            raise TypeError(f"tiling.{config_name} must be a mapping")
-        defaults[public_name] = section
-    defaults["preview"]["tissue_contour_color"] = tuple(
-        defaults["preview"]["tissue_contour_color"]
+    section = OmegaConf.to_container(tiling, resolve=False)
+    if not isinstance(section, dict):
+        raise TypeError("tiling must be a mapping")
+    for key in _SLIDE2VEC_TILING_KEYS:
+        section.pop(key, None)
+    params = section.get("params")
+    if isinstance(params, dict):
+        for key in _SLIDE2VEC_TILING_PARAMS_KEYS:
+            params.pop(key, None)
+    return section
+
+
+def _hs2p_view(tiling: Any) -> Any:
+    """``{"tiling": ...}`` holding the hs2p keys of *tiling*, for hs2p's resolvers."""
+    from omegaconf import OmegaConf
+
+    return OmegaConf.create({"tiling": _hs2p_section(tiling)})
+
+
+@functools.cache
+def _default_section() -> dict[str, Any]:
+    return _hs2p_section(load_config("default").tiling)
+
+
+def _default_view(**params: Any) -> Any:
+    """hs2p view of the package's ``configs/default.yaml`` with the given tiling params."""
+    from omegaconf import OmegaConf
+
+    view = OmegaConf.create({"tiling": _default_section()})
+    for key, value in params.items():
+        view.tiling.params[key] = value
+    return view
+
+
+def _default_segmentation() -> SegmentationConfig:
+    return resolve_segmentation_config(_default_view())
+
+
+def _default_preview() -> PreviewConfig:
+    return resolve_preview_config(_default_view())
+
+
+def _default_masks() -> MaskSamplingConfig:
+    return resolve_mask_sampling_config(_default_view())
+
+
+def _default_tiling(*, requested_spacing_um: float, requested_tile_size_px: int) -> TilingConfig:
+    """The ``TilingConfig`` a ``None`` :attr:`PreprocessingConfig.tiling` resolves to."""
+    return resolve_tiling_config(
+        _default_view(
+            requested_spacing_um=float(requested_spacing_um),
+            requested_tile_size_px=int(requested_tile_size_px),
+        )
     )
-    return defaults
 
 
-#: Complete defaults for the nested public preprocessing sections, loaded from
-#: ``configs/default.yaml`` so Python and YAML entry points share one source.
-DEFAULT_PREPROCESSING = _load_default_preprocessing()
-
-#: Default annotation-mask vocabulary, loaded from ``configs/default.yaml``: plain
-#: binary tissue tiling (``{background: 0, tissue: 1}``) with
-#: ``min_coverage.tissue = 0.1``. ``min_coverage.tissue`` is the single source of truth
-#: for the tissue threshold. A :class:`PreprocessingConfig` ``masks`` value is
-#: deep-merged over this default, so callers only state what they override.
-DEFAULT_MASKS: dict[str, Any] = DEFAULT_PREPROCESSING["masks"]
-
-
-def _deep_merge_dicts(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
-    """Deep-merge *override* onto a copy of *base* (nested dicts merge key-by-key)."""
-    merged = copy.deepcopy(dict(base))
-    for key, value in override.items():
-        existing = merged.get(key)
-        if isinstance(value, Mapping) and isinstance(existing, dict):
-            merged[key] = _deep_merge_dicts(existing, value)
-        else:
-            merged[key] = copy.deepcopy(value)
-    return merged
-
-
-def resolve_masks(masks: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Complete a (possibly partial) ``masks`` mapping by merging it over :data:`DEFAULT_MASKS`."""
-    if not masks:
-        return copy.deepcopy(DEFAULT_MASKS)
-    return _deep_merge_dicts(DEFAULT_MASKS, masks)
-
-
-def _masks_to_plain_dict(node: Any) -> dict[str, Any]:
-    """Normalize a masks config node (OmegaConf, mapping, or namespace) to a plain dict."""
-    from omegaconf import OmegaConf
-
-    if node is None:
-        return {}
-    if OmegaConf.is_config(node):
-        return copy.deepcopy(OmegaConf.to_container(node, resolve=True))  # type: ignore[return-value]
-    if isinstance(node, Mapping):
-        return copy.deepcopy(dict(node))
-    return copy.deepcopy(dict(vars(node)))
+def _default_filter(*, requested_tile_size_px: int) -> FilterConfig:
+    """The ``FilterConfig`` a ``None`` :attr:`PreprocessingConfig.filter` resolves to."""
+    return resolve_filter_config(_default_view(requested_tile_size_px=int(requested_tile_size_px)))
 
 
 @dataclass(frozen=True, kw_only=True)
 class PreprocessingConfig:
-    """Configuration for slide tiling and preprocessing."""
+    """Configuration for slide tiling and preprocessing.
 
-    #: Slide reading backend. ``"auto"`` tries cucim → vips → openslide → asap.
-    #: Explicit choices: ``"cucim"``, ``"openslide"``, ``"vips"``, ``"asap"``.
-    #: Slides without spacing metadata require ``spacing_at_level_0``, including
-    #: untagged TIFFs read with VIPS.
-    backend: str = "auto"
-    #: Source-mask reading backend, resolved independently from the *mask* path.
-    #: ``"auto"`` probes openability just like :attr:`backend`. Set this
-    #: explicitly (e.g. ``"openslide"``) when a precomputed tissue or annotation mask needs
-    #: a different decoder than its slide — hs2p no longer silently falls back to another
-    #: reader, so a mask the slide backend cannot decode fails unless overridden here.
-    #: Accepts the same values as :attr:`backend` plus ``"pil"`` for PNG/JPEG masks and
-    #: ``"tifffile"`` for lossless label reads; ``"auto"`` selects PIL for PNG/JPEG masks
-    #: and ``"tifffile"`` for TIFF masks whose samples are not 8-bit unsigned.
-    #: Ignored for slides with no source mask.
-    #: Masks need no spacing metadata, but must align to the slide's field of view and
-    #: contain only declared label IDs. See :doc:`preprocessing` for hs2p 5 validation.
-    mask_backend: str = "auto"
-    #: Target spacing in µm/px. Resolved from the model preset when ``None``.
-    requested_spacing_um: float | None = None
-    #: Tile side length in pixels at *requested_spacing_um*.
-    #: Resolved from the model preset when ``None``.
-    requested_tile_size_px: int | None = None
+    ``tiling``, ``segmentation``, ``filter``, ``preview`` and ``masks`` hold hs2p's
+    config dataclasses as given. The other fields are slide2vec's.
+    """
+
+    #: hs2p tiling geometry and slide/mask backends. ``None`` resolves when the model is
+    #: known: ``requested_spacing_um`` and ``requested_tile_size_px`` from the model
+    #: preset, ``tolerance=0.05``, ``overlap=0.0``, ``backend`` and ``mask_backend``
+    #: ``"auto"``.
+    tiling: TilingConfig | None = None
+    #: hs2p tissue segmentation. The default uses ``method="hsv"``.
+    segmentation: SegmentationConfig = field(default_factory=_default_segmentation)
+    #: hs2p contour and tile filtering. ``None`` resolves to hs2p's filter defaults with
+    #: ``ref_tile_size`` equal to the resolved ``tiling.requested_tile_size_px``.
+    filter: FilterConfig | None = None
+    #: hs2p previews. The default saves the mask and tiling previews.
+    preview: PreviewConfig = field(default_factory=_default_preview)
+    #: hs2p annotation-mask vocabulary and sampling. The default is binary tissue tiling
+    #: (``{background: 0, tissue: 1}``) with ``min_coverage={"tissue": 0.1}`` and
+    #: ``strategy="independent"``. See :doc:`preprocessing`.
+    masks: MaskSamplingConfig = field(default_factory=_default_masks)
     #: Parent region side length in pixels (hierarchical mode).
     #: Auto-derived as ``requested_tile_size_px × region_tile_multiple`` when ``None``.
     requested_region_size_px: int | None = None
     #: Region grid width/height in tiles (e.g. ``6`` → 6×6 = 36 tiles per region).
     #: Enables hierarchical extraction when set; must be ≥ 2.
     region_tile_multiple: int | None = None
-    #: Relative spacing tolerance for pyramid level selection (default ``0.05``).
-    tolerance: float = 0.05
-    #: Fractional tile overlap (``0.0`` = no overlap).
-    overlap: float = 0.0
     #: Directory containing pre-extracted tile coordinates to reuse, skipping tiling.
     read_coordinates_from: Path | None = None
     #: Directory containing pre-extracted tile images to skip the tiling step entirely.
@@ -194,116 +215,35 @@ class PreprocessingConfig:
     num_cucim_workers: int = 4
     #: Skip slides already present in the output directory when ``True``.
     resume: bool = False
-    #: Partial override forwarded to hs2p segmentation config. Supported keys:
-    #: ``method``, ``downsample``, ``sam2_device``. Omitted keys retain the
-    #: standard configuration defaults. See :doc:`preprocessing` for details.
-    segmentation: dict[str, Any] = field(default_factory=dict)
-    #: Partial override forwarded to hs2p tile-filtering config. Omitted keys
-    #: retain the standard configuration defaults.
-    filtering: dict[str, Any] = field(default_factory=dict)
-    #: Partial override controlling whether hs2p writes mask and tiling preview
-    #: images. Keys: ``save_mask_preview``, ``save_tiling_preview``,
-    #: ``downsample``. Omitted keys retain the standard configuration defaults.
-    preview: dict[str, Any] = field(default_factory=dict)
-    #: Annotation-mask vocabulary forwarded to hs2p's sampling resolver. Keys:
-    #: ``output_mode``, ``pixel_mapping``, ``colors``, ``min_coverage``. A partial
-    #: mapping is deep-merged over :data:`DEFAULT_MASKS`, so callers only state what
-    #: they override (e.g. ``{"min_coverage": {"tissue": 0.5}}``). The default
-    #: ``{background, tissue}`` block is plain tissue tiling; ``min_coverage.tissue``
-    #: is the single source of truth for the tissue threshold.
-    masks: dict[str, Any] = field(default_factory=dict)
-    #: When annotation sampling is active, tile each class independently (``True``)
-    #: vs jointly across classes (``False``).
-    independent_sampling: bool = True
-
-    def __post_init__(self) -> None:
-        filtering_defaults = DEFAULT_PREPROCESSING["filtering"]
-        filtering_override = self.filtering
-        if self.requested_tile_size_px is not None:
-            filtering_defaults = {
-                **filtering_defaults,
-                "ref_tile_size": int(self.requested_tile_size_px),
-            }
-            if (
-                filtering_override.get("ref_tile_size")
-                == _REQUESTED_TILE_SIZE_INTERPOLATION
-            ):
-                filtering_override = {
-                    **filtering_override,
-                    "ref_tile_size": int(self.requested_tile_size_px),
-                }
-        object.__setattr__(
-            self,
-            "segmentation",
-            _deep_merge_dicts(DEFAULT_PREPROCESSING["segmentation"], self.segmentation),
-        )
-        object.__setattr__(
-            self,
-            "filtering",
-            _deep_merge_dicts(filtering_defaults, filtering_override),
-        )
-        object.__setattr__(
-            self,
-            "preview",
-            _deep_merge_dicts(DEFAULT_PREPROCESSING["preview"], self.preview),
-        )
-        object.__setattr__(self, "masks", resolve_masks(self.masks))
 
     @classmethod
     def from_config(cls, cfg: Any) -> "PreprocessingConfig":
+        """Build from a resolved slide2vec config; hs2p's resolvers hydrate its sections."""
         tiling = cfg.tiling
+        view = _hs2p_view(tiling)
         read_coordinates_from = tiling.read_coordinates_from
         read_tiles_from = tiling.read_tiles_from
-        on_the_fly = bool(tiling.on_the_fly)
-        gpu_decode = bool(tiling.gpu_decode)
-        adaptive_batching = bool(tiling.adaptive_batching)
-        preview_cfg = tiling.preview
-        preview_save = bool(preview_cfg.save_mask_preview)
-        preview_tiling_save = bool(preview_cfg.save_tiling_preview)
-        preview_kwargs: dict[str, Any] = {
-            "save_mask_preview": preview_save,
-            "save_tiling_preview": preview_tiling_save,
-            "downsample": int(preview_cfg.downsample),
-        }
-        preview_kwargs["tissue_contour_color"] = tuple(
-            int(channel) for channel in preview_cfg.tissue_contour_color
-        )
-        preview_kwargs["mask_overlay_alpha"] = float(preview_cfg.mask_overlay_alpha)
         region_size_px = getattr(tiling.params, "requested_region_size_px", None)
         region_tile_multiple = getattr(tiling.params, "region_tile_multiple", None)
         return cls(
-            backend=tiling.backend,
-            mask_backend=getattr(tiling, "mask_backend", "auto"),
-            requested_spacing_um=float(tiling.params.requested_spacing_um),
-            requested_tile_size_px=int(tiling.params.requested_tile_size_px),
+            tiling=resolve_tiling_config(view),
+            segmentation=resolve_segmentation_config(view),
+            filter=resolve_filter_config(view),
+            preview=resolve_preview_config(view),
+            masks=resolve_mask_sampling_config(view),
             requested_region_size_px=int(region_size_px) if region_size_px is not None else None,
             region_tile_multiple=int(region_tile_multiple) if region_tile_multiple is not None else None,
-            tolerance=float(tiling.params.tolerance),
-            overlap=float(tiling.params.overlap),
-            masks=_masks_to_plain_dict(getattr(tiling, "masks", None)),
-            independent_sampling=bool(getattr(tiling, "independent_sampling", True)),
             read_coordinates_from=Path(read_coordinates_from) if read_coordinates_from else None,
-            read_tiles_from=(
-                Path(read_tiles_from) if read_tiles_from else None
-            ),
-            on_the_fly=on_the_fly,
+            read_tiles_from=Path(read_tiles_from) if read_tiles_from else None,
+            on_the_fly=bool(tiling.on_the_fly),
             save_tiles=bool(cfg.save_tiles),
-            gpu_decode=gpu_decode,
-            adaptive_batching=adaptive_batching,
+            gpu_decode=bool(tiling.gpu_decode),
+            adaptive_batching=bool(tiling.adaptive_batching),
             use_supertiles=bool(tiling.use_supertiles),
             jpeg_backend=str(tiling.jpeg_backend),
             num_cucim_workers=int(cfg.speed.num_cucim_workers) if cfg.speed.num_cucim_workers is not None else 4,
             resume=bool(cfg.resume),
-            segmentation=dict(tiling.seg_params),
-            filtering=dict(tiling.filter_params),
-            preview=preview_kwargs,
         )
-
-    def with_backend(self, backend: str) -> "PreprocessingConfig":
-        return replace(self, backend=backend)
-
-    def with_mask_backend(self, mask_backend: str) -> "PreprocessingConfig":
-        return replace(self, mask_backend=mask_backend)
 
 
 #: Accepted values of :attr:`ExecutionOptions.on_image_mismatch`.
@@ -1078,14 +1018,14 @@ class Model:
         every layer that reaches the encoder may declare for itself rather than trust
         the layer above to have done it.
         """
-        if preprocessing.requested_tile_size_px is None:
+        if preprocessing.tiling is None:
             raise ValueError(
                 "requested_tile_size_px must be resolved before declaring the encoder "
                 "input geometry; a pooled run reads tiles at a size it requested."
             )
         contract = EncoderInputContract.declared_pooled(
             self.name,
-            requested_tile_size_px=int(preprocessing.requested_tile_size_px),
+            requested_tile_size_px=preprocessing.tiling.requested_tile_size_px,
             allow_non_recommended_settings=self.allow_non_recommended_settings,
         )
         self._encoder_input = contract
@@ -1420,62 +1360,41 @@ def _resolve_direct_api_preprocessing(
     model: Model,
     preprocessing: PreprocessingConfig | None,
 ) -> PreprocessingConfig:
-    name = model.name
-
-    if preprocessing is None:
-        default_tile_size_px, default_spacing_um = _default_preprocessing_from_registry(name)
-        return _resolve_hierarchical_preprocessing(
-            PreprocessingConfig(
-                backend="auto",
-                requested_spacing_um=default_spacing_um,
-                requested_tile_size_px=default_tile_size_px,
-            )
+    preprocessing = preprocessing if preprocessing is not None else PreprocessingConfig()
+    tiling_cfg = preprocessing.tiling
+    if tiling_cfg is None:
+        default_tile_size_px, default_spacing_um = _default_preprocessing_from_registry(model.name)
+        tiling_cfg = _default_tiling(
+            requested_spacing_um=default_spacing_um,
+            requested_tile_size_px=default_tile_size_px,
         )
+    return _complete_preprocessing(preprocessing, tiling=tiling_cfg)
 
-    requested_spacing_um = preprocessing.requested_spacing_um
-    requested_tile_size_px = preprocessing.requested_tile_size_px
-    if requested_spacing_um is None or requested_tile_size_px is None:
-        resolved_fields = _resolve_registered_preprocessing_fields(
-            name,
-            requested_spacing_um=requested_spacing_um,
-            requested_tile_size_px=requested_tile_size_px,
-        )
-        requested_spacing_um = float(resolved_fields["spacing_um"])
-        requested_tile_size_px = int(resolved_fields["tile_size_px"])
+
+def _complete_preprocessing(
+    preprocessing: PreprocessingConfig, *, tiling: TilingConfig
+) -> PreprocessingConfig:
+    """Hold *tiling*, resolve an unset ``filter`` against it, and derive region geometry."""
+    filter_cfg = preprocessing.filter
+    if filter_cfg is None:
+        filter_cfg = _default_filter(requested_tile_size_px=tiling.requested_tile_size_px)
     return _resolve_hierarchical_preprocessing(
-        replace(
-            preprocessing,
-            requested_spacing_um=requested_spacing_um,
-            requested_tile_size_px=requested_tile_size_px,
-        )
+        replace(preprocessing, tiling=tiling, filter=filter_cfg)
     )
 
 
 def _default_preprocessing_from_registry(name: str | None) -> tuple[int, float]:
-    resolved_fields = _resolve_registered_preprocessing_fields(
+    if not name or name not in encoder_registry:
+        raise ValueError(
+            "Cannot infer preprocessing defaults without a registered model. "
+            "Pass preprocessing.tiling explicitly."
+        )
+    resolved_fields = resolve_preprocessing_fields(
         name,
         requested_spacing_um=None,
         requested_tile_size_px=None,
     )
     return int(resolved_fields["tile_size_px"]), float(resolved_fields["spacing_um"])
-
-
-def _resolve_registered_preprocessing_fields(
-    name: str | None,
-    *,
-    requested_spacing_um: float | None,
-    requested_tile_size_px: int | None,
-) -> dict[str, Any]:
-    if not name or name not in encoder_registry:
-        raise ValueError(
-            "Cannot infer preprocessing defaults without a registered model. "
-            "Pass preprocessing.requested_spacing_um and preprocessing.requested_tile_size_px explicitly."
-        )
-    return resolve_preprocessing_fields(
-        name,
-        requested_spacing_um=requested_spacing_um,
-        requested_tile_size_px=requested_tile_size_px,
-    )
 
 
 def _validate_model_config(
@@ -1490,7 +1409,8 @@ def _validate_model_config(
         info = encoder_registry.info(name)
         if info["level"] != "tile":
             raise ValueError("Hierarchical preprocessing is only supported for tile encoders")
-    if preprocessing.overlap and not encoder_registry.require(name).supports_tile_overlap:
+    tiling = _require_tiling(preprocessing)
+    if tiling.overlap and not encoder_registry.require(name).supports_tile_overlap:
         raise ValueError(f"Encoder '{name}' requires non-overlapping tiles (overlap=0)")
     model._declare_encoder_input(preprocessing, emit_run_info=True)
     # Skip precision validation for CPU execution (fp32 is always valid on CPU).
@@ -1498,7 +1418,7 @@ def _validate_model_config(
     precision = None if on_cpu or execution is None else execution.precision
     validate_encoder_config(
         name,
-        requested_spacing_um=preprocessing.requested_spacing_um,
+        requested_spacing_um=tiling.requested_spacing_um,
         precision=precision,
         output_variant=model._output_variant,
         allow_non_recommended=bool(model.allow_non_recommended_settings),
@@ -1514,19 +1434,16 @@ def _resolve_hierarchical_preprocessing(preprocessing: PreprocessingConfig) -> P
             raise ValueError("region_tile_multiple must be at least 2")
     if multiple is None and requested_region_size_px is None:
         return preprocessing
-    if preprocessing.requested_tile_size_px is None:
-        raise ValueError(
-            "requested_tile_size_px must be resolved before deriving hierarchical region geometry"
-        )
+    tile_size_px = _require_tiling(preprocessing).requested_tile_size_px
     if requested_region_size_px is None:
-        requested_region_size_px = int(preprocessing.requested_tile_size_px) * int(multiple)
+        requested_region_size_px = tile_size_px * int(multiple)
     elif multiple is None:
-        if int(requested_region_size_px) % int(preprocessing.requested_tile_size_px) != 0:
+        if int(requested_region_size_px) % tile_size_px != 0:
             raise ValueError(
                 "requested_region_size_px must be an exact multiple of requested_tile_size_px"
             )
-        multiple = int(requested_region_size_px) // int(preprocessing.requested_tile_size_px)
-    elif int(requested_region_size_px) != int(preprocessing.requested_tile_size_px) * int(multiple):
+        multiple = int(requested_region_size_px) // tile_size_px
+    elif int(requested_region_size_px) != tile_size_px * int(multiple):
         raise ValueError(
             "requested_region_size_px must match requested_tile_size_px * region_tile_multiple"
         )
@@ -1535,6 +1452,16 @@ def _resolve_hierarchical_preprocessing(preprocessing: PreprocessingConfig) -> P
         requested_region_size_px=int(requested_region_size_px),
         region_tile_multiple=int(multiple),
     )
+
+
+def _require_tiling(preprocessing: PreprocessingConfig) -> TilingConfig:
+    """The held ``TilingConfig``; raise when it has not been resolved from the model yet."""
+    if preprocessing.tiling is None:
+        raise ValueError(
+            "preprocessing.tiling must be resolved from the model preset first; "
+            "pass a TilingConfig or let the Model resolve it."
+        )
+    return preprocessing.tiling
 
 
 @contextmanager

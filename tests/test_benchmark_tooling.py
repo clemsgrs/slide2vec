@@ -34,12 +34,12 @@ def test_benchmark_config_preserves_requested_pipeline_settings(module_name, bui
     assert pipeline.execution.num_workers_per_gpu == 0
     assert pipeline.execution.num_gpus == 1
     assert pipeline.execution.precision == "fp32"
-    assert pipeline.preprocessing.backend == "openslide"
-    assert pipeline.preprocessing.requested_tile_size_px == 224
-    assert pipeline.preprocessing.requested_spacing_um == 0.5
-    assert pipeline.preprocessing.masks["min_coverage"]["tissue"] == 0.3
-    assert pipeline.preprocessing.preview["save_mask_preview"] is False
-    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
+    assert pipeline.preprocessing.tiling.backend == "openslide"
+    assert pipeline.preprocessing.tiling.requested_tile_size_px == 224
+    assert pipeline.preprocessing.tiling.requested_spacing_um == 0.5
+    assert pipeline.preprocessing.masks.min_coverage["tissue"] == 0.3
+    assert pipeline.preprocessing.preview.save_mask_preview is False
+    assert pipeline.preprocessing.preview.save_tiling_preview is False
     assert pipeline.preprocessing.read_coordinates_from == (
         Path("/tmp/benchmark-config-only/coordinates") if reuses_coordinates else None
     )
@@ -179,10 +179,10 @@ def test_benchmark_base_config_converts_with_current_keys(module_name, model_kwa
     assert pipeline.execution.num_workers_per_gpu == 0
     assert pipeline.execution.num_preprocessing_workers == 1
     assert pipeline.preprocessing.num_cucim_workers == 2
-    assert pipeline.preprocessing.masks["min_coverage"]["tissue"] == expected_tissue
-    assert pipeline.preprocessing.segmentation["method"] == "hsv"
-    assert pipeline.preprocessing.preview["save_mask_preview"] is False
-    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
+    assert pipeline.preprocessing.masks.min_coverage["tissue"] == expected_tissue
+    assert pipeline.preprocessing.segmentation.method == "hsv"
+    assert pipeline.preprocessing.preview.save_mask_preview is False
+    assert pipeline.preprocessing.preview.save_tiling_preview is False
 
 
 def test_embedding_trial_config_sets_current_worker_and_preview_keys():
@@ -201,8 +201,8 @@ def test_embedding_trial_config_sets_current_worker_and_preview_keys():
 
     assert pipeline.execution.num_workers_per_gpu == 0
     assert pipeline.execution.batch_size == 4
-    assert pipeline.preprocessing.preview["save_mask_preview"] is False
-    assert pipeline.preprocessing.preview["save_tiling_preview"] is False
+    assert pipeline.preprocessing.preview.save_mask_preview is False
+    assert pipeline.preprocessing.preview.save_tiling_preview is False
 
 
 def test_runtime_benchmark_checks_expected_pixels_and_rejects_changed_baseline(tmp_path, monkeypatch):

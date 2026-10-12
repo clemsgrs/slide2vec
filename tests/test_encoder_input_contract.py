@@ -10,6 +10,7 @@ from contextlib import nullcontext
 
 import pytest
 import torch
+from tests.tiling_helpers import tiling_config
 
 
 class _Sentinel:
@@ -223,10 +224,7 @@ def test_in_process_embed_tiles_resolves_the_same_transform_as_the_model_route(
     import slide2vec.inference as inference
     from slide2vec.api import ExecutionOptions, Model, PreprocessingConfig
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=288,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 288))
     execution = ExecutionOptions(output_dir=tmp_path, precision="fp32")
 
     def fresh_model() -> Model:
@@ -290,10 +288,7 @@ def test_in_process_embed_patients_declares_the_requested_geometry(monkeypatch, 
     result = inference.embed_patients(
         model,
         [{"sample_id": "slide-a", "image_path": tmp_path / "slide-a.tif"}],
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=232,
-        ),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 232)),
         execution=ExecutionOptions(output_dir=tmp_path, precision="fp32"),
     )
 
@@ -318,10 +313,7 @@ def test_pipeline_and_in_process_embed_route_resolve_the_same_transform(
 
     monkeypatch.setattr(inference, "run_pipeline", lambda *args, **kwargs: None)
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=288,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 288))
     execution = ExecutionOptions(precision="fp32")
 
     def fresh_model() -> Model:

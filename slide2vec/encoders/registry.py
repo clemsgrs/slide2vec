@@ -670,7 +670,7 @@ def _resolve_default_spacing(encoder_name: str, info: dict[str, Any]) -> float:
     ``supported_spacing_um`` when that is a single value. Encoders that support a
     *list* of spacings, or are spacing-agnostic (``supported_spacing_um=None``),
     with no explicit default have no unambiguous tiling spacing and raise — the
-    caller must pass ``preprocessing.requested_spacing_um`` (or the encoder must
+    caller must pass ``preprocessing.tiling`` (or the encoder must
     declare ``default_spacing_um``).
     """
     explicit = info.get("default_spacing_um")
@@ -690,7 +690,7 @@ def _resolve_default_spacing(encoder_name: str, info: dict[str, Any]) -> float:
         raise ValueError(
             f"Encoder '{encoder_name}' supports multiple spacings [{supported_text}]; "
             "cannot infer a default requested_spacing_um. Declare default_spacing_um "
-            "in its registration or pass preprocessing.requested_spacing_um explicitly."
+            "in its registration or pass preprocessing.tiling explicitly."
         )
     if isinstance(supported, (int, float)) and not isinstance(supported, bool):
         return float(supported)
@@ -698,7 +698,7 @@ def _resolve_default_spacing(encoder_name: str, info: dict[str, Any]) -> float:
     raise ValueError(
         f"Encoder '{encoder_name}' is spacing-agnostic (supported_spacing_um=None) but "
         "declares no default_spacing_um; declare default_spacing_um in its registration "
-        "or pass preprocessing.requested_spacing_um explicitly."
+        "or pass preprocessing.tiling explicitly."
     )
 
 
