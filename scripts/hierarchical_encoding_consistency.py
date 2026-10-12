@@ -59,6 +59,8 @@ class QuadrantMeanEncoder:
 
 
 def _inputs():
+    from hs2p import TilingConfig
+
     from slide2vec.api import ExecutionOptions, PreprocessingConfig
     from slide2vec.runtime.types import LoadedModel
 
@@ -79,9 +81,13 @@ def _inputs():
         read_level=0,
     )
     preprocessing = PreprocessingConfig(
-        backend=SETTINGS["backend"],
-        requested_spacing_um=SETTINGS["requested_spacing_um"],
-        requested_tile_size_px=SETTINGS["requested_tile_size_px"],
+        tiling=TilingConfig(
+            requested_spacing_um=SETTINGS["requested_spacing_um"],
+            requested_tile_size_px=SETTINGS["requested_tile_size_px"],
+            tolerance=0.05,
+            overlap=0.0,
+            backend=SETTINGS["backend"],
+        ),
         region_tile_multiple=SETTINGS["region_tile_multiple"],
         requested_region_size_px=SETTINGS["requested_region_size_px"],
     )

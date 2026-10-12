@@ -19,8 +19,9 @@ from slide2vec.artifacts import (
     write_tile_embeddings,
 )
 from slide2vec.runtime import artifacts_collect, embedding_pipeline, manifest
+from tests.tiling_helpers import tiling_config
 
-PREPROCESSING = BasePreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
+PREPROCESSING = BasePreprocessingConfig(tiling=tiling_config(0.5, 224))
 
 PROCESS_LIST_HEADER = (
     "sample_id,annotation,image_path,mask_path,requested_backend,backend,spacing_at_level_0,"

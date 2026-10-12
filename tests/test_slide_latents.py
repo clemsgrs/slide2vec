@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from hs2p import FilterConfig, PreviewConfig
 from PIL import Image
 from torchvision.transforms import v2
 
@@ -29,6 +30,7 @@ from slide2vec.artifacts import load_array
 from slide2vec.encoders.base import SlideEncoder
 from slide2vec.runtime import distributed_stage, embedding_pipeline, manifest
 from slide2vec.runtime.types import LoadedModel
+from tests.tiling_helpers import tiling_config
 
 pytest.importorskip("openslide")
 
@@ -91,11 +93,9 @@ def _slide(tmp_path: Path) -> dict:
 
 def _preprocessing(**kwargs) -> PreprocessingConfig:
     return PreprocessingConfig(
-        backend="openslide",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        filtering={"a_t": 0, "a_h": 0},
-        preview={"save_mask_preview": False, "save_tiling_preview": False},
+        tiling=tiling_config(0.5, 224, backend="openslide"),
+        filter=FilterConfig(ref_tile_size=224, a_t=0, a_h=0),
+        preview=PreviewConfig(),
         **kwargs,
     )
 

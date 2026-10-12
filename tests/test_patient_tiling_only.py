@@ -14,15 +14,10 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from hs2p import SlideSpec
+from hs2p import PreviewConfig, SlideSpec
 
-from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
-from tests.output_consistency_config import (
-    TILING_FILTER_PARAMS,
-    TILING_MASKS,
-    TILING_PARAMS,
-    TILING_SEG_PARAMS,
-)
+from slide2vec.api import ExecutionOptions, Model, Pipeline
+from tests.tiling_helpers import output_consistency_preprocessing
 
 
 pytest.importorskip("openslide")
@@ -46,15 +41,7 @@ def _model_and_pipeline(output_dir: Path) -> tuple[Model, Pipeline]:
     model = Model.from_preset("moozy", device="cpu")
     pipeline = Pipeline(
         model,
-        PreprocessingConfig(
-            backend="openslide",
-            mask_backend="openslide",
-            masks=TILING_MASKS,
-            segmentation=TILING_SEG_PARAMS,
-            filtering=TILING_FILTER_PARAMS,
-            preview={"save_mask_preview": False, "save_tiling_preview": False},
-            **TILING_PARAMS,
-        ),
+        output_consistency_preprocessing(preview=PreviewConfig()),
         execution=ExecutionOptions(output_dir=output_dir, num_gpus=1, num_preprocessing_workers=1),
     )
     return model, pipeline

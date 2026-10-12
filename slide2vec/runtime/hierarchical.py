@@ -38,9 +38,9 @@ def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_res
         raise ValueError("Hierarchical preprocessing requires region_tile_multiple")
     if preprocessing.requested_region_size_px is None:
         raise ValueError("Hierarchical preprocessing requires requested_region_size_px")
-    requested_tile_size_px = int(preprocessing.requested_tile_size_px)
+    requested_tile_size_px = int(preprocessing.tiling.requested_tile_size_px)
     requested_region_size_px = int(preprocessing.requested_region_size_px)
-    requested_spacing_um = float(preprocessing.requested_spacing_um)
+    requested_spacing_um = float(preprocessing.tiling.requested_spacing_um)
     multiple = int(preprocessing.region_tile_multiple)
     if requested_region_size_px % multiple != 0:
         raise ValueError("requested_region_size_px must be divisible by region_tile_multiple")
@@ -50,7 +50,7 @@ def resolve_hierarchical_geometry(preprocessing: PreprocessingConfig, tiling_res
         level0_spacing_um=base_spacing_um,
         level_downsamples=_level_downsample_pairs(getattr(tiling_result, "level_downsamples")),
         target_size_px=(requested_tile_size_px, requested_tile_size_px),
-        tolerance=float(preprocessing.tolerance),
+        tolerance=float(preprocessing.tiling.tolerance),
         content_kind="image",
     )
     read_tile_size_px = int(read_plan.read_size_px[0])

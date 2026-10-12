@@ -1,4 +1,3 @@
-from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,82 +18,9 @@ from slide2vec.artifacts import (
     write_tile_embeddings,
 )
 from slide2vec.configs.resources import load_config
+from tests.tiling_helpers import tiling_config
 
-DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
-
-
-def test_partial_segmentation_override_changes_only_requested_field():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        segmentation={"downsample": 32},
-    )
-
-    segmentation = build_hs2p_configs(preprocessing)[1]
-
-    assert asdict(segmentation) == {
-        "method": "hsv",
-        "downsample": 32,
-        "sthresh": 8,
-        "sthresh_up": 255,
-        "mthresh": 7,
-        "close": 4,
-        "sam2_checkpoint_path": None,
-        "sam2_config_path": None,
-        "sam2_device": "cpu",
-        "sam2_num_workers": None,
-    }
-
-
-def test_partial_filtering_override_changes_only_requested_field():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        filtering={"a_t": 7},
-    )
-
-    filtering = build_hs2p_configs(preprocessing)[2]
-
-    assert asdict(filtering) == {
-        "ref_tile_size": 224,
-        "a_t": 7,
-        "a_h": 2,
-        "filter_white": False,
-        "filter_black": False,
-        "white_threshold": 220,
-        "black_threshold": 25,
-        "fraction_threshold": 0.9,
-        "filter_grayspace": False,
-        "grayspace_saturation_threshold": 0.05,
-        "grayspace_fraction_threshold": 0.6,
-        "filter_blur": False,
-        "blur_threshold": 50.0,
-        "qc_spacing_um": 2.0,
-    }
-
-
-def test_partial_preview_override_changes_only_requested_field():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        preview={"save_tiling_preview": False},
-    )
-
-    preview = build_hs2p_configs(preprocessing)[3]
-
-    assert asdict(preview) == {
-        "save_mask_preview": True,
-        "save_tiling_preview": False,
-        "downsample": 32,
-        "tissue_contour_color": (157, 219, 129),
-        "mask_overlay_alpha": 0.5,
-    }
+DEFAULT_PREPROCESSING = PreprocessingConfig(tiling=tiling_config())
 
 
 def _cli_preprocessing(tmp_path: Path, opts: list[str]) -> PreprocessingConfig:
@@ -115,67 +41,116 @@ def _cli_preprocessing(tmp_path: Path, opts: list[str]) -> PreprocessingConfig:
     return PreprocessingConfig.from_config(cfg)
 
 
-def test_public_preprocessing_defaults_match_standard_configuration(tmp_path: Path):
-    standard = _cli_preprocessing(tmp_path, [])
-    public = PreprocessingConfig(
+def test_cli_config_hydrates_the_held_hs2p_configs(tmp_path: Path):
+    from hs2p import (
+        FilterConfig,
+        MaskSamplingConfig,
+        PreviewConfig,
+        SegmentationConfig,
+        TilingConfig,
+    )
+
+    preprocessing = _cli_preprocessing(
+        tmp_path,
+        [
+            "tiling.backend=openslide",
+            "tiling.seg_params.downsample=32",
+            "tiling.filter_params.a_t=7",
+            "tiling.preview.save_tiling_preview=false",
+            "tiling.masks.min_coverage.tissue=0.4",
+        ],
+    )
+
+    assert preprocessing.tiling == TilingConfig(
         requested_spacing_um=0.5,
         requested_tile_size_px=224,
+        tolerance=0.05,
+        overlap=0.0,
+        backend="openslide",
     )
+    assert preprocessing.segmentation == SegmentationConfig(method="hsv", downsample=32)
+    assert preprocessing.filter == FilterConfig(ref_tile_size=224, a_t=7)
+    assert preprocessing.preview == PreviewConfig(
+        save_mask_preview=True,
+        save_tiling_preview=False,
+        tissue_contour_color=(157, 219, 129),
+    )
+    assert preprocessing.masks == MaskSamplingConfig(
+        pixel_mapping={"background": 0, "tissue": 1},
+        colors={"background": None, "tissue": (157, 219, 129)},
+        min_coverage={"tissue": 0.4},
+        strategy="independent",
+    )
+
+
+def test_cli_config_rejects_the_retired_independent_sampling_key(tmp_path: Path):
+    with pytest.raises(ValueError, match="tiling.masks.strategy"):
+        _cli_preprocessing(tmp_path, ["tiling.independent_sampling=false"])
+
+
+def test_cli_config_rejects_unknown_hs2p_keys(tmp_path: Path):
+    with pytest.raises(ValueError, match="tiling.seg_params.downsampel"):
+        _cli_preprocessing(tmp_path, ["tiling.seg_params.downsampel=32"])
+
+
+def test_public_preprocessing_defaults_match_standard_configuration(tmp_path: Path):
+    from hs2p import MaskSamplingConfig
+
+    standard = _cli_preprocessing(tmp_path, [])
+    public = PreprocessingConfig()
 
     assert public.segmentation == standard.segmentation
-    assert public.filtering == standard.filtering
     assert public.preview == standard.preview
     assert public.masks == standard.masks
-    assert public.masks["min_coverage"] == {"background": None, "tissue": 0.1}
-
-
-def test_partial_masks_override_matches_between_python_and_cli(tmp_path: Path):
-    standard = _cli_preprocessing(tmp_path, ["tiling.masks.min_coverage.tissue=0.4"])
-    public = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks={"min_coverage": {"tissue": 0.4}},
+    assert public.masks == MaskSamplingConfig(
+        pixel_mapping={"background": 0, "tissue": 1},
+        colors={"background": None, "tissue": (157, 219, 129)},
+        min_coverage={"tissue": 0.1},
+        output_mode="per_annotation",
+        strategy="independent",
     )
 
-    assert public.masks == standard.masks
-    assert public.masks == {
-        "output_mode": "per_annotation",
-        "pixel_mapping": {"background": 0, "tissue": 1},
-        "colors": {"background": None, "tissue": [157, 219, 129]},
-        "min_coverage": {"background": None, "tissue": 0.4},
-    }
+
+def test_unset_tiling_and_filter_resolve_like_the_standard_configuration(tmp_path: Path):
+    import slide2vec.api as api
+
+    standard = _cli_preprocessing(tmp_path, [])
+    resolved = api._resolve_direct_api_preprocessing(
+        Model.from_preset("uni"), PreprocessingConfig()
+    )
+
+    assert resolved.tiling == standard.tiling
+    assert resolved.filter == standard.filter
+    assert resolved.filter.ref_tile_size == 224
 
 
-def test_default_masks_constant_keeps_its_public_shape():
-    from slide2vec.api import DEFAULT_MASKS
+def test_unset_filter_tracks_the_held_tile_size():
+    import slide2vec.api as api
 
-    assert DEFAULT_MASKS == {
-        "output_mode": "per_annotation",
-        "pixel_mapping": {"background": 0, "tissue": 1},
-        "colors": {"background": None, "tissue": [157, 219, 129]},
-        "min_coverage": {"background": None, "tissue": 0.1},
-    }
+    resolved = api._resolve_direct_api_preprocessing(
+        Model.from_preset("uni"),
+        PreprocessingConfig(tiling=tiling_config(0.5, 448)),
+    )
 
-
-def test_default_tissue_threshold_reaches_hs2p_unchanged():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    tiling_cfg = build_hs2p_configs(DEFAULT_PREPROCESSING)[0]
-
-    assert tiling_cfg.min_coverage["tissue"] == 0.1
+    assert resolved.tiling == tiling_config(0.5, 448)
+    assert resolved.filter.ref_tile_size == 448
 
 
-def test_public_filtering_default_tracks_requested_tile_size():
-    from slide2vec.runtime.tiling import build_hs2p_configs
+def test_held_hs2p_configs_survive_model_resolution():
+    import slide2vec.api as api
+    from hs2p import FilterConfig, SegmentationConfig
 
     preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=448,
+        tiling=tiling_config(0.25, 256, backend="openslide"),
+        segmentation=SegmentationConfig(method="otsu"),
+        filter=FilterConfig(a_t=7),
     )
 
-    filtering = build_hs2p_configs(preprocessing)[2]
+    resolved = api._resolve_direct_api_preprocessing(Model.from_preset("uni"), preprocessing)
 
-    assert filtering.ref_tile_size == 448
+    assert resolved.tiling == preprocessing.tiling
+    assert resolved.segmentation == preprocessing.segmentation
+    assert resolved.filter == FilterConfig(a_t=7)
 
 
 def test_get_cfg_from_args_fills_missing_preprocessing_from_single_spacing_model(tmp_path: Path):
@@ -673,13 +648,12 @@ def test_resolve_direct_api_preprocessing_derives_requested_region_size_from_mul
     resolved = api._resolve_direct_api_preprocessing(
         model,
         PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=224,
+            tiling=tiling_config(0.5, 224),
             region_tile_multiple=6,
         ),
     )
 
-    assert resolved.requested_tile_size_px == 224
+    assert resolved.tiling.requested_tile_size_px == 224
     assert resolved.requested_region_size_px == 1344
 
 
@@ -694,8 +668,8 @@ def test_resolve_direct_api_preprocessing_uses_model_defaults_before_region_deri
         ),
     )
 
-    assert resolved.requested_spacing_um == pytest.approx(0.5)
-    assert resolved.requested_tile_size_px == 448
+    assert resolved.tiling.requested_spacing_um == pytest.approx(0.5)
+    assert resolved.tiling.requested_tile_size_px == 448
     assert resolved.requested_region_size_px == 2688
 
 
@@ -708,8 +682,7 @@ def test_resolve_direct_api_preprocessing_rejects_mismatched_region_size_and_mul
         api._resolve_direct_api_preprocessing(
             model,
             PreprocessingConfig(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
+                tiling=tiling_config(0.5, 224),
                 requested_region_size_px=1024,
                 region_tile_multiple=6,
             ),
@@ -928,24 +901,50 @@ def test_execution_options_from_config_forces_fp32_for_cpu_runs(monkeypatch, tmp
     assert execution.num_gpus == 1
 
 
-def test_serialize_preprocessing_round_trips_mask_backend():
+def test_serialize_preprocessing_round_trips_the_held_hs2p_configs_through_json():
+    import json
+
+    from hs2p import FilterConfig, MaskSamplingConfig, PreviewConfig, SegmentationConfig
+
     from slide2vec.runtime.serialization import (
         deserialize_preprocessing,
         serialize_preprocessing,
     )
 
     preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        mask_backend="openslide",
+        tiling=tiling_config(0.25, 256, overlap=0.5, backend="cucim", mask_backend="openslide"),
+        segmentation=SegmentationConfig(
+            method="sam2",
+            sam2_checkpoint_path=Path("/tmp/sam2.pt"),
+            sam2_device="cuda:0",
+        ),
+        filter=FilterConfig(ref_tile_size=256, a_t=7, filter_blur=True),
+        preview=PreviewConfig(save_mask_preview=True, tissue_contour_color=(1, 2, 3)),
+        masks=MaskSamplingConfig(
+            pixel_mapping={"background": 0, "tumor": (2, 3)},
+            colors={"background": None, "tumor": (255, 0, 0)},
+            min_coverage={"tumor": 0.5},
+            output_mode="merged",
+            strategy="joint",
+        ),
+        requested_region_size_px=1536,
+        region_tile_multiple=6,
     )
-    payload = serialize_preprocessing(preprocessing)
-    assert payload["mask_backend"] == "openslide"
-    assert deserialize_preprocessing(payload).mask_backend == "openslide"
 
-    # Legacy worker payloads without the key deserialize to the "auto" default.
-    legacy = {k: v for k, v in payload.items() if k != "mask_backend"}
-    assert deserialize_preprocessing(legacy).mask_backend == "auto"
+    payload = json.loads(json.dumps(serialize_preprocessing(preprocessing)))
+
+    assert deserialize_preprocessing(payload) == preprocessing
+
+
+def test_serialize_preprocessing_round_trips_an_unresolved_preprocessing():
+    from slide2vec.runtime.serialization import (
+        deserialize_preprocessing,
+        serialize_preprocessing,
+    )
+
+    preprocessing = PreprocessingConfig()
+
+    assert deserialize_preprocessing(serialize_preprocessing(preprocessing)) == preprocessing
 
 
 def test_serialize_preprocessing_round_trips_save_tiles():
@@ -954,11 +953,7 @@ def test_serialize_preprocessing_round_trips_save_tiles():
         serialize_preprocessing,
     )
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        save_tiles=True,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(), save_tiles=True)
     payload = serialize_preprocessing(preprocessing)
     assert payload["save_tiles"] is True
     assert deserialize_preprocessing(payload).save_tiles is True
@@ -972,189 +967,6 @@ def test_preprocessing_from_config_reads_the_top_level_save_tiles_key():
     assert PreprocessingConfig.from_config(cfg).save_tiles is False
     cfg.save_tiles = True
     assert PreprocessingConfig.from_config(cfg).save_tiles is True
-
-
-def test_build_hs2p_configs_threads_mask_backend_into_tiling_config():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = (
-        _masks_preprocessing({"min_coverage": {"tissue": 0.1}})
-        .with_backend("cucim")
-        .with_mask_backend("openslide")
-    )
-
-    tiling_cfg = build_hs2p_configs(preprocessing)[0]
-
-    assert tiling_cfg.backend == "cucim"
-    assert tiling_cfg.mask_backend == "openslide"
-
-
-def test_masks_min_coverage_tissue_drives_derived_tiling_threshold():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = PreprocessingConfig(
-        backend="asap",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks={"min_coverage": {"tissue": 0.37}},
-        independent_sampling=False,
-        segmentation={"method": "hsv", "downsample": 64},
-        preview={
-            "save_mask_preview": False,
-            "save_tiling_preview": False,
-            "downsample": 32,
-            "tissue_contour_color": (157, 219, 129),
-            "mask_overlay_alpha": 0.5,
-        },
-    )
-
-    # the partial masks dict is deep-merged over the default vocabulary
-    assert preprocessing.masks["pixel_mapping"] == {"background": 0, "tissue": 1}
-    assert preprocessing.masks["min_coverage"]["tissue"] == pytest.approx(0.37)
-
-    tiling_cfg = build_hs2p_configs(preprocessing)[0]
-
-    assert tiling_cfg.min_coverage["tissue"] == pytest.approx(0.37)
-    assert tiling_cfg.independent_sampling is False
-
-
-def test_preprocessing_from_config_reads_masks_block_and_independent_sampling():
-    cfg = SimpleNamespace(
-        output_dir="/tmp/run-masks",
-        resume=False,
-        save_tiles=False,
-        speed=SimpleNamespace(num_cucim_workers=4),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            independent_sampling=False,
-            masks=SimpleNamespace(
-                output_mode="per_annotation",
-                pixel_mapping={"background": 0, "tissue": 1},
-                colors={"background": None, "tissue": [157, 219, 129]},
-                min_coverage={"background": None, "tissue": 0.42},
-            ),
-            params=SimpleNamespace(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
-                tolerance=0.05,
-                overlap=0.0,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(
-                save_mask_preview=False,
-                save_tiling_preview=False,
-                downsample=32,
-                tissue_contour_color=(157, 219, 129),
-                mask_overlay_alpha=0.5,
-            ),
-        ),
-    )
-
-    preprocessing = PreprocessingConfig.from_config(cfg)
-
-    assert preprocessing.masks["min_coverage"]["tissue"] == pytest.approx(0.42)
-    assert preprocessing.independent_sampling is False
-
-
-def _masks_preprocessing(masks, *, independent_sampling=True):
-    return PreprocessingConfig(
-        backend="asap",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        masks=masks,
-        independent_sampling=independent_sampling,
-        segmentation={"method": "hsv", "downsample": 64},
-        preview={
-            "save_mask_preview": False,
-            "save_tiling_preview": False,
-            "downsample": 32,
-            "tissue_contour_color": (157, 219, 129),
-            "mask_overlay_alpha": 0.5,
-        },
-    )
-
-
-def test_default_masks_block_yields_no_sampling():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing({"min_coverage": {"tissue": 0.37}})
-
-    configs = build_hs2p_configs(preprocessing)
-    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
-
-    assert sampling is None
-    assert selection_strategy is None
-    assert output_mode is None
-
-
-def test_customized_masks_block_yields_independent_per_annotation_sampling():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"tumor": 2},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        },
-        independent_sampling=True,
-    )
-
-    configs = build_hs2p_configs(preprocessing)
-    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
-
-    assert sampling is not None
-    assert "tumor" in sampling.active_annotations
-    assert selection_strategy == "independent_sampling"
-    assert output_mode == "per_annotation"
-
-
-def test_merged_output_mode_yields_merged_with_joint_selection():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "output_mode": "merged",
-            "pixel_mapping": {"tumor": 2},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        },
-        independent_sampling=False,
-    )
-
-    configs = build_hs2p_configs(preprocessing)
-    sampling, selection_strategy, output_mode = configs[-3], configs[-2], configs[-1]
-
-    assert sampling is not None
-    assert output_mode == "merged"
-    assert selection_strategy == "joint_sampling"
-
-
-def test_independent_sampling_toggle_selects_selection_strategy():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    customized = {
-        "pixel_mapping": {"tumor": 2},
-        "colors": {"tumor": [255, 0, 0]},
-        "min_coverage": {"tumor": 0.5},
-    }
-
-    independent = build_hs2p_configs(
-        _masks_preprocessing(customized, independent_sampling=True)
-    )
-    joint = build_hs2p_configs(
-        _masks_preprocessing(customized, independent_sampling=False)
-    )
-
-    assert independent[-2] == "independent_sampling"
-    assert joint[-2] == "joint_sampling"
 
 
 def test_merged_process_row_loads_structural_artifact_identity(tmp_path: Path):
@@ -1276,87 +1088,17 @@ def test_real_class_annotation_survives_round_trip_to_per_class_subdir(tmp_path:
     assert artifact.path == tmp_path / "tile_embeddings" / "tumor" / "slide-u.npz"
 
 
-def test_invalid_masks_block_with_duplicate_pixel_values_fails_fast():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"tumor": 1},
-            "min_coverage": {"tumor": 0.5},
-        }
-    )
-
-    with pytest.raises(ValueError, match="unique"):
-        build_hs2p_configs(preprocessing)
-
-
-def test_invalid_masks_block_with_unsafe_class_name_fails_fast():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"../escape": 2},
-            "min_coverage": {"../escape": 0.5},
-        }
-    )
-
-    with pytest.raises(ValueError, match="path component"):
-        build_hs2p_configs(preprocessing)
-
-
-def test_masks_boundary_accepts_distinct_integer_value_255():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"tumor": 255},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        }
-    )
-
-    sampling = build_hs2p_configs(preprocessing)[-3]
-
-    assert sampling.pixel_mapping["tumor"] == 255
-
-
-def test_masks_boundary_forwards_list_valued_pixel_mapping():
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": {"tumor": [2, 3]},
-            "colors": {"tumor": [255, 0, 0]},
-            "min_coverage": {"tumor": 0.5},
-        }
-    )
-
-    sampling = build_hs2p_configs(preprocessing)[-3]
-
-    assert list(sampling.pixel_mapping["tumor"]) == [2, 3]
-
-
 @pytest.mark.parametrize(
-    ("pixel_mapping", "message"),
+    ("opts", "message"),
     [
-        ({"tumor": 256}, r"\[0, 255\]"),
-        ({"merged": 2}, "reserved"),
+        (["tiling.masks.pixel_mapping.tumor=1", "tiling.masks.min_coverage.tumor=0.5"], "unique"),
+        (["tiling.masks.pixel_mapping.tumor=256", "tiling.masks.min_coverage.tumor=0.5"], r"\[0, 255\]"),
     ],
-    ids=["value-256", "reserved-merged"],
+    ids=["duplicate-value", "value-256"],
 )
-def test_masks_boundary_rejects_unsupported_annotation_values(pixel_mapping, message):
-    from slide2vec.runtime.tiling import build_hs2p_configs
-
-    annotation = next(iter(pixel_mapping))
-    preprocessing = _masks_preprocessing(
-        {
-            "pixel_mapping": pixel_mapping,
-            "min_coverage": {annotation: 0.5},
-        }
-    )
-
+def test_cli_config_rejects_an_invalid_masks_block_at_load_time(tmp_path: Path, opts, message):
     with pytest.raises(ValueError, match=message):
-        build_hs2p_configs(preprocessing)
+        _cli_preprocessing(tmp_path, opts)
 
 
 def test_structural_merged_artifact_paths_stay_flat_while_classes_are_namespaced():
@@ -1444,10 +1186,7 @@ def test_preprocessing_jpeg_default_is_pil_across_public_shipped_and_serialized_
         serialize_preprocessing,
     )
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config())
     payload = serialize_preprocessing(preprocessing)
     legacy_payload = {key: value for key, value in payload.items() if key != "jpeg_backend"}
 
@@ -1463,11 +1202,7 @@ def test_preprocessing_turbojpeg_remains_an_explicit_serialized_opt_in():
         serialize_preprocessing,
     )
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        jpeg_backend="turbojpeg",
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(), jpeg_backend="turbojpeg")
 
     assert deserialize_preprocessing(
         serialize_preprocessing(preprocessing)
@@ -1477,55 +1212,33 @@ def test_preprocessing_turbojpeg_remains_an_explicit_serialized_opt_in():
 def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_path: Path):
     import slide2vec.cli as cli
 
+    from omegaconf import OmegaConf
+
     args = SimpleNamespace(run_on_cpu=True, output_dir=None)
-    cfg = SimpleNamespace(
-        csv="/tmp/slides.csv",
-        output_dir=str(tmp_path),
-        resume=False,
-        save_tiles=False,
-        model=SimpleNamespace(
-            name="virchow2",
-            output_variant="cls",
-            batch_size=4,
-            allow_non_recommended_settings=True,
-            save_tile_embeddings=False,
-            save_slide_embeddings=False,
-            save_latents=False,
-        ),
-        speed=SimpleNamespace(
-            precision="fp32",
-            num_dataloader_workers=3,
-            num_preprocessing_workers=8,
-            num_gpus=2,
-            prefetch_factor_embedding=4,
-            persistent_workers_embedding=True,
-            num_cucim_workers=4,
-        ),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from=None,
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
-                tolerance=0.05,
-                overlap=0.0,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(
-                save_mask_preview=False,
-                save_tiling_preview=False,
-                downsample=32,
-                tissue_contour_color=(157, 219, 129),
-                mask_overlay_alpha=0.5,
-            ),
-        ),
+    cfg = OmegaConf.merge(
+        load_config("default"),
+        {
+            "csv": "/tmp/slides.csv",
+            "output_dir": str(tmp_path),
+            "model": {
+                "name": "virchow2",
+                "output_variant": "cls",
+                "batch_size": 4,
+                "allow_non_recommended_settings": True,
+            },
+            "speed": {
+                "precision": "fp32",
+                "num_dataloader_workers": 3,
+                "num_preprocessing_workers": 8,
+                "num_gpus": 2,
+            },
+            "tiling": {
+                "backend": "asap",
+                "jpeg_backend": "turbojpeg",
+                "params": {"requested_spacing_um": 0.5, "requested_tile_size_px": 224},
+                "preview": {"save_mask_preview": False, "save_tiling_preview": False},
+            },
+        },
     )
 
     captured = {}
@@ -1552,7 +1265,7 @@ def test_cli_build_model_and_pipeline_delegates_to_public_api(monkeypatch, tmp_p
     assert captured["model_args"] == ("virchow2",)
     assert captured["model_kwargs"]["device"] == "cpu"
     assert captured["model_kwargs"]["allow_non_recommended_settings"] is True
-    assert captured["preprocessing"].backend == "asap"
+    assert captured["preprocessing"].tiling.backend == "asap"
     assert captured["execution"].output_dir == tmp_path
     assert captured["execution"].num_gpus == 1
 
@@ -1721,37 +1434,11 @@ def test_get_cfg_from_args_allows_cpu_runs_with_non_recommended_precision(tmp_pa
 
 
 def test_preprocessing_config_from_config_preserves_tile_store_dir():
-    cfg = SimpleNamespace(
-        output_dir="/tmp/run-002",
-        resume=False,
-        save_tiles=False,
-        speed=SimpleNamespace(num_cucim_workers=6),
-        tiling=SimpleNamespace(
-            backend="asap",
-            read_coordinates_from=None,
-            read_tiles_from="/tmp/tile-store",
-            on_the_fly=True,
-            gpu_decode=False,
-            adaptive_batching=False,
-            use_supertiles=True,
-            jpeg_backend="turbojpeg",
-            params=SimpleNamespace(
-                requested_spacing_um=0.5,
-                requested_tile_size_px=224,
-                tolerance=0.07,
-                overlap=0.0,
-            ),
-            seg_params={"downsample": 64},
-            filter_params={"ref_tile_size": 224},
-            preview=SimpleNamespace(
-                save_mask_preview=True,
-                save_tiling_preview=True,
-                downsample=32,
-                tissue_contour_color=(157, 219, 129),
-                mask_overlay_alpha=0.5,
-            ),
-        ),
-    )
+    cfg = load_config("default")
+    cfg.tiling.params.requested_spacing_um = 0.5
+    cfg.tiling.params.requested_tile_size_px = 224
+    cfg.tiling.read_tiles_from = "/tmp/tile-store"
+    cfg.speed.num_cucim_workers = 6
 
     preprocessing = PreprocessingConfig.from_config(cfg)
 

@@ -5,7 +5,6 @@ import logging
 import tempfile
 import threading
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -14,7 +13,7 @@ from hs2p import SlideSpec, tile_slides
 from hs2p.fileops import read_csv_keyed_by_sample_id
 from hs2p.utils.stderr import run_with_filtered_stderr
 
-from slide2vec.api import PreprocessingConfig, _resolve_hierarchical_preprocessing
+from slide2vec.api import PreprocessingConfig, _complete_preprocessing, _default_tiling
 from slide2vec.encoders.registry import resolve_preprocessing_defaults
 from slide2vec.progress import emit_progress, read_tiling_progress_snapshot
 from slide2vec.runtime.process_list import (
@@ -22,7 +21,7 @@ from slide2vec.runtime.process_list import (
     restore_resume_metadata_after_tiling,
 )
 from slide2vec.runtime.progress_bridge import bridge_hs2p_progress_to_slide2vec
-from slide2vec.runtime.tiling import build_hs2p_configs, resolve_tiling_backend
+from slide2vec.runtime.tiling import hs2p_tiling_kwargs, resolve_tiling_backend
 from slide2vec.utils.log_utils import suppress_c_stderr
 from slide2vec.utils.tiling_io import load_tiling_process_df, load_tiling_result_from_row
 
@@ -63,35 +62,20 @@ def tile_slides_call(
     num_workers: int,
 ) -> list[Any]:
     preload_asap_wholeslidedata(preprocessing)
-    (
-        tiling_cfg,
-        segmentation_cfg,
-        filtering_cfg,
-        preview_cfg,
-        read_coordinates_from,
-        resume,
-        sampling,
-        selection_strategy,
-        output_mode,
-    ) = build_hs2p_configs(preprocessing)
+    hs2p_configs = hs2p_tiling_kwargs(preprocessing)
+
     def _run_tile_slides():
         return tile_slides(
             slides,
-            tiling=tiling_cfg,
-            segmentation=segmentation_cfg,
-            filtering=filtering_cfg,
-            preview=preview_cfg,
+            **hs2p_configs,
             output_dir=output_dir,
             num_workers=num_workers,
-            read_coordinates_from=read_coordinates_from,
-            resume=resume,
+            read_coordinates_from=preprocessing.read_coordinates_from,
+            resume=preprocessing.resume,
             # Requested, or needed: without on-the-fly reads embedding reads the archive.
             save_tiles=preprocessing.save_tiles
             or (not preprocessing.on_the_fly and preprocessing.read_tiles_from is None),
             jpeg_backend=preprocessing.jpeg_backend,
-            sampling=sampling,
-            selection_strategy=selection_strategy,
-            output_mode=output_mode,
         )
 
     with bridge_hs2p_progress_to_slide2vec():
@@ -184,32 +168,12 @@ def embedding_work_dir(output_dir: Path | None):
 
 
 def resolve_model_preprocessing(model, preprocessing: PreprocessingConfig | None) -> PreprocessingConfig:
-    defaults = None
-
-    def ensure_defaults() -> tuple[int, float]:
-        nonlocal defaults
-        if defaults is None:
-            defaults = resolve_preprocessing_defaults(model.name)
-        return int(defaults["tile_size_px"]), float(defaults["spacing_um"])
-
-    if preprocessing is None:
-        requested_tile_size_px, requested_spacing_um = ensure_defaults()
-        return _resolve_hierarchical_preprocessing(PreprocessingConfig(
-            backend="auto",
-            requested_spacing_um=requested_spacing_um,
-            requested_tile_size_px=requested_tile_size_px,
-        ))
-
-    requested_spacing_um = preprocessing.requested_spacing_um
-    requested_tile_size_px = preprocessing.requested_tile_size_px
-    if requested_spacing_um is None or requested_tile_size_px is None:
-        default_tile_size_px, default_spacing_um = ensure_defaults()
-        if requested_spacing_um is None:
-            requested_spacing_um = default_spacing_um
-        if requested_tile_size_px is None:
-            requested_tile_size_px = default_tile_size_px
-    return _resolve_hierarchical_preprocessing(replace(
-        preprocessing,
-        requested_spacing_um=requested_spacing_um,
-        requested_tile_size_px=requested_tile_size_px,
-    ))
+    preprocessing = preprocessing if preprocessing is not None else PreprocessingConfig()
+    tiling_cfg = preprocessing.tiling
+    if tiling_cfg is None:
+        defaults = resolve_preprocessing_defaults(model.name)
+        tiling_cfg = _default_tiling(
+            requested_spacing_um=float(defaults["spacing_um"]),
+            requested_tile_size_px=int(defaults["tile_size_px"]),
+        )
+    return _complete_preprocessing(preprocessing, tiling=tiling_cfg)

@@ -96,7 +96,7 @@ def compute_tile_embeddings_for_slide(
             return torch.empty((0, int(feature_dim)), dtype=torch.float32)
     supertile_reorder = None
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
-        resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
+        resolved_backend = resolve_slide_backend(preprocessing.tiling.backend, tiling_result)
         collate_fn = OnTheFlyBatchTileCollator(
             image_path=slide.image_path,
             tiling_result=tiling_result,
@@ -140,7 +140,7 @@ def compute_tile_embeddings_for_slide(
     dataset = TileIndexDataset(resolved_indices)
     batch_preprocessor = build_batch_preprocessor(loaded, tiling_result)
     loader_kwargs = embedding_dataloader_kwargs(loaded, execution)
-    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
+    resolved_backend = resolve_slide_backend(preprocessing.tiling.backend, tiling_result)
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
@@ -258,7 +258,7 @@ def _encode_hierarchical_subtiles(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Read and encode ``flat_indices``; return ``(indices, embeddings)`` in loader order."""
     loaded.encoder_input_size_px = None
-    resolved_backend = resolve_slide_backend(preprocessing.backend, tiling_result)
+    resolved_backend = resolve_slide_backend(preprocessing.tiling.backend, tiling_result)
     collate_fn = OnTheFlyHierarchicalBatchCollator(
         image_path=slide.image_path,
         tiling_result=tiling_result,

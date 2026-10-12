@@ -74,15 +74,19 @@ outputs:
 
 .. code-block:: python
 
+   from hs2p import TilingConfig
    from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 
    model = Model.from_preset("virchow2")
    pipeline = Pipeline(
        model=model,
        preprocessing=PreprocessingConfig(
-           requested_spacing_um=0.5,
-           requested_tile_size_px=224,
-           masks={"min_coverage": {"tissue": 0.1}},
+           tiling=TilingConfig(
+               requested_spacing_um=0.5,
+               requested_tile_size_px=224,
+               tolerance=0.05,
+               overlap=0.0,
+           ),
        ),
        execution=ExecutionOptions(output_dir="outputs/demo", num_gpus=2),
    )
@@ -133,11 +137,16 @@ Enable hierarchical mode by setting ``region_tile_multiple`` in
 
 .. code-block:: python
 
+   from hs2p import TilingConfig
    from slide2vec import PreprocessingConfig
 
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
+       tiling=TilingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           tolerance=0.05,
+           overlap=0.0,
+       ),
        region_tile_multiple=6,   # 6×6 = 36 tiles per region
    )
 

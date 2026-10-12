@@ -27,13 +27,11 @@ from slide2vec.api import ExecutionOptions, PreprocessingConfig
 from slide2vec.runtime import embedding_pipeline
 from slide2vec.runtime.distributed import merge_hierarchical_embedding_shards
 from slide2vec.runtime.types import LoadedModel
+from tests.tiling_helpers import tiling_config
 
 # 3 regions of 2x2 subtiles, read at the requested spacing (no resize).
-PREPROCESSING = replace(
-    PreprocessingConfig(),
-    backend="openslide",
-    requested_spacing_um=0.5,
-    requested_tile_size_px=224,
+PREPROCESSING = PreprocessingConfig(
+    tiling=tiling_config(0.5, 224, backend="openslide"),
     region_tile_multiple=2,
     requested_region_size_px=448,
 )
@@ -243,7 +241,7 @@ def test_cucim_reads_use_the_worker_budget_and_filter_stderr(fake_reader, monkey
     monkeypatch.setattr(torch.utils.data, "DataLoader", capturing_dataloader)
     monkeypatch.setattr(embedding_pipeline, "resolve_on_the_fly_num_workers", lambda workers, num_gpus: (3, ""))
     monkeypatch.setattr(embedding_pipeline, "run_with_filtered_stderr", recording_filter)
-    cucim = replace(PREPROCESSING, backend="cucim")
+    cucim = replace(PREPROCESSING, tiling=replace(PREPROCESSING.tiling, backend="cucim"))
     execution = ExecutionOptions(batch_size=4, num_workers_per_gpu=0, num_gpus=1)
 
     if path == "local":

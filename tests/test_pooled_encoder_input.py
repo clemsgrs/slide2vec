@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torchvision.transforms import v2
+from tests.tiling_helpers import tiling_config
 
 
 def test_batch_transform_parser_accepts_scaled_float32_to_dtype():
@@ -148,14 +149,7 @@ def test_distributed_request_round_trip_resolves_same_exact_hierarchical_tar_pla
         "gigapath",
         allow_non_recommended_settings=True,
     )
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=288,
-        requested_region_size_px=576,  # 2 x 288, keeps region == tile * multiple
-        region_tile_multiple=2,
-        on_the_fly=False,
-        read_tiles_from=tmp_path,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 288), requested_region_size_px=576, region_tile_multiple=2, on_the_fly=False, read_tiles_from=tmp_path)
     request = json.loads(
         json.dumps(
             {

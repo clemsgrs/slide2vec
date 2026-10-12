@@ -3,12 +3,48 @@ Preprocessing
 
 Use :class:`~slide2vec.PreprocessingConfig` to choose slide readers, tile
 geometry, tissue segmentation, annotation sampling, and previews.
-Preprocessing requires hs2p 6.0.0 or newer.
+Preprocessing requires hs2p 6.1.0 or newer.
+
+``PreprocessingConfig`` holds hs2p's config dataclasses as given:
+
+- ``tiling`` — :class:`hs2p.TilingConfig`: spacing, tile size, tolerance,
+  overlap, ``backend``, ``mask_backend``.
+- ``segmentation`` — :class:`hs2p.SegmentationConfig`.
+- ``filter`` — :class:`hs2p.FilterConfig`.
+- ``preview`` — :class:`hs2p.PreviewConfig`.
+- ``masks`` — :class:`hs2p.MaskSamplingConfig`.
+
+slide2vec resolves two of them when they are ``None``:
+
+- ``tiling=None`` (the default) takes ``requested_spacing_um`` and
+  ``requested_tile_size_px`` from the model preset, with ``tolerance=0.05``,
+  ``overlap=0.0``, and both backends ``"auto"``. Models with several supported
+  spacings, such as Virchow2, have no preset spacing: pass a ``TilingConfig``.
+- ``filter=None`` (the default) uses hs2p's filter defaults with
+  ``ref_tile_size`` set to the resolved tile size.
+
+.. code-block:: python
+
+   from hs2p import TilingConfig
+   from slide2vec import PreprocessingConfig
+
+   preprocessing = PreprocessingConfig(
+       tiling=TilingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           tolerance=0.05,
+           overlap=0.0,
+           backend="openslide",
+       ),
+   )
+
+A YAML config sets the same values under ``tiling`` (see :doc:`cli`); hs2p's
+resolvers build the dataclasses and reject unknown keys.
 
 Backends
 --------
 
-The ``backend`` field controls which slide-reading library is used:
+``tiling.backend`` controls which slide-reading library is used:
 
 - ``"auto"`` — tries cucim → vips → openslide → asap for WSI inputs and picks
   the first backend that can open and decode the path
@@ -30,7 +66,7 @@ cuCIM reads the same pixels and no context is created. Machines with
 ``nvidia-fs`` loaded keep GPUDirect Storage. To use your own cuFile config, set
 ``CUFILE_ENV_PATH_JSON`` before importing slide2vec; an existing value is kept.
 
-The ``mask_backend`` field controls the reader used for **source masks** —
+``tiling.mask_backend`` controls the reader used for **source masks** —
 precomputed tissue masks and annotation masks — and accepts the same values,
 plus ``"pil"`` for PNG/JPEG masks (selected directly by ``"auto"``) and
 ``"tifffile"`` for lossless label reads. ``"auto"`` selects ``"tifffile"`` for
@@ -43,8 +79,8 @@ not decode it, such as cuCIM with a deflate-compressed label TIFF. An explicit
 for slides with no source mask.
 
 The ``auto`` priority can change when hs2p or the installed backend set
-changes. Set ``backend`` and ``mask_backend`` explicitly when decoder selection
-must stay stable across upgrades.
+changes. Set ``tiling.backend`` and ``tiling.mask_backend`` explicitly when
+decoder selection must stay stable across upgrades.
 
 Source masks
 ------------
@@ -69,7 +105,7 @@ recorded in ``process_list.csv``.
 
 Coordinate artifacts retain their field names. ``mask_spacing_um`` now records
 the effective, dimension-derived spacing of the mask level read. Mask level
-selection uses a fixed 1% tolerance independently of the slide's ``tolerance``;
+selection uses a fixed 1% tolerance independently of ``tiling.tolerance``;
 ``mask_level`` and ``mask_spacing_um`` can therefore differ from hs2p 4.x runs.
 
 Pooled Tile Geometry
@@ -96,11 +132,9 @@ change from earlier releases.
 Tissue Segmentation
 -------------------
 
-``segmentation`` is forwarded directly to
-`hs2p <https://github.com/clemsgrs/hs2p>`_\ 's segmentation pipeline.
-It is a partial override: omitted keys retain the standard configuration
-defaults, including ``method="hsv"``.
-The ``method`` key selects the algorithm:
+``segmentation`` is an :class:`hs2p.SegmentationConfig` passed to
+`hs2p <https://github.com/clemsgrs/hs2p>`_\ 's segmentation pipeline. The
+default uses ``method="hsv"``. ``method`` selects the algorithm:
 
 - ``hsv`` - heuristic based on the HSV colour space. Fast and robust for H&E slides.
 - ``otsu`` - thresholds the saturation channel using Otsu's method.
@@ -114,12 +148,12 @@ Example:
 
 .. code-block:: python
 
+   from hs2p import SegmentationConfig
    from slide2vec import Model, PreprocessingConfig
 
-   model = Model.from_preset("virchow2")
+   model = Model.from_preset("conch")
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       segmentation={"method": "sam2", "sam2_device": "cuda"},
+       segmentation=SegmentationConfig(method="sam2", sam2_device="cuda"),
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
@@ -147,45 +181,46 @@ plain tissue path is otherwise unchanged.
 
 In annotation mode the per-slide ``mask_path`` (argument or manifest column) is
 **required** and is read as a multi-label raster: each class occupies a
-distinct integer pixel value. The ``masks`` block maps that vocabulary and is
-deep-merged over the default, so you only state what you add. The default block
-is ``slide2vec.api.DEFAULT_MASKS``, loaded from the bundled ``default.yaml``:
+distinct integer pixel value. ``masks`` is an :class:`hs2p.MaskSamplingConfig`
+and is used as given. ``PreprocessingConfig().masks`` is the default; derive
+from it with :func:`dataclasses.replace`. Its fields:
 
-- ``pixel_mapping`` — ``{class_name: integer pixel value}``. Values must be
+- ``pixel_mapping`` — ``{class_name: pixel value}``. Values must be
   distinct integers in ``[0, 255]``; ``merged`` is a reserved name. A class may
-  list several raster values (``{"tumor": [2, 3]}``): they are
+  list several raster values (``{"tumor": (2, 3)}``): they are
   sampled as one class whose coverage is their sum, and a value may appear
   under one class only.
-- ``min_coverage`` — ``{class_name: float | null}``; the minimum fraction of a
-  tile covered by that class to keep it. ``null`` means *don't sample that
-  class*. The ``tissue`` entry is the single source of truth for the tissue
-  threshold. It defaults to ``0.1`` for both the Python API and YAML/CLI runs.
-- ``colors`` — ``{class_name: [r, g, b] | null}`` used when rendering previews.
-- ``output_mode`` — ``per_annotation`` (one artifact set per sampled class) or
-  ``merged`` (one set per slide over the union of tiles passing any class).
-  Patient-level models accept only ``merged``; ``per_annotation`` raises a
-  ``ValueError`` before embedding.
-- ``independent_sampling`` (a top-level flag on
-  :class:`~slide2vec.PreprocessingConfig`) — ``True`` samples each class
-  against its own mask; ``False`` samples once over the union, then
-  post-filters per class by coverage.
+- ``min_coverage`` — ``{class_name: float}``; the minimum fraction of a tile
+  covered by that class to keep it. Only listed classes are sampled.
+  ``min_coverage["tissue"]`` is the tissue threshold; slide2vec's default is
+  ``0.1`` for both the Python API and YAML/CLI runs.
+- ``colors`` — ``{class_name: (r, g, b) | None}`` used when rendering
+  previews; lists every class of ``pixel_mapping``.
+- ``output_mode`` — ``"per_annotation"`` (one artifact set per sampled class)
+  or ``"merged"`` (one set per slide over the union of tiles passing any
+  class). Patient-level models accept only ``"merged"``; ``"per_annotation"``
+  raises a ``ValueError`` before embedding.
+- ``strategy`` — ``"independent"`` (slide2vec's default) samples each class
+  against its own mask; ``"joint"`` samples once over the union, then keeps
+  tiles per class by coverage.
 
-**Tumor-only bag features.** Add a ``tumor`` class, set its ``min_coverage``,
-and disable tissue sampling with ``min_coverage.tissue: null``:
+**Tumor-only bag features.** Add a ``tumor`` class and sample only it:
 
 .. code-block:: python
 
+   from dataclasses import replace
+
    from slide2vec import Model, PreprocessingConfig
 
-   model = Model.from_preset("virchow2")
+   model = Model.from_preset("conch")
+   default_masks = PreprocessingConfig().masks
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
-       masks={
-           "pixel_mapping": {"tumor": 2},        # tumor pixels == 2 in the raster
-           "min_coverage": {"tissue": None, "tumor": 0.5},
-           "colors": {"tumor": [255, 0, 0]},     # preview color (optional)
-       },
+       masks=replace(
+           default_masks,
+           pixel_mapping={**default_masks.pixel_mapping, "tumor": 2},  # tumor pixels == 2
+           colors={**default_masks.colors, "tumor": (255, 0, 0)},
+           min_coverage={"tumor": 0.5},
+       ),
    )
 
    slide = {
@@ -211,12 +246,12 @@ use a :class:`~slide2vec.Pipeline` so per-class artifacts are persisted under a
    from slide2vec import ExecutionOptions, Pipeline
 
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
-       masks={
-           "pixel_mapping": {"tumor": 2, "stroma": 3},
-           "min_coverage": {"tissue": None, "tumor": 0.5, "stroma": 0.5},
-       },
+       masks=replace(
+           default_masks,
+           pixel_mapping={**default_masks.pixel_mapping, "tumor": 2, "stroma": 3},
+           colors={**default_masks.colors, "tumor": (255, 0, 0), "stroma": (0, 0, 255)},
+           min_coverage={"tumor": 0.5, "stroma": 0.5},
+       ),
    )
    pipeline = Pipeline(
        model=model,
@@ -232,7 +267,7 @@ hierarchical embeddings — and across GPUs — recording each class's own
 ``feature_path`` in ``process_list.csv``. See :doc:`output-layout` for the
 namespaced directory structure.
 
-**The** ``merged`` **output mode.** With ``masks={"output_mode": "merged"}``
+**The** ``merged`` **output mode.** With ``masks.output_mode="merged"``
 the run does not fan out per class: it samples the union of tiles passing any
 class and produces one bag per slide, labelled ``"merged"``. On disk it lands
 at the flat output root (``tile_embeddings/<sample_id>.pt``) with no
@@ -240,11 +275,9 @@ at the flat output root (``tile_embeddings/<sample_id>.pt``) with no
 
 .. code-block:: python
 
-   from dataclasses import replace
-
    merged_preprocessing = replace(
        preprocessing,
-       masks={**preprocessing.masks, "output_mode": "merged"},
+       masks=replace(preprocessing.masks, output_mode="merged"),
    )
    results = model.embed_slides([slide], preprocessing=merged_preprocessing)
    merged = results["slide-1"]["merged"]
@@ -302,16 +335,16 @@ Preview Images
 --------------
 
 ``slide2vec`` can write a tissue mask preview and a tiling preview for each
-slide — useful for quality control. Both are enabled by default. The
-``preview`` dict is a partial override, so this disables only the tiling
-preview:
+slide — useful for quality control. slide2vec's default ``preview`` enables
+both. This disables only the tiling preview:
 
 .. code-block:: python
 
+   from dataclasses import replace
+
+   default_preview = PreprocessingConfig().preview
    preprocessing = PreprocessingConfig(
-       preview={
-           "save_tiling_preview": False,
-       }
+       preview=replace(default_preview, save_tiling_preview=False),
    )
 
 Preview images are written to ``<output_dir>/preview/mask/<sample_id>.jpg``
@@ -332,4 +365,4 @@ Field reference
 .. autoclass:: slide2vec.PreprocessingConfig
    :members:
    :undoc-members:
-   :exclude-members: from_config, with_backend, with_mask_backend
+   :exclude-members: from_config

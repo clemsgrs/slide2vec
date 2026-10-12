@@ -16,6 +16,7 @@ from slide2vec.runtime import (
     patient_pipeline,
     tiling,
 )
+from tests.tiling_helpers import tiling_config
 
 
 class CapturingSlideEncoderMixin:
@@ -75,10 +76,7 @@ def test_direct_slide_aggregation_passes_level0_coordinates() -> None:
         SimpleNamespace(sample_id="slide-a", image_path=Path("slide-a.svs")),
         make_tiling_result(),
         torch.ones((2, 4)),
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=512,
-        ),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 512)),
         execution=ExecutionOptions(precision="fp32"),
     )
 
@@ -122,10 +120,7 @@ def test_patient_pipeline_passes_level0_coordinates(
         ],
         embeddable_tiling_results=[make_tiling_result()],
         patient_id_map={"slide-a": "patient-a"},
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=512,
-        ),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 512)),
         execution=ExecutionOptions(output_dir=tmp_path, precision="fp32"),
         output_dir=tmp_path,
     )
@@ -180,10 +175,7 @@ def test_distributed_slide_aggregation_passes_level0_coordinates(
         model,
         slide=slide,
         tiling_result=tiling_result,
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=512,
-        ),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 512)),
         execution=ExecutionOptions(num_gpus=2, precision="fp32"),
         work_dir=tmp_path,
     )

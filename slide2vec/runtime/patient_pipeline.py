@@ -5,6 +5,7 @@ from typing import Sequence
 
 import torch
 from hs2p import SlideSpec
+from hs2p.configs.resolvers import resolve_sampling_request
 
 from slide2vec.api import ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import (
@@ -26,7 +27,7 @@ from slide2vec.runtime.feature_identity import pooled_feature_identity, transfor
 from slide2vec.runtime.hierarchical import num_embedding_items
 from slide2vec.runtime.model_settings import resolve_output_precision
 from slide2vec.runtime.slide_encode import encode_slide_from_tiles
-from slide2vec.runtime.tiling import build_hs2p_configs, resolve_slide_backend
+from slide2vec.runtime.tiling import resolve_slide_backend
 
 
 def reject_per_annotation_sampling(model, preprocessing: PreprocessingConfig) -> None:
@@ -36,7 +37,7 @@ def reject_per_annotation_sampling(model, preprocessing: PreprocessingConfig) ->
     one bag per ``(slide, class)``, which would each count as a slide of the patient.
     Merged output keeps one bag per slide and is supported.
     """
-    output_mode = build_hs2p_configs(preprocessing)[-1]
+    output_mode = resolve_sampling_request(masks=preprocessing.masks)[2]
     if output_mode == "per_annotation":
         raise ValueError(
             f"Patient-level model '{model.name}' does not support per-annotation sampling: "
@@ -102,7 +103,7 @@ def run_patient_pipeline(
                     image_path=slide.image_path,
                     mask_path=slide.mask_path,
                     tile_size_lv0=int(tiling_result.tile_size_lv0),
-                    backend=resolve_slide_backend(preprocessing.backend, tiling_result),
+                    backend=resolve_slide_backend(preprocessing.tiling.backend, tiling_result),
                     compatibility=compatibility,
                     encoder_input_size_px=getattr(loaded, "encoder_input_size_px", None),
                 ),

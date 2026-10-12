@@ -5,12 +5,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from hs2p import BatchPartialFailureWarning, SlideSpec
+from hs2p import (
+    BatchPartialFailureWarning,
+    FilterConfig,
+    MaskSamplingConfig,
+    PreviewConfig,
+    SegmentationConfig,
+    SlideSpec,
+)
 from PIL import Image
 
 from slide2vec.api import PreprocessingConfig
 from slide2vec.runtime.embedding import tiling_result_annotation
 from slide2vec.runtime.tiling_pipeline import prepare_tiled_slides
+from tests.tiling_helpers import output_consistency_preprocessing, tiling_config
 
 
 def _flat_slide(tmp_path: Path, labels: np.ndarray) -> SlideSpec:
@@ -28,13 +36,22 @@ def _flat_slide(tmp_path: Path, labels: np.ndarray) -> SlideSpec:
 
 def _preprocessing(**kwargs) -> PreprocessingConfig:
     return PreprocessingConfig(
-        backend="auto",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=32,
-        segmentation={"downsample": 1},
-        filtering={"a_t": 0, "a_h": 0},
-        preview={"save_mask_preview": False, "save_tiling_preview": False},
+        tiling=tiling_config(0.5, 32),
+        segmentation=SegmentationConfig(method="hsv", downsample=1),
+        filter=FilterConfig(ref_tile_size=32, a_t=0, a_h=0),
+        preview=PreviewConfig(),
         **kwargs,
+    )
+
+
+def _tumor_masks(output_mode: str) -> MaskSamplingConfig:
+    """``tumor: [2, 3]`` added to the default vocabulary, sampling only ``tumor``."""
+    return MaskSamplingConfig(
+        pixel_mapping={"background": 0, "tissue": 1, "tumor": (2, 3)},
+        colors={"background": None, "tissue": (157, 219, 129), "tumor": (255, 0, 0)},
+        min_coverage={"tumor": 0.5},
+        output_mode=output_mode,
+        strategy="independent",
     )
 
 
@@ -123,12 +140,7 @@ def test_spacingless_annotation_mask_groups_values_and_preserves_bag_identity(tm
     labels = np.full((32, 32), 2, dtype=np.uint8)
     labels[:, 16:] = 3
     slide = _flat_slide(tmp_path, labels)
-    preprocessing = _preprocessing(masks={
-        "pixel_mapping": {"tumor": [2, 3]},
-        "min_coverage": {"tissue": None, "tumor": 0.5},
-        "colors": {"tumor": [255, 0, 0]},
-        "output_mode": output_mode,
-    })
+    preprocessing = _preprocessing(masks=_tumor_masks(output_mode))
 
     slides, results, process_list = prepare_tiled_slides(
         [slide], preprocessing, output_dir=tmp_path / "out", num_workers=1
@@ -173,12 +185,6 @@ def test_invalid_source_masks_surface_hs2p_errors(tmp_path, labels, error):
 
 def test_wsi_mask_coordinates_and_previews_remain_compatible(tmp_path):
     pytest.importorskip("openslide")
-    from tests.output_consistency_config import (
-        TILING_FILTER_PARAMS,
-        TILING_MASKS,
-        TILING_PARAMS,
-        TILING_SEG_PARAMS,
-    )
 
     fixtures = Path(__file__).parent / "fixtures"
     slide = SlideSpec(
@@ -186,14 +192,7 @@ def test_wsi_mask_coordinates_and_previews_remain_compatible(tmp_path):
         image_path=fixtures / "input" / "test-wsi.tif",
         mask_path=fixtures / "input" / "test-mask.tif",
     )
-    preprocessing = PreprocessingConfig(
-        backend="openslide",
-        mask_backend="openslide",
-        masks=TILING_MASKS,
-        segmentation=TILING_SEG_PARAMS,
-        filtering=TILING_FILTER_PARAMS,
-        **TILING_PARAMS,
-    )
+    preprocessing = output_consistency_preprocessing()
 
     slides, results, process_list = prepare_tiled_slides(
         [slide], preprocessing, output_dir=tmp_path / "out", num_workers=1
@@ -220,6 +219,7 @@ def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_pa
     pytest.importorskip("openslide")
     from types import SimpleNamespace
 
+    import slide2vec.api as api
     from slide2vec.utils.config import get_cfg_from_args
 
     fixtures = Path(__file__).parent / "fixtures"
@@ -228,8 +228,6 @@ def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_pa
         image_path=fixtures / "input" / "test-wsi.tif",
         mask_path=fixtures / "input" / "test-mask.tif",
     )
-    shared = {"backend": "openslide", "mask_backend": "openslide"}
-    preview = {"save_mask_preview": False, "save_tiling_preview": False}
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "tiling:\n"
@@ -242,8 +240,14 @@ def test_default_python_and_cli_settings_tile_the_wsi_fixture_identically(tmp_pa
         SimpleNamespace(config_file=str(config_path), output_dir=None, opts=[], run_on_cpu=True)
     )
     routes = {
-        "python": PreprocessingConfig(
-            requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.07, preview=preview, **shared
+        "python": api._resolve_direct_api_preprocessing(
+            api.Model.from_preset("virchow2", device="cpu"),
+            PreprocessingConfig(
+                tiling=tiling_config(
+                    0.5, 224, tolerance=0.07, backend="openslide", mask_backend="openslide"
+                ),
+                preview=PreviewConfig(),
+            ),
         ),
         "cli": PreprocessingConfig.from_config(cli_cfg),
     }
@@ -270,16 +274,9 @@ def test_wsi_annotation_previews_accept_spacingless_masks(tmp_path, output_mode)
         mask_path=mask_path,
     )
     preprocessing = PreprocessingConfig(
-        backend="openslide",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=512,
-        filtering={"a_t": 0, "a_h": 0},
-        masks={
-            "pixel_mapping": {"tumor": [2, 3]},
-            "min_coverage": {"tissue": None, "tumor": 0.5},
-            "colors": {"tumor": [255, 0, 0]},
-            "output_mode": output_mode,
-        },
+        tiling=tiling_config(0.5, 512, backend="openslide"),
+        filter=FilterConfig(ref_tile_size=512, a_t=0, a_h=0),
+        masks=_tumor_masks(output_mode),
     )
 
     _, results, process_list = prepare_tiled_slides(
@@ -311,12 +308,6 @@ def test_tiling_only_run_keeps_numeric_and_na_sample_ids_verbatim(tmp_path):
     process-list rows, and name their artifacts unchanged, on a first run and a rerun."""
     pytest.importorskip("openslide")
     from slide2vec.api import ExecutionOptions, Model, Pipeline
-    from tests.output_consistency_config import (
-        TILING_FILTER_PARAMS,
-        TILING_MASKS,
-        TILING_PARAMS,
-        TILING_SEG_PARAMS,
-    )
 
     fixtures = Path(__file__).parent / "fixtures" / "input"
     sample_ids = ["0007", "7", "NA"]
@@ -330,16 +321,7 @@ def test_tiling_only_run_keeps_numeric_and_na_sample_ids_verbatim(tmp_path):
     )
     pipeline = Pipeline(
         Model(name="virchow2", device="cpu"),
-        PreprocessingConfig(
-            backend="openslide",
-            mask_backend="openslide",
-            masks=TILING_MASKS,
-            segmentation=TILING_SEG_PARAMS,
-            filtering=TILING_FILTER_PARAMS,
-            preview={"save_mask_preview": False, "save_tiling_preview": False},
-            resume=True,
-            **TILING_PARAMS,
-        ),
+        output_consistency_preprocessing(preview=PreviewConfig(), resume=True),
         execution=ExecutionOptions(
             output_dir=tmp_path / "out", num_gpus=1, num_preprocessing_workers=1
         ),

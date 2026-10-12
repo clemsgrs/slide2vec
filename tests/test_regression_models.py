@@ -10,8 +10,9 @@ from slide2vec.api import (
     Model,
     PreprocessingConfig,
 )
+from tests.tiling_helpers import tiling_config
 
-DEFAULT_PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
+DEFAULT_PREPROCESSING = PreprocessingConfig(tiling=tiling_config(0.5, 224))
 
 
 def _make_embedded_slide(sample_id="slide-a", annotation="tissue", image_path=None):
@@ -30,7 +31,7 @@ def _make_embedded_slide(sample_id="slide-a", annotation="tissue", image_path=No
 
 def test_model_embed_slide_without_preprocessing_reaches_tiling(monkeypatch):
     from slide2vec.runtime import tiling_pipeline
-    from slide2vec.runtime.tiling import build_hs2p_configs
+    from slide2vec.runtime.tiling import hs2p_tiling_kwargs
 
     class TilingReached(Exception):
         pass
@@ -38,7 +39,7 @@ def test_model_embed_slide_without_preprocessing_reaches_tiling(monkeypatch):
     captured = {}
 
     def stop_at_tiling(slides, preprocessing, **kwargs):
-        filtering = build_hs2p_configs(preprocessing)[2]
+        filtering = hs2p_tiling_kwargs(preprocessing)["filtering"]
         captured["preprocessing"] = preprocessing
         captured["filtering"] = filtering
         raise TilingReached
@@ -49,8 +50,7 @@ def test_model_embed_slide_without_preprocessing_reaches_tiling(monkeypatch):
     with pytest.raises(TilingReached):
         model.embed_slide("/tmp/slide-a.svs")
 
-    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
-    assert captured["preprocessing"].requested_tile_size_px == 448
+    assert captured["preprocessing"].tiling == tiling_config(0.5, 448)
     assert captured["filtering"].ref_tile_size == 448
 
 
@@ -251,47 +251,11 @@ def test_model_embed_slide_infers_preprocessing_from_single_spacing_model(monkey
     assert captured["slides"][0]["sample_id"] == "slide-a"
     assert captured["slides"][0]["image_path"] == Path("/tmp/slide-a.svs")
     assert isinstance(captured["preprocessing"], PreprocessingConfig)
-    assert captured["preprocessing"].backend == "auto"
-    assert captured["preprocessing"].requested_tile_size_px == 224
-    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
-
-
-def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_preprocessing(
-    monkeypatch,
-):
-    model = Model.from_preset("virchow")
-    expected = EmbeddedSlide(
-        sample_id="slide-a",
-        tile_embeddings=np.zeros((2, 3), dtype=np.float32),
-        slide_embedding=None,
-        x=np.array([0, 1], dtype=np.int64),
-        y=np.array([0, 1], dtype=np.int64),
-        tile_size_lv0=224,
-        image_path=Path("/tmp/slide-a.svs"),
-        mask_path=None,
-        annotation="tissue",
-    )
-    captured = {}
-
-    def fake_embed_slides(model_arg, slides, **kwargs):
-        captured["preprocessing"] = kwargs["preprocessing"]
-        return [expected]
-
-    monkeypatch.setattr("slide2vec.inference.embed_slides", fake_embed_slides)
-
-    result = model.embed_slide(
-        "/tmp/slide-a.svs",
-        preprocessing=PreprocessingConfig(backend="asap"),
-    )
-
-    assert result is expected
-    assert captured["preprocessing"].backend == "asap"
-    assert captured["preprocessing"].requested_tile_size_px == 224
-    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
+    assert captured["preprocessing"].tiling == tiling_config(0.5, 224)
 
 
 @pytest.mark.parametrize(
-    ("encoder_name", "expected_tile_size_px", "expected_precision"),
+    ("encoder_name", "tile_size_px", "expected_precision"),
     [
         ("virchow2", 224, "fp16"),
         ("midnight", 224, "fp16"),
@@ -299,10 +263,10 @@ def test_model_embed_slide_infers_missing_values_from_explicit_backend_only_prep
         ("musk", 384, "fp16"),
     ],
 )
-def test_model_embed_slides_fills_fields_missing_from_spacing_only_preprocessing(
+def test_model_embed_slides_keeps_the_held_tiling_and_fills_precision_from_the_preset(
     monkeypatch,
     encoder_name,
-    expected_tile_size_px,
+    tile_size_px,
     expected_precision,
 ):
     model = Model.from_preset(encoder_name)
@@ -318,11 +282,10 @@ def test_model_embed_slides_fills_fields_missing_from_spacing_only_preprocessing
 
     model.embed_slides(
         ["/tmp/slide-a.svs"],
-        preprocessing=PreprocessingConfig(requested_spacing_um=0.5),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, tile_size_px)),
     )
 
-    assert captured["preprocessing"].requested_spacing_um == pytest.approx(0.5)
-    assert captured["preprocessing"].requested_tile_size_px == expected_tile_size_px
+    assert captured["preprocessing"].tiling == tiling_config(0.5, tile_size_px)
     assert captured["execution"].precision == expected_precision
 
 
@@ -364,7 +327,7 @@ def test_model_embed_slides_rejects_non_recommended_preprocessing_by_default():
     with pytest.raises(ValueError, match="allow_non_recommended_settings"):
         model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=252),
+            preprocessing=PreprocessingConfig(tiling=tiling_config(1.0, 252)),
         )
 
 
@@ -381,7 +344,7 @@ def test_model_embed_slides_logs_exact_input_when_non_recommended_settings_are_a
     with caplog.at_level("INFO", logger="slide2vec"):
         result = model.embed_slides(
             [{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}],
-            preprocessing=PreprocessingConfig(requested_spacing_um=1.0, requested_tile_size_px=252),
+            preprocessing=PreprocessingConfig(tiling=tiling_config(1.0, 252)),
         )
 
     assert result == expected

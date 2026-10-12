@@ -29,6 +29,7 @@ from huggingface_hub.errors import LocalEntryNotFoundError
 import slide2vec.encoders.models.gigapath as gigapath_module
 from slide2vec.api import ExecutionOptions
 from slide2vec.runtime.feature_identity import PooledResumeCheck, pooled_feature_identity
+from tests.tiling_helpers import tiling_config
 
 
 class _DropoutSlideModel(torch.nn.Module):
@@ -132,9 +133,7 @@ def test_slide_encoder_rejects_overlapping_tiles():
     from slide2vec.runtime.slide_encode import require_supported_tile_stride
 
     model = Model(name="gigapath-slide", device="cpu")
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5, requested_tile_size_px=224, overlap=0.5
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 224, overlap=0.5))
     with pytest.raises(ValueError, match="non-overlapping tiles"):
         _validate_model_config(model, preprocessing)
 

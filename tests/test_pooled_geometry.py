@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
+from tests.tiling_helpers import tiling_config
 
 
 def test_wsi_tile_reader_area_resizes_explicit_read_geometry_to_requested(monkeypatch):
@@ -240,12 +241,7 @@ def test_hierarchical_metadata_records_pooled_geometry():
     from slide2vec.api import PreprocessingConfig
     from slide2vec.runtime.embedding import build_hierarchical_embedding_metadata
 
-    preprocessing = PreprocessingConfig(
-        requested_spacing_um=0.5,
-        requested_tile_size_px=256,
-        requested_region_size_px=512,
-        region_tile_multiple=2,
-    )
+    preprocessing = PreprocessingConfig(tiling=tiling_config(0.5, 256), requested_region_size_px=512, region_tile_multiple=2)
     metadata = build_hierarchical_embedding_metadata(
         SimpleNamespace(name="gigapath", level="tile"),
         tiling_result=SimpleNamespace(

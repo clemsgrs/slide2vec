@@ -16,12 +16,14 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
+from hs2p import FilterConfig, MaskSamplingConfig, PreviewConfig
 from torchvision.transforms import v2
 
 from slide2vec.api import ExecutionOptions, Model, Pipeline, PreprocessingConfig
 from slide2vec.artifacts import load_array
 from slide2vec.encoders.base import PatientEncoder
 from slide2vec.runtime.types import LoadedModel
+from tests.tiling_helpers import tiling_config
 
 
 pytest.importorskip("openslide")
@@ -31,17 +33,21 @@ WSI_PATH = Path(__file__).parent / "fixtures" / "input" / "test-wsi.tif"
 
 def _preprocessing(output_mode: str) -> PreprocessingConfig:
     return PreprocessingConfig(
-        backend="openslide",
-        requested_spacing_um=0.5,
-        requested_tile_size_px=224,
-        filtering={"a_t": 0, "a_h": 0},
-        preview={"save_mask_preview": False, "save_tiling_preview": False},
-        masks={
-            "pixel_mapping": {"tumor": 2, "stroma": 3},
-            "min_coverage": {"tissue": None, "tumor": 0.5, "stroma": 0.5},
-            "colors": {"tumor": [255, 0, 0], "stroma": [0, 0, 255]},
-            "output_mode": output_mode,
-        },
+        tiling=tiling_config(0.5, 224, backend="openslide"),
+        filter=FilterConfig(ref_tile_size=224, a_t=0, a_h=0),
+        preview=PreviewConfig(tissue_contour_color=(157, 219, 129)),
+        masks=MaskSamplingConfig(
+            pixel_mapping={"background": 0, "tissue": 1, "tumor": 2, "stroma": 3},
+            colors={
+                "background": None,
+                "tissue": (157, 219, 129),
+                "tumor": (255, 0, 0),
+                "stroma": (0, 0, 255),
+            },
+            min_coverage={"tumor": 0.5, "stroma": 0.5},
+            output_mode=output_mode,
+            strategy="independent",
+        ),
     )
 
 

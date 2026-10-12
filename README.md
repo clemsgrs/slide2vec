@@ -20,17 +20,22 @@ For gated models such as Virchow2, request access on the model's Hugging Face pa
 ## Embed a slide
 
 ```python
+from hs2p import TilingConfig
 from slide2vec import Model, PreprocessingConfig
 
 model = Model.from_preset("virchow2")
-preprocessing = PreprocessingConfig(requested_spacing_um=0.5)
+preprocessing = PreprocessingConfig(
+    tiling=TilingConfig(
+        requested_spacing_um=0.5, requested_tile_size_px=224, tolerance=0.05, overlap=0.0
+    ),
+)
 embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
 
 tile_embeddings = embedded.tile_embeddings  # (N, 2560)
 x, y = embedded.x, embedded.y               # level-0 tile coordinates
 ```
 
-The preset supplies tile size and precision defaults. Declare spacing explicitly for models such as Virchow2 that support several scales. Use `list_models()` to list presets, or filter with `list_models("tile")`, `list_models("slide")`, or `list_models("patient")`.
+`tiling` is an hs2p `TilingConfig`. Leave it unset to take spacing and tile size from the preset; Virchow2 supports several scales, so it needs an explicit one. The preset also supplies precision. Use `list_models()` to list presets, or filter with `list_models("tile")`, `list_models("slide")`, or `list_models("patient")`.
 
 See [getting started](https://clemsgrs.github.io/slide2vec/getting-started.html) for preprocessing and execution settings, and the [API guide](https://clemsgrs.github.io/slide2vec/api.html) for patient embeddings, image inputs, and dense grids.
 
@@ -47,11 +52,11 @@ slide-2,/data/slide-2.svs
 Optional `mask_path` and `spacing_at_level_0` columns supply a mask or correct missing or incorrect level-0 spacing. Patient-level models also require `patient_id`; see the [manifest schema](https://clemsgrs.github.io/slide2vec/manifest.html).
 
 ```python
-from slide2vec import ExecutionOptions, Model, Pipeline, PreprocessingConfig
+from slide2vec import ExecutionOptions, Model, Pipeline
 
 pipeline = Pipeline(
     model=Model.from_preset("virchow2"),
-    preprocessing=PreprocessingConfig(requested_spacing_um=0.5),
+    preprocessing=preprocessing,  # from the example above
     execution=ExecutionOptions(output_dir="outputs/run"),
 )
 result = pipeline.run(manifest_path="/path/to/slides.csv")

@@ -40,6 +40,7 @@ from slide2vec.artifacts import load_metadata
 from slide2vec.encoders import encoder_registry
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
 from slide2vec.runtime.feature_identity import transform_record
+from tests.tiling_helpers import tiling_config
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -264,7 +265,7 @@ def test_pooled_tile_sidecar_records_the_feature_identity(tmp_path):
         SimpleNamespace(name="virchow2", level="tile", _output_variant="cls"),
         _embedded_slide(tile_embeddings=np.zeros((1, 4), dtype=np.float32)),
         _tiling_result(),
-        preprocessing=PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 224)),
         execution=ExecutionOptions(output_dir=tmp_path, precision="bf16"),
     )
 
@@ -287,7 +288,7 @@ def test_zero_tile_sidecar_records_the_feature_identity_without_a_transform(tmp_
     process_list.write_zero_tile_embedding_sidecars(
         [(slide, _tiling_result(x=np.array([]), y=np.array([]), num_tiles=0))],
         model=SimpleNamespace(name="virchow2", level="tile", _output_variant=None),
-        preprocessing=PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 224)),
         execution=ExecutionOptions(output_dir=tmp_path, precision="fp16"),
     )
 
@@ -333,7 +334,7 @@ class _FakeModel:
         return self._loaded
 
 
-PREPROCESSING = PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224)
+PREPROCESSING = PreprocessingConfig(tiling=tiling_config(0.5, 224))
 
 
 def _run_pipeline(monkeypatch, tmp_path, model, *, preprocessing=PREPROCESSING, **execution):
@@ -458,7 +459,7 @@ def test_pooled_resume_refuses_artifacts_with_a_different_recipe(
     monkeypatch, tmp_path, first, second, differences
 ):
     def run(*, model=None, tile_size=224, resume, **execution):
-        preprocessing = replace(PREPROCESSING, requested_tile_size_px=tile_size, resume=resume)
+        preprocessing = replace(PREPROCESSING, resume=resume, tiling=replace(PREPROCESSING.tiling, requested_tile_size_px=tile_size))
         return _run_pipeline(
             monkeypatch, tmp_path, _FakeModel(**(model or {})),
             preprocessing=preprocessing, **execution,
@@ -893,7 +894,7 @@ def test_pooled_slide_sidecars_record_the_tile_encoder_dependency(tmp_path):
             slide_embedding=np.zeros((8,), dtype=np.float32),
         ),
         _tiling_result(),
-        preprocessing=PreprocessingConfig(requested_spacing_um=0.5, requested_tile_size_px=224),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 224)),
         execution=ExecutionOptions(
             output_dir=tmp_path, precision="fp16", output_dtype="fp32", save_tile_embeddings=True
         ),
@@ -919,12 +920,7 @@ def test_pooled_hierarchical_sidecar_records_the_region_geometry(tmp_path):
         SimpleNamespace(name="virchow2", level="tile", _output_variant=None),
         _embedded_slide(tile_embeddings=np.zeros((1, 4, 8), dtype=np.float32)),
         _tiling_result(base_spacing_um=0.5, level_downsamples=[1.0]),
-        preprocessing=PreprocessingConfig(
-            requested_spacing_um=0.5,
-            requested_tile_size_px=224,
-            requested_region_size_px=448,
-            region_tile_multiple=2,
-        ),
+        preprocessing=PreprocessingConfig(tiling=tiling_config(0.5, 224), requested_region_size_px=448, region_tile_multiple=2),
         execution=ExecutionOptions(output_dir=tmp_path, precision="fp16"),
     )
 

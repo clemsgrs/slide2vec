@@ -29,12 +29,17 @@ Set ``region_tile_multiple`` in :class:`~slide2vec.PreprocessingConfig`:
 
 .. code-block:: python
 
+   from hs2p import TilingConfig
    from slide2vec import Model, PreprocessingConfig
 
    model = Model.from_preset("virchow2")
    preprocessing = PreprocessingConfig(
-       requested_spacing_um=0.5,
-       requested_tile_size_px=224,
+       tiling=TilingConfig(
+           requested_spacing_um=0.5,
+           requested_tile_size_px=224,
+           tolerance=0.05,
+           overlap=0.0,
+       ),
        region_tile_multiple=6,   # 6×6 = 36 tiles per region
    )
    embedded = model.embed_slide("/path/to/slide.svs", preprocessing=preprocessing)
