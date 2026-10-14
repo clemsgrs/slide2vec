@@ -1116,9 +1116,9 @@ version = "2.8.3.post2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
-    { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv') or (extra != 'extra-9-slide2vec-cpu' and extra != 'extra-9-slide2vec-cu128' and extra == 'extra-9-slide2vec-prism2')" },
-    { name = "torch", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv')" },
-    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra == 'extra-9-slide2vec-cu128' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv')" },
+    { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv') or (extra != 'extra-9-slide2vec-cpu' and extra != 'extra-9-slide2vec-cu128')" },
+    { name = "torch", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "extra == 'extra-9-slide2vec-cpu' or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv')" },
+    { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-9-slide2vec-cu128' or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6c/b1/b77625e3d11260d2bd6a4fc249a4be9a3da97ff848e2222e810c4f0e0211/flash_attn-2.8.3.post2.tar.gz", hash = "sha256:d0f9f0b08a986cdeadbffcf5ec8b3a8f514366c68ad1853d3ab061bc83cc340b", size = 8453127, upload-time = "2026-10-14T01:37:12.132Z" }
 
@@ -4090,6 +4090,9 @@ docs = [
     { name = "sphinx-autodoc-typehints", version = "3.13.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*' or (extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra == 'extra-9-slide2vec-fm' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism' and extra == 'extra-9-slide2vec-prism2') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-titan') or (extra == 'extra-9-slide2vec-prism2' and extra == 'extra-9-slide2vec-waiv')" },
     { name = "sphinx-copybutton" },
 ]
+flash-attn = [
+    { name = "flash-attn" },
+]
 fm = [
     { name = "einops" },
     { name = "einops-exts" },
@@ -4178,7 +4181,7 @@ requires-dist = [
     { name = "fairscale", marker = "extra == 'fm'" },
     { name = "flake8", marker = "extra == 'testing'", specifier = ">=3.9" },
     { name = "flake8-pyproject", marker = "extra == 'testing'", specifier = ">=1.2.3" },
-    { name = "flash-attn", marker = "extra == 'prism2'", specifier = ">=2.6.3" },
+    { name = "flash-attn", marker = "extra == 'flash-attn'", specifier = ">=2.6.3" },
     { name = "furo", marker = "extra == 'docs'" },
     { name = "hs2p", extras = ["asap", "cucim", "openslide", "sam2", "tifffile", "vips"], specifier = ">=6.1.0" },
     { name = "huggingface-hub" },
@@ -4193,6 +4196,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'testing'", specifier = ">=2.0" },
     { name = "rich" },
     { name = "sacremoses", marker = "extra == 'prism'" },
+    { name = "slide2vec", extras = ["flash-attn"], marker = "extra == 'prism2'" },
     { name = "slide2vec", extras = ["prism", "titan", "waiv"], marker = "extra == 'fm'" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=8.1" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'" },
@@ -4215,7 +4219,7 @@ requires-dist = [
     { name = "wandb" },
     { name = "xformers", marker = "extra == 'xformers'" },
 ]
-provides-extras = ["prism", "prism2", "titan", "waiv", "xformers", "fm", "cpu", "cu128", "docs", "testing"]
+provides-extras = ["prism", "prism2", "titan", "waiv", "flash-attn", "xformers", "fm", "cpu", "cu128", "docs", "testing"]
 
 [package.metadata.requires-dev]
 dev = [

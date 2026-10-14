@@ -13,3 +13,4 @@ E2E tests in this repo:
 - Tests marked `gpu_integration`: one-GPU versus multi-GPU parity. Run with `CUDA_VISIBLE_DEVICES=0,1 python -m pytest -m gpu_integration --no-cov`.
 
 Environments: `uv.lock` pins every extra. After editing dependencies in `pyproject.toml`, run `uv lock` and check with `uv lock --check`. For tests, create the CI environment with `uv sync --extra cpu --extra fm --group dev`.
+`release.py` runs `uv lock` after `bumpver update`, because `uv.lock` records the project version.

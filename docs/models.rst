@@ -318,8 +318,11 @@ that need more than the base install are:
      - ``waiv`` (or ``fm``)
    * - ``titan``, ``conchv15``
      - base, or ``titan``
-   * - ``musk``, ``gigapath-slide``
+   * - ``musk``
      - ``fm`` (for ``fairscale``) plus an upstream package (below)
+   * - ``gigapath-slide``
+     - ``fm`` (for ``fairscale``), ``flash-attn`` or ``xformers``, plus an
+       upstream package (below)
    * - ``conch``
      - base plus an upstream package (below)
 
@@ -333,9 +336,11 @@ its own:
 
    pip install "slide2vec[prism2]"
 
-The ``xformers`` extra is optional. PRISM uses it when
-``PERCEIVER_MEM_EFF_ATTN=true``, and ``gigapath-slide`` uses it as a fallback
-attention path. It is unpinned because each xformers build pins its own torch.
+``gigapath-slide`` needs an attention backend: the ``flash-attn`` extra on
+GPUs with compute capability above 7, and the ``xformers``
+extra on older GPUs. PRISM uses ``xformers`` optionally, when
+``PERCEIVER_MEM_EFF_ATTN=true``. The ``xformers`` extra is unpinned because
+each xformers build pins its own torch.
 
 The ``musk``, ``conch``, and ``gigapath-slide`` presets also require upstream
 packages that are not on PyPI. The tile-only ``gigapath`` preset uses timm and

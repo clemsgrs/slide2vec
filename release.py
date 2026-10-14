@@ -23,6 +23,8 @@ def get_current_version() -> str:
 def bump_version(level: str = "patch") -> str:
     print(f"🔧 Bumping version with level: {level}")
     run(f"bumpver update --{level}")
+    # uv.lock records the project version
+    run("uv lock")
     return get_current_version()
 
 

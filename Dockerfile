@@ -4,25 +4,25 @@
 # select the extras and dependency groups:
 #
 #   docker build -t slide2vec .
-#       cu128 torch, the `fm` extra and the git-installed encoder packages
-#       (MUSK, CONCH, prov-gigapath, sam2).
+#       cu128 torch, the `fm` extra, flash-attn (gigapath-slide needs it on
+#       GPUs with compute capability above 7) and the git-installed encoder
+#       packages (MUSK, CONCH, prov-gigapath, sam2).
 #
 #   docker build -t slide2vec:prism2 \
 #       --build-arg SLIDE2VEC_EXTRAS="cu128 prism2" \
 #       --build-arg SLIDE2VEC_GROUPS="" .
 #       PRISM2 in its own environment (transformers<4.53 and flash-attn).
-#       flash-attn ships only an sdist that imports torch at build time.
-#       pyproject.toml declares torch (matching the locked runtime torch) as an
-#       extra build dependency of flash-attn, so a single `uv sync` builds it.
-#       If that fails, sync once without it, then build it against the
-#       installed torch:
-#         uv sync --locked --no-install-project --extra cu128 --extra prism2 \
-#             --no-install-package flash-attn
-#         uv pip install --python /opt/venv/bin/python setuptools wheel packaging psutil ninja
-#         uv sync --locked --no-install-project --extra cu128 --extra prism2 \
-#             --no-build-isolation-package flash-attn
 #
-# The default image does not build flash-attn: only the prism2 extra needs it.
+# Both images build flash-attn, which ships only an sdist that imports torch at
+# build time. pyproject.toml declares torch (matching the locked runtime torch)
+# as an extra build dependency of flash-attn, so a single `uv sync` builds it.
+# If that fails, sync once without it, then build it against the installed
+# torch (shown for the default image; use the prism2 flags for that variant):
+#   uv sync --locked --no-install-project --extra cu128 --extra fm \
+#       --extra flash-attn --group models-git --no-install-package flash-attn
+#   uv pip install --python /opt/venv/bin/python setuptools wheel packaging psutil ninja
+#   uv sync --locked --no-install-project --extra cu128 --extra fm \
+#       --extra flash-attn --group models-git --no-build-isolation-package flash-attn
 
 ARG UBUNTU_VERSION=22.04
 ARG CUDA_MAJOR_VERSION=12.8.1
@@ -95,7 +95,7 @@ WORKDIR /opt/app/
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
 
-ARG SLIDE2VEC_EXTRAS="cu128 fm"
+ARG SLIDE2VEC_EXTRAS="cu128 fm flash-attn"
 ARG SLIDE2VEC_GROUPS="models-git"
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
