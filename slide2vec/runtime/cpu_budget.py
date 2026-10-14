@@ -34,7 +34,7 @@ def serialize_execution(
     if preprocessing is not None and preprocessing.on_the_fly and preprocessing.read_tiles_from is None:
         effective_num_workers_per_gpu, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
-            num_gpus=execution.num_gpus,
+            num_gpus=execution.resolved_num_gpus(),
         )
     return serialize_execution_dict(
         execution,
@@ -56,7 +56,7 @@ def log_on_the_fly_worker_override_once(
         return
     effective_num_workers_per_gpu, worker_context = resolve_on_the_fly_num_workers(
         preprocessing.num_cucim_workers,
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
     if effective_num_workers_per_gpu == execution.resolved_num_workers_per_gpu():
         return

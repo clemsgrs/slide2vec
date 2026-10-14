@@ -231,6 +231,52 @@ def test_run_pipeline_distributed_branch_delegates_to_distributed_collection_hel
     assert result.slide_artifacts == ["slide-artifact"]
 
 
+def test_run_pipeline_resolves_auto_gpus_and_tiling_workers_for_the_machine(monkeypatch, tmp_path: Path):
+    """Auto ``num_gpus`` and ``num_preprocessing_workers`` stay ``None`` on the options; the run
+    reads the counts the machine resolves (here two GPUs and five CPUs)."""
+    import slide2vec.api as api
+    import slide2vec.inference as inference
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 2)
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 5)
+
+    slide = make_slide("slide-a")
+    tiling_result = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
+    captured = {}
+
+    def fake_prepare(*args, num_workers, **kwargs):
+        captured["tiling_workers"] = num_workers
+        return [slide], [tiling_result], tmp_path / "process_list.csv"
+
+    def fake_collect(*, execution, **kwargs):
+        captured["collected_on_gpus"] = execution.resolved_num_gpus()
+        return ["tile-artifact"], [], []
+
+    monkeypatch.setattr(tiling_pipeline, "prepare_tiled_slides", fake_prepare)
+    monkeypatch.setattr(
+        distributed_stage,
+        "validate_multi_gpu_execution",
+        lambda model, execution: captured.setdefault("validated", True),
+    )
+    monkeypatch.setattr(artifacts_collect, "collect_distributed_pipeline_artifacts", fake_collect)
+
+    execution = ExecutionOptions(output_dir=tmp_path)
+    result = inference.run_pipeline(
+        Model.from_preset("virchow2"),
+        slides=[slide],
+        preprocessing=DEFAULT_PREPROCESSING,
+        execution=execution,
+    )
+
+    assert execution.num_gpus is None
+    assert execution.num_preprocessing_workers is None
+    assert captured == {"validated": True, "tiling_workers": 5, "collected_on_gpus": 2}
+    assert result.tile_artifacts == ["tile-artifact"]
+    request = json.loads((tmp_path / "embedding_request.json").read_text())
+    assert request["execution"]["num_gpus"] == 2
+    assert request["execution"]["num_preprocessing_workers"] == 5
+
+
 def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_for_worker_input(
     monkeypatch,
     tmp_path: Path,
@@ -3448,6 +3494,25 @@ def test_serialize_execution_preserves_slide_embedding_and_preprocessing_worker_
     assert payload["save_slide_embeddings"] is True
     assert restored.num_preprocessing_workers == 3
     assert restored.save_slide_embeddings is True
+
+
+def test_a_torchrun_rank_keeps_the_launchers_resolved_gpu_and_worker_counts(monkeypatch):
+    """The request carries the launcher's resolution: a rank pinned to one GPU must still
+    split its CPU budget across the launcher's world size."""
+    import slide2vec.api as api
+    from slide2vec.runtime.serialization import deserialize_execution
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 4)
+    monkeypatch.setattr(api, "cpu_worker_limit", lambda: 32)
+    payload = cpu_budget.serialize_execution(ExecutionOptions())
+
+    monkeypatch.setattr(api, "_default_num_gpus", lambda: 1)  # the rank sees only its own GPU
+    restored = deserialize_execution(json.loads(json.dumps(payload)))
+
+    assert payload["num_gpus"] == 4
+    assert payload["num_preprocessing_workers"] == 32
+    assert restored.resolved_num_gpus() == 4
+    assert restored.resolved_num_workers_per_gpu() == 8
 
 
 def test_embedding_dataloader_kwargs_resolve_auto_mode_to_cpu_budget(monkeypatch):

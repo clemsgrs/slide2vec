@@ -207,7 +207,7 @@ def embed_regions_dense(
         out_dir,
         identity,
         resolve_transform=deferred_transform_record(
-            model, on_cpu_copy=execution.num_gpus > 1
+            model, on_cpu_copy=execution.resolved_num_gpus() > 1
         ),
     )
     if skipped:
@@ -220,10 +220,10 @@ def embed_regions_dense(
         total=len(flat),
         skipped=skipped,
         encoding=len(remaining),
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
     if remaining:
-        if execution.num_gpus == 1:
+        if execution.resolved_num_gpus() == 1:
             _run_dense_in_process(
                 model, remaining, dense=dense, execution=execution, out_dir=out_dir,
                 identity=identity,
@@ -323,7 +323,7 @@ def _run_dense_distributed(model, specs, *, dense, execution, out_dir) -> None:
         run_torchrun_worker(
             module="slide2vec.distributed.dense_worker",
             pin_gpus=True,  # No collectives: each rank needs only its own GPU.
-            num_gpus=execution.num_gpus,
+            num_gpus=execution.resolved_num_gpus(),
             output_dir=out_dir,
             request_path=request_path,
             failure_title="Distributed dense feature extraction failed",

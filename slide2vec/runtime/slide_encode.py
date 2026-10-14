@@ -89,6 +89,7 @@ def describe_device_mode(model, execution: ExecutionOptions) -> str:
     requested_device = getattr(model, "_requested_device", None)
     if requested_device == "cpu":
         return "cpu"
-    if execution.num_gpus and execution.num_gpus > 1:
-        return f"{execution.num_gpus} gpus"
+    num_gpus = execution.resolved_num_gpus()
+    if num_gpus > 1:
+        return f"{num_gpus} gpus"
     return "gpu"

@@ -144,7 +144,7 @@ def compute_tile_embeddings_for_slide(
     if preprocessing.on_the_fly and preprocessing.read_tiles_from is None and resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
-            num_gpus=execution.num_gpus,
+            num_gpus=execution.resolved_num_gpus(),
         )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:
@@ -280,7 +280,7 @@ def _encode_hierarchical_subtiles(
     if resolved_backend == "cucim":
         effective_num_workers, _ = resolve_on_the_fly_num_workers(
             preprocessing.num_cucim_workers,
-            num_gpus=execution.num_gpus,
+            num_gpus=execution.resolved_num_gpus(),
         )
         loader_kwargs["num_workers"] = effective_num_workers
         if effective_num_workers == 0:

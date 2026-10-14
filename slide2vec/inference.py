@@ -261,7 +261,7 @@ def embed_slides(
     slide_records = [manifest.coerce_slide_spec(slide) for slide in slides]
     if not slide_records:
         raise ValueError("At least one slide is required")
-    if execution.num_gpus > 1:
+    if execution.resolved_num_gpus() > 1:
         distributed_stage.validate_multi_gpu_execution(model, execution)
     emit_progress(
         "run.started",
@@ -282,7 +282,7 @@ def embed_slides(
                 slide_records,
                 preprocessing,
                 output_dir=work_dir,
-                num_workers=execution.num_preprocessing_workers,
+                num_workers=execution.resolved_num_preprocessing_workers(),
             )
             process_list.emit_tiling_summary(
                 process_list_path,
@@ -306,19 +306,19 @@ def embed_slides(
                 execution=execution,
             )
             emit_progress("embedding.started", slide_count=len(embeddable_slides))
-            if execution.num_gpus > 1 and len(embeddable_slides) > 1:
+            if execution.resolved_num_gpus() > 1 and len(embeddable_slides) > 1:
                 emit_progress(
                     "embedding.assignment.started",
                     slide_count=len(embeddable_slides),
-                    num_gpus=execution.num_gpus,
+                    num_gpus=execution.resolved_num_gpus(),
                 )
                 emit_progress(
                     "embedding.assignment.finished",
                     slide_count=len(embeddable_slides),
-                    num_gpus=execution.num_gpus,
+                    num_gpus=execution.resolved_num_gpus(),
                 )
             local_persist_callback = None
-            if execution.output_dir is not None and execution.num_gpus <= 1:
+            if execution.output_dir is not None and execution.resolved_num_gpus() <= 1:
                 local_persist_callback, _, _ = persist_callbacks.build_incremental_persist_callback(
                     model=model,
                     preprocessing=preprocessing,
@@ -334,7 +334,7 @@ def embed_slides(
                 work_dir=work_dir,
                 on_embedded_slide=local_persist_callback,
             )
-            if execution.output_dir is not None and execution.num_gpus > 1:
+            if execution.output_dir is not None and execution.resolved_num_gpus() > 1:
                 tile_artifacts: list[TileEmbeddingArtifact] = []
                 hierarchical_artifacts: list[HierarchicalEmbeddingArtifact] = []
                 slide_artifacts: list[SlideEmbeddingArtifact] = []
@@ -464,7 +464,7 @@ def embed_patients(
                 slide_records,
                 preprocessing,
                 output_dir=work_dir,
-                num_workers=execution.num_preprocessing_workers,
+                num_workers=execution.resolved_num_preprocessing_workers(),
             )
             process_list.emit_tiling_summary(
                 process_list_path,
@@ -562,7 +562,7 @@ def _select_embedding_path(
     work_dir: Path,
     on_embedded_slide: Callable[[SlideSpec, Any, EmbeddedSlide], None] | None = None,
 ):
-    if execution.num_gpus > 1:
+    if execution.resolved_num_gpus() > 1:
         if len(slide_records) == 1:
             return [
                 distributed_stage.embed_single_slide_distributed(
@@ -780,7 +780,7 @@ def run_pipeline(
     # initialize their own CUDA and do not depend on this parent-side check.
     # Initializing a CUDA context in the parent here only buys needless fork
     # risk for the downstream tiling pool with no benefit.
-    if not tiling_only and execution.num_gpus > 1:
+    if not tiling_only and execution.resolved_num_gpus() > 1:
         distributed_stage.validate_multi_gpu_execution(model, execution)
 
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
@@ -803,7 +803,7 @@ def run_pipeline(
             slide_records,
             resolved_preprocessing,
             output_dir=output_dir,
-            num_workers=execution.num_preprocessing_workers,
+            num_workers=execution.resolved_num_preprocessing_workers(),
         )
         process_list.emit_tiling_summary(
             process_list_path,
@@ -872,7 +872,7 @@ def run_pipeline(
                 process_list_path=process_list_path,
             )
 
-        if execution.num_gpus > 1:
+        if execution.resolved_num_gpus() > 1:
             tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
                 model=model,
                 successful_slides=embeddable_slides,
@@ -990,7 +990,7 @@ def run_pipeline_with_coordinates(
 ) -> RunResult:
     if execution.output_dir is None:
         raise ValueError("ExecutionOptions.output_dir is required for Pipeline.run_with_coordinates(...)")
-    if execution.num_gpus > 1:
+    if execution.resolved_num_gpus() > 1:
         distributed_stage.validate_multi_gpu_execution(model, execution)
 
     output_dir = Path(execution.output_dir)
@@ -1036,7 +1036,7 @@ def run_pipeline_with_coordinates(
             execution=execution,
         )
         emit_progress("embedding.started", slide_count=len(embeddable_slides))
-        if execution.num_gpus > 1:
+        if execution.resolved_num_gpus() > 1:
             tile_artifacts, hierarchical_artifacts, slide_artifacts = artifacts_collect.collect_distributed_pipeline_artifacts(
                 model=model,
                 successful_slides=embeddable_slides,

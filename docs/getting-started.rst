@@ -135,6 +135,12 @@ registered precision. To limit a run to one GPU:
        "/path/to/slide.svs", preprocessing=preprocessing, execution=execution,
    )
 
+``ExecutionOptions`` keeps the values you pass: ``num_gpus`` and
+``num_preprocessing_workers`` stay ``None`` when left on auto.
+:meth:`~slide2vec.ExecutionOptions.resolved_num_gpus` and
+:meth:`~slide2vec.ExecutionOptions.resolved_num_preprocessing_workers` return the
+counts a run uses on the current machine.
+
 For CPU inference, construct the model with
 ``Model.from_preset("virchow2", device="cpu")``.
 
