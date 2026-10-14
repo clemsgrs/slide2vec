@@ -87,8 +87,10 @@ def serialize_execution(
             if effective_num_workers_per_gpu is not None
             else execution.num_workers_per_gpu
         ),
-        "num_preprocessing_workers": execution.num_preprocessing_workers,
-        "num_gpus": execution.num_gpus,
+        # The launcher's resolution, not the request: a torchrun rank pinned to one GPU must
+        # still split its CPU budget across the launcher's world size.
+        "num_preprocessing_workers": execution.resolved_num_preprocessing_workers(),
+        "num_gpus": execution.resolved_num_gpus(),
         "precision": execution.precision,
         "output_dtype": execution.output_dtype,
         "prefetch_factor": execution.prefetch_factor,

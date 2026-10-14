@@ -7,7 +7,7 @@ import warnings
 from dataclasses import dataclass, field, replace
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence
 
 import torch
 from hs2p import (
@@ -261,9 +261,12 @@ class ExecutionOptions:
     #: (capped by CPU / SLURM limit, then split across the resolved GPU count).
     #: Image-only routes safely use zero when auto selection happens after model loading.
     num_workers_per_gpu: int | None = None
-    #: Tiling worker count. ``None`` means auto (capped by CPU / SLURM limit).
+    #: Tiling worker count. ``None`` means auto. The field keeps the requested value;
+    #: :meth:`resolved_num_preprocessing_workers` gives the count a run uses, capped by the
+    #: CPU / SLURM limit.
     num_preprocessing_workers: int | None = None
-    #: Number of GPUs to use. ``None`` defaults to all available GPUs.
+    #: Number of GPUs to use. ``None`` means all available GPUs. The field keeps the
+    #: requested value; :meth:`resolved_num_gpus` gives the count a run uses.
     num_gpus: int | None = None
     #: Forward-pass dtype — ``"fp16"``, ``"bf16"``, ``"fp32"``,
     #: or ``None`` (auto-determined from the model preset).
@@ -313,11 +316,9 @@ class ExecutionOptions:
         )
 
     def __post_init__(self) -> None:
-        resolved_num_gpus = _default_num_gpus() if self.num_gpus is None else self.num_gpus
-        object.__setattr__(self, "num_gpus", resolved_num_gpus)
         object.__setattr__(self, "precision", normalize_precision_name(self.precision))
         object.__setattr__(self, "output_dtype", normalize_output_dtype(self.output_dtype))
-        if resolved_num_gpus < 1:
+        if self.num_gpus is not None and self.num_gpus < 1:
             raise ValueError("ExecutionOptions.num_gpus must be at least 1")
         if self.batch_size < 1:
             raise ValueError("ExecutionOptions.batch_size must be at least 1")
@@ -325,40 +326,62 @@ class ExecutionOptions:
             raise ValueError("ExecutionOptions.prefetch_factor must be at least 1")
         if self.num_workers_per_gpu is not None and self.num_workers_per_gpu < 0:
             raise ValueError("ExecutionOptions.num_workers_per_gpu must be non-negative")
+        if self.num_preprocessing_workers is not None and self.num_preprocessing_workers < 0:
+            raise ValueError("ExecutionOptions.num_preprocessing_workers must be non-negative")
         if self.on_image_mismatch not in IMAGE_MISMATCH_POLICIES:
             raise ValueError(
                 "ExecutionOptions.on_image_mismatch must be one of "
                 f"{', '.join(repr(policy) for policy in IMAGE_MISMATCH_POLICIES)}; "
                 f"got {self.on_image_mismatch!r}"
             )
-        cap = cpu_worker_limit()
-        cpu_count = os.cpu_count() or 1
-        slurm_limit = slurm_cpu_limit()
-        capped_num_preprocessing_workers = (
-            cap if self.num_preprocessing_workers is None else min(self.num_preprocessing_workers, cap)
-        )
-        object.__setattr__(self, "num_preprocessing_workers", capped_num_preprocessing_workers)
-        logger = logging.getLogger(__name__)
-        cap_source = f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={cpu_count}"
-        resolved_num_workers = self.resolved_num_workers_per_gpu()
-        num_workers_per_gpu_label = (
-            f"{resolved_num_workers} (requested=auto)"
-            if self.num_workers_per_gpu is None
-            else str(resolved_num_workers)
-        )
-        logger.info(
-            "ExecutionOptions: num_workers_per_gpu=%s, num_preprocessing_workers=%d "
-            "(preprocessing cap=%d via %s)",
-            num_workers_per_gpu_label,
-            capped_num_preprocessing_workers,
-            cap,
-            cap_source,
-        )
+
+    def resolved_num_gpus(self) -> int:
+        """GPU count a run uses: :attr:`num_gpus`, or every visible GPU when it is ``None``."""
+        return self._machine_resolution.num_gpus
+
+    def resolved_num_preprocessing_workers(self) -> int:
+        """Tiling worker count a run uses: :attr:`num_preprocessing_workers`, or the CPU /
+        SLURM limit when it is ``None``, and never more than that limit."""
+        return self._machine_resolution.num_preprocessing_workers
 
     def resolved_num_workers_per_gpu(self) -> int:
         if self.num_workers_per_gpu is not None:
             return self.num_workers_per_gpu
-        return max(1, cpu_worker_limit() // self.num_gpus)
+        return max(1, cpu_worker_limit() // self.resolved_num_gpus())
+
+    @functools.cached_property
+    def _machine_resolution(self) -> "_MachineResolution":
+        # Resolved once per instance, on first use, so every reader in a run agrees and the
+        # log line is written once. The cache sits outside the dataclass fields: equality,
+        # hashing and repr see only what the caller asked for.
+        num_gpus = _default_num_gpus() if self.num_gpus is None else self.num_gpus
+        cap = cpu_worker_limit()
+        num_preprocessing_workers = (
+            cap if self.num_preprocessing_workers is None else min(self.num_preprocessing_workers, cap)
+        )
+        num_workers_per_gpu = (
+            max(1, cap // num_gpus) if self.num_workers_per_gpu is None else self.num_workers_per_gpu
+        )
+        slurm_limit = slurm_cpu_limit()
+        cap_source = (
+            f"slurm_cpu_limit={slurm_limit}" if slurm_limit is not None else f"cpu_count={os.cpu_count() or 1}"
+        )
+        logging.getLogger(__name__).info(
+            "ExecutionOptions: num_gpus=%s, num_workers_per_gpu=%s, num_preprocessing_workers=%d "
+            "(preprocessing cap=%d via %s)",
+            _auto_label(num_gpus, requested=self.num_gpus),
+            _auto_label(num_workers_per_gpu, requested=self.num_workers_per_gpu),
+            num_preprocessing_workers,
+            cap,
+            cap_source,
+        )
+        return _MachineResolution(num_gpus=num_gpus, num_preprocessing_workers=num_preprocessing_workers)
+
+    def __getstate__(self) -> dict[str, Any]:
+        # A copy or an unpickled instance resolves again on the machine that uses it.
+        state = dict(self.__dict__)
+        state.pop("_machine_resolution", None)
+        return state
 
     def resolved_image_num_workers_per_gpu(self) -> int:
         """Resolve safe post-model-load image-transform workers for this rank."""
@@ -898,8 +921,9 @@ class Model:
         The dense counterpart of the pooled coordinate path: each ``SlideRegions`` names a
         slide + a set of level-0 ROI coordinates, and every ROI is read, encoded through the
         dense transform, and written to ``dense_embeddings/[<class>/]<sample_id>/<x>_<y>.pt``
-        plus a geometry sidecar. The run splits its ROIs across all visible GPUs
-        (``execution.num_gpus``); ``num_gpus=1`` encodes fully in-process. Resume is
+        plus a geometry sidecar. The run splits its ROIs across
+        ``execution.resolved_num_gpus()`` GPUs (all visible GPUs by default);
+        ``num_gpus=1`` encodes fully in-process. Resume is
         automatic — only ROIs whose sidecar has the same source-spacing declaration,
         resolved hs2p read plan and feature identity are skipped. Returns one
         :class:`~slide2vec.artifacts.DenseRegionArtifact` per input ROI.
@@ -932,10 +956,10 @@ class Model:
         **normalization-only** transform, padded up to the encoder's patch multiple, encoded
         — whole-image, or by sliding the encoder's native field and blending the token grids
         — and written to ``dense_image_embeddings/<sample_id>.pt`` plus a geometry sidecar.
-        The run splits its images across all visible GPUs (``execution.num_gpus``);
-        ``num_gpus=1`` encodes fully in-process. Resume is automatic: an image is skipped
-        only when its payload exists and its sidecar records the same normalized source
-        identity and complete extraction recipe. Returns one
+        The run splits its images across ``execution.resolved_num_gpus()`` GPUs (all
+        visible GPUs by default); ``num_gpus=1`` encodes fully in-process. Resume is
+        automatic: an image is skipped only when its payload exists and its sidecar records
+        the same normalized source identity and complete extraction recipe. Returns one
         :class:`~slide2vec.artifacts.DenseImageArtifact` per input image, in input order.
 
         Every source is opened through hs2p. PNG/JPEG inputs use hs2p's one-level PIL reader
@@ -977,12 +1001,12 @@ class Model:
         set — and slide2vec neither tiles nor reads a slide. Each :class:`ImageSpec` is
         decoded, preprocessed with the encoder's **shipped** transform, encoded, and written
         to ``image_embeddings/<sample_id>.pt`` plus a provenance sidecar. The run splits its
-        images across all visible GPUs (``execution.num_gpus``); ``num_gpus=1`` encodes
-        fully in-process. Resume is automatic: an image is skipped only when its sidecar
-        records this ``output_format``, the requested ``image_path`` and the full feature
-        identity. A different recorded feature identity raises; a different recorded
-        ``image_path`` raises unless ``execution.on_image_mismatch="reencode"``; missing
-        provenance re-encodes. Returns
+        images across ``execution.resolved_num_gpus()`` GPUs (all visible GPUs by
+        default); ``num_gpus=1`` encodes fully in-process. Resume is automatic: an image is
+        skipped only when its sidecar records this ``output_format``, the requested
+        ``image_path`` and the full feature identity. A different recorded feature identity
+        raises; a different recorded ``image_path`` raises unless
+        ``execution.on_image_mismatch="reencode"``; missing provenance re-encodes. Returns
         one :class:`~slide2vec.artifacts.ImageEmbeddingArtifact` per input image, in input
         order.
 
@@ -1340,6 +1364,15 @@ def _coerce_execution_options(
 
 def _default_num_gpus() -> int:
     return max(1, torch.cuda.device_count()) if torch.cuda.is_available() else 1
+
+
+class _MachineResolution(NamedTuple):
+    num_gpus: int
+    num_preprocessing_workers: int
+
+
+def _auto_label(resolved: int, *, requested: int | None) -> str:
+    return f"{resolved} (requested=auto)" if requested is None else str(resolved)
 
 
 def _require_output_dir_for_persistence(execution: ExecutionOptions, *, method_name: str) -> None:

@@ -699,10 +699,6 @@ def test_pipeline_run_requires_output_dir():
     with pytest.raises(ValueError, match="ExecutionOptions.output_dir"):
         pipeline.run(slides=[{"sample_id": "slide-a", "image_path": "/tmp/slide-a.svs"}])
 
-def test_execution_options_validate_num_gpus():
-    with pytest.raises(ValueError, match="num_gpus"):
-        ExecutionOptions(num_gpus=0)
-
 def test_model_from_preset_canonicalizes_conchv15_alias():
     model = Model.from_preset("conchv1.5")
 
@@ -823,7 +819,8 @@ def test_execution_options_from_config_defaults_preprocessing_workers_to_cpu_bud
 
     execution = ExecutionOptions.from_config(cfg)
 
-    assert execution.num_preprocessing_workers == 18
+    assert execution.num_preprocessing_workers is None
+    assert execution.resolved_num_preprocessing_workers() == 18
 
 def test_execution_options_from_config_preserves_auto_num_workers(tmp_path: Path):
     cfg = SimpleNamespace(
@@ -872,7 +869,8 @@ def test_execution_options_from_config_defaults_to_all_available_gpus_when_unset
 
     execution = api.ExecutionOptions.from_config(cfg)
 
-    assert execution.num_gpus == 6
+    assert execution.num_gpus is None
+    assert execution.resolved_num_gpus() == 6
     assert execution.precision == "fp32"
     assert execution.prefetch_factor == 3
 

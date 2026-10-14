@@ -275,7 +275,7 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         output_format=execution.output_format,
         identity=identity,
         resolve_transform=deferred_transform_record(
-            model, on_cpu_copy=execution.num_gpus > 1
+            model, on_cpu_copy=execution.resolved_num_gpus() > 1
         ),
         on_image_mismatch=execution.on_image_mismatch,
     )
@@ -291,7 +291,7 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
         total=len(specs),
         skipped=skipped,
         encoding=len(remaining),
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
 
     # The shard loop invalidates each image's stale files right before writing it, so a
@@ -300,7 +300,7 @@ def embed_images(model, images: Sequence[ImageSpec], *, execution) -> list[Image
     # encodes nothing deletes nothing.
     encoded_width = None
     if remaining:
-        if execution.num_gpus == 1:
+        if execution.resolved_num_gpus() == 1:
             encoded_width = _run_images_in_process(
                 model, remaining, execution=execution, out_dir=out_dir, identity=identity,
                 stale=plan.stale,
@@ -417,7 +417,7 @@ def _run_images_distributed(model, specs, *, execution, out_dir, stale) -> int:
         run_torchrun_worker(
             module="slide2vec.distributed.image_worker",
             pin_gpus=True,  # No collectives: each rank needs only its own GPU.
-            num_gpus=execution.num_gpus,
+            num_gpus=execution.resolved_num_gpus(),
             output_dir=out_dir,
             request_path=request_path,
             failure_title="Distributed image feature extraction failed",

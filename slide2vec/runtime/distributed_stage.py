@@ -41,9 +41,9 @@ def validate_multi_gpu_execution(model, execution: ExecutionOptions) -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("ExecutionOptions.num_gpus > 1 requires CUDA")
     available_gpus = int(torch.cuda.device_count())
-    if execution.num_gpus > available_gpus:
+    if execution.resolved_num_gpus() > available_gpus:
         raise ValueError(
-            f"ExecutionOptions.num_gpus={execution.num_gpus} exceeds available CUDA devices ({available_gpus})"
+            f"ExecutionOptions.num_gpus={execution.resolved_num_gpus()} exceeds available CUDA devices ({available_gpus})"
         )
 
 
@@ -140,16 +140,16 @@ def run_distributed_embedding_stage(
     emit_progress(
         "embedding.assignment.started",
         slide_count=len(successful_slides),
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
     emit_progress(
         "embedding.assignment.finished",
         slide_count=len(successful_slides),
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
     run_torchrun_worker(
         module="slide2vec.distributed.pipeline_worker",
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed feature extraction failed",
@@ -187,7 +187,7 @@ def run_distributed_direct_embedding_stage(
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True), encoding="utf-8")
     run_torchrun_worker(
         module="slide2vec.distributed.direct_embed_worker",
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
         output_dir=output_dir,
         request_path=request_path,
         failure_title="Distributed direct embedding failed",
@@ -276,7 +276,7 @@ def embed_multi_slides_distributed(
     assignments = assign_slides_to_ranks(
         slide_records,
         tiling_results,
-        num_gpus=execution.num_gpus,
+        num_gpus=execution.resolved_num_gpus(),
     )
     with distributed_coordination_dir(work_dir) as coordination_dir:
         run_distributed_direct_embedding_stage(
