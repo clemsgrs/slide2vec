@@ -21,6 +21,28 @@ foundation models:
 
    pip install "slide2vec[fm]"
 
+Reproducible model environments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The repository also ships a ``uv.lock`` file that pins every package for each
+extra. From a checkout, `uv <https://docs.astral.sh/uv/>`_ installs the exact
+locked stack:
+
+.. code-block:: shell
+
+   uv sync --extra cu128 --extra fm
+
+Use ``--extra cpu`` instead of ``--extra cu128`` for CPU-only PyTorch. A model
+that needs its own environment, such as PRISM2, runs with its own extra:
+
+.. code-block:: shell
+
+   uv run --extra cu128 --extra prism2 slide2vec ...
+
+The Docker image is built from the same lock. Its ``SLIDE2VEC_EXTRAS`` build
+argument selects a variant, for example
+``docker build --build-arg SLIDE2VEC_EXTRAS="cu128 prism2" --build-arg SLIDE2VEC_GROUPS="" .``.
+
 For gated models, request access from the model's Hugging Face page in the
 :doc:`models` guide, then authenticate before loading weights:
 

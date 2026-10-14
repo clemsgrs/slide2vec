@@ -79,7 +79,7 @@ def load_moozy_inference_components(device: torch.device) -> MoozyInferenceCompo
     except Exception as exc:
         raise RuntimeError(
             "huggingface_hub is required for bundled MOOZY inference support. "
-            "Install it with: pip install 'slide2vec[moozy]'"
+            "Install it with: pip install huggingface_hub"
         ) from exc
 
     checkpoint_path = hf_hub_download(repo_id=_HF_REPO_ID, filename=_HF_CHECKPOINT)

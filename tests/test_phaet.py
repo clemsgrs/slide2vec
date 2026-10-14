@@ -184,10 +184,12 @@ def test_phaet_dense_encoding_rejects_indivisible_geometry_clearly(monkeypatch):
 def test_phaet_real_weights_pooled_dense_and_attention_contract():
     from slide2vec.encoders.models.waiv import Phaet
 
-    transformers_major = int(transformers.__version__.split(".", maxsplit=1)[0])
-    if transformers_major < 5:
+    from packaging.version import Version
+
+    if Version(transformers.__version__) < Version("4.57"):
         pytest.skip(
-            "Phaet real weights require the slide2vec[waiv] Transformers 5 runtime"
+            "Phaet real weights require the slide2vec[waiv] runtime "
+            "(transformers>=4.57)"
         )
 
     try:

@@ -187,7 +187,7 @@ def test_isight_attention_forces_eager_via_the_parent_clip_model():
 
     Asserted as *structure plus behaviour*, never as a specific ``transformers``
     API: ``PreTrainedModel.set_attn_implementation`` only exists from 4.56, and
-    CI pins 4.53 via the ``prism`` extra. Older versions instead fall back to
+    the base install allows transformers from 4.47. Older versions instead fall back to
     eager inside the SDPA attention class when ``output_attentions=True``. Both
     routes must end in materialized attention weights, which is what is checked
     here; the eager flip itself is asserted only where the API exists.

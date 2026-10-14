@@ -36,9 +36,7 @@ def require_timm_for_dinov3() -> None:
     if Version(timm.__version__) < Version(_MIN_TIMM_VERSION):
         raise ImportError(
             f"dinov3-vitb16 requires timm>={_MIN_TIMM_VERSION} (the DINOv3 "
-            f"architectures were added in that release); found timm=={timm.__version__}. "
-            "Note that the 'titan' extra pins timm==1.0.3 and cannot be installed "
-            "alongside dinov3-vitb16."
+            f"architectures were added in that release); found timm=={timm.__version__}."
         )
 
 

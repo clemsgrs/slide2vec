@@ -8,7 +8,7 @@ ARG PYTHON_VERSION=3.11
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Amsterdam
-ENV PATH="/home/user/.local/bin:${PATH}"
+ENV PATH="/opt/venv/bin:/home/user/.local/bin:${PATH}"
 
 # create user and I/O dirs
 RUN groupadd --gid ${USER_GID} user \
@@ -70,26 +70,29 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --upgrade pip setuptools pip-tools \
-    && python -m pip install hatchling psutil \
-    && rm -rf /home/user/.cache/pip
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
+
+# The workflows bind-mount the source over /opt/app, so the environment lives
+# in /opt/venv. It is owned by `user` so the source can be installed into it at
+# test time.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON=/usr/bin/python${PYTHON_VERSION} \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
+RUN mkdir -p /opt/venv /opt/deps && chown user:user /opt/venv /opt/deps
 
 USER user
-WORKDIR /opt/app
+WORKDIR /opt/deps
 
-# Bake the heavy third-party dependencies (torch, xformers, transformers, hs2p,
-# ...) into the image at build time so the GHA layer cache absorbs them once,
-# instead of re-installing them on every PR run (the old runtime `pip install
-# '.[prism,asap]'` step dominated CI wall-clock). We resolve them from a stub
-# package built off the *real* pyproject.toml, so the dependency set is identical
-# to what the source would pull; the stub package itself is then uninstalled,
-# leaving only its resolved dependencies. This layer's cache key is the
-# pyproject.toml hash, so it only re-runs when the dependency set changes.
-# (`asap` is not a slide2vec extra — ASAP is the apt package installed above — so
-# only the `prism` extra is needed here.)
-COPY --chown=user:user pyproject.toml README.md /opt/deps/
-RUN mkdir -p /opt/deps/slide2vec \
-    && touch /opt/deps/slide2vec/__init__.py \
-    && python -m pip install --user --no-cache-dir '/opt/deps[prism]' pytest pytest-cov \
-    && python -m pip uninstall -y slide2vec \
-    && rm -rf /home/user/.cache/pip
+# Bake the locked third-party dependencies (torch, transformers, hs2p, pytest,
+# ...) into the image at build time so the GHA layer cache absorbs them once.
+# Only the dependency files are copied, so this layer re-runs only when
+# pyproject.toml or uv.lock changes. The project itself is installed at test
+# time from the mounted source (`uv pip install --no-deps -e /opt/app`).
+COPY --chown=user:user pyproject.toml uv.lock README.md /opt/deps/
+RUN uv sync --locked --no-install-project --extra cpu --extra fm --group dev \
+    && SITE_PACKAGES=$(/opt/venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth"
+
+WORKDIR /opt/app
