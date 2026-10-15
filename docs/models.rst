@@ -220,9 +220,8 @@ spatial patch tokens after the final norm, excluding the CLS and register
 tokens, which is the pooled output the timm checkpoint ships; ``cls`` returns
 the CLS token. Both are 768-dimensional. Dense grids are ``H/16 × W/16``
 (``14 × 14`` at 224px, ``16 × 16`` at 256px) and attention maps apply the
-backbone's rotary embeddings. ``dinov3-vitb16`` requires ``timm>=1.0.20``
-(the ``fm`` extra floor); the ``titan`` extra pins ``timm==1.0.3`` and is
-incompatible. Weights are public under the `DINOv3 license
+backbone's rotary embeddings. ``dinov3-vitb16`` requires ``timm>=1.0.20``,
+which the base install provides. Weights are public under the `DINOv3 license
 <https://github.com/facebookresearch/dinov3/blob/main/LICENSE.md>`_; see the
 `model card <https://github.com/facebookresearch/dinov3/blob/main/MODEL_CARD.md>`_.
 
@@ -294,33 +293,65 @@ when using the Python API).
 Installation extras
 -------------------
 
-Install ``slide2vec[fm]`` for the shared foundation-model dependencies, or use
-the model-specific extras declared in `pyproject.toml
-<https://github.com/clemsgrs/slide2vec/blob/main/pyproject.toml>`_. Extras with
-conflicting dependency pins need separate environments:
+The base install (``pip install slide2vec``) covers most presets. Extras add
+the packages a few models need. They follow one rule:
 
-- ``slide2vec[prism2]`` pins a different Transformers version from ``fm``,
-  ``prism``, and ``titan`` and requires FlashAttention.
-- ``slide2vec[waiv]`` supplies the Transformers 5 runtime for ``phaet`` and
-  ``mascaret``; it conflicts with the ``fm``, ``prism``, ``prism2``, and
-  ``titan`` extras.
+- Extras carry lower bounds only. An exact or upper pin is kept only when the
+  model's code breaks outside it.
+- A model whose stack conflicts with the shared one gets its own extra, and
+  the conflict is declared in `pyproject.toml
+  <https://github.com/clemsgrs/slide2vec/blob/main/pyproject.toml>`_.
 
-For example, install PRISM2 in its own environment with:
+``slide2vec[fm]`` combines every model extra. The presets that need more
+than the base install are:
 
-.. code-block:: shell
+.. list-table::
+   :header-rows: 1
 
-   pip install "slide2vec[prism2]"
+   * - Preset
+     - Extra
+   * - ``prism``
+     - ``prism`` (or ``fm``)
+   * - ``prism2``
+     - ``prism2`` (or ``fm``) plus ``flash-attn``
+   * - ``phaet``, ``mascaret``
+     - ``waiv`` (or ``fm``)
+   * - ``titan``, ``conchv15``
+     - base, or ``titan``
+   * - ``musk``
+     - ``fm`` (for ``fairscale``) plus an upstream package (below)
+   * - ``gigapath-slide``
+     - ``fm`` (for ``fairscale``), ``flash-attn`` or ``xformers``, plus an
+       upstream package (below)
+   * - ``conch``
+     - base plus an upstream package (below)
+
+Every other preset needs only the base install.
+
+``prism2`` imports FlashAttention, so it needs the ``flash-attn`` extra as
+well. Its text decoder calls a Phi-3 helper that transformers 4.53 removed;
+slide2vec supplies that helper on newer transformers, so ``prism2`` shares the
+``fm`` environment.
+
+``gigapath-slide`` needs an attention backend: the ``flash-attn`` extra on
+GPUs with compute capability above 7, and the ``xformers``
+extra on older GPUs. PRISM uses ``xformers`` optionally, when
+``PERCEIVER_MEM_EFF_ATTN=true``. The ``xformers`` extra is unpinned because
+each xformers build pins its own torch.
 
 The ``musk``, ``conch``, and ``gigapath-slide`` presets also require upstream
-packages that are not included in the PyPI extras. The tile-only ``gigapath``
-preset uses timm and does not need the GigaPath package. Install the relevant
-package below:
+packages that are not on PyPI. The tile-only ``gigapath`` preset uses timm and
+does not need the GigaPath package. Install the relevant package below:
 
 .. code-block:: shell
 
    pip install git+https://github.com/lilab-stanford/MUSK.git
    pip install git+https://github.com/Mahmoodlab/CONCH.git
    pip install git+https://github.com/prov-gigapath/prov-gigapath.git
+
+From a checkout, ``uv sync --group models-git`` installs the same packages at
+the commits recorded in ``uv.lock``. ``uv sync --extra cu128 --extra fm
+--group models-git`` reproduces the default Docker image.
 
 Gated models require access approval on their linked Hugging Face page, plus
 ``hf auth login`` or an ``HF_TOKEN`` environment variable. The base install

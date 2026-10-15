@@ -74,6 +74,6 @@ jobs:
             slide2vec-ci:${{ github.sha }} \
             bash -lc '
               set -euo pipefail
-              python -m pip install --no-cache-dir --no-deps -e /opt/app
+              uv pip install --python /opt/venv/bin/python --no-deps -e /opt/app
               python -m pytest -q -m heavy --durations=15 tests
             '

@@ -1,3 +1,29 @@
+# Release image: CUDA 12.8, the locked slide2vec environment in /opt/venv.
+#
+# The environment comes from uv.lock. SLIDE2VEC_EXTRAS and SLIDE2VEC_GROUPS
+# select the extras and dependency groups:
+#
+#   docker build -t slide2vec .
+#       cu128 torch, the `fm` extra (every slide2vec model extra, PRISM2
+#       included), flash-attn (PRISM2 imports it; gigapath-slide needs it on
+#       GPUs with compute capability above 7) and the git-installed encoder
+#       packages (MUSK, CONCH, prov-gigapath, sam2).
+#
+#   docker build -t slide2vec:slim --build-arg SLIDE2VEC_EXTRAS="cu128" \
+#       --build-arg SLIDE2VEC_GROUPS="" .
+#       The base install only.
+#
+# The image builds flash-attn, which ships only an sdist that imports torch at
+# build time. pyproject.toml declares torch (matching the locked runtime torch)
+# as an extra build dependency of flash-attn, so a single `uv sync` builds it.
+# If that fails, sync once without it, then build it against the installed
+# torch:
+#   uv sync --locked --no-install-project --extra cu128 --extra fm \
+#       --extra flash-attn --group models-git --no-install-package flash-attn
+#   uv pip install --python /opt/venv/bin/python setuptools wheel packaging psutil ninja
+#   uv sync --locked --no-install-project --extra cu128 --extra fm \
+#       --extra flash-attn --group models-git --no-build-isolation-package flash-attn
+
 ARG UBUNTU_VERSION=22.04
 ARG CUDA_MAJOR_VERSION=12.8.1
 ARG PYTHON_VERSION=3.11
@@ -67,39 +93,30 @@ RUN curl -fsSL https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/
 
 WORKDIR /opt/app/
 
-ARG PYTORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu128
-ARG GIT_MODEL_DEPENDENCIES="git+https://github.com/lilab-stanford/MUSK.git git+https://github.com/Mahmoodlab/CONCH.git git+https://github.com/prov-gigapath/prov-gigapath.git git+https://github.com/facebookresearch/sam2.git"
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
 
-RUN python -m pip install --upgrade pip setuptools pip-tools \
-    && python -m pip install hatchling psutil \
-    && rm -rf /home/user/.cache/pip
+ARG SLIDE2VEC_EXTRAS="cu128 fm flash-attn"
+ARG SLIDE2VEC_GROUPS="models-git"
 
-# install slide2vec with all model extras
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON=/usr/bin/python${PYTHON_VERSION} \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
+
+# locked third-party dependencies first, so this layer re-runs only when
+# pyproject.toml or uv.lock changes
+COPY --chown=user:user pyproject.toml uv.lock README.md /opt/app/
+RUN set -eux; \
+    flags=""; \
+    for extra in ${SLIDE2VEC_EXTRAS}; do flags="${flags} --extra ${extra}"; done; \
+    for group in ${SLIDE2VEC_GROUPS}; do flags="${flags} --group ${group}"; done; \
+    uv sync --locked --no-install-project ${flags}
+
+# then slide2vec itself
 COPY --chown=user:user slide2vec /opt/app/slide2vec
-COPY --chown=user:user pyproject.toml /opt/app/pyproject.toml
-COPY --chown=user:user README.md /opt/app/README.md
 COPY --chown=user:user LICENSE /opt/app/LICENSE
-RUN printf '%s\n' \
-    'torch' \
-    > /opt/app/constraints-cu128.txt
-
-RUN python -m pip install --no-cache-dir --no-color \
-    -c /opt/app/constraints-cu128.txt \
-    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
-    "/opt/app[fm]"
-
-RUN python -m pip install --no-cache-dir --no-color \
-    -c /opt/app/constraints-cu128.txt \
-    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
-    ${GIT_MODEL_DEPENDENCIES}
-
-RUN python -m pip install \
-    --no-cache-dir \
-    --extra-index-url "${PYTORCH_CUDA_INDEX_URL}" \
-    -c /opt/app/constraints-cu128.txt \
-    'flash-attn>=2.7.1,<=2.8.0' \
-    --no-build-isolation \
-    && rm -rf /home/user/.cache/pip
+RUN uv pip install --python /opt/venv/bin/python --no-deps /opt/app
 
 ##########################
 # Stage 2: runtime stage #
@@ -165,12 +182,17 @@ RUN apt-get update && curl -L ${ASAP_URL} -o /tmp/ASAP.deb && apt-get install --
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# copy Python libs & entrypoints from build stage (includes flash-attn, your deps, ASAP .pth)
-COPY --from=build /usr/local/lib/python${PYTHON_VERSION}/dist-packages /usr/local/lib/python${PYTHON_VERSION}/dist-packages
-COPY --from=build /usr/local/bin /usr/local/bin
+# copy the environment (dependencies, slide2vec and its entrypoint) and uv
+COPY --from=build /opt/venv /opt/venv
+COPY --from=build /usr/local/bin/uv /usr/local/bin/uv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+# make ASAP importable from the environment
+RUN SITE_PACKAGES=$(/opt/venv/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") && \
+    printf "/opt/ASAP/bin/\n" > "${SITE_PACKAGES}/asap.pth"
 
 # register libnvimgcodec so cucim can use GPU-accelerated JPEG decoding
-RUN echo "/usr/local/lib/python${PYTHON_VERSION}/dist-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
+RUN echo "/opt/venv/lib/python${PYTHON_VERSION}/site-packages/nvidia/nvimgcodec" > /etc/ld.so.conf.d/nvimgcodec.conf && \
     ldconfig
 
 # copy app code

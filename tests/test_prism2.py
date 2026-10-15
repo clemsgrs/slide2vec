@@ -276,3 +276,98 @@ def test_prism2_moves_the_official_diagnostic_path_to_cuda_in_bfloat16(
         ("img_projection", torch.device("cuda:0"), torch.bfloat16),
         ("text_decoder", torch.device("cuda:0"), torch.bfloat16),
     ]
+
+
+def _load_fake_prism2(monkeypatch):
+    monkeypatch.setattr(
+        transformers.AutoModel,
+        "from_pretrained",
+        lambda *args, **kwargs: _fake_prism2_model([]),
+    )
+    monkeypatch.setattr(
+        transformers.AutoProcessor,
+        "from_pretrained",
+        lambda *args, **kwargs: object(),
+    )
+
+
+@pytest.mark.parametrize("shipped", ["absent", "incompatible"])
+def test_prism2_installs_the_phi3_mask_helper_on_every_transformers(monkeypatch, shipped):
+    from transformers.models.phi3.modeling_phi3 import Phi3Model
+
+    from slide2vec.encoders.models import prism2
+
+    name = "_prepare_4d_causal_attention_mask_with_cache_position"
+    if shipped == "absent":
+        monkeypatch.delattr(Phi3Model, name, raising=False)
+    else:
+
+        def without_device(attention_mask, sequence_length, target_length, dtype, cache_position, batch_size, config, past_key_values):
+            raise AssertionError("transformers 4.52's helper rejects device=")
+
+        monkeypatch.setattr(Phi3Model, name, staticmethod(without_device), raising=False)
+    _load_fake_prism2(monkeypatch)
+
+    prism2.Prism2SlideEncoder()
+
+    helper = Phi3Model.__dict__[name]
+    assert isinstance(helper, staticmethod)
+    assert helper.__func__ is prism2._prepare_4d_causal_attention_mask_with_cache_position
+
+
+def _vendored_mask(attention_mask, *, sequence_length, config, dtype=torch.float32):
+    from transformers.cache_utils import DynamicCache
+
+    from slide2vec.encoders.models.prism2 import (
+        _prepare_4d_causal_attention_mask_with_cache_position,
+    )
+
+    return _prepare_4d_causal_attention_mask_with_cache_position(
+        attention_mask=attention_mask,
+        sequence_length=sequence_length,
+        target_length=sequence_length,
+        dtype=dtype,
+        cache_position=torch.arange(sequence_length),
+        batch_size=attention_mask.shape[0],
+        device=attention_mask.device,  # PRISM2 and transformers 4.51 pass it
+        config=config,
+        past_key_values=DynamicCache(),
+    )
+
+
+def test_vendored_phi3_mask_is_causal_and_masks_left_padding():
+    from transformers.models.phi3 import Phi3Config
+
+    pad_mask = torch.tensor([[1, 1, 1, 1], [0, 0, 1, 1]], dtype=torch.int8)
+
+    mask = _vendored_mask(pad_mask, sequence_length=4, config=Phi3Config(sliding_window=None))
+
+    assert mask.shape == (2, 1, 4, 4)
+    assert mask.dtype == torch.float32
+    allowed = mask == 0
+    query = torch.arange(4).reshape(-1, 1)
+    key = torch.arange(4).reshape(1, -1)
+    expected = (key <= query)[None, None] & pad_mask.bool()[:, None, None, :]
+    assert torch.equal(allowed, expected)
+    assert torch.all(mask[~allowed] == torch.finfo(torch.float32).min)
+
+
+def test_vendored_phi3_mask_applies_the_sliding_window():
+    from transformers.models.phi3 import Phi3Config
+
+    pad_mask = torch.ones(1, 5, dtype=torch.int8)
+
+    mask = _vendored_mask(pad_mask, sequence_length=5, config=Phi3Config(sliding_window=2))
+
+    query = torch.arange(5).reshape(-1, 1)
+    key = torch.arange(5).reshape(1, -1)
+    expected = ((key <= query) & (key > query - 2))[None, None]
+    assert torch.equal(mask == 0, expected)
+
+
+def test_vendored_phi3_mask_returns_a_4d_mask_unchanged():
+    from transformers.models.phi3 import Phi3Config
+
+    four_d = torch.zeros(1, 1, 3, 3)
+
+    assert _vendored_mask(four_d, sequence_length=3, config=Phi3Config()) is four_d
