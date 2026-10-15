@@ -4028,7 +4028,7 @@ wheels = [
 
 [[package]]
 name = "slide2vec"
-version = "7.1.1"
+version = "7.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "einops" },
