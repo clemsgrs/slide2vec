@@ -218,7 +218,7 @@ testpaths = [
     "tests",
 ]
 markers = [
-    "heavy: real-weight foundation-model inference on CPU; minutes per test. Included in the PR suite and available separately through the manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
+    "heavy: real-weight foundation-model inference on CPU; minutes per test. Excluded from the PR suite except the PRISM consistency test; run all of them through the manual heavy workflow (.github/workflows/nightly-heavy.yaml).",
     "gpu_integration: real one-GPU versus multi-GPU parity; requires at least two visible CUDA devices. Run explicitly with `CUDA_VISIBLE_DEVICES=0,1 python -m pytest -m gpu_integration --no-cov`.",
 ]
 
