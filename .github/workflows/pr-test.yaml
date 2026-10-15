@@ -13,6 +13,11 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+# A new push to a PR cancels the run still going for its previous head.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Cheap guard: uv.lock must match pyproject.toml. The Docker images install
   # from the lock with `uv sync --locked`, so a drifted lock would fail there.
@@ -113,10 +118,15 @@ jobs:
           test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
 
       # Push-to-main runs are cache-seeding only: they build and export the image
-      # layers so PRs can restore them, but skip the ~16-min PRISM consistency test
-      # (the merged PR already ran it). Tests run on PRs that touch code and on
-      # manual dispatch.
-      - name: Run test suite in container
+      # layers so PRs can restore them, but run no tests (the merged PR already
+      # did). Tests run on PRs that touch code and on manual dispatch.
+      #
+      # This job runs the fast suite: everything except the `heavy` real-weight
+      # tests (about 5 minutes). The PRISM end-to-end consistency test runs in
+      # the `prism-consistency` job below, in parallel.
+      # The other heavy tests run only through the manual heavy workflow
+      # (.github/workflows/nightly-heavy.yaml).
+      - name: Run fast test suite in container
         if: ${{ (github.event_name == 'pull_request' && steps.changes.outputs.code == 'true') || github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
@@ -134,6 +144,94 @@ jobs:
               uv pip install --python /opt/venv/bin/python --no-deps -e /opt/app
               echo "::notice::uv pip install (source only) took $((SECONDS - t0))s"
               t1=$SECONDS
-              python -m pytest -q --durations=15 tests
+              python -m pytest -q -m "not heavy and not gpu_integration" --durations=15 tests
+              echo "::notice::pytest took $((SECONDS - t1))s"
+            '
+
+  # The PRISM end-to-end consistency test (tests/test_output_consistency.py):
+  # one `slide2vec` run over the fixture slide, 459 tiles through Virchow on
+  # CPU, about 15 minutes. It runs on its own runner so the fast suite does not
+  # wait for it. Like docker-test it is a required check, so the job always
+  # runs; the expensive steps are skipped unless the PR touches something the
+  # pipeline run depends on (package code, dependencies, the CI image, the test
+  # or its fixtures).
+  prism-consistency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: write  # needed for Buildx GHA cache
+      pull-requests: read  # paths-filter reads the PR's changed files
+
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && !startsWith(github.head_ref, 'release-') }}
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Detect changes the pipeline run depends on
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            pipeline:
+              - 'slide2vec/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'Dockerfile.ci'
+              - 'tests/test_output_consistency.py'
+              - 'tests/output_consistency_config.py'
+              - 'tests/fixtures/**'
+
+      - name: Check out repository
+        if: ${{ steps.changes.outputs.pipeline == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.changes.outputs.pipeline == 'true' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Free disk space on runner
+        if: ${{ steps.changes.outputs.pipeline == 'true' }}
+        run: |
+          set -euxo pipefail
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}" || true
+          docker system prune -af || true
+          sudo apt-get clean
+          df -h
+
+      - name: Build image
+        if: ${{ steps.changes.outputs.pipeline == 'true' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: false
+          load: true
+          tags: slide2vec-ci:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run the PRISM consistency test in container
+        if: ${{ steps.changes.outputs.pipeline == 'true' }}
+        run: |
+          set -euo pipefail
+          test -n "${HF_TOKEN:-}" || { echo "HF_TOKEN is required but not set"; exit 1; }
+          docker run --rm \
+            -e HF_TOKEN="$HF_TOKEN" \
+            -v "$GITHUB_WORKSPACE:/opt/app" \
+            slide2vec-ci:${{ github.sha }} \
+            bash -lc '
+              set -euo pipefail
+              uv pip install --python /opt/venv/bin/python --no-deps -e /opt/app
+              t1=$SECONDS
+              python -m pytest -q --no-cov tests/test_output_consistency.py
               echo "::notice::pytest took $((SECONDS - t1))s"
             '

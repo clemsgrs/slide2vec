@@ -1,17 +1,15 @@
 name: Heavy test suite
 
-# Scaffolding for running the `heavy`-marked, real-weight CPU-inference tests
-# (currently just the PRISM end-to-end pooled-feature consistency check) off the
-# critical path. Reuses the same Dockerfile.ci image and its GHA-cached layer.
+# Runs every `heavy`-marked test: real-weight CPU inference per model, about
+# 45 minutes on a GitHub runner. Reuses the Dockerfile.ci image and its GHA
+# cache.
 #
-# Status: the PR suite currently runs the heavy tests inline, so the daily
-# schedule below is intentionally DISABLED — this workflow is manual-dispatch
-# only for now. Re-enable the `schedule:` trigger if/when we move the heavy tests
-# out of the PR suite again (also re-add `-m "not heavy"` to pr-test.yaml then).
+# Manual dispatch only, to keep Actions minutes down. The PR suite
+# (pr-test.yaml) runs the fast tests and, when a PR touches the pipeline, the
+# PRISM end-to-end consistency test; the other heavy tests run only here. Run
+# this workflow before a release.
 
 on:
-  # schedule:
-  #   - cron: '0 3 * * *'  # 03:00 UTC daily — re-enable to run heavy tests nightly
   workflow_dispatch:
 
 jobs:
