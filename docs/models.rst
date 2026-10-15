@@ -302,8 +302,8 @@ the packages a few models need. They follow one rule:
   the conflict is declared in `pyproject.toml
   <https://github.com/clemsgrs/slide2vec/blob/main/pyproject.toml>`_.
 
-``slide2vec[fm]`` combines every model extra except ``prism2``. The presets
-that need more than the base install are:
+``slide2vec[fm]`` combines every model extra. The presets that need more
+than the base install are:
 
 .. list-table::
    :header-rows: 1
@@ -313,7 +313,7 @@ that need more than the base install are:
    * - ``prism``
      - ``prism`` (or ``fm``)
    * - ``prism2``
-     - ``prism2``, in its own environment
+     - ``prism2`` (or ``fm``) plus ``flash-attn``
    * - ``phaet``, ``mascaret``
      - ``waiv`` (or ``fm``)
    * - ``titan``, ``conchv15``
@@ -328,13 +328,10 @@ that need more than the base install are:
 
 Every other preset needs only the base install.
 
-``prism2`` needs ``transformers<4.53`` and FlashAttention, so it cannot share
-an environment with ``fm``, ``prism``, ``titan``, or ``waiv``. Install it on
-its own:
-
-.. code-block:: shell
-
-   pip install "slide2vec[prism2]"
+``prism2`` imports FlashAttention, so it needs the ``flash-attn`` extra as
+well. Its text decoder calls a Phi-3 helper that transformers 4.53 removed;
+slide2vec supplies that helper on newer transformers, so ``prism2`` shares the
+``fm`` environment.
 
 ``gigapath-slide`` needs an attention backend: the ``flash-attn`` extra on
 GPUs with compute capability above 7, and the ``xformers``

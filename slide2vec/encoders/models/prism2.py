@@ -2,6 +2,12 @@
 
 import torch
 from transformers import AutoModel, AutoProcessor
+from transformers.models.phi3.modeling_phi3 import Phi3Model
+
+try:
+    from transformers.cache_utils import SlidingWindowCache
+except ImportError:  # pragma: no cover - older transformers
+    SlidingWindowCache = ()  # type: ignore[assignment,misc]
 
 from slide2vec.encoders.base import (
     SlideEncoder,
@@ -12,6 +18,69 @@ from slide2vec.encoders.registry import register_encoder
 
 PRISM2_MODEL_ID = "paige-ai/Prism2"
 PRISM2_REVISION = "450352d0ddc6b42b21ce20794ce0fbefe6b5a47a"
+_PHI3_MASK_HELPER = "_prepare_4d_causal_attention_mask_with_cache_position"
+
+
+def _prepare_4d_causal_attention_mask_with_cache_position(
+    attention_mask: torch.Tensor | None,
+    sequence_length: int,
+    target_length: int,
+    dtype: torch.dtype,
+    cache_position: torch.Tensor,
+    batch_size: int,
+    config=None,
+    past_key_values=None,
+    **_: object,
+) -> torch.Tensor | None:
+    """``Phi3Model._prepare_4d_causal_attention_mask_with_cache_position`` from
+    transformers 4.52.4, which 4.53 removed.
+
+    The pinned PRISM2 remote code calls it from the text decoder (the
+    ``diagnostic`` output variant); the ``base`` variant never reaches it.
+    Returns a ``(batch_size, 1, sequence_length, target_length)`` mask in
+    ``dtype``: 0 where a query may attend, the dtype minimum elsewhere. A 4D
+    ``attention_mask`` is returned as is.
+    """
+    if attention_mask is not None and attention_mask.dim() == 4:
+        return attention_mask
+    device = cache_position.device
+    min_dtype = torch.finfo(dtype).min
+    causal_mask = torch.full(
+        (sequence_length, target_length), fill_value=min_dtype, dtype=dtype, device=device
+    )
+    positions = torch.arange(target_length, device=device)
+    diagonal_attend_mask = positions > cache_position.reshape(-1, 1)
+    text_config = config.get_text_config() if config is not None else None
+    sliding_window = getattr(text_config, "sliding_window", None)
+    if getattr(text_config, "use_sliding_window", True) and sliding_window is not None:
+        if not isinstance(past_key_values, SlidingWindowCache) or sequence_length > target_length:
+            sliding_attend_mask = positions <= (cache_position.reshape(-1, 1) - sliding_window)
+            diagonal_attend_mask.bitwise_or_(sliding_attend_mask)
+    causal_mask *= diagonal_attend_mask
+    causal_mask = causal_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
+    if attention_mask is not None:
+        causal_mask = causal_mask.clone()
+        if attention_mask.shape[-1] > target_length:
+            attention_mask = attention_mask[:, :target_length]
+        mask_length = attention_mask.shape[-1]
+        padding_mask = causal_mask[:, :, :, :mask_length] + attention_mask[:, None, None, :].to(device)
+        padding_mask = padding_mask == 0
+        causal_mask[:, :, :, :mask_length] = causal_mask[:, :, :, :mask_length].masked_fill(
+            padding_mask, min_dtype
+        )
+    return causal_mask
+
+
+def install_phi3_mask_helper() -> None:
+    """Give ``Phi3Model`` the mask helper the PRISM2 remote code calls when the
+    installed transformers no longer has it. A transformers that still ships
+    the helper is left untouched."""
+    if not hasattr(Phi3Model, _PHI3_MASK_HELPER):
+        setattr(
+            Phi3Model,
+            _PHI3_MASK_HELPER,
+            staticmethod(_prepare_4d_causal_attention_mask_with_cache_position),
+        )
 
 
 @register_encoder(
@@ -35,6 +104,7 @@ class Prism2SlideEncoder(SlideEncoder):
             default="base",
             allowed=("base", "diagnostic"),
         )
+        install_phi3_mask_helper()
         shared_load_kwargs = {
             "revision": PRISM2_REVISION,
             "trust_remote_code": True,

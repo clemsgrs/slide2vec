@@ -62,9 +62,9 @@ prism = [
 ]
 prism2 = [
     "torch>=2.3",
-    # the text variant calls Phi3Model._prepare_4d_causal_attention_mask_with_cache_position,
-    # present in 4.51.3 and 4.52.4, removed in 4.53.0
-    "transformers>=4.51,<4.53",
+    # the text (diagnostic) variant calls a Phi3Model helper that 4.53 removed;
+    # slide2vec.encoders.models.prism2 vendors it, so no upper bound
+    "transformers>=4.51,<5",
     # hard import
     "slide2vec[flash-attn]",
 ]
@@ -89,7 +89,7 @@ xformers = [
     "xformers",
 ]
 fm = [
-    "slide2vec[prism,titan,waiv]",
+    "slide2vec[prism,prism2,titan,waiv]",
     # hard import in MUSK and gigapath-slide
     "fairscale",
 ]
@@ -157,23 +157,6 @@ conflicts = [
     [
         { extra = "cpu" },
         { extra = "cu128" },
-    ],
-    # prism2 needs transformers<4.53 and resolves its own environment
-    [
-        { extra = "prism2" },
-        { extra = "fm" },
-    ],
-    [
-        { extra = "prism2" },
-        { extra = "prism" },
-    ],
-    [
-        { extra = "prism2" },
-        { extra = "titan" },
-    ],
-    [
-        { extra = "prism2" },
-        { extra = "waiv" },
     ],
 ]
 

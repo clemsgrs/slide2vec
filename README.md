@@ -17,7 +17,7 @@ Many models need additional dependencies available through `pip install "slide2v
 
 ### Reproducible model environments
 
-The repository ships a `uv.lock` file that pins every package for each extra. From a checkout, `uv sync --extra cu128 --extra fm` installs the exact locked stack (use `--extra cpu` for CPU-only PyTorch). A model that needs its own environment runs with its own extra, for example `uv run --extra cu128 --extra prism2 slide2vec ...`. The Docker image is built from the same lock; its `SLIDE2VEC_EXTRAS` build argument selects a variant, for example `--build-arg SLIDE2VEC_EXTRAS="cu128 prism2"`.
+The repository ships a `uv.lock` file that pins every package for each extra. From a checkout, `uv sync --extra cu128 --extra fm` installs the exact locked stack (use `--extra cpu` for CPU-only PyTorch). Add `--extra flash-attn` for PRISM2 and `gigapath-slide`. The Docker image is built from the same lock; its `SLIDE2VEC_EXTRAS` build argument selects the extras, for example `--build-arg SLIDE2VEC_EXTRAS="cu128"` for the base install only.
 
 For gated models such as Virchow2, request access on the model's Hugging Face page and authenticate with `hf auth login` or an `HF_TOKEN` environment variable.
 

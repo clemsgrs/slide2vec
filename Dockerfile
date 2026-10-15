@@ -4,20 +4,20 @@
 # select the extras and dependency groups:
 #
 #   docker build -t slide2vec .
-#       cu128 torch, the `fm` extra, flash-attn (gigapath-slide needs it on
+#       cu128 torch, the `fm` extra (every slide2vec model extra, PRISM2
+#       included), flash-attn (PRISM2 imports it; gigapath-slide needs it on
 #       GPUs with compute capability above 7) and the git-installed encoder
 #       packages (MUSK, CONCH, prov-gigapath, sam2).
 #
-#   docker build -t slide2vec:prism2 \
-#       --build-arg SLIDE2VEC_EXTRAS="cu128 prism2" \
+#   docker build -t slide2vec:slim --build-arg SLIDE2VEC_EXTRAS="cu128" \
 #       --build-arg SLIDE2VEC_GROUPS="" .
-#       PRISM2 in its own environment (transformers<4.53 and flash-attn).
+#       The base install only.
 #
-# Both images build flash-attn, which ships only an sdist that imports torch at
+# The image builds flash-attn, which ships only an sdist that imports torch at
 # build time. pyproject.toml declares torch (matching the locked runtime torch)
 # as an extra build dependency of flash-attn, so a single `uv sync` builds it.
 # If that fails, sync once without it, then build it against the installed
-# torch (shown for the default image; use the prism2 flags for that variant):
+# torch:
 #   uv sync --locked --no-install-project --extra cu128 --extra fm \
 #       --extra flash-attn --group models-git --no-install-package flash-attn
 #   uv pip install --python /opt/venv/bin/python setuptools wheel packaging psutil ninja
