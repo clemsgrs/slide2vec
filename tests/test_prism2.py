@@ -291,44 +291,28 @@ def _load_fake_prism2(monkeypatch):
     )
 
 
-def test_prism2_installs_the_phi3_mask_helper_transformers_4_53_removed(monkeypatch):
+@pytest.mark.parametrize("shipped", ["absent", "incompatible"])
+def test_prism2_installs_the_phi3_mask_helper_on_every_transformers(monkeypatch, shipped):
     from transformers.models.phi3.modeling_phi3 import Phi3Model
 
     from slide2vec.encoders.models import prism2
 
-    monkeypatch.delattr(
-        Phi3Model,
-        "_prepare_4d_causal_attention_mask_with_cache_position",
-        raising=False,
-    )
+    name = "_prepare_4d_causal_attention_mask_with_cache_position"
+    if shipped == "absent":
+        monkeypatch.delattr(Phi3Model, name, raising=False)
+    else:
+
+        def without_device(attention_mask, sequence_length, target_length, dtype, cache_position, batch_size, config, past_key_values):
+            raise AssertionError("transformers 4.52's helper rejects device=")
+
+        monkeypatch.setattr(Phi3Model, name, staticmethod(without_device), raising=False)
     _load_fake_prism2(monkeypatch)
 
     prism2.Prism2SlideEncoder()
 
-    helper = Phi3Model.__dict__["_prepare_4d_causal_attention_mask_with_cache_position"]
+    helper = Phi3Model.__dict__[name]
     assert isinstance(helper, staticmethod)
     assert helper.__func__ is prism2._prepare_4d_causal_attention_mask_with_cache_position
-
-
-def test_prism2_keeps_the_phi3_mask_helper_a_transformers_still_ships(monkeypatch):
-    from transformers.models.phi3.modeling_phi3 import Phi3Model
-
-    from slide2vec.encoders.models.prism2 import Prism2SlideEncoder
-
-    def shipped(*args, **kwargs):
-        return "shipped"
-
-    monkeypatch.setattr(
-        Phi3Model,
-        "_prepare_4d_causal_attention_mask_with_cache_position",
-        staticmethod(shipped),
-        raising=False,
-    )
-    _load_fake_prism2(monkeypatch)
-
-    Prism2SlideEncoder()
-
-    assert Phi3Model._prepare_4d_causal_attention_mask_with_cache_position() == "shipped"
 
 
 def _vendored_mask(attention_mask, *, sequence_length, config, dtype=torch.float32):
@@ -345,7 +329,7 @@ def _vendored_mask(attention_mask, *, sequence_length, config, dtype=torch.float
         dtype=dtype,
         cache_position=torch.arange(sequence_length),
         batch_size=attention_mask.shape[0],
-        device=attention_mask.device,
+        device=attention_mask.device,  # PRISM2 and transformers 4.51 pass it
         config=config,
         past_key_values=DynamicCache(),
     )

@@ -62,11 +62,11 @@ prism = [
 ]
 prism2 = [
     "torch>=2.3",
-    # the text (diagnostic) variant calls a Phi3Model helper that 4.53 removed;
-    # slide2vec.encoders.models.prism2 vendors it, so no upper bound
+    # the text (diagnostic) variant calls a Phi3Model helper whose signature
+    # changed in 4.52 and which 4.53 removed; slide2vec.encoders.models.prism2
+    # vendors it, so no upper bound. PRISM2 also imports flash_attn: add the
+    # flash-attn extra (CUDA only, so not pulled in here)
     "transformers>=4.51,<5",
-    # hard import
-    "slide2vec[flash-attn]",
 ]
 titan = [
     "einops",

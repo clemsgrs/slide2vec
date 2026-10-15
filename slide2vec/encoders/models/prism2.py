@@ -28,22 +28,27 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
     dtype: torch.dtype,
     cache_position: torch.Tensor,
     batch_size: int,
+    device: torch.device | None = None,
     config=None,
     past_key_values=None,
     **_: object,
 ) -> torch.Tensor | None:
-    """``Phi3Model._prepare_4d_causal_attention_mask_with_cache_position`` from
-    transformers 4.52.4, which 4.53 removed.
+    """``Phi3Model._prepare_4d_causal_attention_mask_with_cache_position`` as
+    shipped by transformers 4.52.4, accepting the ``device`` keyword of 4.51.
 
-    The pinned PRISM2 remote code calls it from the text decoder (the
-    ``diagnostic`` output variant); the ``base`` variant never reaches it.
-    Returns a ``(batch_size, 1, sequence_length, target_length)`` mask in
-    ``dtype``: 0 where a query may attend, the dtype minimum elsewhere. A 4D
+    The pinned PRISM2 remote code (written against 4.51.3) calls it with
+    ``device=`` from the text decoder, which only the ``diagnostic`` output
+    variant runs; the ``base`` variant never reaches it. 4.52 dropped the
+    ``device`` parameter and 4.53 removed the helper, so this one is installed
+    on ``Phi3Model`` for every transformers version. Returns a
+    ``(batch_size, 1, sequence_length, target_length)`` mask in ``dtype``: 0
+    where a query may attend, the dtype minimum elsewhere. A 4D
     ``attention_mask`` is returned as is.
     """
     if attention_mask is not None and attention_mask.dim() == 4:
         return attention_mask
-    device = cache_position.device
+    if device is None:
+        device = cache_position.device
     min_dtype = torch.finfo(dtype).min
     causal_mask = torch.full(
         (sequence_length, target_length), fill_value=min_dtype, dtype=dtype, device=device
@@ -72,15 +77,18 @@ def _prepare_4d_causal_attention_mask_with_cache_position(
 
 
 def install_phi3_mask_helper() -> None:
-    """Give ``Phi3Model`` the mask helper the PRISM2 remote code calls when the
-    installed transformers no longer has it. A transformers that still ships
-    the helper is left untouched."""
-    if not hasattr(Phi3Model, _PHI3_MASK_HELPER):
-        setattr(
-            Phi3Model,
-            _PHI3_MASK_HELPER,
-            staticmethod(_prepare_4d_causal_attention_mask_with_cache_position),
-        )
+    """Give ``Phi3Model`` the mask helper the PRISM2 remote code calls.
+
+    Installed unconditionally: 4.51 ships a compatible helper, 4.52 ships one
+    that rejects the ``device`` keyword PRISM2 passes, and 4.53 ships none.
+    ``Phi3Model`` itself calls the helper with keywords only, so the vendored
+    one serves every version.
+    """
+    setattr(
+        Phi3Model,
+        _PHI3_MASK_HELPER,
+        staticmethod(_prepare_4d_causal_attention_mask_with_cache_position),
+    )
 
 
 @register_encoder(

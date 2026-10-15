@@ -5,8 +5,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -495,8 +495,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -680,8 +680,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -712,8 +712,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -744,8 +744,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -788,8 +788,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -841,8 +841,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -944,8 +944,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ae/b6/03bb70946330e88ffec97aefd3ea75ba575cb2e762061e0e62a213befee8/docutils-0.22.4.tar.gz", hash = "sha256:4db53b1fde9abecbb74d91230d32ab626d94f6badfc575d6db9194a49df29968", size = 2291750, upload-time = "2025-12-18T19:00:26.443Z" }
@@ -1061,8 +1061,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f4/a9/1af41b37c3279712b22cdc63aac78a52432202b6fe1f9666a2a3d2831fb4/filelock-4.2.0.tar.gz", hash = "sha256:7a60906c75227cf04d0c273afadc8219400f11aeb13cc69591d4f6cdc6c8036e", size = 569667, upload-time = "2026-10-14T20:57:13.11Z" }
@@ -1161,8 +1161,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/94/36/102e180f8f5dbaee88b26595b01ca8aa80bf4e62128d9aa94265b3996c96/fonttools-4.67.0.tar.gz", hash = "sha256:3cb57e6600ca77c0b1729cf8adc23bc0652633a37f18cfa934d9c7bc3de25519", size = 3750028, upload-time = "2026-10-14T13:20:28.294Z" }
@@ -1435,8 +1435,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -1473,8 +1473,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -1794,8 +1794,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -1970,8 +1970,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -2137,8 +2137,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -2183,8 +2183,8 @@ version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6a/51/63fe664f3908c97be9d2e4f1158eb633317598cfa6e1fc14af5383f17512/networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509", size = 2517025, upload-time = "2025-12-08T17:02:39.908Z" }
@@ -2490,8 +2490,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 wheels = [
@@ -2796,8 +2796,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -2927,8 +2927,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/80/a8/66d45abadff219e36e2a824181b8f6a67e7ed4572934d6252c71c29d5731/platformdirs-4.13.0.tar.gz", hash = "sha256:1aa0b0d3f224c1f07c295121e312a5a24a180d6ae5a8425ea1784b3e3863e9c0", size = 61094, upload-time = "2026-10-11T02:05:24.109Z" }
@@ -3152,8 +3152,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -3527,8 +3527,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/68/3bd46b8a5e01d3c2ebdf9c5e9497912e3fe0cde02bac21a7130ca866e403/rpds_py-2026.9.1.tar.gz", hash = "sha256:4793ef7f78268b124b73fa933440f01d258bbae01de9fa53e9080c9ab0425a12", size = 63948, upload-time = "2026-10-04T16:32:36.469Z" }
@@ -3730,8 +3730,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -3811,8 +3811,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -3883,8 +3883,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -3978,8 +3978,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -4083,7 +4083,6 @@ fm = [
     { name = "einops-exts" },
     { name = "environs" },
     { name = "fairscale" },
-    { name = "flash-attn" },
     { name = "sacremoses" },
     { name = "timm" },
     { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra != 'extra-9-slide2vec-cpu' and extra != 'extra-9-slide2vec-cu128')" },
@@ -4099,7 +4098,6 @@ prism = [
     { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-9-slide2vec-cu128'" },
 ]
 prism2 = [
-    { name = "flash-attn" },
     { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "(extra == 'extra-9-slide2vec-cpu' and extra == 'extra-9-slide2vec-cu128') or (extra != 'extra-9-slide2vec-cpu' and extra != 'extra-9-slide2vec-cu128')" },
     { name = "torch", version = "2.11.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "extra == 'extra-9-slide2vec-cpu'" },
     { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "extra == 'extra-9-slide2vec-cu128'" },
@@ -4182,7 +4180,6 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'testing'", specifier = ">=2.0" },
     { name = "rich" },
     { name = "sacremoses", marker = "extra == 'prism'" },
-    { name = "slide2vec", extras = ["flash-attn"], marker = "extra == 'prism2'" },
     { name = "slide2vec", extras = ["prism", "prism2", "titan", "waiv"], marker = "extra == 'fm'" },
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=8.1" },
     { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'" },
@@ -4307,8 +4304,8 @@ version = "9.0.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -4387,8 +4384,8 @@ version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -4542,8 +4539,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
@@ -4653,8 +4650,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4703,8 +4700,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4753,8 +4750,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4803,8 +4800,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4839,8 +4836,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4875,8 +4872,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux'",
@@ -4938,8 +4935,8 @@ resolution-markers = [
     "python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version == '3.12.*' and platform_machine != 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
-    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11.5' and python_full_version < '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.11' and python_full_version < '3.11.5' and platform_machine != 'aarch64' and sys_platform == 'linux'",
 ]
 dependencies = [
