@@ -225,6 +225,69 @@ def pooled_identity_differences(
     )
 
 
+def dense_identity_differences(
+    model,
+    recorded: dict[str, Any],
+    *,
+    dense,
+    execution,
+) -> dict[str, tuple[Any, Any]]:
+    """Compare a recorded dense identity with the request-wide identity of the current request.
+
+    A :class:`~slide2vec.api.DenseImageOptions` request is compared with the image recipe,
+    any other with the region identity. The request is validated as the embed methods
+    validate it, on an isolated CPU copy of *model* that declares the dense encoder-input
+    contract, so *model* keeps its contract and backend. The transform is that copy's
+    ``get_normalization_transform()``, as the shards record it.
+    """
+    from slide2vec.api import DenseImageOptions, Model
+
+    source = Model.from_preset(
+        model.name,
+        device="cpu",
+        output_variant=model._output_variant,
+        allow_non_recommended_settings=model.allow_non_recommended_settings,
+    )
+    if isinstance(dense, DenseImageOptions):
+        from slide2vec.runtime.dense_image_recipe import (
+            resolve_dense_image_recipe,
+            resolve_dense_image_spacing,
+        )
+
+        resolve_dense_image_spacing(source, dense)  # validates; the spacing is per-sample
+        contract = source._declare_dense_encoder_input(dense, emit_run_info=False)
+        requested = resolve_dense_image_recipe(
+            model=source, contract=contract, dense=dense, execution=execution
+        ).request_identity()
+    else:
+        from slide2vec.encoders.registry import resolve_patch_size
+        from slide2vec.runtime.dense_regions import (
+            compute_dense_geometry,
+            validate_dense_request_settings,
+        )
+
+        plan = source._declare_dense_encoder_input(dense, emit_run_info=False).plan
+        # The region shards validate the same settings when they encode.
+        validate_dense_request_settings(
+            compute_dense_geometry(
+                target_size=plan.target_size_px,
+                patch_size=resolve_patch_size(plan.tile_encoder_name),
+            ),
+            pad_mode=dense.pad_mode,
+            window_size=dense.window_size,
+            overlap=dense.overlap,
+            feature_kind=dense.feature_kind,
+            attention_blocks=dense.attention_blocks,
+            attention_include_registers=dense.attention_include_registers,
+        )
+        requested = dense_feature_identity(source, dense=dense, execution=execution)
+
+    def resolve_transform() -> dict[str, Any]:
+        return transform_record(source._load_backend().model.get_normalization_transform())
+
+    return differing_fields(recorded, requested, resolve_transform=resolve_transform)
+
+
 class PooledResumeCheck:
     """Compare the completed pooled artifacts of one resume with the run's feature identity.
 

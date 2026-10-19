@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from dataclasses import replace
 from pathlib import Path
 from subprocess import Popen
@@ -37,8 +36,6 @@ from typing import Callable, Sequence
 
 from slide2vec.api import DenseImageOptions, ImageSpec
 from slide2vec.artifacts import DenseImageArtifact
-from slide2vec.encoders.registry import resolve_preprocessing_defaults
-from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.progress import emit_progress
 from slide2vec.runtime.dense_image_shard import (
     dense_image_artifact_from_disk,
@@ -48,6 +45,7 @@ from slide2vec.runtime.dense_image_shard import (
 from slide2vec.runtime.dense_image_recipe import (
     DenseImageRecipe,
     resolve_dense_image_recipe,
+    resolve_dense_image_spacing,
 )
 from slide2vec.runtime.dense_image_reading import DenseImageReadPlan, resolve_spacing_read_plan
 from slide2vec.runtime.dense_stage import resolve_output_torch_dtype
@@ -115,31 +113,8 @@ def embed_images_dense(
         artifact_location="dense_image_embeddings/<sample_id>",
     )
     reader_regime, probed_auto_backends = validate_dense_image_reader_regime(specs)
-    spacing_source = "explicit"
-    if dense.spacing_um is None:
-        try:
-            spacing_um = float(
-                resolve_preprocessing_defaults(model.name)["spacing_um"]
-            )
-        except (KeyError, ValueError) as exc:
-            raise ValueError(
-                "DenseImageOptions.spacing_um must be explicit when encoder "
-                f"{model.name!r} has no single resolvable model default: {exc}"
-            ) from exc
-        spacing_source = "model_default"
-        dense = replace(dense, spacing_um=spacing_um)
-    else:
-        spacing_um = float(dense.spacing_um)
-    if spacing_um is not None and (not math.isfinite(spacing_um) or spacing_um <= 0):
-        raise ValueError(
-            "DenseImageOptions.spacing_um must be a positive, finite value or None."
-        )
-    validate_encoder_config(
-        model.name,
-        requested_spacing_um=spacing_um,
-        allow_non_recommended=bool(model.allow_non_recommended_settings),
-        require_known_spacing=True,
-    )
+    spacing_um, spacing_source = resolve_dense_image_spacing(model, dense)
+    dense = replace(dense, spacing_um=spacing_um)
     # Declare the effective encoder input before anything is decoded, sharded or launched: an
     # image geometry this encoder cannot accept must fail here, not on the first forward pass
     # of a torchrun rank. Idempotent, so every rank re-declares for itself (dense_image_worker).
