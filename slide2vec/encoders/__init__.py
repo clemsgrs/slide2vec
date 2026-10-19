@@ -16,6 +16,7 @@ from slide2vec.encoders.base import (
     resolve_recommended_dynamic_img_size,
     resolve_requested_output_variant,
 )
+from slide2vec.encoders.code import encoder_code
 from slide2vec.encoders.registry import (
     EncoderCapabilities,
     EncoderProviderDiagnostic,
@@ -42,6 +43,7 @@ __all__ = [
     "reshape_tokens_to_grid",
     "resolve_recommended_dynamic_img_size",
     "resolve_requested_output_variant",
+    "encoder_code",
     "encoder_registry",
     "list_encoder_provider_diagnostics",
     "normalize_patch_size",

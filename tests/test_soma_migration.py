@@ -145,6 +145,7 @@ def _literal_recipe() -> DenseImageRecipe:
     geometry = compute_dense_geometry(target_size=16, patch_size=8)
     return DenseImageRecipe(
         encoder_name="literal-patch-encoder",
+        encoder_code={"object": "tests.LiteralPatchEncoder", "fingerprint": None, "source": ""},
         output_variant="default",
         reader_regime="raster",
         spacing_source="explicit",

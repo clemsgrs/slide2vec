@@ -14,8 +14,11 @@ Ways the pooled sidecars and their resume check can go wrong, each covered below
 * a writer omits the identity: tile, slide, hierarchical, zero-tile, ``embed_tiles``,
   ``aggregate_tiles``, the patient pipeline, and the multi-GPU parent that never loads
   the encoder its workers encoded with;
-* a resume reuses artifacts from a different encoder, output variant, precision, stored
-  dtype, encoder input size or transform;
+* a resume reuses artifacts from a different encoder, encoder code, output variant,
+  precision, stored dtype, encoder input size or transform, or its error suggests
+  requesting recorded code;
+* ``aggregate_tiles`` records the current tile encoder's code instead of the code the
+  tile sidecar records;
 * a resume reuses an artifact whose identity does not record every required field, or
   reads a required field back from outside the identity;
 * a resume holds GPU memory in the multi-GPU parent to verify a transform;
@@ -37,10 +40,13 @@ from torchvision.transforms import v2
 
 from slide2vec.api import EmbeddedSlide, ExecutionOptions, PreprocessingConfig
 from slide2vec.artifacts import load_metadata
-from slide2vec.encoders import encoder_registry
+from slide2vec.encoders import encoder_code, encoder_registry
 from slide2vec.runtime.embedding_persist import persist_embedded_slide
 from slide2vec.runtime.feature_identity import transform_record
 from tests.tiling_helpers import tiling_config
+
+#: The current code block of ``virchow2``; ``test_encoder_code.py`` pins its value.
+VIRCHOW2_CODE = encoder_code("virchow2")
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
@@ -271,6 +277,7 @@ def test_pooled_tile_sidecar_records_the_feature_identity(tmp_path):
 
     assert load_metadata(tile_artifact.metadata_path)["compatibility"] == {
         "encoder_name": "virchow2",
+        "encoder_code": VIRCHOW2_CODE,
         "output_variant": "cls",
         "precision": "bf16",
         "feature_dtype": "fp32",
@@ -295,6 +302,7 @@ def test_zero_tile_sidecar_records_the_feature_identity_without_a_transform(tmp_
     sidecar = load_metadata(tmp_path / "tile_embeddings" / "slide-z.meta.json")
     assert sidecar["compatibility"] == {
         "encoder_name": "virchow2",
+        "encoder_code": VIRCHOW2_CODE,
         "output_variant": "cls_patch_mean",
         "precision": "fp16",
         "feature_dtype": "fp16",
@@ -384,6 +392,7 @@ def test_run_pipeline_records_the_transform_the_loaded_encoder_applies(monkeypat
     sidecar = load_metadata(tmp_path / "tile_embeddings" / "slide-a.meta.json")
     assert sidecar["compatibility"] == {
         "encoder_name": "virchow2",
+        "encoder_code": VIRCHOW2_CODE,
         "output_variant": "cls_patch_mean",
         "precision": "fp16",
         "feature_dtype": "fp16",
@@ -410,12 +419,18 @@ def test_pooled_resume_refuses_artifacts_from_a_different_encoder(monkeypatch, t
     with pytest.raises(ValueError) as error:
         _run_pipeline(monkeypatch, tmp_path, _FakeModel("uni"), preprocessing=RESUME)
 
+    uni_code = encoder_code("uni")
     assert str(error.value) == (
         "Cannot resume 'slide-a': the existing tile embeddings at "
         f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with a different "
         "feature identity: encoder_name (recorded 'virchow2', requested 'uni'); "
+        f"encoder_code.fingerprint (recorded '{VIRCHOW2_CODE['fingerprint']}', requested "
+        f"'{uni_code['fingerprint']}'); "
+        "encoder_code.object (recorded 'slide2vec.encoders.models.virchow.Virchow2', "
+        f"requested '{uni_code['object']}'); "
+        f"encoder_code.source (recorded 'paige-ai/Virchow2', requested '{uni_code['source']}'); "
         "output_variant (recorded 'cls_patch_mean', requested 'default'). Re-run into a new "
-        "output_dir, delete the stale artifacts, or request the recorded values."
+        "output_dir or delete the stale artifacts."
     )
 
 
@@ -505,6 +520,7 @@ def _write_completed_tile_run(tmp_path, sidecars: dict[str, dict]) -> Path:
 #: The complete identity ``_run_pipeline`` records for ``_FakeModel("virchow2")``.
 VIRCHOW2_IDENTITY = {
     "encoder_name": "virchow2",
+    "encoder_code": VIRCHOW2_CODE,
     "output_variant": "cls_patch_mean",
     "precision": "fp16",
     "feature_dtype": "fp16",
@@ -525,6 +541,10 @@ VIRCHOW2_IDENTITY = {
         pytest.param(
             {"compatibility": {k: v for k, v in VIRCHOW2_IDENTITY.items() if k != "precision"}},
             id="no-precision",
+        ),
+        pytest.param(
+            {"compatibility": {k: v for k, v in VIRCHOW2_IDENTITY.items() if k != "encoder_code"}},
+            id="no-encoder-code",
         ),
     ],
 )
@@ -577,6 +597,28 @@ def test_pooled_resume_refuses_a_different_recorded_encoder_input_size(monkeypat
         f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with a different "
         "feature identity: encoder_input_size_px (recorded 256, requested 224). Re-run "
         "into a new output_dir, delete the stale artifacts, or request the recorded values."
+    )
+
+
+def test_pooled_resume_refusing_other_encoder_code_names_only_the_remedies_a_caller_has(
+    monkeypatch, tmp_path
+):
+    """A caller cannot request the recorded code, so the error does not suggest it."""
+    recorded_code = {**VIRCHOW2_CODE, "fingerprint": "0" * 64}
+    _write_completed_tile_run(
+        tmp_path,
+        {"slide-a": {"compatibility": {**VIRCHOW2_IDENTITY, "encoder_code": recorded_code}}},
+    )
+
+    with pytest.raises(ValueError) as error:
+        _run_pipeline(monkeypatch, tmp_path, _FakeModel("virchow2"), preprocessing=RESUME)
+
+    assert str(error.value) == (
+        "Cannot resume 'slide-a': the existing tile embeddings at "
+        f"{tmp_path / 'tile_embeddings' / 'slide-a.npz'} were computed with a different "
+        f"feature identity: encoder_code.fingerprint (recorded '{'0' * 64}', requested "
+        f"'{VIRCHOW2_CODE['fingerprint']}'). Re-run into a new output_dir or delete the "
+        "stale artifacts."
     )
 
 
@@ -683,6 +725,7 @@ def test_embed_tiles_sidecar_records_the_feature_identity(monkeypatch, tmp_path)
 
     assert load_metadata(artifact.metadata_path)["compatibility"] == {
         "encoder_name": "virchow2",
+        "encoder_code": VIRCHOW2_CODE,
         "output_variant": "cls_patch_mean",
         "precision": "fp16",
         "feature_dtype": "fp16",
@@ -692,8 +735,17 @@ def test_embed_tiles_sidecar_records_the_feature_identity(monkeypatch, tmp_path)
     }
 
 
-def test_aggregate_tiles_slide_sidecar_carries_the_tile_artifact_recipe(monkeypatch, tmp_path):
-    """Aggregation encodes no tile: the geometry and transform recorded with the tiles apply."""
+#: The tile identity a tile sidecar records, without its code block.
+TILE_SIDECAR_IDENTITY = {
+    "encoder_name": "virchow",
+    "requested_tile_size_px": 224,
+    "encoder_input_size_px": 224,
+    "transform": NORMALIZE_ONLY,
+}
+
+
+def _aggregate_tiles(monkeypatch, tmp_path, tile_identity: dict) -> dict:
+    """Aggregate one tile artifact recording *tile_identity* with prism; return the slide identity."""
     import slide2vec.inference as inference
     from slide2vec.runtime import slide_encode, tiling
 
@@ -713,30 +765,46 @@ def test_aggregate_tiles_slide_sidecar_carries_the_tile_artifact_recipe(monkeypa
             "coordinates_npz_path": "/tmp/c.npz",
             "coordinates_meta_path": "/tmp/c.meta.json",
             "image_path": "/tmp/slide-a.svs",
-            "compatibility": {
-                "encoder_name": "virchow",
-                "requested_tile_size_px": 224,
-                "encoder_input_size_px": 224,
-                "transform": NORMALIZE_ONLY,
-            },
+            "compatibility": tile_identity,
         },
     )
 
     [slide_artifact] = inference.aggregate_tiles(
         model, [tile_artifact], execution=ExecutionOptions(output_dir=tmp_path, precision="fp16")
     )
+    return load_metadata(slide_artifact.metadata_path)["compatibility"]
 
-    assert load_metadata(slide_artifact.metadata_path)["compatibility"] == {
+
+def test_aggregate_tiles_slide_sidecar_carries_the_tile_artifact_recipe(monkeypatch, tmp_path):
+    """Aggregation encodes no tile: the geometry, transform and code recorded with the tiles apply."""
+    # Not the current virchow code: the tile features may come from an older file.
+    recorded_code = {**encoder_code("virchow"), "fingerprint": "0" * 64}
+
+    compatibility = _aggregate_tiles(
+        monkeypatch, tmp_path, {**TILE_SIDECAR_IDENTITY, "encoder_code": recorded_code}
+    )
+
+    assert compatibility == {
         "encoder_name": "prism",
+        "encoder_code": encoder_code("prism"),
         "output_variant": "default",
         "precision": "fp16",
         "feature_dtype": "fp16",
         "tile_encoder": "virchow",
+        "tile_encoder_code": recorded_code,
         "tile_encoder_output_variant": "cls_patch_mean",
         "requested_tile_size_px": 224,
         "encoder_input_size_px": 224,
         "transform": NORMALIZE_ONLY,
     }
+
+
+def test_aggregate_tiles_records_no_tile_encoder_code_the_tile_sidecar_does_not_record(
+    monkeypatch, tmp_path
+):
+    compatibility = _aggregate_tiles(monkeypatch, tmp_path, TILE_SIDECAR_IDENTITY)
+
+    assert "tile_encoder_code" not in compatibility
 
 
 def test_patient_pipeline_tile_and_slide_sidecars_record_the_feature_identity(monkeypatch, tmp_path):
@@ -769,10 +837,12 @@ def test_patient_pipeline_tile_and_slide_sidecars_record_the_feature_identity(mo
 
     expected = {
         "encoder_name": "moozy",
+        "encoder_code": encoder_code("moozy"),
         "output_variant": "default",
         "precision": "fp16",
         "feature_dtype": "fp16",
         "tile_encoder": "lunit",
+        "tile_encoder_code": encoder_code("lunit"),
         "tile_encoder_output_variant": "default",
         "requested_tile_size_px": 224,
         "encoder_input_size_px": 224,
@@ -902,10 +972,12 @@ def test_pooled_slide_sidecars_record_the_tile_encoder_dependency(tmp_path):
 
     expected = {
         "encoder_name": "prism",
+        "encoder_code": encoder_code("prism"),
         "output_variant": "default",
         "precision": "fp16",
         "feature_dtype": "fp32",
         "tile_encoder": "virchow",
+        "tile_encoder_code": encoder_code("virchow"),
         "tile_encoder_output_variant": "cls_patch_mean",
         "requested_tile_size_px": 224,
         "encoder_input_size_px": 224,
@@ -926,6 +998,7 @@ def test_pooled_hierarchical_sidecar_records_the_region_geometry(tmp_path):
 
     assert load_metadata(hierarchical_artifact.metadata_path)["compatibility"] == {
         "encoder_name": "virchow2",
+        "encoder_code": VIRCHOW2_CODE,
         "output_variant": "cls_patch_mean",
         "precision": "fp16",
         "feature_dtype": "fp16",

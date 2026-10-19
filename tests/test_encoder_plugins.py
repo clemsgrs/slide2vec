@@ -155,7 +155,7 @@ from threading import Barrier
 
 import slide2vec
 from slide2vec import Model, list_models
-from slide2vec.encoders import encoder_registry
+from slide2vec.encoders import encoder_code, encoder_registry
 from slide2vec.runtime.serialization import serialize_model
 
 discovered = Path(os.environ["PLUGIN_DISCOVERED_SENTINEL"])
@@ -200,6 +200,14 @@ assert encoder_registry.info("private-beta") == {
     "precision": "fp16",
     "source": "private-org/private-beta",
 }
+
+# The installed distribution pins its encoders' code, without constructing them.
+assert encoder_code("private-alpha") == {
+    "object": "private_encoder_plugin.register_presets.<locals>.PrivateAlpha",
+    "fingerprint": "1.0.0",
+    "source": "/models/private-alpha.pt",
+}
+assert not constructed.exists()
 
 model = Model.from_preset("private-alpha", device="cpu")
 assert model.name == "private-alpha"

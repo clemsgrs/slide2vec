@@ -230,10 +230,20 @@ the feature identity that ``resume`` compares.
 
    {
      "encoder_name": "prism",
+     "encoder_code": {
+       "object": "slide2vec.encoders.models.prism.PrismSlideEncoder",
+       "fingerprint": "<sha256 of prism.py>",
+       "source": "paige-ai/Prism"
+     },
      "output_variant": "default",
      "precision": "fp16",
      "feature_dtype": "fp32",
      "tile_encoder": "virchow",
+     "tile_encoder_code": {
+       "object": "slide2vec.encoders.models.virchow.Virchow",
+       "fingerprint": "<sha256 of virchow.py>",
+       "source": "paige-ai/Virchow"
+     },
      "tile_encoder_output_variant": "cls_patch_mean",
      "requested_tile_size_px": 224,
      "encoder_input_size_px": 224,
@@ -244,11 +254,22 @@ the feature identity that ``resume`` compares.
      }
    }
 
+- ``encoder_code`` records the encoder's code. ``object`` is the encoder
+  class's ``module.qualname``. ``fingerprint`` is the version of the installed
+  distribution that owns the class's file. For slide2vec's built-in encoders,
+  editable installs and files that no distribution owns, it is the SHA-256 of
+  that file; it is ``null`` when the class has no file (a notebook cell).
+  ``source`` is the registry's ``source``. Weights are not hashed: a new
+  weights file changes the identity only through ``source``.
+  ``slide2vec.encoders.encoder_code(name)`` returns the current block without
+  loading the encoder.
 - ``precision`` is the inference precision; ``feature_dtype`` is the stored
   dtype.
-- ``tile_encoder`` and ``tile_encoder_output_variant`` are present for slide
-  and patient encoders. ``aggregation_revision`` is present for encoders that
-  declare one (``gigapath-slide``).
+- ``tile_encoder``, ``tile_encoder_code`` and ``tile_encoder_output_variant``
+  are present for slide and patient encoders. :meth:`~slide2vec.Model.aggregate_tiles`
+  takes ``tile_encoder_code`` from the tile sidecar's ``encoder_code``.
+  ``aggregation_revision`` is present for encoders that declare one
+  (``gigapath-slide``).
 - ``requested_tile_size_px`` and ``encoder_input_size_px`` are present for
   slide runs. Hierarchical runs add ``region_tile_multiple`` and
   ``requested_region_size_px``.
@@ -262,7 +283,9 @@ Every field above that applies to the run is required, and so is
 ``transform`` unless the artifact encoded no pixels (a zero-tile slide). A
 resume over a completed artifact that records a different value for a field
 raises and names the sample and the fields. An artifact with no
-``compatibility`` object or a missing required field is recomputed.
+``compatibility`` object or a missing required field is recomputed. After an
+edit to a custom encoder's file, re-run into a new ``output_dir`` or delete
+the stale artifacts.
 
 Downstream caches can apply the same comparison through
 :meth:`~slide2vec.Model.pooled_identity_differences` before extracting missing
@@ -344,7 +367,7 @@ fields):
 
 ``read_size`` and ``output_size`` use ``[height, width]``; see the
 :doc:`glossary` for the spacing vocabulary. The object also records
-``encoder_name``, ``output_variant``, the dense options (``pad_mode``,
+``encoder_name``, ``encoder_code``, ``output_variant``, the dense options (``pad_mode``,
 ``image_pad_value``, ``window_size``, ``overlap``, ``feature_kind``,
 ``attention_blocks``, ``attention_include_registers``), the inference
 ``precision``, the stored ``dtype`` and the ``transform`` record (see
@@ -410,8 +433,8 @@ Selected fields; the nested ``compatibility`` object is omitted here:
    }
 
 The nested ``compatibility`` object repeats the identity and recipe fields
-above, plus the inference ``precision``, the stored ``dtype`` and the
-``transform`` record (see :ref:`compatibility <feature-identity>`). Resume
+above, plus ``encoder_code``, the inference ``precision``, the stored ``dtype``
+and the ``transform`` record (see :ref:`compatibility <feature-identity>`). Resume
 recomputes any artifact whose ``compatibility`` object records a different
 value for a field or does not record a field. A sidecar with no
 ``compatibility`` object is recomputed. Execution mechanics

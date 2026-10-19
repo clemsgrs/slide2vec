@@ -385,6 +385,22 @@ def test_dense_region_sidecar_records_the_feature_identity(fake_backend, stub_re
     assert compatibility["read_level"] == 0  # the read plan is still recorded alongside
 
 
+def test_dense_region_sidecar_records_the_code_of_a_registered_encoder(
+    fake_backend, stub_read_plan, tmp_path
+):
+    from slide2vec.encoders import encoder_code
+
+    [artifact] = dense_stage.embed_regions_dense(
+        _FakeModel(_encoder(), name="virchow2"),
+        [_regions(coords=((0, 0),))],
+        dense=_dense(),
+        execution=ExecutionOptions(output_dir=tmp_path, num_gpus=1, precision="fp32"),
+    )
+
+    compatibility = json.loads(artifact.metadata_path.read_text())["compatibility"]
+    assert compatibility["encoder_code"] == encoder_code("virchow2")
+
+
 def test_embed_regions_dense_resume_recomputes_regions_from_a_different_encoder(
     fake_backend, stub_read_plan, tmp_path
 ):

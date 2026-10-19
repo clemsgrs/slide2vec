@@ -725,8 +725,8 @@ def aggregate_tiles(
                 execution=execution,
             )
             latents = None
-        # Aggregation encodes no tile: the tile geometry and transform are the ones
-        # recorded with the tile artifact.
+        # Aggregation encodes no tile: the tile geometry, transform and tile encoder code
+        # are the ones recorded with the tile artifact.
         tile_identity = metadata.get("compatibility") or {}
         compatibility = {
             **feature_identity.pooled_feature_identity(model, execution=execution),
@@ -736,6 +736,9 @@ def aggregate_tiles(
                 if field in tile_identity
             },
         }
+        compatibility.pop("tile_encoder_code", None)
+        if "encoder_code" in tile_identity:
+            compatibility["tile_encoder_code"] = tile_identity["encoder_code"]
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,
             slide_embedding,

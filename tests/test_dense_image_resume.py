@@ -9,6 +9,7 @@ import pytest
 
 from slide2vec.api import DenseImageOptions, ExecutionOptions, ImageSpec, Model
 from slide2vec.artifacts import dense_image_paths
+from slide2vec.encoders import encoder_code
 from slide2vec.runtime.dense_image_stage import partition_dense_images_by_resume
 from slide2vec.runtime.dense_image_recipe import resolve_dense_image_recipe
 from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
@@ -80,6 +81,7 @@ def test_dense_image_recipe_contains_the_complete_canonical_identity(tmp_path):
     )
     assert first.to_dict() == {
         "encoder_name": "virchow2",
+        "encoder_code": encoder_code("virchow2"),
         "output_variant": "cls",
         "reader_regime": "raster",
         "spacing_source": "explicit",
@@ -444,6 +446,7 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
         "sample_id",
         "image_path",
         "encoder_name",
+        "encoder_code",
         "output_variant",
         "reader_regime",
         "spacing_source",
@@ -493,6 +496,8 @@ def test_every_recorded_compatibility_field_participates_in_resume(tmp_path):
             recorded[field] = f"{value}-different"
         elif isinstance(value, list):
             recorded[field] = [value[0] + 1, *value[1:]]
+        elif isinstance(value, dict):
+            recorded[field] = {**value, "fingerprint": "different"}
         else:
             recorded[field] = value + 1
         out_dir = tmp_path / field
