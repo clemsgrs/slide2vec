@@ -10,6 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")
 OmegaConf = pytest.importorskip("omegaconf").OmegaConf
 
+from slide2vec.encoders import encoder_code  # noqa: E402
 from tests.output_consistency_config import (  # noqa: E402
     MODEL_PARAMS,
     SPEED_PARAMS,
@@ -154,10 +155,12 @@ def test_output_consistency(wsi_path, mask_path, tmp_path):
         transform = compatibility.pop("transform")
         assert compatibility == {
             "encoder_name": "prism",
+            "encoder_code": encoder_code("prism"),
             "output_variant": "default",
             "precision": "fp32",  # --run-on-cpu
             "feature_dtype": "fp32",
             "tile_encoder": "virchow",
+            "tile_encoder_code": encoder_code("virchow"),
             "tile_encoder_output_variant": "cls_patch_mean",
             "requested_tile_size_px": 224,
             "encoder_input_size_px": 224,

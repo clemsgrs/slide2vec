@@ -11,6 +11,7 @@ from PIL import Image
 from transformers.image_processing_utils import BaseImageProcessor
 
 from slide2vec.encoders.base import ProcessorTransform
+from slide2vec.encoders.code import encoder_code
 from slide2vec.encoders.registry import encoder_registry
 from slide2vec.runtime.model_settings import output_dtype_name, resolve_output_precision
 from slide2vec.runtime.preprocessing import iter_transform_steps
@@ -35,6 +36,7 @@ def pooled_feature_identity(
     if model.level != "tile" and model.name in encoder_registry:
         info = encoder_registry.info(model.name)
         identity["tile_encoder"] = info["tile_encoder"]
+        identity["tile_encoder_code"] = encoder_code(info["tile_encoder"])
         identity["tile_encoder_output_variant"] = info["tile_encoder_output_variant"]
         if info.get("aggregation_revision") is not None:
             identity["aggregation_revision"] = info["aggregation_revision"]
@@ -74,15 +76,16 @@ def dense_feature_identity(model, *, dense, execution) -> dict[str, Any]:
 
 
 def _encoder_identity(model, execution) -> dict[str, Any]:
-    """The fields every path records: the encoder, its output variant, the precision."""
+    """The fields every path records: the encoder, its code, its output variant, the precision."""
     from slide2vec.runtime.process_list import resolved_process_list_output_variant
 
-    return {
-        "encoder_name": model.name,
-        "output_variant": resolved_process_list_output_variant(model),
-        # An unset inference precision runs without autocast, which is fp32.
-        "precision": execution.precision or "fp32",
-    }
+    identity: dict[str, Any] = {"encoder_name": model.name}
+    if model.name in encoder_registry:
+        identity["encoder_code"] = encoder_code(model.name)
+    identity["output_variant"] = resolved_process_list_output_variant(model)
+    # An unset inference precision runs without autocast, which is fp32.
+    identity["precision"] = execution.precision or "fp32"
+    return identity
 
 
 def deferred_transform_record(
@@ -253,11 +256,16 @@ class PooledResumeCheck:
                 for field, values in differing.items()
                 for leaf, old, new in _leaf_differences(field, *values)
             )
+            # A caller can request a recorded value, but not recorded code.
+            remedies = (
+                "Re-run into a new output_dir or delete the stale artifacts."
+                if differing.keys() & {"encoder_code", "tile_encoder_code"}
+                else "Re-run into a new output_dir, delete the stale artifacts, or request "
+                "the recorded values."
+            )
             raise ValueError(
                 f"Cannot resume '{sample_id}': the existing {kind} embeddings at {path} "
-                f"were computed with a different feature identity: {details}. Re-run into "
-                "a new output_dir, delete the stale artifacts, or request the recorded "
-                "values."
+                f"were computed with a different feature identity: {details}. {remedies}"
             )
         return not missing
 

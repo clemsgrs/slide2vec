@@ -97,6 +97,7 @@ def _recipe(
     geometry = compute_dense_geometry(target_size=target_size, patch_size=(16, 16))
     return DenseImageRecipe(
         encoder_name="fake-encoder",
+        encoder_code={"object": "tests.FakeEncoder", "fingerprint": None, "source": ""},
         output_variant="default",
         reader_regime="raster",
         spacing_source="explicit",
@@ -317,6 +318,7 @@ def test_run_dense_image_shard_sidecar_records_extraction_geometry(tmp_path):
             "sample_id": "a",
             "image_path": str(Path(specs[0].image_path).resolve()),
             "encoder_name": "fake-encoder",
+            "encoder_code": {"object": "tests.FakeEncoder", "fingerprint": None, "source": ""},
             "output_variant": "default",
             "reader_regime": "raster",
             "spacing_source": "explicit",

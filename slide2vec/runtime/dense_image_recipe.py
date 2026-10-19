@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from slide2vec.encoders.code import encoder_code
 from slide2vec.encoders.registry import resolve_encoder_output
 from slide2vec.runtime.model_settings import output_dtype_name, resolve_output_precision
 
@@ -67,6 +68,8 @@ class DenseImageRecipe:
     """Request-wide extraction facts combined with one parent-resolved image read plan."""
 
     encoder_name: str
+    #: The encoder's code block (:func:`slide2vec.encoders.encoder_code`).
+    encoder_code: dict[str, Any]
     output_variant: str
     reader_regime: str
     spacing_source: str
@@ -99,6 +102,7 @@ class DenseImageRecipe:
     def to_dict(self) -> dict[str, Any]:
         payload = {
             "encoder_name": self.encoder_name,
+            "encoder_code": self.encoder_code,
             "output_variant": self.output_variant,
             "reader_regime": self.reader_regime,
             "spacing_source": self.spacing_source,
@@ -142,6 +146,7 @@ class DenseImageRecipe:
             )
         recipe = self.to_dict()
         encoder_name = recipe.pop("encoder_name")
+        code = recipe.pop("encoder_code")
         output_variant = recipe.pop("output_variant")
         for field in read_plan.to_dict():
             recipe.pop(field, None)
@@ -149,6 +154,7 @@ class DenseImageRecipe:
             "sample_id": str(spec.sample_id),
             "image_path": str(Path(spec.image_path).expanduser().resolve()),
             "encoder_name": encoder_name,
+            "encoder_code": code,
             "output_variant": output_variant,
             **read_plan.to_dict(),
             **recipe,
@@ -158,6 +164,7 @@ class DenseImageRecipe:
     def from_dict(cls, payload: dict[str, Any]) -> "DenseImageRecipe":
         return cls(
             encoder_name=str(payload["encoder_name"]),
+            encoder_code=dict(payload["encoder_code"]),
             output_variant=str(payload["output_variant"]),
             reader_regime=str(payload["reader_regime"]),
             spacing_source=str(payload["spacing_source"]),
@@ -270,6 +277,7 @@ def resolve_dense_image_recipe(
     )
     return DenseImageRecipe(
         encoder_name=str(model.name),
+        encoder_code=encoder_code(model.name),
         output_variant=str(output["output_variant"]),
         reader_regime=str(reader_regime),
         spacing_source=(

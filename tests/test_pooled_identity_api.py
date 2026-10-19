@@ -11,7 +11,13 @@ from PIL import Image
 from torchvision.transforms import v2
 
 from slide2vec import MISSING_FIELD, ExecutionOptions, ImageSpec, Model, PreprocessingConfig
-from slide2vec.encoders import PatientEncoder, SlideEncoder, TileEncoder, register_encoder
+from slide2vec.encoders import (
+    PatientEncoder,
+    SlideEncoder,
+    TileEncoder,
+    encoder_code,
+    register_encoder,
+)
 from tests.tiling_helpers import tiling_config
 
 TILE_ENCODER = "identity-api-tile"
@@ -163,6 +169,8 @@ def test_pooled_identity_comparison_reports_recorded_and_current_metadata():
 
     assert differences == {
         "encoder_name": ("older-encoder", "virchow2"),
+        # A sidecar written before the code block was recorded.
+        "encoder_code": (MISSING_FIELD, encoder_code("virchow2")),
         "output_variant": ("cls", "cls_patch_mean"),
         "precision": ("bf16", "fp32"),
         "feature_dtype": ("fp16", "fp32"),
@@ -225,6 +233,7 @@ def test_pooled_identity_comparison_reports_missing_required_fields(tile_encoder
 
     assert differences == {
         "encoder_name": (MISSING_FIELD, TILE_ENCODER),
+        "encoder_code": (MISSING_FIELD, encoder_code(TILE_ENCODER)),
         "output_variant": (MISSING_FIELD, "default"),
         "feature_dtype": (MISSING_FIELD, "fp32"),
         "transform": (MISSING_FIELD, SHIPPED_TRANSFORM),
@@ -238,6 +247,7 @@ def test_pooled_identity_comparison_distinguishes_a_recorded_none_from_a_missing
     differences = Model.from_preset(TILE_ENCODER).pooled_identity_differences(
         {
             "encoder_name": TILE_ENCODER,
+            "encoder_code": encoder_code(TILE_ENCODER),
             "output_variant": None,
             "precision": "fp32",
             "feature_dtype": "fp32",
@@ -254,6 +264,7 @@ def test_pooled_identity_comparison_accepts_a_zero_tile_output_without_a_transfo
     """A zero-tile slide encodes no pixels, so its identity legitimately records no transform."""
     recorded = {
         "encoder_name": TILE_ENCODER,
+        "encoder_code": encoder_code(TILE_ENCODER),
         "output_variant": "default",
         "precision": "fp32",
         "feature_dtype": "fp32",
