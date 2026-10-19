@@ -289,9 +289,10 @@ edit to a custom encoder's file, re-run into a new ``output_dir`` or delete
 the stale artifacts.
 
 Downstream caches can apply the same comparison through
-:meth:`~slide2vec.Model.pooled_identity_differences` before extracting missing
-samples. The method reports differences and missing fields; the caller owns
-the cache policy.
+:meth:`~slide2vec.Model.pooled_identity_differences`, or
+:meth:`~slide2vec.Model.dense_identity_differences` for dense grids, before
+extracting missing samples. The methods report differences and missing fields;
+the caller owns the cache policy.
 
 
 Image Embeddings

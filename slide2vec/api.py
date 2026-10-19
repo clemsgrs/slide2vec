@@ -708,6 +708,45 @@ class Model:
             encoded_pixels=encoded_pixels,
         )
 
+    def dense_identity_differences(
+        self,
+        recorded: Mapping[str, Any],
+        *,
+        dense: "DenseOptions | DenseImageOptions",
+        execution: ExecutionOptions | None = None,
+    ) -> dict[str, tuple[Any, Any]]:
+        """Compare a dense sidecar's ``compatibility`` block with the current request.
+
+        The dense counterpart of :meth:`pooled_identity_differences`. Pass the
+        ``dense`` options and ``execution`` of :meth:`embed_regions_dense` (a
+        :class:`DenseOptions`) or :meth:`embed_images_dense` (a
+        :class:`DenseImageOptions`). Returns ``{field: (recorded, current)}`` for every
+        request-wide field that the record holds with a different value or does not
+        hold. A field the record does not hold is reported as
+        :data:`slide2vec.MISSING_FIELD`. Per-sample fields (the sample, its path and its
+        read plan) are not compared. An empty result means the record proves the
+        current request-wide identity. The caller owns the policy for a difference.
+
+        An invalid request raises as it does in the embed methods. ``execution``
+        defaults to the model's recommended precision and needs no output directory.
+        Comparing the ``transform`` loads weights, on an isolated CPU model. This method
+        does not change this model's input contract or loaded backend, encode pixels,
+        or write files.
+        """
+        from slide2vec.runtime.feature_identity import dense_identity_differences
+
+        if not isinstance(dense, (DenseOptions, DenseImageOptions)):
+            raise TypeError(
+                "Model.dense_identity_differences(dense=...) expects DenseOptions "
+                f"or DenseImageOptions, got {type(dense).__name__}"
+            )
+        return dense_identity_differences(
+            self,
+            dict(recorded),
+            dense=dense,
+            execution=_coerce_execution_options(execution, model=self),
+        )
+
     def prepare_dense_encoder(
         self,
         *,
@@ -1085,6 +1124,11 @@ class Model:
         non-timm backbone, say) fails before any backend is loaded and before resume
         inspects or invalidates an existing artifact.
         """
+        if self.level != "tile":
+            raise ValueError(
+                "Dense extraction requires a tile-level foundation encoder; model "
+                f"{self.name!r} is registered at level {self.level!r}."
+            )
         contract = EncoderInputContract.declared_dense(
             self.name,
             target_size_px=dense.target_size,

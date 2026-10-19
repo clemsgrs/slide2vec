@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
 from slide2vec.encoders.code import encoder_code
-from slide2vec.encoders.registry import resolve_encoder_output
+from slide2vec.encoders.registry import resolve_encoder_output, resolve_preprocessing_defaults
+from slide2vec.encoders.validation import validate_encoder_config
 from slide2vec.runtime.model_settings import output_dtype_name, resolve_output_precision
 
 
@@ -134,6 +136,20 @@ class DenseImageRecipe:
             payload["transform"] = self.transform
         return payload
 
+    def request_identity(self) -> dict[str, Any]:
+        """The request-wide fields of :meth:`for_image`: the recipe without per-image fields.
+
+        The per-image fields are the read plan's, which :meth:`for_image` replaces, and
+        the read sizes.
+        """
+        from slide2vec.runtime.dense_image_reading import DenseImageReadPlan
+
+        per_image = {field.name for field in fields(DenseImageReadPlan)} | {
+            "read_tile_size_px",
+            "requested_tile_size_px",
+        }
+        return {key: value for key, value in self.to_dict().items() if key not in per_image}
+
     def for_image(self, spec, read_plan=None) -> dict[str, Any]:
         """Add the normalized source identity to this request-wide recipe."""
         if read_plan is None:
@@ -223,6 +239,38 @@ class DenseImageRecipe:
             dtype=str(payload["dtype"]),
             transform=payload.get("transform"),
         )
+
+
+def resolve_dense_image_spacing(model, dense) -> tuple[float, str]:
+    """Resolve and validate the run spacing of *dense*: ``(spacing_um, spacing_source)``.
+
+    An omitted spacing resolves the encoder's single registry default.
+    """
+    spacing_source = "explicit"
+    if dense.spacing_um is None:
+        try:
+            spacing_um = float(
+                resolve_preprocessing_defaults(model.name)["spacing_um"]
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValueError(
+                "DenseImageOptions.spacing_um must be explicit when encoder "
+                f"{model.name!r} has no single resolvable model default: {exc}"
+            ) from exc
+        spacing_source = "model_default"
+    else:
+        spacing_um = float(dense.spacing_um)
+    if not math.isfinite(spacing_um) or spacing_um <= 0:
+        raise ValueError(
+            "DenseImageOptions.spacing_um must be a positive, finite value or None."
+        )
+    validate_encoder_config(
+        model.name,
+        requested_spacing_um=spacing_um,
+        allow_non_recommended=bool(model.allow_non_recommended_settings),
+        require_known_spacing=True,
+    )
+    return spacing_um, spacing_source
 
 
 def resolve_dense_image_recipe(

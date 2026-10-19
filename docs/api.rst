@@ -310,6 +310,46 @@ their registered tile encoder and tile output variant without loading their
 aggregation weights. The method preserves the caller's model, does not encode
 pixels or write artifacts, and needs no output directory.
 
+Checking dense feature identity
+-------------------------------
+
+Use :meth:`~slide2vec.Model.dense_identity_differences` to compare a dense
+sidecar's ``compatibility`` object with the current dense request. Pass the
+``dense`` options and ``execution`` used for extraction: a
+:class:`~slide2vec.DenseOptions` for region grids, or a
+:class:`~slide2vec.DenseImageOptions` for image grids:
+
+.. code-block:: python
+
+   import json
+   from pathlib import Path
+
+   from slide2vec import DenseImageOptions, ExecutionOptions, Model
+
+   recorded = json.loads(
+       Path("dense_image_embeddings/sample.meta.json").read_text()
+   )["compatibility"]
+   model = Model.from_preset("virchow2")
+   differences = model.dense_identity_differences(
+       recorded,
+       dense=DenseImageOptions(target_size=1024, window_size=224),
+       execution=ExecutionOptions(precision="fp16", output_dtype="fp32"),
+   )
+
+The result has the same form as for pooled identities. Only request-wide fields
+are compared: ``encoder_name``, ``encoder_code``, ``output_variant``,
+``precision``, ``dtype``, ``transform``, the encode options (``pad_mode``,
+``image_pad_value``, ``window_size``, ``overlap``, ``feature_kind``,
+``attention_blocks``, ``attention_include_registers``) and, for images,
+``target_size``, ``patch_size``, ``encoded_size``, ``pad`` and ``grid_shape``.
+Per-sample fields (``sample_id``, ``image_path``, the read plan and the read
+sizes) are never reported, so a different ``spacing_um``, ``backend`` or
+``tolerance`` is not reported. An invalid request raises as in extraction.
+
+Comparing the ``transform`` loads one isolated CPU encoder. The method
+preserves the caller's model, does not encode pixels or write artifacts, and
+needs no output directory.
+
 Live Dense Encoding after Augmentation
 --------------------------------------
 
