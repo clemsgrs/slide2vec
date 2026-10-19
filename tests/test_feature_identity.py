@@ -807,6 +807,26 @@ def test_aggregate_tiles_records_no_tile_encoder_code_the_tile_sidecar_does_not_
     assert "tile_encoder_code" not in compatibility
 
 
+def test_aggregate_tiles_keeps_the_tile_encoder_code_a_slide_run_tile_sidecar_records(
+    monkeypatch, tmp_path
+):
+    """A slide run's tile sidecar records the slide encoder's code and its tile encoder's code."""
+    recorded_tile_code = {**encoder_code("virchow"), "fingerprint": "0" * 64}
+
+    compatibility = _aggregate_tiles(
+        monkeypatch,
+        tmp_path,
+        {
+            **TILE_SIDECAR_IDENTITY,
+            "encoder_name": "prism",
+            "encoder_code": encoder_code("prism"),
+            "tile_encoder_code": recorded_tile_code,
+        },
+    )
+
+    assert compatibility["tile_encoder_code"] == recorded_tile_code
+
+
 def test_patient_pipeline_tile_and_slide_sidecars_record_the_feature_identity(monkeypatch, tmp_path):
     from slide2vec.runtime import patient_pipeline
 

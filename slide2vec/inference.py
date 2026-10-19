@@ -736,9 +736,11 @@ def aggregate_tiles(
                 if field in tile_identity
             },
         }
+        # A slide run's tile sidecar records the tile encoder's code under `tile_encoder_code`.
         compatibility.pop("tile_encoder_code", None)
-        if "encoder_code" in tile_identity:
-            compatibility["tile_encoder_code"] = tile_identity["encoder_code"]
+        tile_code = tile_identity.get("tile_encoder_code") or tile_identity.get("encoder_code")
+        if tile_code is not None:
+            compatibility["tile_encoder_code"] = tile_code
         slide_artifact = embedding.write_slide_embedding_artifact(
             artifact.sample_id,
             slide_embedding,

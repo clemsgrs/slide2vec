@@ -267,7 +267,8 @@ the feature identity that ``resume`` compares.
   dtype.
 - ``tile_encoder``, ``tile_encoder_code`` and ``tile_encoder_output_variant``
   are present for slide and patient encoders. :meth:`~slide2vec.Model.aggregate_tiles`
-  takes ``tile_encoder_code`` from the tile sidecar's ``encoder_code``.
+  takes ``tile_encoder_code`` from the tile sidecar's ``tile_encoder_code``,
+  else from its ``encoder_code``.
   ``aggregation_revision`` is present for encoders that declare one
   (``gigapath-slide``).
 - ``requested_tile_size_px`` and ``encoder_input_size_px`` are present for
