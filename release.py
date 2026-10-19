@@ -1,5 +1,12 @@
+import os
+import shutil
 import subprocess
 import re
+import tempfile
+from pathlib import Path
+
+# The files `uv lock` reads from the project
+LOCK_INPUTS = ("pyproject.toml", "uv.lock", "README.md")
 
 
 def run(cmd: str, check: bool = True) -> str:
@@ -24,8 +31,20 @@ def bump_version(level: str = "patch") -> str:
     print(f"🔧 Bumping version with level: {level}")
     run(f"bumpver update --{level}")
     # uv.lock records the project version
-    run("uv lock")
+    lock_in_local_copy()
     return get_current_version()
+
+
+def lock_in_local_copy() -> None:
+    # uv sets file permissions when it writes uv.lock, which a network mount (CIFS)
+    # refuses, so lock a local copy and write the result back. Unless UV_CACHE_DIR
+    # is set, the cache is local too: filling it on a network home is slow.
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in LOCK_INPUTS:
+            shutil.copyfile(name, Path(tmp, name))
+        cache = os.environ.get("UV_CACHE_DIR") or Path(tmp, "cache")
+        run(f'uv lock --directory "{tmp}" --cache-dir "{cache}"')
+        shutil.copyfile(Path(tmp, "uv.lock"), "uv.lock")
 
 
 def create_branch(branch: str) -> None:
