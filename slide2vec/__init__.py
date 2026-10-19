@@ -36,7 +36,7 @@ from slide2vec.encoders import (
 )
 
 
-__version__ = "7.1.3"
+__version__ = "7.1.4"
 
 __all__ = [
     "Model",
