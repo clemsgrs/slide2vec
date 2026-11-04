@@ -2,10 +2,11 @@
 
 Mettle (``slideflow-labs/Mettle``) is H-optimus-0's ViT-g/14 reg4 backbone,
 fine-tuned, plus a small ``MettleRefineHead`` applied to the CLS token.
-Mettle-1.5 (``slideflow-labs/mettle-1.5``) differs only in its weights and its
-default output (``cls``). Both ship as ``trust_remote_code`` HF repos; slide2vec
-rebuilds them from timm + a vendored head, so these tests pin, for both presets,
-the contracts that break silently (no exception, just different features):
+Mettle-1.5 (``slideflow-labs/mettle-1.5``) differs in its weights, its default
+output (``cls``) and its given recipe (a direct 224x224 resize). Both ship as
+``trust_remote_code`` HF repos; slide2vec rebuilds them from timm + a vendored
+head, so these tests pin, for both presets, the contracts that break silently
+(no exception, just different features):
 
 * ``cls`` is the *headed* CLS token; ``cls_patch_mean`` appends the *unheaded*
   mean of the spatial patch tokens, with CLS and the 4 register tokens excluded;

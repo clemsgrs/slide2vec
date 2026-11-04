@@ -390,3 +390,23 @@ def test_mettle_given_recipe_is_a_bicubic_224_resize_without_enlargement(name):
     torch.testing.assert_close(downsized[:, 112, 112], torch.tensor(HOPTIMUS_RED))
     resize = next(step for step in transform.transforms if isinstance(step, v2.Resize))
     assert resize.interpolation == v2.InterpolationMode.BICUBIC
+
+
+HOPTIMUS_BLUE = [-3.3378, -2.514934, 1.669603]
+
+
+def test_mettle_1_5_given_recipe_resizes_rectangular_images_directly_without_a_crop():
+    """slideflow-labs/mettle-1.5's ViTImageProcessor resizes to 224x224 with do_center_crop false."""
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    transform = EncoderInputContract.given().get_transform(recipe_encoder("mettle-1.5"))
+    image = Image.new("RGB", (448, 224), (0, 0, 0))
+    image.paste((255, 0, 0), (0, 0, 112, 224))
+    image.paste((0, 0, 255), (336, 0, 448, 224))
+    output = transform(image)
+
+    assert tuple(output.shape) == (3, 224, 224)
+    # A shortest-side resize plus a center crop would drop both edge quarters.
+    torch.testing.assert_close(output[:, 112, 28], torch.tensor(HOPTIMUS_RED))
+    torch.testing.assert_close(output[:, 112, 112], torch.tensor(HOPTIMUS_BLACK))
+    torch.testing.assert_close(output[:, 112, 196], torch.tensor(HOPTIMUS_BLUE))

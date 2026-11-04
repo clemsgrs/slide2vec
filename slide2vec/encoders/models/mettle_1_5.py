@@ -1,11 +1,15 @@
 """Mettle-1.5 tile encoder.
 
 Mettle-1.5 (slideflow labs; ``slideflow-labs/mettle-1.5``) is a later scanner and
-stain robustness fine-tune of H-optimus-0. Only the weights differ from
-``mettle``: the backbone, the ``MettleRefineHead``, the preprocessing and the
-feature views are the same, so this module reuses :mod:`.mettle`. Weights are
-openly downloadable (not gated). The model card states no license; slide2vec only
-wraps user-downloaded weights and does not redistribute them.
+stain robustness fine-tune of H-optimus-0. It shares ``mettle``'s backbone,
+``MettleRefineHead``, H-optimus mean/std and feature views, so this module reuses
+:mod:`.mettle`. Weights are openly downloadable (not gated). The model card states
+no license; slide2vec only wraps user-downloaded weights and does not redistribute
+them.
+
+The given recipe resizes directly to 224x224, as upstream's
+``preprocessor_config.json`` does. ``mettle`` resizes the shortest side and
+center-crops instead. The two agree on square tiles.
 
 slide2vec strictly loads ``model.safetensors`` at a pinned revision, as for
 ``mettle``; no remote code runs.
@@ -25,13 +29,18 @@ Output variants (upstream ``feature_view``):
 Precision, dense extraction and spacing are as for ``mettle``.
 """
 
+from typing import Callable
+
+import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
+from torchvision.transforms import v2
 
 from slide2vec.encoders.base import (
     resolve_recommended_dynamic_img_size,
     resolve_requested_output_variant,
 )
+from slide2vec.encoders.models.hoptimus import _HOPTIMUS_MEAN, _HOPTIMUS_STD
 from slide2vec.encoders.models.mettle import (
     _EMBED_DIM,
     _HEAD_HIDDEN_SIZE,
@@ -109,3 +118,12 @@ class Mettle15(Mettle):
         self._head.load_state_dict(_strip_prefix(state_dict, "head."), strict=True)
         self._model.eval()
         self._head.eval()
+
+    def get_transform(self) -> Callable:
+        # Upstream's ViTImageProcessor resizes directly to 224x224, with no crop.
+        return v2.Compose([
+            v2.ToImage(),
+            v2.Resize((224, 224), interpolation=v2.InterpolationMode.BICUBIC, antialias=True),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=_HOPTIMUS_MEAN, std=_HOPTIMUS_STD),
+        ])
