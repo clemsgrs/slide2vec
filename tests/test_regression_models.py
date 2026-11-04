@@ -260,6 +260,7 @@ def test_model_embed_slide_infers_preprocessing_from_single_spacing_model(monkey
         ("virchow2", 224, "fp16"),
         ("midnight", 224, "fp16"),
         ("mettle", 224, "fp16"),
+        ("mettle-1.5", 224, "fp16"),
         ("musk", 384, "fp16"),
     ],
 )

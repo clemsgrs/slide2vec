@@ -353,32 +353,36 @@ def test_dinov3_public_pooled_recipe_reaches_encoding(
     torch.testing.assert_close(observed[1], observed[0])  # batched == itemwise
 
 
-# bioptimus/H-optimus-0 mean/std, which slideflow-labs/Mettle's preprocessor_config.json repeats.
+# bioptimus/H-optimus-0 mean/std, which the preprocessor_config.json of slideflow-labs/Mettle
+# and slideflow-labs/mettle-1.5 repeats.
 HOPTIMUS_RED = [1.381786, -2.514934, -3.96366]
 HOPTIMUS_BLACK = [-3.3378, -2.514934, -3.96366]
+METTLE_PRESETS = ["mettle", "mettle-1.5"]
 
 
+@pytest.mark.parametrize("name", METTLE_PRESETS)
 @pytest.mark.parametrize("regime", ["pooled", "dense"])
-def test_mettle_declared_normalization_uses_hoptimus_photometrics_not_imagenet(regime):
+def test_mettle_declared_normalization_uses_hoptimus_photometrics_not_imagenet(regime, name):
     """Mettle's generic timm arch carries an ImageNet pretrained_cfg; its card uses H-optimus mean/std."""
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
     if regime == "pooled":
         contract = EncoderInputContract.declared_pooled(
-            "mettle", requested_tile_size_px=224, allow_non_recommended_settings=False,
+            name, requested_tile_size_px=224, allow_non_recommended_settings=False,
         )
     else:
-        contract = EncoderInputContract.declared_dense("mettle", target_size_px=224, window_size=None)
-    output = contract.get_transform(recipe_encoder("mettle"))(bordered_image(224))
+        contract = EncoderInputContract.declared_dense(name, target_size_px=224, window_size=None)
+    output = contract.get_transform(recipe_encoder(name))(bordered_image(224))
 
     assert_border_intact(output, size=224, red=HOPTIMUS_RED, black=HOPTIMUS_BLACK)
 
 
-def test_mettle_given_recipe_is_a_bicubic_224_resize_without_enlargement():
+@pytest.mark.parametrize("name", METTLE_PRESETS)
+def test_mettle_given_recipe_is_a_bicubic_224_resize_without_enlargement(name):
     from torchvision.transforms import v2
     from slide2vec.runtime.encoder_input_contract import EncoderInputContract
 
-    transform = EncoderInputContract.given().get_transform(recipe_encoder("mettle"))
+    transform = EncoderInputContract.given().get_transform(recipe_encoder(name))
 
     assert_border_intact(transform(bordered_image(224)), size=224, red=HOPTIMUS_RED, black=HOPTIMUS_BLACK)
     downsized = transform(Image.new("RGB", (448, 448), (255, 0, 0)))
@@ -386,3 +390,23 @@ def test_mettle_given_recipe_is_a_bicubic_224_resize_without_enlargement():
     torch.testing.assert_close(downsized[:, 112, 112], torch.tensor(HOPTIMUS_RED))
     resize = next(step for step in transform.transforms if isinstance(step, v2.Resize))
     assert resize.interpolation == v2.InterpolationMode.BICUBIC
+
+
+HOPTIMUS_BLUE = [-3.3378, -2.514934, 1.669603]
+
+
+def test_mettle_1_5_given_recipe_resizes_rectangular_images_directly_without_a_crop():
+    """slideflow-labs/mettle-1.5's ViTImageProcessor resizes to 224x224 with do_center_crop false."""
+    from slide2vec.runtime.encoder_input_contract import EncoderInputContract
+
+    transform = EncoderInputContract.given().get_transform(recipe_encoder("mettle-1.5"))
+    image = Image.new("RGB", (448, 224), (0, 0, 0))
+    image.paste((255, 0, 0), (0, 0, 112, 224))
+    image.paste((0, 0, 255), (336, 0, 448, 224))
+    output = transform(image)
+
+    assert tuple(output.shape) == (3, 224, 224)
+    # A shortest-side resize plus a center crop would drop both edge quarters.
+    torch.testing.assert_close(output[:, 112, 28], torch.tensor(HOPTIMUS_RED))
+    torch.testing.assert_close(output[:, 112, 112], torch.tensor(HOPTIMUS_BLACK))
+    torch.testing.assert_close(output[:, 112, 196], torch.tensor(HOPTIMUS_BLUE))
