@@ -170,7 +170,7 @@ unchanged.
      - 1536
      - ``0.5``
    * - ``mettle``
-     - `Mettle <https://huggingface.co/slideflow-labs/Mettle>`_
+     - `Mettle-1 (Pre-release) <https://huggingface.co/slideflow-labs/mettle-1>`_
      - 1536 / 3072
      - ``0.5``
    * - ``rudolfv2``
