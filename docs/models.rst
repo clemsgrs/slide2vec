@@ -173,6 +173,10 @@ unchanged.
      - `Mettle-1 (Pre-release) <https://huggingface.co/slideflow-labs/mettle-1>`_
      - 1536 / 3072
      - ``0.5``
+   * - ``mettle-1.5``
+     - `Mettle-1.5 <https://huggingface.co/slideflow-labs/mettle-1.5>`_
+     - 1536 (default) / 3072
+     - ``0.5``
    * - ``rudolfv2``
      - `RudolfV 2 <https://huggingface.co/Aignostics/RudolfV-2>`_
      - 1536 / 3072
