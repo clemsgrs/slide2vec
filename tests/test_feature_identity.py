@@ -907,7 +907,7 @@ def _run_direct_embed_worker(monkeypatch, tmp_path, *, strategy: str, **request)
         serialization, "deserialize_execution", lambda payload: ExecutionOptions(output_dir=tmp_path)
     )
     monkeypatch.setattr(
-        manifest, "load_successful_tiled_slides", lambda output_dir: ([slide], [_tiling_result()])
+        manifest, "load_successful_tiled_slides", lambda output_dir, work_units=None: ([slide], [_tiling_result()])
     )
     monkeypatch.setattr(
         embedding_pipeline, "compute_tile_embeddings_for_slide",

@@ -1002,19 +1002,14 @@ def run_pipeline_with_coordinates(
     output_dir.mkdir(parents=True, exist_ok=True)
     resolved_preprocessing = tiling_pipeline.resolve_model_preprocessing(model, preprocessing)
     distributed_stage.write_embedding_request(model, resolved_preprocessing, execution, output_dir)
-    available_slides, available_tilings = manifest.load_successful_tiled_slides(coordinates_dir)
     if slides is None:
-        slide_records = available_slides
-        tiling_results = available_tilings
+        slide_records, tiling_results = manifest.load_successful_tiled_slides(coordinates_dir)
     else:
         requested_ids = {slide.sample_id: slide for slide in [manifest.coerce_slide_spec(slide) for slide in slides]}
-        slide_records = []
-        tiling_results = []
-        for slide, tiling_result in zip(available_slides, available_tilings):
-            if slide.sample_id not in requested_ids:
-                continue
-            slide_records.append(requested_ids[slide.sample_id])
-            tiling_results.append(tiling_result)
+        available_slides, tiling_results = manifest.load_successful_tiled_slides(
+            coordinates_dir, work_units=list(requested_ids)
+        )
+        slide_records = [requested_ids[slide.sample_id] for slide in available_slides]
     process_list_path = Path(coordinates_dir) / "process_list.csv"
     emit_progress(
         "run.started",
