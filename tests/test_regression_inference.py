@@ -291,7 +291,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda path, work_units=None: ([slide], [tiling_result]),
+        lambda path, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
     monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
 
@@ -1630,7 +1630,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda tiling_input_dir, work_units=None: ([slide], [tiling_result]),
+        lambda tiling_input_dir, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
     monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
         lambda **kwargs: (lambda *args, **kwargs: None, [], []),
@@ -5498,7 +5498,7 @@ def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_colli
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda output_dir, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
+        lambda output_dir, *, sample_ids=None, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
     )
 
     def fake_compute(_model, slides, tiling_results, *, on_embedded_slide, **kwargs):
@@ -5584,7 +5584,7 @@ def test_direct_embed_worker_hierarchical_tile_shard_writes_rank_payload(monkeyp
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda output_dir, work_units=None: ([slide], [tiling_result]),
+        lambda output_dir, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
 
     def fake_compute_shard(loaded_model, _slide, _tiling_result, *, flat_indices, **kwargs):
@@ -5691,7 +5691,7 @@ def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, 
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda tiling_input_dir, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
+        lambda tiling_input_dir, *, sample_ids=None, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
     )
     monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
         lambda **kwargs: (lambda *args, **kwargs: None, [], []),

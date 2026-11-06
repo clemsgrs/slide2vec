@@ -108,33 +108,36 @@ def normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
     return list(tiling_results)
 
 
-def _row_is_requested(row: dict[str, Any], requested_units: set[str]) -> bool:
-    """A bare ``sample_id`` selects every row of the slide; a composite unit selects one class row."""
-    sample_id = str(row["sample_id"])
-    if sample_id in requested_units:
-        return True
+def _row_work_unit(row: dict[str, Any]) -> str:
     annotation = row.get("annotation")
     if annotation is not None and pd.isna(annotation):
         annotation = None
-    return encode_work_unit(sample_id, annotation) in requested_units
+    return encode_work_unit(str(row["sample_id"]), annotation)
 
 
 def load_successful_tiled_slides(
     output_dir: str | Path,
+    *,
+    sample_ids: Iterable[str] | None = None,
     work_units: Iterable[str] | None = None,
 ) -> tuple[list[SlideSpec], list[Any]]:
     """Load the successful rows of ``output_dir/process_list.csv``, zero-tile rows included.
 
-    With ``work_units``, rows that do not match are dropped before anything is read or logged.
+    ``sample_ids`` selects every row of each listed slide. ``work_units`` selects the rows whose
+    ``encode_work_unit(sample_id, annotation)`` is listed. Rows that do not match are dropped
+    before anything is read or logged. With neither, every row is kept.
     """
     base_dir = Path(output_dir)
     process_df = load_tiling_process_df(base_dir / "process_list.csv")
     successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
+    requested_ids = None if sample_ids is None else {str(sample_id) for sample_id in sample_ids}
     requested_units = None if work_units is None else {str(unit) for unit in work_units}
     slide_records: list[SlideSpec] = []
     tiling_results: list[Any] = []
     for row in successful_rows.to_dict("records"):
-        if requested_units is not None and not _row_is_requested(row, requested_units):
+        if requested_ids is not None and str(row["sample_id"]) not in requested_ids:
+            continue
+        if requested_units is not None and _row_work_unit(row) not in requested_units:
             continue
         num_tiles = row.get("num_tiles", 0)
         if num_tiles == 0 or pd.isna(row.get("coordinates_npz_path")):

@@ -1007,7 +1007,7 @@ def run_pipeline_with_coordinates(
     else:
         requested_ids = {slide.sample_id: slide for slide in [manifest.coerce_slide_spec(slide) for slide in slides]}
         available_slides, tiling_results = manifest.load_successful_tiled_slides(
-            coordinates_dir, work_units=list(requested_ids)
+            coordinates_dir, sample_ids=list(requested_ids)
         )
         slide_records = [requested_ids[slide.sample_id] for slide in available_slides]
     process_list_path = Path(coordinates_dir) / "process_list.csv"

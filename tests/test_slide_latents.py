@@ -295,7 +295,7 @@ def test_slide_sharded_run_carries_latents_from_the_rank_to_the_parent(tmp_path,
     monkeypatch.setattr(distributed, "get_device_ordinal", lambda: 0)
     monkeypatch.setattr(Model, "from_preset", lambda *args, **kwargs: rank_model)
     monkeypatch.setattr(
-        manifest, "load_successful_tiled_slides", lambda output_dir, work_units=None: ([slide], [tiling_result])
+        manifest, "load_successful_tiled_slides", lambda output_dir, *, sample_ids=None, work_units=None: ([slide], [tiling_result])
     )
     monkeypatch.setattr(
         embedding_pipeline,

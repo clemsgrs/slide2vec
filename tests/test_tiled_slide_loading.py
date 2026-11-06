@@ -5,7 +5,8 @@ Ways it could go wrong, each covered below:
 * a run reads, warns about or fails on rows of a shared tiling directory it did not ask for;
 * a requested zero-tile slide is dropped, so it never gets its metadata sidecar;
 * the zero-tile warning repeats in each multi-GPU rank, or a rank loads another rank's units;
-* a multi-class slide's zero-tile class is loaded by the ranks that embed its other class;
+* a multi-class slide's zero-tile class is loaded by the ranks that embed its other class,
+  including when that other class is ``tissue``, whose work unit is the bare sample id;
 * a zero-tile slide is embedded, or the set of embedded slides changes.
 """
 
@@ -136,11 +137,20 @@ CLASSES = MaskSamplingConfig(
     strategy="independent",
 )
 TUMOR = np.full((32, 32), 2, dtype=np.uint8)
+#: Samples ``tissue`` and ``stroma`` per class; a slide of only ``tissue`` pixels has no stroma tiles.
+TISSUE_AND_STROMA = replace(CLASSES, min_coverage={"tissue": 0.5, "stroma": 0.5})
+
+#: ``(labels, classes, the class with tiles)``: each slide has 16 tiles of one class, none of stroma.
+MULTI_CLASS_CASES = {
+    "tumor-and-stroma": (TUMOR, CLASSES, "tumor"),
+    "tissue-and-stroma": (TISSUE, TISSUE_AND_STROMA, "tissue"),
+}
 
 
-def _multi_class_tiling_dir(root: Path, preprocessing: PreprocessingConfig = PREPROCESSING) -> Path:
-    """Slide ``slide`` has 16 tumor tiles and no stroma tile."""
-    return _tile(root, [_slide(root, "slide", TUMOR)], replace(preprocessing, masks=CLASSES))
+def _multi_class_tiling_dir(root: Path, case: str = "tumor-and-stroma") -> Path:
+    """Slide ``slide`` has 16 tiles of one class and no stroma tile."""
+    labels, classes, _ = MULTI_CLASS_CASES[case]
+    return _tile(root, [_slide(root, "slide", labels)], replace(PREPROCESSING, masks=classes))
 
 
 def test_loader_selects_one_class_row_by_its_work_unit(tmp_path, caplog):
@@ -157,10 +167,23 @@ def test_loader_selects_one_class_row_by_its_work_unit(tmp_path, caplog):
     assert _no_tiles_warnings(caplog) == []
 
 
-def test_loader_selects_every_class_row_of_a_bare_sample_id(tmp_path):
+def test_loader_selects_only_the_tissue_row_of_a_bare_work_unit(tmp_path, caplog):
+    coordinates_dir = _multi_class_tiling_dir(tmp_path, "tissue-and-stroma")
+    caplog.clear()
+
+    with caplog.at_level(logging.WARNING):
+        _, tiling_results = manifest.load_successful_tiled_slides(
+            coordinates_dir, work_units=[encode_work_unit("slide", "tissue")]
+        )
+
+    assert [(result.annotation, len(result.x)) for result in tiling_results] == [("tissue", 16)]
+    assert _no_tiles_warnings(caplog) == []
+
+
+def test_loader_selects_every_class_row_of_a_sample_id(tmp_path):
     coordinates_dir = _multi_class_tiling_dir(tmp_path)
 
-    _, tiling_results = manifest.load_successful_tiled_slides(coordinates_dir, work_units=["slide"])
+    _, tiling_results = manifest.load_successful_tiled_slides(coordinates_dir, sample_ids=["slide"])
 
     assert [(result.annotation, len(result.x)) for result in tiling_results] == [
         ("tumor", 16),
@@ -371,10 +394,11 @@ def test_embed_slides_writes_the_zero_tile_sidecar(tmp_path, caplog, encoded, nu
     assert (sidecar["num_tiles"], sidecar["feature_dim"]) == (0, None)
 
 
-def _multi_class_run(entry_point: str, root: Path, execution: ExecutionOptions):
-    """Return a call that embeds ``slide`` (16 tumor tiles, no stroma tile) through ``entry_point``."""
-    preprocessing = replace(PREPROCESSING, masks=CLASSES)
-    slide = _slide(root, "slide", TUMOR)
+def _multi_class_run(entry_point: str, case: str, root: Path, execution: ExecutionOptions):
+    """Return a call that embeds ``slide`` (16 tiles of one class, no stroma tile) through ``entry_point``."""
+    labels, classes, _ = MULTI_CLASS_CASES[case]
+    preprocessing = replace(PREPROCESSING, masks=classes)
+    slide = _slide(root, "slide", labels)
     if entry_point == "run_with_coordinates":
         coordinates_dir = _tile(root, [slide], preprocessing)
         return lambda: inference.run_pipeline_with_coordinates(
@@ -393,13 +417,15 @@ def _multi_class_run(entry_point: str, root: Path, execution: ExecutionOptions):
     )
 
 
+@pytest.mark.parametrize("case", list(MULTI_CLASS_CASES))
 @pytest.mark.parametrize("entry_point", ["run_with_coordinates", "run", "embed_slides"])
 def test_a_zero_tile_class_gets_its_sidecar_and_one_warning(
-    tmp_path, caplog, encoded, num_gpus, entry_point
+    tmp_path, caplog, encoded, num_gpus, entry_point, case
 ):
     output_dir = tmp_path / "out"
     run = _multi_class_run(
         entry_point,
+        case,
         tmp_path,
         ExecutionOptions(output_dir=output_dir, output_format="npz", num_gpus=num_gpus),
     )
@@ -408,7 +434,7 @@ def test_a_zero_tile_class_gets_its_sidecar_and_one_warning(
     with caplog.at_level(logging.WARNING):
         run()
 
-    assert set(encoded) == {("slide", "tumor")}
+    assert set(encoded) == {("slide", MULTI_CLASS_CASES[case][2])}
     assert _no_tiles_warnings(caplog) == ["Skipping slide: no tiles extracted"]
     sidecar = load_metadata(output_dir / "tile_embeddings" / "stroma" / "slide.meta.json")
     assert (sidecar["num_tiles"], sidecar["feature_dim"]) == (0, None)
