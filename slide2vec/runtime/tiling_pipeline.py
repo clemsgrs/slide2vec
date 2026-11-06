@@ -147,10 +147,10 @@ def prepare_tiled_slides(
                 raise RuntimeError(f"Tiling failed for {slide.sample_id}: {error_message}")
             num_tiles = row_dict.get("num_tiles", 0)
             if num_tiles == 0 or pd.isna(row_dict.get("coordinates_npz_path")):
+                # Kept, not dropped: the caller writes the zero-tile sidecar for it.
                 logging.getLogger(__name__).warning(
                     f"Skipping {slide.sample_id}: no tiles extracted"
                 )
-                continue
             successful_slides.append(slide)
             tiling_results.append(load_tiling_result_from_row(row_dict))
     return successful_slides, tiling_results, process_list_path

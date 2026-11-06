@@ -62,7 +62,12 @@ def main(argv=None) -> int:
     from slide2vec.runtime.feature_identity import transform_record
     from slide2vec.runtime.manifest import load_successful_tiled_slides
 
-    slide_records, tiling_results = load_successful_tiled_slides(output_dir)
+    # Load only this rank's units: the parent already handled the zero-tile rows.
+    if request["strategy"] == "tile_shard":
+        work_units = [request["work_unit"]]
+    else:
+        work_units = list(request.get("assignments", {}).get(str(global_rank), []))
+    slide_records, tiling_results = load_successful_tiled_slides(output_dir, work_units=work_units)
     # Key by the composite (sample_id, annotation) work unit so a multi-class slide's sibling
     # classes never overwrite each other; flat units collapse to the bare sample_id key.
     paired_by_unit = {
@@ -133,11 +138,10 @@ def main(argv=None) -> int:
                 torch.save(payload, coordination_dir / f"{shard_stem}.tiles.rank{global_rank}.pt")
             return 0
 
-        assigned_ids = list(request.get("assignments", {}).get(str(global_rank), []))
-        if not assigned_ids:
+        if not work_units:
             return 0
-        assigned_slides = [paired_by_unit[unit_key][0] for unit_key in assigned_ids]
-        assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in assigned_ids]
+        assigned_slides = [paired_by_unit[unit_key][0] for unit_key in work_units]
+        assigned_tiling_results = [paired_by_unit[unit_key][1] for unit_key in work_units]
 
         def _persist_embedded_slide(slide, tiling_result, embedded_slide) -> None:
             payload = {

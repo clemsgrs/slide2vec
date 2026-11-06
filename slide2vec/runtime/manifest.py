@@ -2,11 +2,12 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 import pandas as pd
 from hs2p import SlideSpec
 
+from slide2vec.runtime.distributed import encode_work_unit
 from slide2vec.utils.tiling_io import (
     _optional_float,
     load_patient_id_mapping,
@@ -107,19 +108,43 @@ def normalize_tiling_results(tiling_results, slides: Sequence[SlideSpec]):
     return list(tiling_results)
 
 
-def load_successful_tiled_slides(output_dir: str | Path) -> tuple[list[SlideSpec], list[Any]]:
+def _row_work_unit(row: dict[str, Any]) -> str:
+    annotation = row.get("annotation")
+    if annotation is not None and pd.isna(annotation):
+        annotation = None
+    return encode_work_unit(str(row["sample_id"]), annotation)
+
+
+def load_successful_tiled_slides(
+    output_dir: str | Path,
+    *,
+    sample_ids: Iterable[str] | None = None,
+    work_units: Iterable[str] | None = None,
+) -> tuple[list[SlideSpec], list[Any]]:
+    """Load the successful rows of ``output_dir/process_list.csv``, zero-tile rows included.
+
+    ``sample_ids`` selects every row of each listed slide. ``work_units`` selects the rows whose
+    ``encode_work_unit(sample_id, annotation)`` is listed. Rows that do not match are dropped
+    before anything is read or logged. With neither, every row is kept.
+    """
     base_dir = Path(output_dir)
     process_df = load_tiling_process_df(base_dir / "process_list.csv")
     successful_rows = process_df.loc[process_df["tiling_status"] == "success"]
+    requested_ids = None if sample_ids is None else {str(sample_id) for sample_id in sample_ids}
+    requested_units = None if work_units is None else {str(unit) for unit in work_units}
     slide_records: list[SlideSpec] = []
     tiling_results: list[Any] = []
     for row in successful_rows.to_dict("records"):
+        if requested_ids is not None and str(row["sample_id"]) not in requested_ids:
+            continue
+        if requested_units is not None and _row_work_unit(row) not in requested_units:
+            continue
         num_tiles = row.get("num_tiles", 0)
         if num_tiles == 0 or pd.isna(row.get("coordinates_npz_path")):
+            # Kept, not dropped: the caller writes the zero-tile sidecar for it.
             logging.getLogger(__name__).warning(
                 f"Skipping {row['sample_id']}: no tiles extracted"
             )
-            continue
         mask_path = row["mask_path"] if "mask_path" in row else None
         spacing_at_level_0 = row["spacing_at_level_0"] if "spacing_at_level_0" in row else None
         slide_records.append(

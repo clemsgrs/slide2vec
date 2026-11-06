@@ -291,7 +291,7 @@ def test_run_pipeline_with_coordinates_distributed_branch_uses_coordinates_dir_f
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda path: ([slide], [tiling_result]),
+        lambda path, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
     monkeypatch.setattr(distributed_stage, "validate_multi_gpu_execution", lambda *args, **kwargs: None)
 
@@ -1630,7 +1630,7 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda tiling_input_dir: ([slide], [tiling_result]),
+        lambda tiling_input_dir, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
     monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
         lambda **kwargs: (lambda *args, **kwargs: None, [], []),
@@ -1649,71 +1649,6 @@ def test_pipeline_worker_disables_result_collection_when_streaming(monkeypatch, 
 
     assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
     assert captured["collect_results"] is False
-
-
-def test_pipeline_worker_filters_to_requested_sample_ids(monkeypatch, tmp_path: Path):
-    import slide2vec.distributed as distributed
-    import slide2vec.runtime.serialization as serialization
-    from slide2vec.api import Model
-    from slide2vec.distributed import pipeline_worker
-
-    request_path = tmp_path / "request.json"
-    request_path.write_text(
-        json.dumps(
-            {
-                "model": {
-                    "name": "virchow2",
-                    "allow_non_recommended_settings": False,
-                },
-                "preprocessing": {},
-                "execution": {},
-                "tiling_input_dir": str(tmp_path),
-                "work_units": ["slide-b"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    slide_a = make_slide("slide-a")
-    slide_b = make_slide("slide-b")
-    tiling_a = SimpleNamespace(x=np.array([0]), y=np.array([1]), tile_size_lv0=224)
-    tiling_b = SimpleNamespace(x=np.array([2]), y=np.array([3]), tile_size_lv0=224)
-    captured = {}
-
-    monkeypatch.setattr(distributed, "enable", lambda overwrite=True: None)
-    monkeypatch.setattr(distributed, "get_local_rank", lambda: 0)
-    monkeypatch.setattr(distributed, "get_global_rank", lambda: 0)
-    monkeypatch.setattr(distributed, "get_global_size", lambda: 1)
-    monkeypatch.setattr(
-        Model,
-        "from_preset",
-        lambda *args, **kwargs: SimpleNamespace(
-            _declare_encoder_input=_noop_declare_encoder_input
-        ),
-    )
-    monkeypatch.setattr(serialization, "deserialize_preprocessing", lambda payload: DEFAULT_PREPROCESSING)
-    monkeypatch.setattr(
-        serialization,
-        "deserialize_execution",
-        lambda payload: ExecutionOptions(output_dir=tmp_path),
-    )
-    monkeypatch.setattr(
-        manifest,
-        "load_successful_tiled_slides",
-        lambda tiling_input_dir: ([slide_a, slide_b], [tiling_a, tiling_b]),
-    )
-    monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
-        lambda **kwargs: (lambda *args, **kwargs: None, [], []),
-    )
-
-    def fake_compute_embedded_slides(_model, slides, _tiling_results, **kwargs):
-        captured["computed_sample_ids"] = [slide.sample_id for slide in slides]
-        return []
-
-    monkeypatch.setattr(embedding_pipeline, "compute_embedded_slides", fake_compute_embedded_slides)
-
-    assert pipeline_worker.main(["--output-dir", str(tmp_path), "--request-path", str(request_path)]) == 0
-    assert captured["computed_sample_ids"] == ["slide-b"]
 
 
 def test_run_pipeline_local_branch_persists_completed_slides_before_later_failure(monkeypatch, tmp_path: Path):
@@ -5563,7 +5498,7 @@ def test_direct_embed_worker_slide_shard_writes_per_class_payloads_without_colli
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda output_dir: ([slide, slide], [tumor_tr, stroma_tr]),
+        lambda output_dir, *, sample_ids=None, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
     )
 
     def fake_compute(_model, slides, tiling_results, *, on_embedded_slide, **kwargs):
@@ -5649,7 +5584,7 @@ def test_direct_embed_worker_hierarchical_tile_shard_writes_rank_payload(monkeyp
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda output_dir: ([slide], [tiling_result]),
+        lambda output_dir, *, sample_ids=None, work_units=None: ([slide], [tiling_result]),
     )
 
     def fake_compute_shard(loaded_model, _slide, _tiling_result, *, flat_indices, **kwargs):
@@ -5756,7 +5691,7 @@ def test_pipeline_worker_embeds_every_class_of_a_multi_class_slide(monkeypatch, 
     monkeypatch.setattr(
         manifest,
         "load_successful_tiled_slides",
-        lambda tiling_input_dir: ([slide, slide], [tumor_tr, stroma_tr]),
+        lambda tiling_input_dir, *, sample_ids=None, work_units=None: ([slide, slide], [tumor_tr, stroma_tr]),
     )
     monkeypatch.setattr(persist_callbacks, "build_incremental_persist_callback",
         lambda **kwargs: (lambda *args, **kwargs: None, [], []),

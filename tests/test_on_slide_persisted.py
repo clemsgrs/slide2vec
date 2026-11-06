@@ -139,7 +139,7 @@ def _single_gpu_run(monkeypatch, tmp_path: Path, *, hook, compute=fake_tile_embe
         coordinates_dir / "process_list.csv",
         [(slide.sample_id, "tissue", int(tiling_result.x.size), "tbp") for slide, tiling_result in zip(slides, tiling_results)],
     )
-    monkeypatch.setattr(manifest, "load_successful_tiled_slides", lambda path: (slides, tiling_results))
+    monkeypatch.setattr(manifest, "load_successful_tiled_slides", lambda path, *, sample_ids=None, work_units=None: (slides, tiling_results))
     monkeypatch.setattr(embedding_pipeline, "compute_tile_embeddings_for_slide", compute)
     return inference.run_pipeline_with_coordinates(
         make_tile_model(),
